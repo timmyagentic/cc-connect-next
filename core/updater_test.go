@@ -1,6 +1,26 @@
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestUpdaterUsesFeishuPlusDistributionOnly(t *testing.T) {
+	if feishuPlusRepo != "timmyagentic/cc-connect-feishu-plus" {
+		t.Fatalf("feishuPlusRepo = %q, want Feishu Plus repository", feishuPlusRepo)
+	}
+	for name, value := range map[string]string{
+		"releases API": githubReleasesAPI,
+		"download URL": githubDownload,
+	} {
+		if !strings.Contains(value, feishuPlusRepo) {
+			t.Fatalf("%s = %q, want repository %q", name, value, feishuPlusRepo)
+		}
+		if strings.Contains(value, "chenhg5/cc-connect") || strings.Contains(value, "gitee.com") {
+			t.Fatalf("%s = %q, must not downgrade to an upstream distribution", name, value)
+		}
+	}
+}
 
 func TestSemverCompare(t *testing.T) {
 	tests := []struct {
@@ -23,7 +43,7 @@ func TestSemverCompare(t *testing.T) {
 		{"v1.0.0-beta.1", "v1.0.0-beta.1", 0},
 
 		// different pre-release prefixes
-		{"v1.0.0-rc.1", "v1.0.0-beta.1", 1},  // "rc" > "beta" lexicographically
+		{"v1.0.0-rc.1", "v1.0.0-beta.1", 1}, // "rc" > "beta" lexicographically
 		{"v1.0.0-alpha.1", "v1.0.0-beta.1", -1},
 
 		// without 'v' prefix

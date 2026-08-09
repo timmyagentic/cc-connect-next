@@ -1019,6 +1019,10 @@ app_secret = "your-feishu-app-secret"
 #                           # Agent 完成回复后添加的表情回复（如 "Done"）；设为 "none" 可禁用
 # group_reply_all = false   # If true, respond to ALL group messages without requiring @mention
 #                           # 设为 true 时，群聊中无需 @机器人 也会响应所有消息（默认 false）
+# plus_enabled = false      # Enable independently maintained Feishu Plus behavior; false preserves the native path.
+#                           # 启用独立维护的 Feishu Plus 能力；false 时保持原生行为。
+# plus_identity_mode = "retry" # retry | fail_closed | legacy. Plus defaults to retry: block protected group traffic while bot identity is unknown, retry in the background, and self-recover without restart.
+#                                # retry | fail_closed | legacy。Plus 默认 retry：身份未知时阻止需要 @的群消息，后台重试并在成功后自动恢复。
 # share_session_in_channel = false  # If true, all users in a group share one agent session
 #                                   # 设为 true 时，群聊内所有用户共享同一个 Agent 会话
 # thread_isolation = false  # If true, group messages use Feishu reply threads as session boundaries (one thread/root = one agent session and, in multi-workspace mode, one workspace binding)

@@ -4,9 +4,25 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestUpdateSourceStaysOnFeishuPlusDistribution(t *testing.T) {
+	if distributionName != "cc-connect-feishu-plus" {
+		t.Fatalf("distributionName = %q, want Feishu Plus binary identity", distributionName)
+	}
+	if githubRepo != "timmyagentic/cc-connect-feishu-plus" {
+		t.Fatalf("githubRepo = %q, want Feishu Plus repository", githubRepo)
+	}
+	if !strings.Contains(downloadBase, githubRepo) {
+		t.Fatalf("downloadBase = %q, want repository %q", downloadBase, githubRepo)
+	}
+	if strings.Contains(downloadBase, "chenhg5/cc-connect") {
+		t.Fatalf("downloadBase = %q, must not downgrade to upstream distribution", downloadBase)
+	}
+}
 
 func TestIsNewer(t *testing.T) {
 	tests := []struct {

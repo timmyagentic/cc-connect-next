@@ -30,6 +30,11 @@ var (
 	buildTime = "unknown"
 )
 
+const (
+	distributionName = "cc-connect-feishu-plus"
+	distributionRepo = "https://github.com/timmyagentic/cc-connect-feishu-plus"
+)
+
 // globalAPIServer holds the running API server so the config-reload path can
 // re-apply hot-reloadable settings (e.g. max attachment size) without threading
 // it through the engine's reload closure. nil when the API server is disabled.
@@ -310,11 +315,11 @@ func main() {
 	}
 
 	if *showVersion {
-		fmt.Printf("cc-connect %s\ncommit:  %s\nbuilt:   %s\n", version, commit, buildTime)
+		fmt.Printf("%s %s\ncommit:  %s\nbuilt:   %s\n", distributionName, version, commit, buildTime)
 		return
 	}
 
-	core.VersionInfo = fmt.Sprintf("cc-connect %s\ncommit: %s\nbuilt: %s", version, commit, buildTime)
+	core.VersionInfo = fmt.Sprintf("%s %s\ncommit: %s\nbuilt: %s", distributionName, version, commit, buildTime)
 	core.CurrentVersion = version
 	core.CurrentCommit = commit
 	core.CurrentBuildTime = buildTime
@@ -1520,7 +1525,7 @@ func bootstrapConfig(path string) error {
 	}
 
 	const tmpl = `# cc-connect configuration
-# Docs: https://github.com/chenhg5/cc-connect
+# Docs: https://github.com/timmyagentic/cc-connect-feishu-plus
 
 [log]
 level = "info"
@@ -1547,7 +1552,7 @@ app_id = "your-feishu-app-id"
 app_secret = "your-feishu-app-secret"
 
 # For more platforms (DingTalk, Telegram, Slack, Discord, LINE, WeChat Work)
-# see: https://github.com/chenhg5/cc-connect/blob/main/config.example.toml
+# see: https://github.com/timmyagentic/cc-connect-feishu-plus/blob/main/config.example.toml
 `
 	return os.WriteFile(path, []byte(tmpl), 0o644)
 }
@@ -1572,8 +1577,8 @@ func printUsage() {
   Supports: Claude Code, Codex, Cursor, Gemini CLI, Qoder CLI, OpenCode
   Platforms: Feishu, TuiTui, Telegram, Slack, DingTalk, Discord, LINE, WeChat Work, Weixin, QQ, QQ Bot
 
-  GitHub:  https://github.com/chenhg5/cc-connect
-  Docs:    https://github.com/chenhg5/cc-connect/blob/main/INSTALL.md
+  GitHub:  %s
+  Docs:    %s/blob/main/INSTALL.md
 
 Usage:
   cc-connect [flags]
@@ -1658,7 +1663,7 @@ Examples:
   cc-connect config format            Format the config file
   cc-connect config example > c.toml  Save example config to a file
 
-`, v, updateHint)
+`, v, updateHint, distributionRepo, distributionRepo)
 }
 
 func setupLogger(level string, w io.Writer) {

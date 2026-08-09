@@ -133,6 +133,7 @@ type Platform struct {
 	// noReplyToTrigger: when true, send via Create instead of Im.Message.Reply (no quote to the user's message).
 	noReplyToTrigger bool
 	resolveMentions  bool
+	plus             plusConfig
 	client           *lark.Client
 	replayClient     *lark.Client
 	replayClientMu   sync.Mutex
@@ -168,6 +169,14 @@ type Platform struct {
 	// without requiring another @bot mention. Value is the last-seen time so
 	// stale entries can be expired by a future TTL sweep if needed.
 	activeThreadSessions sync.Map // sessionKey -> time.Time
+
+	identityRetryMu      sync.Mutex
+	identityRetryCancel  context.CancelFunc
+	identityRetryInitial time.Duration
+	identityRetryMax     time.Duration
+	// fetchBotOpenIDOverride is test-only dependency injection for the retry
+	// loop. Production always uses fetchBotOpenID.
+	fetchBotOpenIDOverride func() (string, error)
 
 	richCardImageMu         sync.Mutex
 	richCardImageResolved   map[string]string
@@ -286,6 +295,10 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 			domain = v
 		}
 	}
+	plus, err := parsePlusConfig(opts)
+	if err != nil {
+		return nil, err
+	}
 	reactionEmoji, _ := opts["reaction_emoji"].(string)
 	if reactionEmoji == "" {
 		reactionEmoji = "OnIt"
@@ -402,6 +415,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		shareSessionInChannel:      shareSessionInChannel,
 		threadIsolation:            threadIsolation,
 		resolveMentions:            resolveMentionsOpt,
+		plus:                       plus,
 		noReplyToTrigger:           noReplyToTrigger,
 		client:                     lark.NewClient(appID, appSecret, clientOpts...),
 		replayClient:               newFeishuReplayClient(appID, appSecret, domain),
@@ -477,12 +491,18 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 	// can still receive events and operate correctly. We therefore only attempt
 	// bot open_id discovery eagerly for WebSocket mode.
 	if !p.shouldUseWebhookMode() {
-		if openID, err := p.fetchBotOpenID(); err != nil {
-			slog.Warn(p.platformName+": failed to get bot open_id, group chat filtering disabled", "error", err)
+		if openID, err := p.fetchBotIdentity(); err != nil {
+			switch {
+			case p.plus.enabled && p.plus.identityMode == plusIdentityRetry:
+				slog.Error(p.platformName+": Feishu Plus failed to get bot open_id; group messages blocked until identity recovers", "error", err)
+				p.startBotIdentityRetry()
+			case p.plus.enabled && p.plus.identityMode == plusIdentityFailClosed:
+				slog.Error(p.platformName+": Feishu Plus failed to get bot open_id; group messages blocked until restart", "error", err)
+			default:
+				slog.Warn(p.platformName+": failed to get bot open_id, group chat filtering disabled", "error", err)
+			}
 		} else {
-			p.mu.Lock()
-			p.botOpenID = openID
-			p.mu.Unlock()
+			p.setBotOpenID(openID)
 			slog.Info(p.platformName+": bot identified", "open_id", openID)
 		}
 	}
@@ -1354,8 +1374,14 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	// thread set; sessionKey is also used downstream for dispatch.
 	sessionKey := p.makeSessionKey(msg, chatID, userID)
 
-	if chatType == "group" && !p.groupReplyAll && p.getBotOpenID() != "" {
-		if !isBotMentioned(msg.Mentions, p.getBotOpenID()) {
+	if p.shouldDropForUnknownBotIdentity(chatType) {
+		slog.Debug(p.tag()+": Feishu Plus blocked group message while bot identity is unknown",
+			"chat_id", chatID, "message_id", messageID)
+		return nil
+	}
+	if chatType == "group" && !p.groupReplyAll {
+		botOpenID := p.getBotOpenID()
+		if botOpenID != "" && !isBotMentioned(msg.Mentions, botOpenID) {
 			switch {
 			// Feishu @all sends {"text":"@_all"} with 0 mentions.
 			case p.respondToAtEveryoneAndHere && msg.Content != nil && strings.Contains(*msg.Content, "@_all"):
@@ -4592,6 +4618,7 @@ func (p *Platform) updateCardEntity(ctx context.Context, h *feishuPreviewHandle,
 }
 
 func (p *Platform) Stop() error {
+	p.stopBotIdentityRetry()
 	if p.isWSPrimary {
 		remaining := unregisterSharedWS(p)
 		if remaining > 0 {
