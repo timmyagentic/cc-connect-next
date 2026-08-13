@@ -72,6 +72,9 @@ web/tsconfig.tsbuildinfo
 # Testing & temporary files
 # ============================================================================
 test/
+!npm/test/
+!npm/test/**
+/core/test_ws_*.json
 scripts/
 tmp/
 temp/

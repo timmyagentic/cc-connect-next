@@ -1142,12 +1142,12 @@ func TestCUJ_A3_ImageReachesAgent(t *testing.T) {
 		agent.mu.Lock()
 		n := len(agent.sessions)
 		agent.mu.Unlock()
-		if n > 0 {
+		if n > 0 && len(plat.getSent()) > 0 {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatal("agent never received the message with image")
+			t.Fatalf("image turn did not complete (agent sessions=%d, sent=%v)", n, plat.getSent())
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
@@ -1206,12 +1206,12 @@ func TestCUJ_A5_FileReachesAgent(t *testing.T) {
 		agent.mu.Lock()
 		n := len(agent.sessions)
 		agent.mu.Unlock()
-		if n > 0 {
+		if n > 0 && len(plat.getSent()) > 0 {
 			return
 		}
 		select {
 		case <-deadline:
-			t.Fatal("agent never received the message with file attachment")
+			t.Fatalf("file turn did not complete (agent sessions=%d, sent=%v)", n, plat.getSent())
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}

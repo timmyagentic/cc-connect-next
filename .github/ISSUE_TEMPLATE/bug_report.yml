@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug to help us improve cc-connect
+description: Report a bug to help us improve CC Connect Feishu Plus
 title: "[Bug] "
 labels: ["bug"]
 
@@ -12,9 +12,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: cc-connect Version
-      description: Run `cc-connect --version` to get the version.
-      placeholder: "e.g. v0.3.0"
+      label: CC Connect Feishu Plus version
+      description: Run `cc-connect --version` after installation or `npx cc-connect-feishu-plus version` for the bootstrap version.
+      placeholder: "e.g. 0.1.0"
     validations:
       required: true
 
@@ -69,7 +69,7 @@ body:
     attributes:
       label: Installation Method
       options:
-        - npm (npm install -g cc-connect)
+        - npm bootstrap (npx cc-connect-feishu-plus install)
         - Binary download (GitHub Releases)
         - Build from source
     validations:

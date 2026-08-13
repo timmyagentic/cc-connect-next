@@ -1,26 +1,40 @@
-# cc-connect
+# CC Connect Feishu Plus npm bootstrap
 
-Bridge local AI coding agents (Claude Code, Cursor, Gemini CLI, Codex) to messaging platforms (Feishu/Lark, DingTalk, Slack, Telegram, Discord, LINE, WeChat Work).
+This package is the safe installation and diagnostics entrypoint for
+[CC Connect Feishu Plus](https://github.com/timmyagentic/cc-connect-feishu-plus).
+It does not run a second Feishu connection and does not rewrite secrets.
 
-Chat with your AI dev assistant from anywhere.
-
-## Install
-
-```bash
-npm install -g cc-connect
-```
-
-## Usage
+Planned public entrypoint:
 
 ```bash
-# Create config
-cc-connect --version
-
-# Edit config.toml, then run
-cc-connect
-cc-connect -config /path/to/config.toml
+npx cc-connect-feishu-plus@latest install
 ```
 
-## Documentation
+The foundation build intentionally supports inspection and installation
+planning only:
 
-See full documentation at: https://github.com/chenhg5/cc-connect
+```bash
+# Inspect the native binary, config path, service metadata, and Plus state.
+node ./cli.js doctor
+node ./cli.js doctor --json
+
+# Produce the exact plan without downloading, writing, stopping, or restarting.
+node ./cli.js install --dry-run
+node ./cli.js install --dry-run --json
+```
+
+`doctor` reads only enough metadata to report paths, version, permissions, and
+whether `plus_enabled = true` is present. It never returns configuration
+contents or credentials.
+
+Applying the plan remains disabled until all of these release gates exist:
+
+- a versioned GitHub Release for each supported OS/architecture;
+- a signed manifest and SHA-256 verification;
+- immutable version directories plus an atomic `current` pointer;
+- backup of the existing service entry and config metadata;
+- post-activation health checks and automatic rollback.
+
+The npm package is marked `private` during this foundation phase so it cannot be
+published accidentally before those gates and the upstream licensing status are
+resolved.

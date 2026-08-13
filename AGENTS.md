@@ -1,5 +1,20 @@
 # CC-Connect Development Guide
 
+## Feishu Plus Distribution Invariants
+
+This repository is the independently maintained **CC Connect Feishu Plus**
+distribution. Do not make delivery depend on an upstream PR being reviewed or
+merged.
+
+- Preserve the native `feishu`/`lark` adapter path when `plus_enabled` is false.
+- Put deep Feishu changes behind explicit `plus_*` options with regression tests.
+- Never start a second adapter connection for the same Feishu application.
+- Keep update checks and release downloads on `timmyagentic/cc-connect-feishu-plus`;
+  falling back to the upstream release feed would silently remove Plus features.
+- Run `npm run check --prefix npm` for bootstrap changes.
+- Do not enable npm or modified-binary publication until signed assets, automatic
+  rollback, and the licensing gate in `docs/upstream-baseline.md` are resolved.
+
 ## Project Overview
 
 CC-Connect is a bridge that connects AI coding agents (Claude Code, Codex, Gemini CLI, Cursor, etc.) with messaging platforms (Feishu/Lark, Telegram, Discord, Slack, DingTalk, WeChat Work, QQ, LINE). Users interact with their coding agent through their preferred messaging app.
