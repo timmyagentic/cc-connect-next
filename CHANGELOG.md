@@ -11,7 +11,7 @@
 
 - `mention_map` now fails startup/migration validation unless `resolve_mentions = true`, every alias is valid, and every target is a bot `open_id` beginning with `ou_`.
 - Quoted files are downloaded only after the user explicitly mentions this bot and only when the quoted file was uploaded by that same user.
-- Native mentions are resolved only outside Markdown code spans/blocks and link destinations, so code or URL examples cannot notify a bot. Topic follow-ups remain FIFO while first-mention context bootstrap is in flight, and a partially fetched reply chain stays retryable after a transient ancestor failure. Topic-local relay echoes remain in-thread even when ordinary trigger replies are disabled.
+- Native mentions are resolved only outside Markdown code spans/blocks, inline links, autolinks, and reference definitions, so code or hidden URL/title examples cannot notify a bot. Topic follow-ups remain FIFO while first-mention context bootstrap is in flight, and a partially fetched reply chain stays retryable after a transient ancestor failure. Topic-local relay echoes remain in-thread even when ordinary trigger replies are disabled, and failed visibility delivery emits an operator warning.
 
 ## v0.1.0-beta.1 (2026-08-15)
 

@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +49,7 @@ func TestResolveGroupVisibilityKeyFallsBackForUnsupportedPlatform(t *testing.T) 
 type relayVisibilitySenderStub struct {
 	stubPlatformEngine
 	sessionKey string
+	sendErr    error
 }
 
 func (p *relayVisibilitySenderStub) SendRelayGroupVisibility(_ context.Context, sessionKey, content string) error {
@@ -54,7 +57,33 @@ func (p *relayVisibilitySenderStub) SendRelayGroupVisibility(_ context.Context, 
 	p.sessionKey = sessionKey
 	p.sent = append(p.sent, content)
 	p.mu.Unlock()
-	return nil
+	return p.sendErr
+}
+
+func TestSendToGroupWarnsWhenPlatformVisibilitySendFails(t *testing.T) {
+	buf, restore := captureSlog(t)
+	defer restore()
+
+	rm := NewRelayManager("")
+	platform := &relayVisibilitySenderStub{
+		stubPlatformEngine: stubPlatformEngine{n: "feishu"},
+		sendErr:            errors.New("topic reply unavailable"),
+	}
+	engine := NewEngine("source", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+
+	rm.sendToGroup(context.Background(), engine, "feishu", "feishu:oc_chat:root:om_root", "relay visible")
+
+	logOutput := buf.String()
+	for _, want := range []string{
+		"relay: failed to send platform group visibility message",
+		`"platform":"feishu"`,
+		`"session_key":"feishu:oc_chat:root:om_root"`,
+		"topic reply unavailable",
+	} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("warning log %q does not contain %q", logOutput, want)
+		}
+	}
 }
 
 func TestSendToGroupPrefersPlatformVisibilitySender(t *testing.T) {

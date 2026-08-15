@@ -180,6 +180,11 @@ func TestRichCardTerminalTextFallbackOnlyWhenMentionResolved(t *testing.T) {
 	}
 	for _, link := range []string{
 		"[profile](https://host/@Reviewer-Bot)",
+		"[profile]: /users/@Reviewer-Bot",
+		"[@Reviewer-Bot]: /users/profile",
+		"[profile]: <../users/@Reviewer-Bot> \"hidden title\"",
+		"[profile]:\n  ../users/@Reviewer-Bot",
+		"[profile]: /users/profile\n  \"hidden @Reviewer-Bot title\"",
 		"<https://host/@Reviewer-Bot>",
 		"https://host/@Reviewer-Bot",
 		"<mailto:support@Reviewer-Bot.example>",
@@ -189,13 +194,18 @@ func TestRichCardTerminalTextFallbackOnlyWhenMentionResolved(t *testing.T) {
 			t.Fatalf("link destination alias must remain literal: (%q, %v, %v)", prepared, required, err)
 		}
 	}
+	visibleLabel := "[@Reviewer-Bot](https://host/profile)"
+	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, visibleLabel)
+	if err != nil || !required || !strings.Contains(prepared, `<at user_id="ou_bot">Reviewer-Bot</at>`) || !strings.Contains(prepared, "https://host/profile") {
+		t.Fatalf("visible link-label mention must resolve without changing its destination: (%q, %v, %v)", prepared, required, err)
+	}
 
-	mixed := "示例 `@Reviewer-Bot` 和 [链接](https://host/@Reviewer-Bot)；真正通知 @Reviewer-Bot。"
+	mixed := "[profile]: /users/@Reviewer-Bot\n示例 `@Reviewer-Bot` 和 [链接](https://host/@Reviewer-Bot)；真正通知 @Reviewer-Bot。"
 	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, mixed)
 	if err != nil || !required {
 		t.Fatalf("mixed terminal preparation = (%q, %v, %v)", prepared, required, err)
 	}
-	if !strings.Contains(prepared, "`@Reviewer-Bot`") || !strings.Contains(prepared, "https://host/@Reviewer-Bot") || strings.Count(prepared, `<at user_id="ou_bot">Reviewer-Bot</at>`) != 1 {
+	if !strings.Contains(prepared, "`@Reviewer-Bot`") || !strings.Contains(prepared, "https://host/@Reviewer-Bot") || !strings.Contains(prepared, "/users/@Reviewer-Bot") || strings.Count(prepared, `<at user_id="ou_bot">Reviewer-Bot</at>`) != 1 {
 		t.Fatalf("only the real mention should be resolved: %q", prepared)
 	}
 	if partial := p.TransformRichCardMarkdown(context.Background(), replyContext{chatID: "oc_chat"}, "@Reviewer-BotExtra"); partial != "@Reviewer-BotExtra" {

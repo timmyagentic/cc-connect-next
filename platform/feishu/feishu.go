@@ -2170,6 +2170,9 @@ func markdownLinkRegionEnd(content string, offset int) (int, bool) {
 	if offset >= len(content) {
 		return 0, false
 	}
+	if end, ok := markdownReferenceDefinitionEnd(content, offset); ok {
+		return end, true
+	}
 
 	// Inline link/image destination: ](...). Preserve balanced parentheses and
 	// backslash escapes so an @ anywhere in the destination remains literal.
@@ -2226,6 +2229,98 @@ func markdownLinkRegionEnd(content string, offset int) (int, bool) {
 	}
 
 	return 0, false
+}
+
+// markdownReferenceDefinitionEnd protects hidden reference definitions such as
+// [profile]: /users/@Reviewer. Unlike inline destinations, their URL is not
+// adjacent to a closing bracket, and relative paths have no scheme to detect.
+func markdownReferenceDefinitionEnd(content string, offset int) (int, bool) {
+	if offset > 0 && content[offset-1] != '\n' {
+		return 0, false
+	}
+	cursor := offset
+	for cursor < len(content) && cursor-offset < 3 && content[cursor] == ' ' {
+		cursor++
+	}
+	if cursor >= len(content) || content[cursor] != '[' {
+		return 0, false
+	}
+
+	labelStart := cursor + 1
+	closingBracket := -1
+	for cursor = labelStart; cursor < len(content) && content[cursor] != '\n'; cursor++ {
+		if content[cursor] == '\\' && cursor+1 < len(content) {
+			cursor++
+			continue
+		}
+		if content[cursor] == ']' {
+			closingBracket = cursor
+			break
+		}
+	}
+	if closingBracket == labelStart || closingBracket < 0 || closingBracket+1 >= len(content) || content[closingBracket+1] != ':' {
+		return 0, false
+	}
+
+	lineEnd := markdownLineEnd(content, closingBracket+2)
+	hasDestination := strings.TrimSpace(content[closingBracket+2:lineEnd]) != ""
+	if !hasDestination && lineEnd < len(content) {
+		// CommonMark permits the destination on the following line. Extend only
+		// for URL-like prefixes so an incomplete definition cannot hide ordinary
+		// visible prose from mention resolution.
+		nextStart := lineEnd + 1
+		nextEnd := markdownLineEnd(content, nextStart)
+		if isLikelyMarkdownReferenceDestination(strings.TrimSpace(content[nextStart:nextEnd])) {
+			lineEnd = nextEnd
+			hasDestination = true
+		}
+	}
+	if hasDestination && lineEnd < len(content) {
+		// An optional title may occupy the following line and is hidden along
+		// with the destination, so mention-like text in it is not user prose.
+		nextStart := lineEnd + 1
+		nextEnd := markdownLineEnd(content, nextStart)
+		if isMarkdownReferenceTitle(strings.TrimSpace(content[nextStart:nextEnd])) {
+			lineEnd = nextEnd
+		}
+	}
+	if lineEnd < len(content) {
+		lineEnd++
+	}
+	return lineEnd, true
+}
+
+func markdownLineEnd(content string, offset int) int {
+	if relative := strings.IndexByte(content[offset:], '\n'); relative >= 0 {
+		return offset + relative
+	}
+	return len(content)
+}
+
+func isLikelyMarkdownReferenceDestination(line string) bool {
+	lower := strings.ToLower(line)
+	for _, prefix := range []string{"<", "/", "./", "../", "#", "http://", "https://", "mailto:"} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return line != "" && !strings.ContainsAny(line, " \t") && !isMarkdownReferenceTitle(line)
+}
+
+func isMarkdownReferenceTitle(line string) bool {
+	if len(line) < 2 {
+		return false
+	}
+	switch line[0] {
+	case '"':
+		return line[len(line)-1] == '"'
+	case '\'':
+		return line[len(line)-1] == '\''
+	case '(':
+		return line[len(line)-1] == ')'
+	default:
+		return false
+	}
 }
 
 func isMarkdownURLStart(content string, offset int) bool {
