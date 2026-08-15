@@ -1702,6 +1702,13 @@ func TestGroupReplyAllChats_OnlyConfiguredChatsBypassMention(t *testing.T) {
 	}
 	ip := p.(*interactivePlatform)
 	ip.botOpenID = "ou_bot"
+	// Keep this routing test independent of the Contact/IM APIs. Without
+	// cached names, dispatchMessage performs real SDK lookups against the
+	// intentionally fake credentials, making the short admission assertion
+	// timing-sensitive under coverage.
+	ip.userNameCache.Store("ou_user", "Test User")
+	ip.chatNameCache.Store("oc_allowed", "Allowed")
+	ip.chatNameCache.Store("oc_other", "Other")
 	var eventSequence int64
 
 	dispatches := func(chatID string, mentions []*larkim.MentionEvent) bool {
