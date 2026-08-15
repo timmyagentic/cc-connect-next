@@ -1181,17 +1181,18 @@ func isMessageWithdrawnError(err error) bool {
 	return isMessageWithdrawnCode(0, err.Error())
 }
 
-func (p *Platform) dispatchCoreMessage(msg *core.Message) {
+func (p *Platform) dispatchCoreMessage(msg *core.Message) bool {
 	h := p.getHandler()
 	if msg == nil || h == nil {
-		return
+		return false
 	}
 	p.populateWorkspaceChannelKeys(msg)
 	if p.isMessageRecalled(msg.MessageID) {
 		slog.Debug(p.tag()+": recalled message dispatch dropped", "message_id", msg.MessageID)
-		return
+		return false
 	}
 	h(p.dispatchPlatform(), msg)
+	return true
 }
 
 // populateWorkspaceChannelKeys aligns multi-workspace binding scope with the
@@ -1544,10 +1545,11 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 	if rctx.bootstrapQueued {
 		rctx.bootstrapThread = p.claimThreadBootstrapRetry(sessionKey)
 	}
-	bootstrapSucceeded := false
+	bootstrapContextReady := false
+	messageDispatched := false
 	defer func() {
 		if rctx.bootstrapThread {
-			p.finishThreadBootstrap(sessionKey, bootstrapSucceeded)
+			p.finishThreadBootstrap(sessionKey, bootstrapContextReady && messageDispatched)
 		}
 		if rctx.bootstrapDone != nil {
 			p.releaseThreadBootstrapDispatch(sessionKey, rctx.bootstrapDone)
@@ -1576,12 +1578,17 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		var fetched bool
 		quoted, fetched = p.fetchQuotedMessageWithStatus(ctx, parentID)
 		if rctx.bootstrapThread {
-			bootstrapSucceeded = fetched
+			bootstrapContextReady = fetched
 		}
 	} else if rctx.bootstrapThread {
 		// A newly-created topic can have no earlier root message to recover.
 		// Treat that as a completed (empty) bootstrap instead of retrying forever.
-		bootstrapSucceeded = true
+		bootstrapContextReady = true
+	}
+	dispatchToCore := func(msg *core.Message) {
+		if p.dispatchCoreMessage(msg) {
+			messageDispatched = true
+		}
 	}
 
 	switch msgType {
@@ -1604,7 +1611,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			)
 			return
 		}
-		p.dispatchCoreMessage(&core.Message{
+		dispatchToCore(&core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
@@ -1649,7 +1656,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			})
 			return
 		}
-		p.dispatchCoreMessage(&core.Message{
+		dispatchToCore(&core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
@@ -1678,7 +1685,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			}
 			return
 		}
-		p.dispatchCoreMessage(&core.Message{
+		dispatchToCore(&core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
@@ -1700,7 +1707,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		if text == "" && len(images) == 0 && quoted.text == "" && len(quoted.images) == 0 && len(quotedFiles) == 0 {
 			return
 		}
-		p.dispatchCoreMessage(&core.Message{
+		dispatchToCore(&core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
@@ -1729,7 +1736,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		}
 		slog.Debug(p.tag()+": file downloaded", "file_name", fileBody.FileName, "size", len(fileData))
 		mimeType := detectMimeType(fileData)
-		p.dispatchCoreMessage(&core.Message{
+		dispatchToCore(&core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
@@ -1758,7 +1765,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			ReplyCtx:          rctx,
 			UserMessageTimeMs: createTimeMs,
 		}
-		p.dispatchCoreMessage(coreMsg)
+		dispatchToCore(coreMsg)
 
 	case "sticker":
 		var stickerBody struct {
@@ -1772,7 +1779,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		imgData, mimeType, err := p.downloadImage(messageID, stickerBody.FileKey)
 		if err != nil {
 			slog.Warn(p.tag()+": download sticker failed, falling back to placeholder", "error", err)
-			p.dispatchCoreMessage(&core.Message{
+			dispatchToCore(&core.Message{
 				SessionKey: sessionKey, Platform: p.platformName,
 				MessageID: messageID,
 				UserID:    userID, UserName: userName, ChatName: chatName,
@@ -1781,7 +1788,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			})
 			return
 		}
-		p.dispatchCoreMessage(&core.Message{
+		dispatchToCore(&core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
@@ -1818,7 +1825,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 				slog.Warn(p.tag()+": download media thumbnail failed", "error", err)
 			}
 		}
-		p.dispatchCoreMessage(&core.Message{
+		dispatchToCore(&core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
@@ -2057,7 +2064,9 @@ func (p *Platform) resolveMentionsWithFormatResult(ctx context.Context, chatID, 
 		if content[offset] == '@' && !isMarkdownEscaped(content, offset) {
 			for _, name := range names {
 				pattern := "@" + name
-				if !strings.HasPrefix(content[offset:], pattern) || !isMentionTokenEnd(content, offset+len(pattern)) {
+				if !strings.HasPrefix(content[offset:], pattern) ||
+					!isMentionTokenStart(content, offset) ||
+					!isMentionTokenEnd(content, offset+len(pattern)) {
 					continue
 				}
 				openID := merged[name]
@@ -2090,15 +2099,27 @@ func isMentionTokenEnd(content string, end int) bool {
 	// Preserve the established CJK behavior where natural-language text often
 	// follows a display name without whitespace (for example, @张三请查看), while
 	// preventing an ASCII alias from matching a longer identifier.
-	switch {
-	case next >= 'a' && next <= 'z':
-		return false
-	case next >= 'A' && next <= 'Z':
-		return false
-	case next >= '0' && next <= '9', next == '_', next == '-':
-		return false
-	default:
+	return !isASCIIMentionContinuation(next)
+}
+
+func isMentionTokenStart(content string, start int) bool {
+	if start == 0 {
 		return true
+	}
+	previous, _ := utf8.DecodeLastRuneInString(content[:start])
+	return !isASCIIMentionContinuation(previous)
+}
+
+func isASCIIMentionContinuation(value rune) bool {
+	switch {
+	case value >= 'a' && value <= 'z':
+		return true
+	case value >= 'A' && value <= 'Z':
+		return true
+	case value >= '0' && value <= '9', value == '_', value == '-':
+		return true
+	default:
+		return false
 	}
 }
 

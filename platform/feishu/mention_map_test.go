@@ -147,6 +147,12 @@ func TestRichCardTerminalTextFallbackOnlyWhenMentionResolved(t *testing.T) {
 	if err != nil || required || prepared != escaped {
 		t.Fatalf("escaped mention must remain literal: (%q, %v, %v)", prepared, required, err)
 	}
+	for _, identifier := range []string{"support@Reviewer-Bot.com", "alice@Reviewer-Bot"} {
+		prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, identifier)
+		if err != nil || required || prepared != identifier {
+			t.Fatalf("identifier-embedded alias must remain literal: (%q, %v, %v)", prepared, required, err)
+		}
+	}
 
 	mixed := "示例 `@Reviewer-Bot`；真正通知 @Reviewer-Bot。"
 	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, mixed)

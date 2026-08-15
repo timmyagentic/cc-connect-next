@@ -144,6 +144,84 @@ func TestOnMessageThreadBootstrapRetriesAfterRootFetchFailure(t *testing.T) {
 	}
 }
 
+func TestDispatchMessageCompletesBootstrapOnlyAfterCoreDispatch(t *testing.T) {
+	const (
+		appID      = "cli_thread_bootstrap_dispatch"
+		appSecret  = "secret-thread-bootstrap-dispatch"
+		rootMsgID  = "om_root"
+		sessionKey = "feishu:oc_chat:root:" + rootMsgID
+	)
+
+	var rootCalls atomic.Int32
+	got := make(chan *core.Message, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			writeJSON(t, w, map[string]any{
+				"code": 0, "msg": "success", "expire": 7200,
+				"tenant_access_token": "tenant-token",
+			})
+		case "/open-apis/im/v1/messages/" + rootMsgID:
+			rootCalls.Add(1)
+			writeJSON(t, w, map[string]any{
+				"code": 0, "msg": "success",
+				"data": map[string]any{"items": []map[string]any{{
+					"msg_type": "text", "parent_id": "",
+					"sender": map[string]any{"id": "", "sender_type": "user"},
+					"body":   map[string]any{"content": `{"text":"必须送达的根上下文"}`},
+				}}},
+			})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p := &Platform{
+		platformName:    "feishu",
+		appID:           appID,
+		appSecret:       appSecret,
+		threadIsolation: true,
+		client: lark.NewClient(appID, appSecret,
+			lark.WithOpenBaseUrl(srv.URL),
+			lark.WithHttpClient(srv.Client()),
+		),
+		handler: func(_ core.Platform, msg *core.Message) { got <- msg },
+	}
+
+	if !p.markThreadSessionActive(sessionKey) {
+		t.Fatal("first bootstrap reservation was not acquired")
+	}
+	p.dispatchMessage(context.Background(), "text", `{`, nil, "om_bad", sessionKey, "", "",
+		replyContext{sessionKey: sessionKey, bootstrapThread: true}, rootMsgID, 0)
+	select {
+	case msg := <-got:
+		t.Fatalf("malformed trigger unexpectedly dispatched: %q", msg.MessageID)
+	default:
+	}
+
+	if !p.markThreadSessionActive(sessionKey) {
+		t.Fatal("bootstrap was marked complete before the malformed trigger reached Core")
+	}
+	p.dispatchMessage(context.Background(), "text", `{"text":"继续"}`, nil, "om_valid", sessionKey, "", "",
+		replyContext{sessionKey: sessionKey, bootstrapThread: true}, rootMsgID, 0)
+	select {
+	case msg := <-got:
+		if msg.MessageID != "om_valid" || !strings.Contains(msg.ExtraContent, "必须送达的根上下文") {
+			t.Fatalf("retried dispatch = (%q, %q)", msg.MessageID, msg.ExtraContent)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for valid retried dispatch")
+	}
+	if rootCalls.Load() != 2 {
+		t.Fatalf("root fetch calls = %d, want 2", rootCalls.Load())
+	}
+	if p.markThreadSessionActive(sessionKey) {
+		t.Fatal("successful Core dispatch must complete bootstrap")
+	}
+}
+
 func TestOnMessageThreadBootstrapQueuesConcurrentFollowUpsInOrder(t *testing.T) {
 	const (
 		appID      = "cli_thread_bootstrap_order"
