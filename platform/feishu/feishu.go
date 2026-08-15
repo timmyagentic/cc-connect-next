@@ -1585,7 +1585,25 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		// Treat that as a completed (empty) bootstrap instead of retrying forever.
 		bootstrapContextReady = true
 	}
+	approvedQuotedFiles := p.filterQuotedFilesForUser(quoted.files, mentions, userID)
+	quotedFiles := p.downloadQuotedFiles(ctx, approvedQuotedFiles)
 	dispatchToCore := func(msg *core.Message) {
+		if msg == nil {
+			return
+		}
+		if msg.ExtraContent == "" {
+			msg.ExtraContent = quoted.text
+		}
+		if len(quoted.images) > 0 {
+			images := make([]core.ImageAttachment, 0, len(quoted.images)+len(msg.Images))
+			images = append(images, quoted.images...)
+			msg.Images = append(images, msg.Images...)
+		}
+		if len(quotedFiles) > 0 {
+			files := make([]core.FileAttachment, 0, len(quotedFiles)+len(msg.Files))
+			files = append(files, quotedFiles...)
+			msg.Files = append(files, msg.Files...)
+		}
 		if p.dispatchCoreMessage(msg) {
 			messageDispatched = true
 		}
@@ -1601,8 +1619,6 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			return
 		}
 		text := stripMentions(textBody.Text, mentions, p.getBotOpenID())
-		approvedQuotedFiles := p.filterQuotedFilesForUser(quoted.files, mentions, userID)
-		quotedFiles := p.downloadQuotedFiles(ctx, approvedQuotedFiles)
 		if text == "" && quoted.text == "" && len(quoted.images) == 0 && len(quotedFiles) == 0 {
 			slog.Debug(p.tag()+": dropping empty text after mention stripping",
 				"message_id", messageID,
@@ -1615,7 +1631,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
-			Content: text, ExtraContent: quoted.text, Images: quoted.images, Files: quotedFiles, ReplyCtx: rctx,
+			Content: text, ReplyCtx: rctx,
 			UserMessageTimeMs: createTimeMs,
 		})
 
@@ -1662,7 +1678,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			UserID:    userID, UserName: userName, ChatName: chatName,
 			Content:           "",
 			ExtraContent:      quoted.text,
-			Images:            append(quoted.images, core.ImageAttachment{MimeType: mimeType, Data: imgData}),
+			Images:            []core.ImageAttachment{{MimeType: mimeType, Data: imgData}},
 			ReplyCtx:          rctx,
 			UserMessageTimeMs: createTimeMs,
 		})
@@ -1702,8 +1718,6 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 	case "post":
 		textParts, images := p.parsePostContent(messageID, content)
 		text := stripMentions(strings.Join(textParts, "\n"), mentions, p.getBotOpenID())
-		approvedQuotedFiles := p.filterQuotedFilesForUser(quoted.files, mentions, userID)
-		quotedFiles := p.downloadQuotedFiles(ctx, approvedQuotedFiles)
 		if text == "" && len(images) == 0 && quoted.text == "" && len(quoted.images) == 0 && len(quotedFiles) == 0 {
 			return
 		}
@@ -1711,7 +1725,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
-			Content: text, ExtraContent: quoted.text, Images: append(quoted.images, images...), Files: quotedFiles,
+			Content: text, Images: images,
 			ReplyCtx:          rctx,
 			UserMessageTimeMs: createTimeMs,
 		})

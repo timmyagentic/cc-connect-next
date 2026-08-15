@@ -150,6 +150,8 @@ func TestDispatchMessageCompletesBootstrapOnlyAfterCoreDispatch(t *testing.T) {
 		appSecret  = "secret-thread-bootstrap-dispatch"
 		rootMsgID  = "om_root"
 		sessionKey = "feishu:oc_chat:root:" + rootMsgID
+		fileKey    = "file_current"
+		fileMsgID  = "om_file"
 	)
 
 	var rootCalls atomic.Int32
@@ -172,6 +174,9 @@ func TestDispatchMessageCompletesBootstrapOnlyAfterCoreDispatch(t *testing.T) {
 					"body":   map[string]any{"content": `{"text":"必须送达的根上下文"}`},
 				}}},
 			})
+		case "/open-apis/im/v1/messages/" + fileMsgID + "/resources/" + fileKey:
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write([]byte("file payload"))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -214,11 +219,29 @@ func TestDispatchMessageCompletesBootstrapOnlyAfterCoreDispatch(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for valid retried dispatch")
 	}
-	if rootCalls.Load() != 2 {
-		t.Fatalf("root fetch calls = %d, want 2", rootCalls.Load())
-	}
 	if p.markThreadSessionActive(sessionKey) {
 		t.Fatal("successful Core dispatch must complete bootstrap")
+	}
+
+	fileSessionKey := "feishu:oc_chat:root:om_file_topic"
+	if !p.markThreadSessionActive(fileSessionKey) {
+		t.Fatal("file-turn bootstrap reservation was not acquired")
+	}
+	p.dispatchMessage(context.Background(), "file", `{"file_key":"`+fileKey+`","file_name":"input.txt"}`, nil,
+		fileMsgID, fileSessionKey, "", "", replyContext{sessionKey: fileSessionKey, bootstrapThread: true}, rootMsgID, 0)
+	select {
+	case msg := <-got:
+		if !strings.Contains(msg.ExtraContent, "必须送达的根上下文") || len(msg.Files) != 1 || msg.Files[0].FileName != "input.txt" {
+			t.Fatalf("file bootstrap dispatch = extra %q files %+v", msg.ExtraContent, msg.Files)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for file bootstrap dispatch")
+	}
+	if rootCalls.Load() != 3 {
+		t.Fatalf("root fetch calls = %d, want 3", rootCalls.Load())
+	}
+	if p.markThreadSessionActive(fileSessionKey) {
+		t.Fatal("file turn with injected root context must complete bootstrap")
 	}
 }
 
