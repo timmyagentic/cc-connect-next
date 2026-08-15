@@ -2085,7 +2085,7 @@ func (p *Platform) resolveMentionsWithFormatResult(ctx context.Context, chatID, 
 			offset = end
 			continue
 		}
-		if end, ok := markdownLinkRegionEnd(content, offset); ok {
+		if end, ok := markdownNonProseRegionEnd(content, offset); ok {
 			result.WriteString(content[offset:end])
 			offset = end
 			continue
@@ -2162,36 +2162,37 @@ func isMarkdownEscaped(content string, offset int) bool {
 	return backslashes%2 == 1
 }
 
-// markdownLinkRegionEnd reports Markdown regions where an @ is address data,
-// not visible prose: inline link destinations, autolinks, and bare URLs.
-// Link labels are intentionally left outside this region so a visible mention
-// such as [@Reviewer](...) can still notify the configured target.
-func markdownLinkRegionEnd(content string, offset int) (int, bool) {
+// markdownNonProseRegionEnd reports Markdown regions where an @ is metadata,
+// code, or address data rather than visible prose. Link labels remain outside
+// these regions so [@Reviewer](...) can still notify the configured target.
+func markdownNonProseRegionEnd(content string, offset int) (int, bool) {
 	if offset >= len(content) {
 		return 0, false
 	}
 	if end, ok := markdownReferenceDefinitionEnd(content, offset); ok {
 		return end, true
 	}
+	if end, ok := markdownImageRegionEnd(content, offset); ok {
+		return end, true
+	}
+	if content[offset] == '[' && offset+1 < len(content) && content[offset+1] == '^' {
+		if end, ok := markdownBracketedEnd(content, offset); ok {
+			return end, true
+		}
+	}
 
-	// Inline link/image destination: ](...). Preserve balanced parentheses and
+	// Inline link destination: ](...). Preserve balanced parentheses and
 	// backslash escapes so an @ anywhere in the destination remains literal.
 	if content[offset] == ']' && offset+1 < len(content) && content[offset+1] == '(' {
-		depth := 1
-		for cursor := offset + 2; cursor < len(content); cursor++ {
-			if content[cursor] == '\\' && cursor+1 < len(content) {
-				cursor++
-				continue
-			}
-			switch content[cursor] {
-			case '(':
-				depth++
-			case ')':
-				depth--
-				if depth == 0 {
-					return cursor + 1, true
-				}
-			}
+		if end, ok := markdownParenthesizedEnd(content, offset+1); ok {
+			return end, true
+		}
+	}
+	// In a full reference link, the first bracket is visible text while the
+	// immediately adjacent second bracket is a hidden reference identifier.
+	if content[offset] == ']' && offset+1 < len(content) && content[offset+1] == '[' {
+		if end, ok := markdownBracketedEnd(content, offset+1); ok {
+			return end, true
 		}
 	}
 
@@ -2208,6 +2209,9 @@ func markdownLinkRegionEnd(content string, offset int) (int, bool) {
 			if isAddress {
 				return end + 1, true
 			}
+		}
+		if end, ok := markdownHTMLTagEnd(content, offset); ok {
+			return end, true
 		}
 	}
 
@@ -2229,6 +2233,165 @@ func markdownLinkRegionEnd(content string, offset int) (int, bool) {
 	}
 
 	return 0, false
+}
+
+func markdownImageRegionEnd(content string, offset int) (int, bool) {
+	if offset+1 >= len(content) || content[offset] != '!' || content[offset+1] != '[' {
+		return 0, false
+	}
+	labelEnd, ok := markdownBracketedEnd(content, offset+1)
+	if !ok {
+		return 0, false
+	}
+	end := labelEnd
+	if end < len(content) && content[end] == '(' {
+		if destinationEnd, ok := markdownParenthesizedEnd(content, end); ok {
+			end = destinationEnd
+		}
+	} else if end < len(content) && content[end] == '[' {
+		if identifierEnd, ok := markdownBracketedEnd(content, end); ok {
+			end = identifierEnd
+		}
+	}
+	return end, true
+}
+
+func markdownBracketedEnd(content string, offset int) (int, bool) {
+	if offset >= len(content) || content[offset] != '[' {
+		return 0, false
+	}
+	depth := 0
+	for cursor := offset; cursor < len(content); cursor++ {
+		if content[cursor] == '\\' && cursor+1 < len(content) {
+			cursor++
+			continue
+		}
+		switch content[cursor] {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return cursor + 1, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func markdownParenthesizedEnd(content string, offset int) (int, bool) {
+	if offset >= len(content) || content[offset] != '(' {
+		return 0, false
+	}
+	depth := 0
+	var quote byte
+	for cursor := offset; cursor < len(content); cursor++ {
+		if content[cursor] == '\\' && cursor+1 < len(content) {
+			cursor++
+			continue
+		}
+		if quote != 0 {
+			if content[cursor] == quote {
+				quote = 0
+			}
+			continue
+		}
+		if (content[cursor] == '"' || content[cursor] == '\'') && cursor > offset && isASCIISpace(content[cursor-1]) {
+			quote = content[cursor]
+			continue
+		}
+		switch content[cursor] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return cursor + 1, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func markdownHTMLTagEnd(content string, offset int) (int, bool) {
+	if offset+1 >= len(content) || content[offset] != '<' {
+		return 0, false
+	}
+	if strings.HasPrefix(content[offset:], "<!--") {
+		if relativeEnd := strings.Index(content[offset+4:], "-->"); relativeEnd >= 0 {
+			return offset + 4 + relativeEnd + len("-->"), true
+		}
+		return len(content), true
+	}
+
+	first := content[offset+1]
+	isTag := isASCIIAlpha(first) || first == '!' || first == '?'
+	if first == '/' && offset+2 < len(content) {
+		isTag = isASCIIAlpha(content[offset+2])
+	}
+	if !isTag {
+		return 0, false
+	}
+	closingTag := first == '/'
+	nameStart := offset + 1
+	if closingTag {
+		nameStart++
+	}
+	nameEnd := nameStart
+	for nameEnd < len(content) && (isASCIIAlpha(content[nameEnd]) || content[nameEnd] >= '0' && content[nameEnd] <= '9' || content[nameEnd] == '-') {
+		nameEnd++
+	}
+	tagName := strings.ToLower(content[nameStart:nameEnd])
+
+	var quote byte
+	tagEnd := len(content)
+	for cursor := offset + 1; cursor < len(content); cursor++ {
+		current := content[cursor]
+		if quote != 0 {
+			if current == quote {
+				quote = 0
+			}
+			continue
+		}
+		if current == '"' || current == '\'' {
+			quote = current
+			continue
+		}
+		if current == '>' {
+			tagEnd = cursor + 1
+			break
+		}
+	}
+	if !closingTag && isMarkdownHiddenHTMLContentTag(tagName) && tagEnd < len(content) && !strings.HasSuffix(strings.TrimSpace(content[offset:tagEnd]), "/>") {
+		closing := "</" + tagName + ">"
+		if relativeEnd := strings.Index(strings.ToLower(content[tagEnd:]), closing); relativeEnd >= 0 {
+			return tagEnd + relativeEnd + len(closing), true
+		}
+		return len(content), true
+	}
+	return tagEnd, true
+}
+
+func isASCIIAlpha(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
+}
+
+func isASCIISpace(value byte) bool {
+	switch value {
+	case ' ', '\t', '\r', '\n':
+		return true
+	default:
+		return false
+	}
+}
+
+func isMarkdownHiddenHTMLContentTag(tagName string) bool {
+	switch tagName {
+	case "code", "pre", "script", "style", "textarea":
+		return true
+	default:
+		return false
+	}
 }
 
 // markdownReferenceDefinitionEnd protects hidden reference definitions such as

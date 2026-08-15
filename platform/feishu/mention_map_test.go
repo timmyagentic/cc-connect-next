@@ -180,8 +180,17 @@ func TestRichCardTerminalTextFallbackOnlyWhenMentionResolved(t *testing.T) {
 	}
 	for _, link := range []string{
 		"[profile](https://host/@Reviewer-Bot)",
+		`[profile](https://host/profile "hidden ) @Reviewer-Bot title")`,
 		"[profile]: /users/@Reviewer-Bot",
 		"[@Reviewer-Bot]: /users/profile",
+		"[profile][@Reviewer-Bot]",
+		"![avatar @Reviewer-Bot](https://host/avatar.png)",
+		"![avatar][@Reviewer-Bot]",
+		"[^@Reviewer-Bot]",
+		`<span data-user="@Reviewer-Bot">profile</span>`,
+		"<!-- hidden @Reviewer-Bot -->",
+		"<code>@Reviewer-Bot</code>",
+		"<pre><span>@Reviewer-Bot</span></pre>",
 		"[profile]: <../users/@Reviewer-Bot> \"hidden title\"",
 		"[profile]:\n  ../users/@Reviewer-Bot",
 		"[profile]: /users/profile\n  \"hidden @Reviewer-Bot title\"",
@@ -198,6 +207,16 @@ func TestRichCardTerminalTextFallbackOnlyWhenMentionResolved(t *testing.T) {
 	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, visibleLabel)
 	if err != nil || !required || !strings.Contains(prepared, `<at user_id="ou_bot">Reviewer-Bot</at>`) || !strings.Contains(prepared, "https://host/profile") {
 		t.Fatalf("visible link-label mention must resolve without changing its destination: (%q, %v, %v)", prepared, required, err)
+	}
+	visibleReferenceLabel := "[@Reviewer-Bot][profile]"
+	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, visibleReferenceLabel)
+	if err != nil || !required || !strings.Contains(prepared, `<at user_id="ou_bot">Reviewer-Bot</at>`) || !strings.Contains(prepared, "[profile]") {
+		t.Fatalf("visible reference-link label must resolve without changing its identifier: (%q, %v, %v)", prepared, required, err)
+	}
+	visibleHTMLText := "<span>@Reviewer-Bot</span>"
+	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, visibleHTMLText)
+	if err != nil || !required || strings.Count(prepared, `<at user_id="ou_bot">Reviewer-Bot</at>`) != 1 {
+		t.Fatalf("visible HTML text mention must resolve outside tag attributes: (%q, %v, %v)", prepared, required, err)
 	}
 
 	mixed := "[profile]: /users/@Reviewer-Bot\n示例 `@Reviewer-Bot` 和 [链接](https://host/@Reviewer-Bot)；真正通知 @Reviewer-Bot。"
