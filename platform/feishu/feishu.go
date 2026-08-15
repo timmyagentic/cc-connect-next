@@ -2054,7 +2054,7 @@ func (p *Platform) resolveMentionsWithFormatResult(ctx context.Context, chatID, 
 		}
 
 		matched := false
-		if content[offset] == '@' {
+		if content[offset] == '@' && !isMarkdownEscaped(content, offset) {
 			for _, name := range names {
 				pattern := "@" + name
 				if !strings.HasPrefix(content[offset:], pattern) || !isMentionTokenEnd(content, offset+len(pattern)) {
@@ -2090,8 +2090,24 @@ func isMentionTokenEnd(content string, end int) bool {
 	// Preserve the established CJK behavior where natural-language text often
 	// follows a display name without whitespace (for example, @张三请查看), while
 	// preventing an ASCII alias from matching a longer identifier.
-	return !((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') ||
-		(next >= '0' && next <= '9') || next == '_' || next == '-')
+	switch {
+	case next >= 'a' && next <= 'z':
+		return false
+	case next >= 'A' && next <= 'Z':
+		return false
+	case next >= '0' && next <= '9', next == '_', next == '-':
+		return false
+	default:
+		return true
+	}
+}
+
+func isMarkdownEscaped(content string, offset int) bool {
+	backslashes := 0
+	for i := offset - 1; i >= 0 && content[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 == 1
 }
 
 // markdownCodeRegionEnd reports a fenced or inline Markdown code region that
@@ -2214,6 +2230,12 @@ func (p *interactivePlatform) PrepareRichCardTerminalText(ctx context.Context, r
 	rc, ok := rctx.(replyContext)
 	if !ok {
 		return markdown, false, fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
+	}
+	// Fail closed if the model supplied native markup itself. Even when the
+	// same answer also contains a configured alias, switching the entire answer
+	// to MsgTypeText would activate every raw tag, including unvalidated ones.
+	if hasNativeTextMention(markdown) {
+		return markdown, false, nil
 	}
 	resolved, resolvedMention := p.resolveMentionsWithFormatResult(ctx, rc.chatID, markdown, false)
 	return resolved, resolvedMention, nil

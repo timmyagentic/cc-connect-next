@@ -131,11 +131,21 @@ func TestRichCardTerminalTextFallbackOnlyWhenMentionResolved(t *testing.T) {
 	if err != nil || required || prepared != rawMarkup {
 		t.Fatalf("literal at-markup must not trigger terminal text fallback: (%q, %v, %v)", prepared, required, err)
 	}
+	rawMarkupWithAlias := rawMarkup + "；请 @Reviewer-Bot 复核"
+	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, rawMarkupWithAlias)
+	if err != nil || required || prepared != rawMarkupWithAlias {
+		t.Fatalf("raw at-markup must fail closed even beside an alias: (%q, %v, %v)", prepared, required, err)
+	}
 
 	codeOnly := "内联示例 `@Reviewer-Bot`\n```text\n@Reviewer-Bot\n```"
 	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, codeOnly)
 	if err != nil || required || prepared != codeOnly {
 		t.Fatalf("mentions in code must remain literal: (%q, %v, %v)", prepared, required, err)
+	}
+	escaped := `文档写法：\@Reviewer-Bot`
+	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, escaped)
+	if err != nil || required || prepared != escaped {
+		t.Fatalf("escaped mention must remain literal: (%q, %v, %v)", prepared, required, err)
 	}
 
 	mixed := "示例 `@Reviewer-Bot`；真正通知 @Reviewer-Bot。"
