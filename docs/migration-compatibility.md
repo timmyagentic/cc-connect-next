@@ -7,9 +7,15 @@
 | v1.4.1 | Covered | Covered | Supported |
 | v1.5.0-beta.1 | Same known layout | Covered when every configured plugin exists in the Next build | Supported with preflight |
 | v1.5.0-beta.2 | Same known layout | Covered when every configured plugin exists in the Next build | Supported with preflight |
-| v1.5.0-beta.3 | Same known layout | `hide_agent_footer`, Feishu `mention_map`, topic workspace isolation, quoted-file retrieval, topic bootstrap, and relay visibility are supported. Yuanbao and `agent_session_idle_timeout_mins` are rejected until implemented. | Supported with preflight |
+| v1.5.0-beta.3 | Same known layout | `hide_agent_footer`, Feishu `mention_map` and `peer_bots`, topic workspace isolation, quoted-file retrieval, topic bootstrap, relay visibility, Weixin `burst_limit`/`burst_window_secs`, pi `thinking`, and the `cmd` array form are supported. The known rejections below fail preflight until implemented. | Supported with preflight |
 
 Compatibility is deliberately configuration-specific. A release row does not mean an unavailable platform is silently removed or a new setting is ignored. If source TOML contains a field the current build cannot honor, fails normal startup validation (for example, an invalid display mode or a missing Agent/platform), or names a plugin unavailable in the current build, migration reports the exact incompatibility and writes nothing.
+
+## Known rejections (fail preflight, nothing written)
+
+- **Plugin types this build does not provide**: platforms `yuanbao`, `googlechat`, `tuitui`, `cloud_web`, `wps-agentspace`; agent `reasonix`. A source project configured with any of them is rejected by the registry preflight with the exact project and plugin name.
+- **Gated settings implemented upstream but not here**: the `[[projects]]`-level `agent_session_idle_timeout_mins`, and the pi agent option `rpc` (official beta.x pi gained a persistent RPC transport; this build runs pi one-shot in json mode). An explicit `rpc = false` is behavior-neutral and passes.
+- **Dynamic option tables are validated, not waved through**: the agent options `env` table migrates only for agent types that actually consume it (`devin` and `tmux` ignore env, so an env table on them is rejected as dead configuration). Feishu `mention_map` and `peer_bots` tables migrate only on `feishu`/`lark` platforms; `mention_map` additionally requires `resolve_mentions = true` and mention names without a leading `@` in this build, and the Feishu validator reports the exact violation otherwise.
 
 The generated manifest is schema version 2 and records `source_version` as either the caller-supplied canonical release or `auto-layout-v1`, together with every copied file's source, target, size, and SHA-256.
 
