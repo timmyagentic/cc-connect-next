@@ -178,13 +178,24 @@ func TestRichCardTerminalTextFallbackOnlyWhenMentionResolved(t *testing.T) {
 			t.Fatalf("identifier-embedded alias must remain literal: (%q, %v, %v)", prepared, required, err)
 		}
 	}
+	for _, link := range []string{
+		"[profile](https://host/@Reviewer-Bot)",
+		"<https://host/@Reviewer-Bot>",
+		"https://host/@Reviewer-Bot",
+		"<mailto:support@Reviewer-Bot.example>",
+	} {
+		prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, link)
+		if err != nil || required || prepared != link {
+			t.Fatalf("link destination alias must remain literal: (%q, %v, %v)", prepared, required, err)
+		}
+	}
 
-	mixed := "示例 `@Reviewer-Bot`；真正通知 @Reviewer-Bot。"
+	mixed := "示例 `@Reviewer-Bot` 和 [链接](https://host/@Reviewer-Bot)；真正通知 @Reviewer-Bot。"
 	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, mixed)
 	if err != nil || !required {
 		t.Fatalf("mixed terminal preparation = (%q, %v, %v)", prepared, required, err)
 	}
-	if !strings.Contains(prepared, "`@Reviewer-Bot`") || strings.Count(prepared, `<at user_id="ou_bot">Reviewer-Bot</at>`) != 1 {
+	if !strings.Contains(prepared, "`@Reviewer-Bot`") || !strings.Contains(prepared, "https://host/@Reviewer-Bot") || strings.Count(prepared, `<at user_id="ou_bot">Reviewer-Bot</at>`) != 1 {
 		t.Fatalf("only the real mention should be resolved: %q", prepared)
 	}
 	if partial := p.TransformRichCardMarkdown(context.Background(), replyContext{chatID: "oc_chat"}, "@Reviewer-BotExtra"); partial != "@Reviewer-BotExtra" {

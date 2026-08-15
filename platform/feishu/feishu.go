@@ -21,6 +21,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/timmyagentic/cc-connect-next/core"
@@ -358,6 +359,7 @@ type imageBatchEntry struct {
 }
 
 var _ core.RelayGroupVisibilityTarget = (*Platform)(nil)
+var _ core.RelayGroupVisibilitySender = (*Platform)(nil)
 
 type interactivePlatform struct {
 	*Platform
@@ -2083,6 +2085,11 @@ func (p *Platform) resolveMentionsWithFormatResult(ctx context.Context, chatID, 
 			offset = end
 			continue
 		}
+		if end, ok := markdownLinkRegionEnd(content, offset); ok {
+			result.WriteString(content[offset:end])
+			offset = end
+			continue
+		}
 
 		matched := false
 		if content[offset] == '@' && !isMarkdownEscaped(content, offset) {
@@ -2153,6 +2160,80 @@ func isMarkdownEscaped(content string, offset int) bool {
 		backslashes++
 	}
 	return backslashes%2 == 1
+}
+
+// markdownLinkRegionEnd reports Markdown regions where an @ is address data,
+// not visible prose: inline link destinations, autolinks, and bare URLs.
+// Link labels are intentionally left outside this region so a visible mention
+// such as [@Reviewer](...) can still notify the configured target.
+func markdownLinkRegionEnd(content string, offset int) (int, bool) {
+	if offset >= len(content) {
+		return 0, false
+	}
+
+	// Inline link/image destination: ](...). Preserve balanced parentheses and
+	// backslash escapes so an @ anywhere in the destination remains literal.
+	if content[offset] == ']' && offset+1 < len(content) && content[offset+1] == '(' {
+		depth := 1
+		for cursor := offset + 2; cursor < len(content); cursor++ {
+			if content[cursor] == '\\' && cursor+1 < len(content) {
+				cursor++
+				continue
+			}
+			switch content[cursor] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 {
+					return cursor + 1, true
+				}
+			}
+		}
+	}
+
+	// CommonMark autolinks: <https://...>, <mailto:...>, and <user@example>.
+	if content[offset] == '<' {
+		if relativeEnd := strings.IndexByte(content[offset+1:], '>'); relativeEnd >= 0 {
+			end := offset + 1 + relativeEnd
+			inner := content[offset+1 : end]
+			lower := strings.ToLower(inner)
+			isAddress := strings.HasPrefix(lower, "http://") ||
+				strings.HasPrefix(lower, "https://") ||
+				strings.HasPrefix(lower, "mailto:") ||
+				(strings.Contains(inner, "@") && !strings.ContainsAny(inner, " \t\r\n<>"))
+			if isAddress {
+				return end + 1, true
+			}
+		}
+	}
+
+	for _, scheme := range []string{"https://", "http://", "mailto:"} {
+		if len(content)-offset < len(scheme) ||
+			!strings.EqualFold(content[offset:offset+len(scheme)], scheme) ||
+			!isMarkdownURLStart(content, offset) {
+			continue
+		}
+		cursor := offset + len(scheme)
+		for cursor < len(content) {
+			r, size := utf8.DecodeRuneInString(content[cursor:])
+			if unicode.IsSpace(r) || strings.ContainsRune("<>\"'", r) {
+				break
+			}
+			cursor += size
+		}
+		return cursor, true
+	}
+
+	return 0, false
+}
+
+func isMarkdownURLStart(content string, offset int) bool {
+	if offset == 0 {
+		return true
+	}
+	previous, _ := utf8.DecodeLastRuneInString(content[:offset])
+	return !unicode.IsLetter(previous) && !unicode.IsNumber(previous) && previous != '_'
 }
 
 // markdownCodeRegionEnd reports a fenced or inline Markdown code region that
@@ -2356,15 +2437,20 @@ const maxReplyChainDepth = 5
 // is replying to, and returns formatted context plus downloaded attachments.
 // For multi-level reply chains, it traces parent_id links up to maxReplyChainDepth
 // levels and returns the full conversation chain.
-// Returns empty content on any failure (graceful degradation — the user's own
-// message is still delivered without the quote).
+// Returns every successfully recovered message. A failure before the first
+// message yields empty content; an ancestor failure yields a partial chain so
+// the user's current message still reaches the Agent while bootstrap remains
+// retryable through fetchQuotedMessageWithStatus.
 func (p *Platform) fetchQuotedMessage(ctx context.Context, parentID string) quotedMessage {
 	quoted, _ := p.fetchQuotedMessageWithStatus(ctx, parentID)
 	return quoted
 }
 
+// fetchQuotedMessageWithStatus also reports whether traversal is terminal.
+// False with non-empty content means an ancestor fetch failed after a partial
+// chain was recovered and topic bootstrap should try again on the next turn.
 func (p *Platform) fetchQuotedMessageWithStatus(ctx context.Context, parentID string) (quotedMessage, bool) {
-	chain := p.fetchReplyChain(ctx, parentID, maxReplyChainDepth)
+	chain, complete := p.fetchReplyChain(ctx, parentID, maxReplyChainDepth)
 	if len(chain) == 0 {
 		return quotedMessage{}, false
 	}
@@ -2372,7 +2458,7 @@ func (p *Platform) fetchQuotedMessageWithStatus(ctx context.Context, parentID st
 		text:   formatReplyChain(chain),
 		images: collectReplyChainImages(chain),
 		files:  collectReplyChainFiles(chain),
-	}, true
+	}, complete
 }
 
 // resolveBotSenderName returns a display name for a bot sender in a quoted
@@ -2526,16 +2612,19 @@ func collectReplyChainFiles(chain []chainMessage) []quotedFileMeta {
 }
 
 // fetchReplyChain iteratively traverses parent_id links to build a reply chain.
-// Returns messages in chronological order (oldest first). Stops on any failure,
-// circular reference, or when maxDepth is reached.
-func (p *Platform) fetchReplyChain(ctx context.Context, parentID string, maxDepth int) []chainMessage {
+// Returns messages in chronological order (oldest first) plus whether traversal
+// is terminal (root reached, cycle detected, or maxDepth reached). A fetch
+// failure is non-terminal so topic bootstrap can retry on the next message.
+func (p *Platform) fetchReplyChain(ctx context.Context, parentID string, maxDepth int) ([]chainMessage, bool) {
 	var chain []chainMessage
 	visited := make(map[string]struct{})
 	currentID := parentID
+	terminal := false
 
 	for currentID != "" && len(chain) < maxDepth {
 		if _, seen := visited[currentID]; seen {
 			slog.Debug(p.tag()+": reply chain: circular reference detected", "message_id", currentID)
+			terminal = true
 			break
 		}
 		visited[currentID] = struct{}{}
@@ -2547,12 +2636,17 @@ func (p *Platform) fetchReplyChain(ctx context.Context, parentID string, maxDept
 		chain = append(chain, *msg)
 		currentID = msg.parentID
 	}
+	if currentID == "" || (maxDepth > 0 && len(chain) >= maxDepth) {
+		// Reaching the root is complete. A cycle or the configured safety bound
+		// is also terminal because retrying the same traversal cannot improve it.
+		terminal = true
+	}
 
 	// Reverse to chronological order (oldest first).
 	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
 		chain[i], chain[j] = chain[j], chain[i]
 	}
-	return chain
+	return chain, terminal
 }
 
 // formatReplyChain formats a slice of chain messages into a readable string.
@@ -4034,9 +4128,23 @@ func (p *Platform) replyMessage(ctx context.Context, rc replyContext, msgType, c
 }
 
 func (p *Platform) replyMessageWithID(ctx context.Context, rc replyContext, msgType, content string) (string, error) {
+	return p.replyMessageWithBody(ctx, rc.messageID, p.buildReplyMessageReqBody(rc, msgType, content))
+}
+
+func (p *Platform) replyMessageInThread(ctx context.Context, rc replyContext, msgType, content string) error {
+	body := larkim.NewReplyMessageReqBodyBuilder().
+		MsgType(msgType).
+		Content(content).
+		ReplyInThread(true).
+		Build()
+	_, err := p.replyMessageWithBody(ctx, rc.messageID, body)
+	return err
+}
+
+func (p *Platform) replyMessageWithBody(ctx context.Context, messageID string, body *larkim.ReplyMessageReqBody) (string, error) {
 	req := larkim.NewReplyMessageReqBuilder().
-		MessageId(rc.messageID).
-		Body(p.buildReplyMessageReqBody(rc, msgType, content)).
+		MessageId(messageID).
+		Body(body).
 		Build()
 	var resp *larkim.ReplyMessageResp
 	if err := p.withTransientRetry(ctx, "reply", func() error {
@@ -4275,6 +4383,26 @@ func (p *Platform) RelayGroupVisibilityKey(callerSessionKey string) (string, boo
 		return "", false
 	}
 	return callerSessionKey, true
+}
+
+// SendRelayGroupVisibility keeps topic-scoped relay echoes in their original
+// topic even when reply_to_trigger is disabled for ordinary bot responses.
+// Channel-level relay targets retain the legacy standalone-send behavior.
+func (p *Platform) SendRelayGroupVisibility(ctx context.Context, sessionKey, content string) error {
+	rctx, err := p.ReconstructReplyCtx(sessionKey)
+	if err != nil {
+		return err
+	}
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return fmt.Errorf("%s: invalid reconstructed relay context type %T", p.tag(), rctx)
+	}
+	content, resolvedMention := p.prepareOutboundMentions(ctx, rc.chatID, content)
+	msgType, body := buildReplyContentWithResolvedMention(content, resolvedMention)
+	if isThreadSessionKey(sessionKey) && rc.messageID != "" {
+		return p.replyMessageInThread(ctx, rc, msgType, body)
+	}
+	return p.sendNewMessageToChat(ctx, rc, msgType, body)
 }
 
 func parseThreadRootID(sessionTail string) (string, bool) {

@@ -43,6 +43,7 @@ func TestOnMessageThreadBootstrapRetriesAfterRootFetchFailure(t *testing.T) {
 		userOpenID = "ou_user"
 		chatID     = "oc_chat"
 		rootMsgID  = "om_root"
+		childMsgID = "om_child"
 	)
 
 	rootCalls := 0
@@ -67,6 +68,15 @@ func TestOnMessageThreadBootstrapRetriesAfterRootFetchFailure(t *testing.T) {
 					"msg_type": "text", "parent_id": "",
 					"sender": map[string]any{"id": userOpenID, "sender_type": "user"},
 					"body":   map[string]any{"content": `{"text":"可恢复的根消息"}`},
+				}}},
+			})
+		case r.URL.Path == "/open-apis/im/v1/messages/"+childMsgID:
+			writeJSON(t, w, map[string]any{
+				"code": 0, "msg": "success",
+				"data": map[string]any{"items": []map[string]any{{
+					"msg_type": "text", "parent_id": rootMsgID,
+					"sender": map[string]any{"id": userOpenID, "sender_type": "user"},
+					"body":   map[string]any{"content": `{"text":"不完整的子消息"}`},
 				}}},
 			})
 		case strings.HasPrefix(r.URL.Path, "/open-apis/contact/v3/users/"):
@@ -106,7 +116,7 @@ func TestOnMessageThreadBootstrapRetriesAfterRootFetchFailure(t *testing.T) {
 				SenderId: &larkim.UserId{OpenId: strPtr(userOpenID)}, SenderType: &senderType,
 			},
 			Message: &larkim.EventMessage{
-				MessageId: strPtr(messageID), RootId: strPtr(rootMsgID), ThreadId: &threadID,
+				MessageId: strPtr(messageID), ParentId: strPtr(childMsgID), RootId: strPtr(rootMsgID), ThreadId: &threadID,
 				ChatId: strPtr(chatID), ChatType: &chatType, MessageType: &msgType,
 				Content: &content, CreateTime: &createTime,
 				Mentions: []*larkim.MentionEvent{{
@@ -121,8 +131,8 @@ func TestOnMessageThreadBootstrapRetriesAfterRootFetchFailure(t *testing.T) {
 	}
 	select {
 	case first := <-got:
-		if first.ExtraContent != "" {
-			t.Fatalf("failed bootstrap unexpectedly produced context: %q", first.ExtraContent)
+		if !strings.Contains(first.ExtraContent, "不完整的子消息") || strings.Contains(first.ExtraContent, "可恢复的根消息") {
+			t.Fatalf("first bootstrap context = %q, want only the partial child", first.ExtraContent)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for first dispatch")
@@ -133,7 +143,7 @@ func TestOnMessageThreadBootstrapRetriesAfterRootFetchFailure(t *testing.T) {
 	}
 	select {
 	case second := <-got:
-		if !strings.Contains(second.ExtraContent, "可恢复的根消息") {
+		if !strings.Contains(second.ExtraContent, "可恢复的根消息") || !strings.Contains(second.ExtraContent, "不完整的子消息") {
 			t.Fatalf("retried bootstrap context = %q", second.ExtraContent)
 		}
 	case <-time.After(2 * time.Second):

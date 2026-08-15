@@ -273,6 +273,12 @@ func (rm *RelayManager) sendToGroup(ctx context.Context, e *Engine, platform, se
 		if p.Name() != platform {
 			continue
 		}
+		if sender, ok := p.(RelayGroupVisibilitySender); ok {
+			if err := sender.SendRelayGroupVisibility(ctx, sessionKey, content); err != nil {
+				slog.Debug("relay: failed to send platform group visibility message", "error", err)
+			}
+			return
+		}
 		rc, ok := p.(ReplyContextReconstructor)
 		if !ok {
 			continue
