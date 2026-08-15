@@ -104,6 +104,23 @@ func TestDispatchMessageDownloadsApprovedQuotedFileOnDemand(t *testing.T) {
 		t.Fatalf("resource calls = %d, want 1", resourceCalls)
 	}
 
+	// A rich-text/post reply with the same explicit mention must apply the
+	// identical privacy gate and attach the quoted file.
+	p = newPlatform()
+	p.dispatchMessage(context.Background(), "post", `{"title":"","content":[[{"tag":"text","text":"分析文件"}]]}`, mention,
+		"om_trigger_post", rctx.sessionKey, userID, chatID, rctx, parentID, 0)
+	select {
+	case msg := <-got:
+		if len(msg.Files) != 1 || msg.Files[0].FileName != "report.txt" || string(msg.Files[0].Data) != string(fileData) {
+			t.Fatalf("post Files = %+v, want downloaded report.txt", msg.Files)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for quoted-file post dispatch")
+	}
+	if resourceCalls != 2 {
+		t.Fatalf("post resource calls = %d, want 2 total", resourceCalls)
+	}
+
 	// Quoting the same file without addressing the bot may still fetch the
 	// parent metadata, but must not fetch its binary resource.
 	p = newPlatform()
@@ -117,7 +134,7 @@ func TestDispatchMessageDownloadsApprovedQuotedFileOnDemand(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for non-mention dispatch")
 	}
-	if resourceCalls != 1 {
+	if resourceCalls != 2 {
 		t.Fatalf("quote without mention made resource call; total = %d", resourceCalls)
 	}
 }

@@ -21,7 +21,124 @@ func TestMarkThreadSessionActiveReportsFirstActivation(t *testing.T) {
 		t.Fatal("first activation must request thread bootstrap")
 	}
 	if p.markThreadSessionActive(key) {
-		t.Fatal("subsequent activation must not bootstrap again")
+		t.Fatal("concurrent activation must not duplicate an in-flight bootstrap")
+	}
+	p.finishThreadBootstrap(key, false)
+	if !p.markThreadSessionActive(key) {
+		t.Fatal("failed bootstrap must become retryable")
+	}
+	p.finishThreadBootstrap(key, true)
+	if p.markThreadSessionActive(key) {
+		t.Fatal("successful bootstrap must not repeat")
+	}
+}
+
+func TestOnMessageThreadBootstrapRetriesAfterRootFetchFailure(t *testing.T) {
+	const (
+		appID      = "cli_thread_bootstrap_retry"
+		appSecret  = "secret-thread-bootstrap-retry"
+		botOpenID  = "ou_bot"
+		userOpenID = "ou_user"
+		chatID     = "oc_chat"
+		rootMsgID  = "om_root"
+	)
+
+	rootCalls := 0
+	got := make(chan *core.Message, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+			writeJSON(t, w, map[string]any{
+				"code": 0, "msg": "success", "expire": 7200,
+				"tenant_access_token": "tenant-token",
+			})
+		case r.URL.Path == "/open-apis/im/v1/messages/"+rootMsgID:
+			rootCalls++
+			if rootCalls == 1 {
+				writeJSON(t, w, map[string]any{"code": 19001, "msg": "temporary failure"})
+				return
+			}
+			writeJSON(t, w, map[string]any{
+				"code": 0, "msg": "success",
+				"data": map[string]any{"items": []map[string]any{{
+					"msg_type": "text", "parent_id": "",
+					"sender": map[string]any{"id": userOpenID, "sender_type": "user"},
+					"body":   map[string]any{"content": `{"text":"可恢复的根消息"}`},
+				}}},
+			})
+		case strings.HasPrefix(r.URL.Path, "/open-apis/contact/v3/users/"):
+			writeJSON(t, w, map[string]any{"code": 0, "msg": "success"})
+		case strings.HasPrefix(r.URL.Path, "/open-apis/im/v1/chats/"):
+			writeJSON(t, w, map[string]any{"code": 0, "msg": "success"})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	p := &Platform{
+		platformName:    "feishu",
+		domain:          srv.URL,
+		appID:           appID,
+		appSecret:       appSecret,
+		botOpenID:       botOpenID,
+		threadIsolation: true,
+		dedup:           &core.MessageDedup{},
+		client: lark.NewClient(appID, appSecret,
+			lark.WithOpenBaseUrl(srv.URL),
+			lark.WithHttpClient(srv.Client()),
+		),
+		handler: func(_ core.Platform, msg *core.Message) { got <- msg },
+	}
+
+	makeEvent := func(messageID string) *larkim.P2MessageReceiveV1 {
+		chatType := "group"
+		senderType := "user"
+		msgType := "text"
+		content := `{"text":"@_user_1 继续"}`
+		createTime := strconv.FormatInt(time.Now().Add(time.Second).UnixMilli(), 10)
+		threadID := "omt_thread"
+		return &larkim.P2MessageReceiveV1{Event: &larkim.P2MessageReceiveV1Data{
+			Sender: &larkim.EventSender{
+				SenderId: &larkim.UserId{OpenId: strPtr(userOpenID)}, SenderType: &senderType,
+			},
+			Message: &larkim.EventMessage{
+				MessageId: strPtr(messageID), RootId: strPtr(rootMsgID), ThreadId: &threadID,
+				ChatId: strPtr(chatID), ChatType: &chatType, MessageType: &msgType,
+				Content: &content, CreateTime: &createTime,
+				Mentions: []*larkim.MentionEvent{{
+					Key: strPtr("@_user_1"), Id: &larkim.UserId{OpenId: strPtr(botOpenID)}, Name: strPtr("Bot"),
+				}},
+			},
+		}}
+	}
+
+	if err := p.onMessage(context.Background(), makeEvent("om_trigger_1")); err != nil {
+		t.Fatalf("first onMessage() error = %v", err)
+	}
+	select {
+	case first := <-got:
+		if first.ExtraContent != "" {
+			t.Fatalf("failed bootstrap unexpectedly produced context: %q", first.ExtraContent)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first dispatch")
+	}
+
+	if err := p.onMessage(context.Background(), makeEvent("om_trigger_2")); err != nil {
+		t.Fatalf("second onMessage() error = %v", err)
+	}
+	select {
+	case second := <-got:
+		if !strings.Contains(second.ExtraContent, "可恢复的根消息") {
+			t.Fatalf("retried bootstrap context = %q", second.ExtraContent)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for retried dispatch")
+	}
+	if rootCalls != 2 {
+		t.Fatalf("root fetch calls = %d, want retry", rootCalls)
 	}
 }
 

@@ -125,6 +125,12 @@ func TestRichCardTerminalTextFallbackOnlyWhenMentionResolved(t *testing.T) {
 	if !required || !strings.Contains(resolved, `<at user_id="ou_bot">Reviewer-Bot</at>`) {
 		t.Fatalf("mention terminal preparation = (%q, %v)", resolved, required)
 	}
+
+	rawMarkup := `文档示例：<at user_id="ou_untrusted">Example</at>`
+	prepared, required, err := p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, rawMarkup)
+	if err != nil || required || prepared != rawMarkup {
+		t.Fatalf("literal at-markup must not trigger terminal text fallback: (%q, %v, %v)", prepared, required, err)
+	}
 }
 
 func TestSendRichCardTerminalTextReturnsRecallableHandle(t *testing.T) {

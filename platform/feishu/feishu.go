@@ -265,6 +265,11 @@ type Platform struct {
 	// without requiring another @bot mention. Value is the last-seen time so
 	// stale entries can be expired by a future TTL sweep if needed.
 	activeThreadSessions sync.Map // sessionKey -> time.Time
+	// threadBootstrapStates tracks whether the one-time root-message bootstrap
+	// for an engaged topic is currently in flight or has completed. Keeping it
+	// separate from activeThreadSessions lets attachment admission remain active
+	// while a transient root fetch failure becomes retryable.
+	threadBootstrapStates sync.Map // sessionKey -> threadBootstrapState
 
 	richCardImageMu         sync.Mutex
 	richCardImageResolved   map[string]string
@@ -1528,6 +1533,13 @@ func (p *Platform) replyUnauthorizedAccess(ctx context.Context, rctx replyContex
 // handler invocation. It runs in its own goroutine so that onMessage returns
 // quickly and does not block the SDK event loop.
 func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string, mentions []*larkim.MentionEvent, messageID, sessionKey, userID, chatID string, rctx replyContext, parentID string, createTimeMs int64) {
+	bootstrapPending := rctx.bootstrapThread
+	defer func() {
+		if bootstrapPending {
+			p.finishThreadBootstrap(sessionKey, false)
+		}
+	}()
+
 	if p.isMessageRecalled(messageID) {
 		slog.Debug(p.tag()+": recalled message ignored in async dispatch", "message_id", messageID)
 		return
@@ -1547,7 +1559,17 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 	// root content never reached the new agent session.
 	var quoted quotedMessage
 	if parentID != "" && (!p.threadIsolation || !isThreadSessionKey(sessionKey) || rctx.bootstrapThread) {
-		quoted = p.fetchQuotedMessage(ctx, parentID)
+		var fetched bool
+		quoted, fetched = p.fetchQuotedMessageWithStatus(ctx, parentID)
+		if rctx.bootstrapThread {
+			p.finishThreadBootstrap(sessionKey, fetched)
+			bootstrapPending = false
+		}
+	} else if rctx.bootstrapThread {
+		// A newly-created topic can have no earlier root message to recover.
+		// Treat that as a completed (empty) bootstrap instead of retrying forever.
+		p.finishThreadBootstrap(sessionKey, true)
+		bootstrapPending = false
 	}
 
 	switch msgType {
@@ -1661,14 +1683,16 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 	case "post":
 		textParts, images := p.parsePostContent(messageID, content)
 		text := stripMentions(strings.Join(textParts, "\n"), mentions, p.getBotOpenID())
-		if text == "" && len(images) == 0 && quoted.text == "" && len(quoted.images) == 0 {
+		approvedQuotedFiles := p.filterQuotedFilesForUser(quoted.files, mentions, userID)
+		quotedFiles := p.downloadQuotedFiles(ctx, approvedQuotedFiles)
+		if text == "" && len(images) == 0 && quoted.text == "" && len(quoted.images) == 0 && len(quotedFiles) == 0 {
 			return
 		}
 		p.dispatchCoreMessage(&core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
-			Content: text, ExtraContent: quoted.text, Images: append(quoted.images, images...),
+			Content: text, ExtraContent: quoted.text, Images: append(quoted.images, images...), Files: quotedFiles,
 			ReplyCtx:          rctx,
 			UserMessageTimeMs: createTimeMs,
 		})
@@ -1969,8 +1993,13 @@ func (p *Platform) resolveMentionsInContent(ctx context.Context, chatID, content
 }
 
 func (p *Platform) resolveMentionsWithFormat(ctx context.Context, chatID, content string, useCardFormat bool) string {
+	resolved, _ := p.resolveMentionsWithFormatResult(ctx, chatID, content, useCardFormat)
+	return resolved
+}
+
+func (p *Platform) resolveMentionsWithFormatResult(ctx context.Context, chatID, content string, useCardFormat bool) (string, bool) {
 	if !p.resolveMentions || chatID == "" || !strings.Contains(content, "@") {
-		return content
+		return content, false
 	}
 	merged := make(map[string]string)
 	members := p.getChatMembers(ctx, chatID)
@@ -1987,7 +2016,7 @@ func (p *Platform) resolveMentionsWithFormat(ctx context.Context, chatID, conten
 	}
 	p.mu.RUnlock()
 	if len(merged) == 0 {
-		return content
+		return content, false
 	}
 
 	// Sort names longest-first to avoid partial matches.
@@ -1998,6 +2027,7 @@ func (p *Platform) resolveMentionsWithFormat(ctx context.Context, chatID, conten
 	sort.Slice(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
 
 	result := content
+	resolvedMention := false
 	for _, name := range names {
 		pattern := "@" + name
 		if !strings.Contains(result, pattern) {
@@ -2013,8 +2043,9 @@ func (p *Platform) resolveMentionsWithFormat(ctx context.Context, chatID, conten
 		}
 		slog.Debug(p.tag()+": mention resolved", "name", name, "card_format", useCardFormat)
 		result = strings.ReplaceAll(result, pattern, atTag)
+		resolvedMention = true
 	}
-	return result
+	return result, resolvedMention
 }
 
 func hasNativeTextMention(content string) bool {
@@ -2042,8 +2073,8 @@ func (p *interactivePlatform) PrepareRichCardTerminalText(ctx context.Context, r
 	if !ok {
 		return markdown, false, fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
 	}
-	resolved := p.resolveMentionsWithFormat(ctx, rc.chatID, markdown, false)
-	return resolved, hasNativeTextMention(resolved), nil
+	resolved, resolvedMention := p.resolveMentionsWithFormatResult(ctx, rc.chatID, markdown, false)
+	return resolved, resolvedMention, nil
 }
 
 // SendRichCardTerminalText delivers a prepared mention answer as MsgTypeText
@@ -2119,15 +2150,20 @@ const maxReplyChainDepth = 5
 // Returns empty content on any failure (graceful degradation — the user's own
 // message is still delivered without the quote).
 func (p *Platform) fetchQuotedMessage(ctx context.Context, parentID string) quotedMessage {
+	quoted, _ := p.fetchQuotedMessageWithStatus(ctx, parentID)
+	return quoted
+}
+
+func (p *Platform) fetchQuotedMessageWithStatus(ctx context.Context, parentID string) (quotedMessage, bool) {
 	chain := p.fetchReplyChain(ctx, parentID, maxReplyChainDepth)
 	if len(chain) == 0 {
-		return quotedMessage{}
+		return quotedMessage{}, false
 	}
 	return quotedMessage{
 		text:   formatReplyChain(chain),
 		images: collectReplyChainImages(chain),
 		files:  collectReplyChainFiles(chain),
-	}
+	}, true
 }
 
 // resolveBotSenderName returns a display name for a bot sender in a quoted
@@ -3569,18 +3605,34 @@ func isAttachmentMsgType(msgType string) bool {
 	return false
 }
 
+type threadBootstrapState uint8
+
+const (
+	threadBootstrapInFlight threadBootstrapState = iota + 1
+	threadBootstrapComplete
+)
+
 // markThreadSessionActive records that a thread sessionKey has been engaged
-// and reports whether this is its first activation. The first activation is
-// used to bootstrap context that predates the bot's first mention.
+// and reports whether this caller reserved its one-time bootstrap. A failed
+// bootstrap can release the reservation without revoking attachment admission.
 func (p *Platform) markThreadSessionActive(sessionKey string) bool {
 	if !p.threadIsolation || !isThreadSessionKey(sessionKey) {
 		return false
 	}
-	_, loaded := p.activeThreadSessions.LoadOrStore(sessionKey, time.Now())
-	if loaded {
-		p.activeThreadSessions.Store(sessionKey, time.Now())
-	}
+	p.activeThreadSessions.Store(sessionKey, time.Now())
+	_, loaded := p.threadBootstrapStates.LoadOrStore(sessionKey, threadBootstrapInFlight)
 	return !loaded
+}
+
+func (p *Platform) finishThreadBootstrap(sessionKey string, success bool) {
+	if sessionKey == "" {
+		return
+	}
+	if success {
+		p.threadBootstrapStates.Store(sessionKey, threadBootstrapComplete)
+		return
+	}
+	p.threadBootstrapStates.CompareAndDelete(sessionKey, threadBootstrapInFlight)
 }
 
 // isActiveThreadSession reports whether the given sessionKey corresponds to a
