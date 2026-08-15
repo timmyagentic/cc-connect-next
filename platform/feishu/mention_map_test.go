@@ -131,6 +131,24 @@ func TestRichCardTerminalTextFallbackOnlyWhenMentionResolved(t *testing.T) {
 	if err != nil || required || prepared != rawMarkup {
 		t.Fatalf("literal at-markup must not trigger terminal text fallback: (%q, %v, %v)", prepared, required, err)
 	}
+
+	codeOnly := "内联示例 `@Reviewer-Bot`\n```text\n@Reviewer-Bot\n```"
+	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, codeOnly)
+	if err != nil || required || prepared != codeOnly {
+		t.Fatalf("mentions in code must remain literal: (%q, %v, %v)", prepared, required, err)
+	}
+
+	mixed := "示例 `@Reviewer-Bot`；真正通知 @Reviewer-Bot。"
+	prepared, required, err = p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, mixed)
+	if err != nil || !required {
+		t.Fatalf("mixed terminal preparation = (%q, %v, %v)", prepared, required, err)
+	}
+	if !strings.Contains(prepared, "`@Reviewer-Bot`") || strings.Count(prepared, `<at user_id="ou_bot">Reviewer-Bot</at>`) != 1 {
+		t.Fatalf("only the real mention should be resolved: %q", prepared)
+	}
+	if partial := p.TransformRichCardMarkdown(context.Background(), replyContext{chatID: "oc_chat"}, "@Reviewer-BotExtra"); partial != "@Reviewer-BotExtra" {
+		t.Fatalf("partial alias unexpectedly resolved: %q", partial)
+	}
 }
 
 func TestSendRichCardTerminalTextReturnsRecallableHandle(t *testing.T) {

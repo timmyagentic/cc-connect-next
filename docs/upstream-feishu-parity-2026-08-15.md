@@ -16,7 +16,9 @@ The earlier configurable 500 ms multi-image batch behavior is already present in
 
 - Core does not contain Feishu-specific session parsing. Optional capability interfaces let the platform supply topic relay targets and the rare Rich Card terminal-text replacement.
 - A terminal native-mention replacement is sent successfully and tracked before the lifecycle card is deleted. A concurrent trigger recall can therefore delete the exact replacement instead of leaving an untracked answer.
+- Native mention resolution ignores inline, fenced, and indented Markdown code, so examples cannot switch the final transport or emit a notification.
 - Topic binding migration is non-destructive and idempotent. It retains the chat default for other topics and rollback to older binaries.
+- First-topic bootstrap holds a short per-topic FIFO until root recovery completes; transient failures release the bootstrap reservation for the next queued message without revoking attachment admission.
 - Quoted-file bytes never enter the Agent request until the explicit-mention and same-uploader privacy checks both pass.
 - Reasoning text, tool details, model/token/context metadata, and local runtime state remain outside Feishu answer-card payloads.
 

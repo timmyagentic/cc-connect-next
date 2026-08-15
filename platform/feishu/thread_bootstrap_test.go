@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,6 +141,134 @@ func TestOnMessageThreadBootstrapRetriesAfterRootFetchFailure(t *testing.T) {
 	}
 	if rootCalls != 2 {
 		t.Fatalf("root fetch calls = %d, want retry", rootCalls)
+	}
+}
+
+func TestOnMessageThreadBootstrapQueuesConcurrentFollowUpsInOrder(t *testing.T) {
+	const (
+		appID      = "cli_thread_bootstrap_order"
+		appSecret  = "secret-thread-bootstrap-order"
+		botOpenID  = "ou_bot"
+		userOpenID = "ou_user"
+		chatID     = "oc_chat"
+		rootMsgID  = "om_root"
+	)
+
+	rootStarted := make(chan struct{}, 1)
+	allowRoot := make(chan struct{})
+	var allowRootOnce sync.Once
+	releaseRoot := func() { allowRootOnce.Do(func() { close(allowRoot) }) }
+	var rootCalls atomic.Int32
+	got := make(chan *core.Message, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+			writeJSON(t, w, map[string]any{
+				"code": 0, "msg": "success", "expire": 7200,
+				"tenant_access_token": "tenant-token",
+			})
+		case r.URL.Path == "/open-apis/im/v1/messages/"+rootMsgID:
+			rootCalls.Add(1)
+			rootStarted <- struct{}{}
+			<-allowRoot
+			writeJSON(t, w, map[string]any{
+				"code": 0, "msg": "success",
+				"data": map[string]any{"items": []map[string]any{{
+					"msg_type": "text", "parent_id": "",
+					"sender": map[string]any{"id": userOpenID, "sender_type": "user"},
+					"body":   map[string]any{"content": `{"text":"按顺序恢复的根消息"}`},
+				}}},
+			})
+		case strings.HasPrefix(r.URL.Path, "/open-apis/contact/v3/users/"):
+			writeJSON(t, w, map[string]any{"code": 0, "msg": "success"})
+		case strings.HasPrefix(r.URL.Path, "/open-apis/im/v1/chats/"):
+			writeJSON(t, w, map[string]any{"code": 0, "msg": "success"})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	defer releaseRoot()
+
+	p := &Platform{
+		platformName:    "feishu",
+		domain:          srv.URL,
+		appID:           appID,
+		appSecret:       appSecret,
+		botOpenID:       botOpenID,
+		threadIsolation: true,
+		dedup:           &core.MessageDedup{},
+		client: lark.NewClient(appID, appSecret,
+			lark.WithOpenBaseUrl(srv.URL),
+			lark.WithHttpClient(srv.Client()),
+		),
+		handler: func(_ core.Platform, msg *core.Message) { got <- msg },
+	}
+
+	makeEvent := func(messageID, text string, offset time.Duration) *larkim.P2MessageReceiveV1 {
+		chatType := "group"
+		senderType := "user"
+		msgType := "text"
+		content := `{"text":"@_user_1 ` + text + `"}`
+		createTime := strconv.FormatInt(time.Now().Add(offset).UnixMilli(), 10)
+		threadID := "omt_thread"
+		return &larkim.P2MessageReceiveV1{Event: &larkim.P2MessageReceiveV1Data{
+			Sender: &larkim.EventSender{
+				SenderId: &larkim.UserId{OpenId: strPtr(userOpenID)}, SenderType: &senderType,
+			},
+			Message: &larkim.EventMessage{
+				MessageId: strPtr(messageID), RootId: strPtr(rootMsgID), ThreadId: &threadID,
+				ChatId: strPtr(chatID), ChatType: &chatType, MessageType: &msgType,
+				Content: &content, CreateTime: &createTime,
+				Mentions: []*larkim.MentionEvent{{
+					Key: strPtr("@_user_1"), Id: &larkim.UserId{OpenId: strPtr(botOpenID)}, Name: strPtr("Bot"),
+				}},
+			},
+		}}
+	}
+
+	if err := p.onMessage(context.Background(), makeEvent("om_trigger_1", "第一条", time.Second)); err != nil {
+		t.Fatalf("first onMessage() error = %v", err)
+	}
+	select {
+	case <-rootStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for root fetch to start")
+	}
+
+	if err := p.onMessage(context.Background(), makeEvent("om_trigger_2", "第二条", 2*time.Second)); err != nil {
+		t.Fatalf("second onMessage() error = %v", err)
+	}
+	select {
+	case early := <-got:
+		t.Fatalf("message %q overtook the in-flight bootstrap", early.MessageID)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	releaseRoot()
+	var first, second *core.Message
+	select {
+	case first = <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first ordered dispatch")
+	}
+	select {
+	case second = <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for second ordered dispatch")
+	}
+	if first.MessageID != "om_trigger_1" || second.MessageID != "om_trigger_2" {
+		t.Fatalf("dispatch order = [%q, %q]", first.MessageID, second.MessageID)
+	}
+	if !strings.Contains(first.ExtraContent, "按顺序恢复的根消息") {
+		t.Fatalf("first ExtraContent = %q, want recovered root", first.ExtraContent)
+	}
+	if second.ExtraContent != "" {
+		t.Fatalf("second ExtraContent = %q, root must not be reinjected", second.ExtraContent)
+	}
+	if rootCalls.Load() != 1 {
+		t.Fatalf("root fetch calls = %d, want 1", rootCalls.Load())
 	}
 }
 

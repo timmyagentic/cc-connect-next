@@ -207,6 +207,9 @@ type replyContext struct {
 	chatID          string
 	sessionKey      string
 	bootstrapThread bool
+	bootstrapQueued bool
+	bootstrapWait   <-chan struct{}
+	bootstrapDone   chan struct{}
 }
 
 type Platform struct {
@@ -265,11 +268,12 @@ type Platform struct {
 	// without requiring another @bot mention. Value is the last-seen time so
 	// stale entries can be expired by a future TTL sweep if needed.
 	activeThreadSessions sync.Map // sessionKey -> time.Time
-	// threadBootstrapStates tracks whether the one-time root-message bootstrap
-	// for an engaged topic is currently in flight or has completed. Keeping it
+	// threadBootstrapStates tracks both one-time root-message bootstrap state
+	// and the short FIFO used while that bootstrap is in flight. Keeping it
 	// separate from activeThreadSessions lets attachment admission remain active
 	// while a transient root fetch failure becomes retryable.
-	threadBootstrapStates sync.Map // sessionKey -> threadBootstrapState
+	threadBootstrapMu     sync.Mutex
+	threadBootstrapStates map[string]*threadBootstrapEntry // sessionKey -> state + FIFO tail
 
 	richCardImageMu         sync.Mutex
 	richCardImageResolved   map[string]string
@@ -1506,8 +1510,9 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	// Mark this thread as bot-engaged so subsequent attachment-only messages
 	// can pass through. The first accepted mention in a pre-existing topic also
 	// bootstraps the isolated agent session from the root message once.
-	rctx.bootstrapThread = p.markThreadSessionActive(sessionKey)
-	if rctx.bootstrapThread && parentID == "" {
+	rctx.bootstrapThread, rctx.bootstrapQueued, rctx.bootstrapWait, rctx.bootstrapDone =
+		p.prepareThreadBootstrapDispatch(sessionKey)
+	if (rctx.bootstrapThread || rctx.bootstrapQueued) && parentID == "" {
 		parentID = stringValue(msg.RootId)
 	}
 
@@ -1533,10 +1538,19 @@ func (p *Platform) replyUnauthorizedAccess(ctx context.Context, rctx replyContex
 // handler invocation. It runs in its own goroutine so that onMessage returns
 // quickly and does not block the SDK event loop.
 func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string, mentions []*larkim.MentionEvent, messageID, sessionKey, userID, chatID string, rctx replyContext, parentID string, createTimeMs int64) {
-	bootstrapPending := rctx.bootstrapThread
+	if rctx.bootstrapWait != nil {
+		<-rctx.bootstrapWait
+	}
+	if rctx.bootstrapQueued {
+		rctx.bootstrapThread = p.claimThreadBootstrapRetry(sessionKey)
+	}
+	bootstrapSucceeded := false
 	defer func() {
-		if bootstrapPending {
-			p.finishThreadBootstrap(sessionKey, false)
+		if rctx.bootstrapThread {
+			p.finishThreadBootstrap(sessionKey, bootstrapSucceeded)
+		}
+		if rctx.bootstrapDone != nil {
+			p.releaseThreadBootstrapDispatch(sessionKey, rctx.bootstrapDone)
 		}
 	}()
 
@@ -1562,14 +1576,12 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		var fetched bool
 		quoted, fetched = p.fetchQuotedMessageWithStatus(ctx, parentID)
 		if rctx.bootstrapThread {
-			p.finishThreadBootstrap(sessionKey, fetched)
-			bootstrapPending = false
+			bootstrapSucceeded = fetched
 		}
 	} else if rctx.bootstrapThread {
 		// A newly-created topic can have no earlier root message to recover.
 		// Treat that as a completed (empty) bootstrap instead of retrying forever.
-		p.finishThreadBootstrap(sessionKey, true)
-		bootstrapPending = false
+		bootstrapSucceeded = true
 	}
 
 	switch msgType {
@@ -2026,26 +2038,156 @@ func (p *Platform) resolveMentionsWithFormatResult(ctx context.Context, chatID, 
 	}
 	sort.Slice(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
 
-	result := content
+	var result strings.Builder
+	result.Grow(len(content) + 32)
 	resolvedMention := false
-	for _, name := range names {
-		pattern := "@" + name
-		if !strings.Contains(result, pattern) {
+	for offset := 0; offset < len(content); {
+		if end, ok := markdownIndentedCodeLineEnd(content, offset); ok {
+			result.WriteString(content[offset:end])
+			offset = end
 			continue
 		}
-		openID := merged[name]
-		var atTag string
-		if useCardFormat {
-			atTag = fmt.Sprintf(`<at id=%s></at>`, openID)
-		} else {
-			escapedName := html.EscapeString(name)
-			atTag = fmt.Sprintf(`<at user_id="%s">%s</at>`, openID, escapedName)
+		if end, ok := markdownCodeRegionEnd(content, offset); ok {
+			result.WriteString(content[offset:end])
+			offset = end
+			continue
 		}
-		slog.Debug(p.tag()+": mention resolved", "name", name, "card_format", useCardFormat)
-		result = strings.ReplaceAll(result, pattern, atTag)
-		resolvedMention = true
+
+		matched := false
+		if content[offset] == '@' {
+			for _, name := range names {
+				pattern := "@" + name
+				if !strings.HasPrefix(content[offset:], pattern) || !isMentionTokenEnd(content, offset+len(pattern)) {
+					continue
+				}
+				openID := merged[name]
+				if useCardFormat {
+					fmt.Fprintf(&result, `<at id=%s></at>`, openID)
+				} else {
+					fmt.Fprintf(&result, `<at user_id="%s">%s</at>`, openID, html.EscapeString(name))
+				}
+				slog.Debug(p.tag()+": mention resolved", "name", name, "card_format", useCardFormat)
+				offset += len(pattern)
+				resolvedMention = true
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+		result.WriteByte(content[offset])
+		offset++
 	}
-	return result, resolvedMention
+	return result.String(), resolvedMention
+}
+
+func isMentionTokenEnd(content string, end int) bool {
+	if end >= len(content) {
+		return true
+	}
+	next, _ := utf8.DecodeRuneInString(content[end:])
+	// Preserve the established CJK behavior where natural-language text often
+	// follows a display name without whitespace (for example, @张三请查看), while
+	// preventing an ASCII alias from matching a longer identifier.
+	return !((next >= 'a' && next <= 'z') || (next >= 'A' && next <= 'Z') ||
+		(next >= '0' && next <= '9') || next == '_' || next == '-')
+}
+
+// markdownCodeRegionEnd reports a fenced or inline Markdown code region that
+// starts at offset. Mention-like examples inside these regions must remain
+// literal and must never trigger a native Feishu notification.
+func markdownCodeRegionEnd(content string, offset int) (int, bool) {
+	if offset >= len(content) {
+		return 0, false
+	}
+	marker := content[offset]
+	if marker != '`' && marker != '~' {
+		return 0, false
+	}
+	run := countByteRun(content, offset, marker)
+	if run >= 3 && isMarkdownFenceStart(content, offset) {
+		return findMarkdownFenceEnd(content, offset+run, marker, run), true
+	}
+	if marker != '`' {
+		return 0, false
+	}
+	for cursor := offset + run; cursor < len(content); {
+		next := strings.IndexByte(content[cursor:], '`')
+		if next < 0 {
+			return 0, false
+		}
+		next += cursor
+		closingRun := countByteRun(content, next, '`')
+		if closingRun == run {
+			return next + closingRun, true
+		}
+		cursor = next + closingRun
+	}
+	return 0, false
+}
+
+func countByteRun(content string, offset int, marker byte) int {
+	end := offset
+	for end < len(content) && content[end] == marker {
+		end++
+	}
+	return end - offset
+}
+
+func isMarkdownFenceStart(content string, offset int) bool {
+	lineStart := strings.LastIndexByte(content[:offset], '\n') + 1
+	if offset-lineStart > 3 {
+		return false
+	}
+	for i := lineStart; i < offset; i++ {
+		if content[i] != ' ' {
+			return false
+		}
+	}
+	return true
+}
+
+func findMarkdownFenceEnd(content string, afterOpening int, marker byte, minimumRun int) int {
+	cursor := afterOpening
+	for cursor < len(content) {
+		lineBreak := strings.IndexByte(content[cursor:], '\n')
+		if lineBreak < 0 {
+			return len(content)
+		}
+		lineStart := cursor + lineBreak + 1
+		candidate := lineStart
+		for candidate < len(content) && candidate-lineStart < 4 && content[candidate] == ' ' {
+			candidate++
+		}
+		if candidate-lineStart <= 3 && candidate < len(content) && content[candidate] == marker {
+			run := countByteRun(content, candidate, marker)
+			if run >= minimumRun {
+				lineEnd := candidate + run
+				for lineEnd < len(content) && content[lineEnd] != '\n' && (content[lineEnd] == ' ' || content[lineEnd] == '\t') {
+					lineEnd++
+				}
+				if lineEnd == len(content) || content[lineEnd] == '\n' {
+					return lineEnd
+				}
+			}
+		}
+		cursor = lineStart
+	}
+	return len(content)
+}
+
+func markdownIndentedCodeLineEnd(content string, offset int) (int, bool) {
+	if offset != 0 && content[offset-1] != '\n' {
+		return 0, false
+	}
+	if content[offset] != '\t' && !strings.HasPrefix(content[offset:], "    ") {
+		return 0, false
+	}
+	if end := strings.IndexByte(content[offset:], '\n'); end >= 0 {
+		return offset + end + 1, true
+	}
+	return len(content), true
 }
 
 func hasNativeTextMention(content string) bool {
@@ -3608,9 +3750,15 @@ func isAttachmentMsgType(msgType string) bool {
 type threadBootstrapState uint8
 
 const (
-	threadBootstrapInFlight threadBootstrapState = iota + 1
+	threadBootstrapPending threadBootstrapState = iota
+	threadBootstrapInFlight
 	threadBootstrapComplete
 )
+
+type threadBootstrapEntry struct {
+	state threadBootstrapState
+	tail  chan struct{}
+}
 
 // markThreadSessionActive records that a thread sessionKey has been engaged
 // and reports whether this caller reserved its one-time bootstrap. A failed
@@ -3620,19 +3768,93 @@ func (p *Platform) markThreadSessionActive(sessionKey string) bool {
 		return false
 	}
 	p.activeThreadSessions.Store(sessionKey, time.Now())
-	_, loaded := p.threadBootstrapStates.LoadOrStore(sessionKey, threadBootstrapInFlight)
-	return !loaded
+	p.threadBootstrapMu.Lock()
+	defer p.threadBootstrapMu.Unlock()
+	if p.threadBootstrapStates == nil {
+		p.threadBootstrapStates = make(map[string]*threadBootstrapEntry)
+	}
+	entry := p.threadBootstrapStates[sessionKey]
+	if entry == nil {
+		p.threadBootstrapStates[sessionKey] = &threadBootstrapEntry{state: threadBootstrapInFlight}
+		return true
+	}
+	if entry.state == threadBootstrapPending && entry.tail == nil {
+		entry.state = threadBootstrapInFlight
+		return true
+	}
+	return false
+}
+
+func (p *Platform) prepareThreadBootstrapDispatch(sessionKey string) (bootstrap, queued bool, wait <-chan struct{}, done chan struct{}) {
+	if !p.threadIsolation || !isThreadSessionKey(sessionKey) {
+		return false, false, nil, nil
+	}
+	p.activeThreadSessions.Store(sessionKey, time.Now())
+	p.threadBootstrapMu.Lock()
+	defer p.threadBootstrapMu.Unlock()
+	if p.threadBootstrapStates == nil {
+		p.threadBootstrapStates = make(map[string]*threadBootstrapEntry)
+	}
+	entry := p.threadBootstrapStates[sessionKey]
+	if entry == nil {
+		entry = &threadBootstrapEntry{state: threadBootstrapInFlight}
+		p.threadBootstrapStates[sessionKey] = entry
+		bootstrap = true
+	} else if entry.tail != nil {
+		queued = true
+	} else if entry.state == threadBootstrapPending {
+		entry.state = threadBootstrapInFlight
+		bootstrap = true
+	} else if entry.state == threadBootstrapComplete {
+		return false, false, nil, nil
+	} else {
+		queued = true
+	}
+
+	wait = entry.tail
+	done = make(chan struct{})
+	entry.tail = done
+	return bootstrap, queued, wait, done
+}
+
+func (p *Platform) claimThreadBootstrapRetry(sessionKey string) bool {
+	p.threadBootstrapMu.Lock()
+	defer p.threadBootstrapMu.Unlock()
+	entry := p.threadBootstrapStates[sessionKey]
+	if entry == nil || entry.state != threadBootstrapPending {
+		return false
+	}
+	entry.state = threadBootstrapInFlight
+	return true
 }
 
 func (p *Platform) finishThreadBootstrap(sessionKey string, success bool) {
 	if sessionKey == "" {
 		return
 	}
-	if success {
-		p.threadBootstrapStates.Store(sessionKey, threadBootstrapComplete)
+	p.threadBootstrapMu.Lock()
+	defer p.threadBootstrapMu.Unlock()
+	entry := p.threadBootstrapStates[sessionKey]
+	if entry == nil {
 		return
 	}
-	p.threadBootstrapStates.CompareAndDelete(sessionKey, threadBootstrapInFlight)
+	if success {
+		entry.state = threadBootstrapComplete
+		return
+	}
+	if entry.state == threadBootstrapInFlight {
+		entry.state = threadBootstrapPending
+	}
+}
+
+func (p *Platform) releaseThreadBootstrapDispatch(sessionKey string, done chan struct{}) {
+	close(done)
+	p.threadBootstrapMu.Lock()
+	defer p.threadBootstrapMu.Unlock()
+	entry := p.threadBootstrapStates[sessionKey]
+	if entry != nil && entry.tail == done {
+		entry.tail = nil
+	}
 }
 
 // isActiveThreadSession reports whether the given sessionKey corresponds to a
