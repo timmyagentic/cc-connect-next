@@ -15,7 +15,16 @@ Compatibility is deliberately configuration-specific. A release row does not mea
 
 - **Plugin types this build does not provide**: platforms `yuanbao`, `googlechat`, `tuitui`, `cloud_web`, `wps-agentspace`; agent `reasonix`. A source project configured with any of them is rejected by the registry preflight with the exact project and plugin name.
 - **Gated settings implemented upstream but not here**: the `[[projects]]`-level `agent_session_idle_timeout_mins`, and the pi agent option `rpc` (official beta.x pi gained a persistent RPC transport; this build runs pi one-shot in json mode). An explicit `rpc = false` is behavior-neutral and passes.
-- **Dynamic option tables are validated, not waved through**: the agent options `env` table migrates only for agent types that actually consume it (`devin` and `tmux` ignore env, so an env table on them is rejected as dead configuration). Feishu `mention_map` and `peer_bots` tables migrate only on `feishu`/`lark` platforms; `mention_map` additionally requires `resolve_mentions = true` and mention names without a leading `@` in this build, and the Feishu validator reports the exact violation otherwise.
+- **Dynamic option tables are validated, not waved through**: the agent options `env` table migrates only for agent types that actually consume it (`devin` and `tmux` ignore env, so an env table on them is rejected as dead configuration). Feishu `mention_map` and `peer_bots` tables migrate only on `feishu`/`lark` platforms; `mention_map` additionally requires `resolve_mentions = true` and mention names without a leading `@` in this build, and the Feishu validator reports the exact violation otherwise. (Official CC Connect leaves a `mention_map` dormant when `resolve_mentions` is off; this build treats that as dead configuration and fails preflight with the fix.)
+
+## Defaults that differ from official CC Connect
+
+A migrated configuration keeps its bytes, so every setting it does not spell out follows this build's defaults. Two defaults deliberately differ:
+
+- **`card_mode` defaults to `rich`** (the privacy-first Feishu Card 2.0 answer-card contract) where official CC Connect defaults to `legacy` plain messages. A migrated config that never set `card_mode` changes rendering. Set `card_mode = "legacy"` globally under `[display]` or per project to keep the official look.
+- **`data_dir` defaults to `~/.cc-connect-next`** instead of `~/.cc-connect`. Migration removes the ambiguity for migrated configs by pinning the rewritten `data_dir` to the migration target explicitly.
+
+Everything else — including Feishu `progress_style` (`legacy`), the Weixin send quota (4 per 24h), and all timeout defaults — matches the official values.
 
 The generated manifest is schema version 2 and records `source_version` as either the caller-supplied canonical release or `auto-layout-v1`, together with every copied file's source, target, size, and SHA-256.
 

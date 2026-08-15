@@ -597,8 +597,8 @@ type = "feishu"
 [projects.platforms.options]
 app_id = "cli_fixture"
 app_secret = "fixture-secret"
-[projects.platforms.options.peer_bots.helper]
-open_id = "ou_fixture"
+[projects.platforms.options.peer_bots]
+helper = "ou_fixture"
 `)
 
 	if _, err := prepareLegacyMigration(migrationOptions{
@@ -624,8 +624,8 @@ type = "codex"
 type = "telegram"
 [projects.platforms.options]
 token = "fixture-token"
-[projects.platforms.options.peer_bots.helper]
-open_id = "ou_fixture"
+[projects.platforms.options.peer_bots]
+helper = "ou_fixture"
 `)
 
 	_, err := prepareLegacyMigration(migrationOptions{
