@@ -140,14 +140,73 @@ func validatePlatformOptions(name string) core.OptionsValidator {
 				return fmt.Errorf("%s: image_batch_window_ms must be >= 0, got %d", name, milliseconds)
 			}
 		}
+		mentionMap, err := parseMentionMap(opts["mention_map"])
+		if err != nil {
+			return fmt.Errorf("%s: invalid mention_map: %w", name, err)
+		}
+		resolveMentions, _ := opts["resolve_mentions"].(bool)
+		if len(mentionMap) > 0 && !resolveMentions {
+			return fmt.Errorf("%s: mention_map requires resolve_mentions = true", name)
+		}
 		return nil
 	}
 }
 
+func parseMentionMap(raw any) (map[string]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	values := make(map[string]any)
+	switch typed := raw.(type) {
+	case map[string]any:
+		for name, value := range typed {
+			values[name] = value
+		}
+	case map[string]string:
+		for name, value := range typed {
+			values[name] = value
+		}
+	default:
+		return nil, fmt.Errorf("must be a string-to-string table, got %T", raw)
+	}
+
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	result := make(map[string]string, len(values))
+	for _, rawName := range names {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			return nil, fmt.Errorf("name must not be empty")
+		}
+		if strings.HasPrefix(name, "@") {
+			return nil, fmt.Errorf("name %q must not include the leading @", rawName)
+		}
+		openID, ok := values[rawName].(string)
+		if !ok {
+			return nil, fmt.Errorf("open_id for %q must be a string, got %T", name, values[rawName])
+		}
+		openID = strings.TrimSpace(openID)
+		if !strings.HasPrefix(openID, "ou_") || len(openID) <= len("ou_") {
+			return nil, fmt.Errorf("open_id for %q must be a bot open_id starting with ou_", name)
+		}
+		if _, exists := result[name]; exists {
+			return nil, fmt.Errorf("duplicate name %q after trimming", name)
+		}
+		result[name] = openID
+	}
+	return result, nil
+}
+
 type replyContext struct {
-	messageID  string
-	chatID     string
-	sessionKey string
+	messageID       string
+	chatID          string
+	sessionKey      string
+	bootstrapThread bool
 }
 
 type Platform struct {
@@ -181,6 +240,7 @@ type Platform struct {
 	dedup            *core.MessageDedup
 	botOpenID        string
 	peerBots         map[string]string // app_id -> friendly alias, for quoted-reply attribution
+	mentionMap       map[string]string // friendly bot name -> open_id, for outbound native @ notifications
 	userNameCache    sync.Map          // open_id -> display name
 	chatNameCache    sync.Map          // chat_id -> chat name
 	chatMemberCache  sync.Map          // chatID -> *chatMemberEntry
@@ -288,6 +348,8 @@ type imageBatchEntry struct {
 	timer        *time.Timer
 }
 
+var _ core.RelayGroupVisibilityTarget = (*Platform)(nil)
+
 type interactivePlatform struct {
 	*Platform
 }
@@ -359,6 +421,13 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 			}
 		}
 	}
+	mentionMap, err := parseMentionMap(opts["mention_map"])
+	if err != nil {
+		return nil, fmt.Errorf("%s: invalid mention_map: %w", name, err)
+	}
+	if len(mentionMap) > 0 && !resolveMentionsOpt {
+		return nil, fmt.Errorf("%s: mention_map requires resolve_mentions = true", name)
+	}
 
 	progressStyle := "legacy"
 	if v, ok := opts["progress_style"].(string); ok {
@@ -429,6 +498,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		callbackPath:               callbackPath,
 		encryptKey:                 encryptKey,
 		peerBots:                   peerBots,
+		mentionMap:                 mentionMap,
 		imageBatch:                 make(map[string]*imageBatchEntry),
 		imageBatchWindow:           imageBatchWindow,
 	}
@@ -802,8 +872,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 		}
 
 		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
-		h := p.getHandler()
-		go h(p.dispatchPlatform(), &core.Message{
+		go p.dispatchCoreMessage(&core.Message{
 			SessionKey:           sessionKey,
 			Platform:             p.platformName,
 			UserID:               userID,
@@ -835,8 +904,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	// askq: — AskUserQuestion option selected, forward as user message
 	if strings.HasPrefix(actionVal, "askq:") {
 		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
-		h := p.getHandler()
-		go h(p.dispatchPlatform(), &core.Message{
+		go p.dispatchCoreMessage(&core.Message{
 			SessionKey: sessionKey,
 			Platform:   p.platformName,
 			UserID:     userID,
@@ -871,8 +939,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 
 		slog.Info(p.tag()+": card action dispatched as command", "cmd", cmdText, "user", userID)
 
-		h := p.getHandler()
-		go h(p.dispatchPlatform(), &core.Message{
+		go p.dispatchCoreMessage(&core.Message{
 			SessionKey: sessionKey,
 			Platform:   p.platformName,
 			UserID:     userID,
@@ -1110,11 +1177,39 @@ func (p *Platform) dispatchCoreMessage(msg *core.Message) {
 	if msg == nil || h == nil {
 		return
 	}
+	p.populateWorkspaceChannelKeys(msg)
 	if p.isMessageRecalled(msg.MessageID) {
 		slog.Debug(p.tag()+": recalled message dispatch dropped", "message_id", msg.MessageID)
 		return
 	}
 	h(p.dispatchPlatform(), msg)
+}
+
+// populateWorkspaceChannelKeys aligns multi-workspace binding scope with the
+// Feishu/Lark session scope. A chat-level binding remains the default that a
+// topic inherits on first use.
+func (p *Platform) populateWorkspaceChannelKeys(msg *core.Message) {
+	if msg == nil || msg.ChannelKey != "" {
+		return
+	}
+	rctx, ok := msg.ReplyCtx.(replyContext)
+	if !ok || rctx.chatID == "" {
+		return
+	}
+	msg.ChannelKey = rctx.chatID
+	if !p.threadIsolation {
+		return
+	}
+	parts := strings.SplitN(rctx.sessionKey, ":", 3)
+	if len(parts) != 3 || parts[0] != p.platformName || parts[1] != rctx.chatID {
+		return
+	}
+	rootID, ok := parseThreadRootID(parts[2])
+	if !ok {
+		return
+	}
+	msg.ChannelKey = rctx.chatID + ":topic:" + rootID
+	msg.LegacyChannelKey = rctx.chatID
 }
 
 // bufferImage adds a freshly-downloaded image to the per-session batch buffer.
@@ -1404,8 +1499,12 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	)
 
 	// Mark this thread as bot-engaged so subsequent attachment-only messages
-	// in the same thread can pass through without re-mentioning the bot.
-	p.markThreadSessionActive(sessionKey)
+	// can pass through. The first accepted mention in a pre-existing topic also
+	// bootstraps the isolated agent session from the root message once.
+	rctx.bootstrapThread = p.markThreadSessionActive(sessionKey)
+	if rctx.bootstrapThread && parentID == "" {
+		parentID = stringValue(msg.RootId)
+	}
 
 	// Dispatch message handling asynchronously so the SDK event loop is not
 	// blocked by IO-heavy operations (image/audio download, handler HTTP calls).
@@ -1443,11 +1542,11 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 
 	// If this message is a reply to another message, fetch the quoted content
 	// and prepend it so the agent has full context.
-	// Skip quote injection when thread_isolation is enabled and the message is
-	// inside a thread — the thread already provides conversational context, and
-	// long quoted prefixes can drown out the user's actual text (issue #764).
+	// Skip repeated quote injection inside an already-engaged isolated topic.
+	// The first accepted mention is the exception because earlier unmentioned
+	// root content never reached the new agent session.
 	var quoted quotedMessage
-	if parentID != "" && !(p.threadIsolation && isThreadSessionKey(sessionKey)) {
+	if parentID != "" && (!p.threadIsolation || !isThreadSessionKey(sessionKey) || rctx.bootstrapThread) {
 		quoted = p.fetchQuotedMessage(ctx, parentID)
 	}
 
@@ -1461,7 +1560,9 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			return
 		}
 		text := stripMentions(textBody.Text, mentions, p.getBotOpenID())
-		if text == "" && quoted.text == "" && len(quoted.images) == 0 {
+		approvedQuotedFiles := p.filterQuotedFilesForUser(quoted.files, mentions, userID)
+		quotedFiles := p.downloadQuotedFiles(ctx, approvedQuotedFiles)
+		if text == "" && quoted.text == "" && len(quoted.images) == 0 && len(quotedFiles) == 0 {
 			slog.Debug(p.tag()+": dropping empty text after mention stripping",
 				"message_id", messageID,
 				"raw_text_len", len(textBody.Text),
@@ -1473,7 +1574,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
-			Content: text, ExtraContent: quoted.text, Images: quoted.images, ReplyCtx: rctx,
+			Content: text, ExtraContent: quoted.text, Images: quoted.images, Files: quotedFiles, ReplyCtx: rctx,
 			UserMessageTimeMs: createTimeMs,
 		})
 
@@ -1859,23 +1960,39 @@ func (p *Platform) getChatMembers(ctx context.Context, chatID string) map[string
 }
 
 // resolveMentionsInContent replaces @name with Feishu at tags in raw content
-// (before JSON serialization). Reverse-matches against the chat member list,
-// longest name first. Uses the correct at syntax based on predicted message type.
+// (before JSON serialization). Explicit mention_map entries override group
+// members with the same display name. Ordinary sends always use MsgTypeText at
+// syntax because Feishu renders card mentions but does not emit the native
+// mention event needed to notify another bot.
 func (p *Platform) resolveMentionsInContent(ctx context.Context, chatID, content string) string {
-	return p.resolveMentionsWithFormat(ctx, chatID, content, predictMsgType(content) == larkim.MsgTypeInteractive)
+	return p.resolveMentionsWithFormat(ctx, chatID, content, false)
 }
 
 func (p *Platform) resolveMentionsWithFormat(ctx context.Context, chatID, content string, useCardFormat bool) string {
 	if !p.resolveMentions || chatID == "" || !strings.Contains(content, "@") {
 		return content
 	}
+	merged := make(map[string]string)
 	members := p.getChatMembers(ctx, chatID)
-	if len(members) == 0 {
+	for name, openID := range members {
+		if openID != "" {
+			merged[name] = openID
+		}
+	}
+	p.mu.RLock()
+	for name, openID := range p.mentionMap {
+		if openID != "" {
+			merged[name] = openID
+		}
+	}
+	p.mu.RUnlock()
+	if len(merged) == 0 {
 		return content
 	}
+
 	// Sort names longest-first to avoid partial matches.
-	names := make([]string, 0, len(members))
-	for name := range members {
+	names := make([]string, 0, len(merged))
+	for name := range merged {
 		names = append(names, name)
 	}
 	sort.Slice(names, func(i, j int) bool { return len(names[i]) > len(names[j]) })
@@ -1886,11 +2003,7 @@ func (p *Platform) resolveMentionsWithFormat(ctx context.Context, chatID, conten
 		if !strings.Contains(result, pattern) {
 			continue
 		}
-		openID := members[name]
-		if openID == "" {
-			slog.Debug(p.tag()+": skipping ambiguous mention", "name", name)
-			continue
-		}
+		openID := merged[name]
 		var atTag string
 		if useCardFormat {
 			atTag = fmt.Sprintf(`<at id=%s></at>`, openID)
@@ -1902,6 +2015,10 @@ func (p *Platform) resolveMentionsWithFormat(ctx context.Context, chatID, conten
 		result = strings.ReplaceAll(result, pattern, atTag)
 	}
 	return result
+}
+
+func hasNativeTextMention(content string) bool {
+	return strings.Contains(content, `<at user_id=`) || strings.Contains(content, `<at id=`)
 }
 
 // TransformRichCardMarkdown preserves resolve_mentions semantics when the
@@ -1917,18 +2034,78 @@ func (p *interactivePlatform) TransformRichCardMarkdown(ctx context.Context, rct
 	return p.resolveMentionsWithFormat(ctx, rc.chatID, markdown, true)
 }
 
+// PrepareRichCardTerminalText requests a transport switch only when the final
+// answer contains a mention that can be resolved to a native target. Card 2.0
+// remains the default for every other answer.
+func (p *interactivePlatform) PrepareRichCardTerminalText(ctx context.Context, rctx any, markdown string) (string, bool, error) {
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return markdown, false, fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
+	}
+	resolved := p.resolveMentionsWithFormat(ctx, rc.chatID, markdown, false)
+	return resolved, hasNativeTextMention(resolved), nil
+}
+
+// SendRichCardTerminalText delivers a prepared mention answer as MsgTypeText
+// and returns its message ID in the standard preview handle. The engine uses
+// that handle to delete the exact replacement if the triggering message is
+// recalled concurrently.
+func (p *interactivePlatform) SendRichCardTerminalText(ctx context.Context, rctx any, content string) (any, error) {
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return nil, fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
+	}
+	msgType, body := buildReplyContent(content)
+	if msgType != larkim.MsgTypeText || !hasNativeTextMention(content) {
+		return nil, fmt.Errorf("%s: terminal text fallback requires a resolved native mention", p.tag())
+	}
+
+	var (
+		messageID string
+		err       error
+	)
+	if p.shouldUseThreadOrReplyAPI(rc) {
+		messageID, err = p.replyMessageWithID(ctx, rc, msgType, body)
+	} else {
+		if rc.chatID == "" {
+			return nil, fmt.Errorf("%s: chatID is empty, cannot send terminal text", p.tag())
+		}
+		messageID, err = p.createMessageWithID(ctx, rc.chatID, msgType, body, "send terminal mention text")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if messageID == "" {
+		return nil, fmt.Errorf("%s: terminal mention text returned no message ID", p.tag())
+	}
+	return &feishuPreviewHandle{messageID: messageID, chatID: rc.chatID}, nil
+}
+
 // chainMessage holds extracted data from one message in a reply chain.
 type chainMessage struct {
 	senderName string
 	senderType string // "user" or "app"
+	senderID   string // open_id for users or app_id for bots
 	text       string
 	images     []core.ImageAttachment
+	files      []quotedFileMeta
 	parentID   string
+}
+
+// quotedFileMeta carries only enough information to decide whether a quoted
+// file may be fetched. Binary data is deliberately deferred until the current
+// message explicitly mentions the bot and the uploader is the same IM user.
+type quotedFileMeta struct {
+	fileKey   string
+	fileName  string
+	messageID string
+	senderID  string
 }
 
 type quotedMessage struct {
 	text   string
 	images []core.ImageAttachment
+	files  []quotedFileMeta
 }
 
 // maxReplyChainDepth is the maximum number of parent messages to traverse
@@ -1946,7 +2123,11 @@ func (p *Platform) fetchQuotedMessage(ctx context.Context, parentID string) quot
 	if len(chain) == 0 {
 		return quotedMessage{}
 	}
-	return quotedMessage{text: formatReplyChain(chain), images: collectReplyChainImages(chain)}
+	return quotedMessage{
+		text:   formatReplyChain(chain),
+		images: collectReplyChainImages(chain),
+		files:  collectReplyChainFiles(chain),
+	}
 }
 
 // resolveBotSenderName returns a display name for a bot sender in a quoted
@@ -2004,6 +2185,7 @@ func (p *Platform) fetchSingleMessage(ctx context.Context, messageID string) *ch
 	// Extract plain text based on message type.
 	var text string
 	var images []core.ImageAttachment
+	var files []quotedFileMeta
 	switch item.MsgType {
 	case "text":
 		var textBody struct {
@@ -2031,6 +2213,20 @@ func (p *Platform) fetchSingleMessage(ctx context.Context, messageID string) *ch
 			} else {
 				images = append(images, core.ImageAttachment{MimeType: mimeType, Data: imgData})
 			}
+		}
+	case "file", "media":
+		text = "[" + item.MsgType + "]"
+		var fileBody struct {
+			FileKey  string `json:"file_key"`
+			FileName string `json:"file_name"`
+		}
+		if err := json.Unmarshal([]byte(content), &fileBody); err == nil && fileBody.FileKey != "" {
+			files = append(files, quotedFileMeta{
+				fileKey:   fileBody.FileKey,
+				fileName:  fileBody.FileName,
+				messageID: messageID,
+				senderID:  item.Sender.ID,
+			})
 		}
 	case "interactive":
 		text = extractInteractiveCardText(content)
@@ -2060,8 +2256,10 @@ func (p *Platform) fetchSingleMessage(ctx context.Context, messageID string) *ch
 	return &chainMessage{
 		senderName: senderName,
 		senderType: item.Sender.SenderType,
+		senderID:   item.Sender.ID,
 		text:       text,
 		images:     images,
+		files:      files,
 		parentID:   item.ParentID,
 	}
 }
@@ -2072,6 +2270,14 @@ func collectReplyChainImages(chain []chainMessage) []core.ImageAttachment {
 		images = append(images, msg.images...)
 	}
 	return images
+}
+
+func collectReplyChainFiles(chain []chainMessage) []quotedFileMeta {
+	var files []quotedFileMeta
+	for _, msg := range chain {
+		files = append(files, msg.files...)
+	}
+	return files
 }
 
 // fetchReplyChain iteratively traverses parent_id links to build a reply chain.
@@ -2683,18 +2889,21 @@ func (p *Platform) Send(ctx context.Context, rctx any, content string) error {
 }
 
 // SendWithStatusFooter implements core.StatusFooterSender: send a reply with
-// the body content followed by a small/dim status-footer block. Always uses
-// the interactive card path so the footer can render with text_size:
-// "notation". Falls back to plain Send when the footer is empty.
+// the body content followed by a small/dim status-footer block. A resolved
+// mention falls back to MsgTypeText because card at-tags render visually but
+// do not emit the native notification event.
 func (p *Platform) SendWithStatusFooter(ctx context.Context, rctx any, content, footer string) error {
-	if strings.TrimSpace(footer) == "" {
-		return p.Send(ctx, rctx, content)
-	}
 	rc, ok := rctx.(replyContext)
 	if !ok {
 		return fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
 	}
 	content = p.resolveMentionsInContent(ctx, rc.chatID, content)
+	if strings.TrimSpace(footer) == "" || hasNativeTextMention(content) {
+		if strings.TrimSpace(footer) != "" {
+			content += "\n\n" + footer
+		}
+		return p.Send(ctx, rctx, content)
+	}
 	processedBody := sanitizeMarkdownURLs(preprocessFeishuMarkdown(content))
 	processedFooter := sanitizeMarkdownURLs(preprocessFeishuMarkdown(footer))
 	cardJSON := buildCardJSONWithStatusFooter(processedBody, processedFooter)
@@ -2883,7 +3092,11 @@ func (p *Platform) downloadImage(messageID, imageKey string) ([]byte, string, er
 }
 
 func (p *Platform) downloadResource(messageID, fileKey, resType string) ([]byte, error) {
-	resp, err := p.client.Im.MessageResource.Get(context.Background(),
+	return p.downloadResourceContext(context.Background(), messageID, fileKey, resType)
+}
+
+func (p *Platform) downloadResourceContext(ctx context.Context, messageID, fileKey, resType string) ([]byte, error) {
+	resp, err := p.client.Im.MessageResource.Get(ctx,
 		larkim.NewGetMessageResourceReqBuilder().
 			MessageId(messageID).
 			FileKey(fileKey).
@@ -2924,21 +3137,10 @@ func detectMimeType(data []byte) string {
 	return "image/png"
 }
 
-// predictMsgType returns the message type that buildReplyContent will choose,
-// without actually building the content. Used to select the correct at syntax
-// before building.
-func predictMsgType(content string) string {
-	if !containsMarkdown(content) {
-		return larkim.MsgTypeText
-	}
-	if countMarkdownTables(content) <= maxCardTables {
-		return larkim.MsgTypeInteractive
-	}
-	return larkim.MsgTypePost
-}
-
 func buildReplyContent(content string) (msgType string, body string) {
-	if !containsMarkdown(content) {
+	// Feishu only generates a native mention event for MsgTypeText. A card or
+	// post at-tag can look correct while silently failing to notify the target.
+	if !containsMarkdown(content) || hasNativeTextMention(content) {
 		b, _ := json.Marshal(map[string]string{"text": content})
 		return larkim.MsgTypeText, string(b)
 	}
@@ -3308,6 +3510,53 @@ func isBotMentioned(mentions []*larkim.MentionEvent, botOpenID string) bool {
 	return false
 }
 
+// filterQuotedFilesForUser applies the privacy and demand gates without doing
+// network I/O. Quoted binaries are available only when this turn explicitly
+// mentions the bot and the triggering user uploaded the file.
+func (p *Platform) filterQuotedFilesForUser(metas []quotedFileMeta, mentions []*larkim.MentionEvent, userID string) []quotedFileMeta {
+	if len(metas) == 0 || userID == "" || !isBotMentioned(mentions, p.getBotOpenID()) {
+		return nil
+	}
+	kept := make([]quotedFileMeta, 0, len(metas))
+	for _, meta := range metas {
+		if meta.senderID != userID {
+			slog.Debug(p.tag()+": quoted file rejected by same-user gate",
+				"message_id", meta.messageID,
+				"file_sender", meta.senderID,
+				"current_user", userID)
+			continue
+		}
+		kept = append(kept, meta)
+	}
+	return kept
+}
+
+func (p *Platform) downloadQuotedFiles(ctx context.Context, metas []quotedFileMeta) []core.FileAttachment {
+	if len(metas) == 0 {
+		return nil
+	}
+	files := make([]core.FileAttachment, 0, len(metas))
+	for _, meta := range metas {
+		if meta.fileKey == "" || meta.messageID == "" {
+			continue
+		}
+		data, err := p.downloadResourceContext(ctx, meta.messageID, meta.fileKey, "file")
+		if err != nil {
+			slog.Warn(p.tag()+": quoted file download failed",
+				"error", err,
+				"message_id", meta.messageID,
+				"file_key", meta.fileKey)
+			continue
+		}
+		files = append(files, core.FileAttachment{
+			MimeType: http.DetectContentType(data),
+			Data:     data,
+			FileName: meta.fileName,
+		})
+	}
+	return files
+}
+
 // isAttachmentMsgType reports whether a Feishu message type carries only an
 // attachment payload (no free-form text the user could use to address another
 // human). These are the message types we are willing to admit into an
@@ -3321,13 +3570,17 @@ func isAttachmentMsgType(msgType string) bool {
 }
 
 // markThreadSessionActive records that a thread sessionKey has been engaged
-// by an @bot message, enabling attachment-only follow-ups inside the thread.
-// No-op when thread isolation is disabled or sessionKey is not a thread key.
-func (p *Platform) markThreadSessionActive(sessionKey string) {
+// and reports whether this is its first activation. The first activation is
+// used to bootstrap context that predates the bot's first mention.
+func (p *Platform) markThreadSessionActive(sessionKey string) bool {
 	if !p.threadIsolation || !isThreadSessionKey(sessionKey) {
-		return
+		return false
 	}
-	p.activeThreadSessions.Store(sessionKey, time.Now())
+	_, loaded := p.activeThreadSessions.LoadOrStore(sessionKey, time.Now())
+	if loaded {
+		p.activeThreadSessions.Store(sessionKey, time.Now())
+	}
+	return !loaded
 }
 
 // isActiveThreadSession reports whether the given sessionKey corresponds to a
@@ -3425,13 +3678,20 @@ func (p *Platform) buildReplyMessageReqBody(rc replyContext, msgType, content st
 }
 
 func (p *Platform) replyMessage(ctx context.Context, rc replyContext, msgType, content string) error {
+	_, err := p.replyMessageWithID(ctx, rc, msgType, content)
+	return err
+}
+
+func (p *Platform) replyMessageWithID(ctx context.Context, rc replyContext, msgType, content string) (string, error) {
 	req := larkim.NewReplyMessageReqBuilder().
 		MessageId(rc.messageID).
 		Body(p.buildReplyMessageReqBody(rc, msgType, content)).
 		Build()
-	return p.withTransientRetry(ctx, "reply", func() error {
+	var resp *larkim.ReplyMessageResp
+	if err := p.withTransientRetry(ctx, "reply", func() error {
 		return p.withFreshTenantAccessTokenRetry(ctx, "reply", func(client *lark.Client, options ...larkcore.RequestOptionFunc) error {
-			resp, err := client.Im.Message.Reply(ctx, req, options...)
+			var err error
+			resp, err = client.Im.Message.Reply(ctx, req, options...)
 			if err != nil {
 				return fmt.Errorf("%s: reply api call: %w", p.tag(), err)
 			}
@@ -3440,10 +3700,21 @@ func (p *Platform) replyMessage(ctx context.Context, rc replyContext, msgType, c
 			}
 			return nil
 		})
-	})
+	}); err != nil {
+		return "", err
+	}
+	if resp == nil || resp.Data == nil || resp.Data.MessageId == nil {
+		return "", nil
+	}
+	return *resp.Data.MessageId, nil
 }
 
 func (p *Platform) createMessage(ctx context.Context, chatID, msgType, content, op string) error {
+	_, err := p.createMessageWithID(ctx, chatID, msgType, content, op)
+	return err
+}
+
+func (p *Platform) createMessageWithID(ctx context.Context, chatID, msgType, content, op string) (string, error) {
 	req := larkim.NewCreateMessageReqBuilder().
 		ReceiveIdType(larkim.ReceiveIdTypeChatId).
 		Body(larkim.NewCreateMessageReqBodyBuilder().
@@ -3452,9 +3723,11 @@ func (p *Platform) createMessage(ctx context.Context, chatID, msgType, content, 
 			Content(content).
 			Build()).
 		Build()
-	return p.withTransientRetry(ctx, op, func() error {
+	var resp *larkim.CreateMessageResp
+	if err := p.withTransientRetry(ctx, op, func() error {
 		return p.withFreshTenantAccessTokenRetry(ctx, op, func(client *lark.Client, options ...larkcore.RequestOptionFunc) error {
-			resp, err := client.Im.Message.Create(ctx, req, options...)
+			var err error
+			resp, err = client.Im.Message.Create(ctx, req, options...)
 			if err != nil {
 				return fmt.Errorf("%s: %s api call: %w", p.tag(), op, err)
 			}
@@ -3463,7 +3736,13 @@ func (p *Platform) createMessage(ctx context.Context, chatID, msgType, content, 
 			}
 			return nil
 		})
-	})
+	}); err != nil {
+		return "", err
+	}
+	if resp == nil || resp.Data == nil || resp.Data.MessageId == nil {
+		return "", nil
+	}
+	return *resp.Data.MessageId, nil
 }
 
 func (p *Platform) withFreshTenantAccessTokenRetry(ctx context.Context, operation string, fn feishuRequestFunc) error {
@@ -3631,6 +3910,20 @@ func (p *Platform) ReconstructReplyCtx(sessionKey string) (any, error) {
 		}
 	}
 	return rc, nil
+}
+
+// RelayGroupVisibilityKey keeps relay visibility echoes in the Feishu/Lark
+// topic that initiated the relay. Non-thread session keys deliberately fall
+// back to the channel-level relay target in core.
+func (p *Platform) RelayGroupVisibilityKey(callerSessionKey string) (string, bool) {
+	parts := strings.SplitN(callerSessionKey, ":", 3)
+	if len(parts) != 3 || parts[0] != p.platformName || parts[1] == "" {
+		return "", false
+	}
+	if _, ok := parseThreadRootID(parts[2]); !ok {
+		return "", false
+	}
+	return callerSessionKey, true
 }
 
 func parseThreadRootID(sessionTail string) (string, bool) {

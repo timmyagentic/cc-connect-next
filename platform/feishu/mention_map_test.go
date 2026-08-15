@@ -1,0 +1,187 @@
+package feishu
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	lark "github.com/larksuite/oapi-sdk-go/v3"
+	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
+)
+
+func TestValidatePlatformOptionsMentionMap(t *testing.T) {
+	validate := validatePlatformOptions("feishu")
+
+	tests := []struct {
+		name    string
+		opts    map[string]any
+		wantErr string
+	}{
+		{
+			name: "valid",
+			opts: map[string]any{
+				"app_id":           "cli_test",
+				"app_secret":       "secret",
+				"resolve_mentions": true,
+				"mention_map":      map[string]any{"Reviewer-Bot": "ou_reviewer"},
+			},
+		},
+		{
+			name: "requires resolve mentions",
+			opts: map[string]any{
+				"app_id":      "cli_test",
+				"app_secret":  "secret",
+				"mention_map": map[string]any{"Reviewer-Bot": "ou_reviewer"},
+			},
+			wantErr: "requires resolve_mentions = true",
+		},
+		{
+			name: "rejects app id",
+			opts: map[string]any{
+				"app_id":           "cli_test",
+				"app_secret":       "secret",
+				"resolve_mentions": true,
+				"mention_map":      map[string]any{"Reviewer-Bot": "cli_wrong_identifier"},
+			},
+			wantErr: "must be a bot open_id starting with ou_",
+		},
+		{
+			name: "rejects non string",
+			opts: map[string]any{
+				"app_id":           "cli_test",
+				"app_secret":       "secret",
+				"resolve_mentions": true,
+				"mention_map":      map[string]any{"Reviewer-Bot": 42},
+			},
+			wantErr: "must be a string",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validate(tt.opts)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validatePlatformOptions() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("validatePlatformOptions() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestResolveMentionsMentionMapOverridesMembersAndForcesText(t *testing.T) {
+	p := &Platform{
+		platformName:    "feishu",
+		resolveMentions: true,
+		mentionMap:      map[string]string{"Reviewer-Bot": "ou_bot"},
+	}
+	p.chatMemberCache.Store("oc_chat", &chatMemberEntry{
+		members:   map[string]string{"Reviewer-Bot": "ou_human", "Reviewer": "ou_reviewer"},
+		fetchedAt: time.Now(),
+	})
+
+	resolved := p.resolveMentionsInContent(context.Background(), "oc_chat", "**完成**，请 @Reviewer-Bot 和 @Reviewer 复核")
+	if !strings.Contains(resolved, `<at user_id="ou_bot">Reviewer-Bot</at>`) {
+		t.Fatalf("mention_map target was not resolved: %q", resolved)
+	}
+	if strings.Contains(resolved, "ou_human") {
+		t.Fatalf("group member unexpectedly overrode mention_map: %q", resolved)
+	}
+	if !strings.Contains(resolved, `<at user_id="ou_reviewer">Reviewer</at>`) {
+		t.Fatalf("ordinary member target was not resolved: %q", resolved)
+	}
+	msgType, _ := buildReplyContent(resolved)
+	if msgType != larkim.MsgTypeText {
+		t.Fatalf("resolved mentions must use text delivery for native notification, got %q", msgType)
+	}
+}
+
+func TestRichCardTerminalTextFallbackOnlyWhenMentionResolved(t *testing.T) {
+	base := &Platform{
+		platformName:    "feishu",
+		resolveMentions: true,
+		mentionMap:      map[string]string{"Reviewer-Bot": "ou_bot"},
+	}
+	p := &interactivePlatform{Platform: base}
+
+	plain, required, err := p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, "普通回答")
+	if err != nil || required || plain != "普通回答" {
+		t.Fatalf("plain terminal preparation = (%q, %v, %v)", plain, required, err)
+	}
+
+	resolved, required, err := p.PrepareRichCardTerminalText(context.Background(), replyContext{chatID: "oc_chat"}, "请 @Reviewer-Bot 复核")
+	if err != nil {
+		t.Fatalf("PrepareRichCardTerminalText() error = %v", err)
+	}
+	if !required || !strings.Contains(resolved, `<at user_id="ou_bot">Reviewer-Bot</at>`) {
+		t.Fatalf("mention terminal preparation = (%q, %v)", resolved, required)
+	}
+}
+
+func TestSendRichCardTerminalTextReturnsRecallableHandle(t *testing.T) {
+	const chatID = "oc_chat"
+	var gotMsgType string
+	var gotContent string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+			writeJSON(t, w, map[string]any{"code": 0, "expire": 7200, "tenant_access_token": "t"})
+		case r.URL.Path == "/open-apis/im/v1/messages" && r.Method == http.MethodPost:
+			body, _ := io.ReadAll(r.Body)
+			var req struct {
+				MsgType string `json:"msg_type"`
+				Content string `json:"content"`
+			}
+			if err := json.Unmarshal(body, &req); err != nil {
+				t.Fatalf("unmarshal request: %v", err)
+			}
+			gotMsgType = req.MsgType
+			gotContent = req.Content
+			writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"message_id": "om_text_final"}})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	base := &Platform{
+		platformName: "feishu",
+		domain:       srv.URL,
+		appID:        "cli_test",
+		appSecret:    "secret",
+		client: lark.NewClient("cli_test", "secret",
+			lark.WithOpenBaseUrl(srv.URL),
+			lark.WithHttpClient(srv.Client())),
+		replayClient: lark.NewClient("cli_test", "secret",
+			lark.WithEnableTokenCache(false),
+			lark.WithOpenBaseUrl(srv.URL),
+			lark.WithHttpClient(srv.Client())),
+	}
+	p := &interactivePlatform{Platform: base}
+	handle, err := p.SendRichCardTerminalText(
+		context.Background(),
+		replyContext{chatID: chatID},
+		`完成，请 <at user_id="ou_bot">Reviewer-Bot</at> 复核`,
+	)
+	if err != nil {
+		t.Fatalf("SendRichCardTerminalText() error = %v", err)
+	}
+	h, ok := handle.(*feishuPreviewHandle)
+	if !ok || h.messageID != "om_text_final" || h.chatID != chatID {
+		t.Fatalf("terminal handle = %#v", handle)
+	}
+	if gotMsgType != larkim.MsgTypeText || !strings.Contains(gotContent, "ou_bot") {
+		t.Fatalf("sent message = type %q content %q", gotMsgType, gotContent)
+	}
+}

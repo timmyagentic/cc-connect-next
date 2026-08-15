@@ -25,6 +25,14 @@ type ReplyContextReconstructor interface {
 	ReconstructReplyCtx(sessionKey string) (any, error)
 }
 
+// RelayGroupVisibilityTarget lets a platform preserve the caller's thread or
+// topic when relay request/response visibility echoes are sent back to chat.
+// Platforms that do not implement it keep the legacy
+// "<platform>:<chatID>:relay" target.
+type RelayGroupVisibilityTarget interface {
+	RelayGroupVisibilityKey(callerSessionKey string) (groupSessionKey string, ok bool)
+}
+
 // MessageRecallDetector is an optional interface for platforms that can check
 // whether the message targeted by a reply context was recalled/deleted.
 type MessageRecallDetector interface {

@@ -240,8 +240,10 @@ func (rm *RelayManager) Send(ctx context.Context, req RelayRequest) (*RelayRespo
 		toName = binding.Bots[req.To]
 	}
 
-	// Post the forwarded message to the group chat for visibility.
-	groupSessionKey := platform + ":" + chatID + ":relay"
+	// Post the forwarded message to the group chat for visibility. Platforms
+	// with thread/topic semantics can keep the echo beside the caller instead
+	// of leaking it into the channel root.
+	groupSessionKey := rm.resolveGroupVisibilityKey(platform, chatID, req.SessionKey, sourceEngine)
 	if sourceEngine != nil && visibility != RelayVisibilityNone {
 		label := relayVisibilityRequestLabel(visibility, fromName, toName, req.Message)
 		rm.sendToGroup(ctx, sourceEngine, platform, groupSessionKey, label)
@@ -346,6 +348,27 @@ func parseSessionKeyParts(sessionKey string) (platform, chatID string, err error
 		return parts[0], parts[2], nil
 	}
 	return parts[0], parts[1], nil
+}
+
+func (rm *RelayManager) resolveGroupVisibilityKey(platform, chatID, callerSessionKey string, sourceEngine *Engine) string {
+	defaultKey := platform + ":" + chatID + ":relay"
+	if sourceEngine == nil {
+		return defaultKey
+	}
+	for _, p := range sourceEngine.platforms {
+		if p.Name() != platform {
+			continue
+		}
+		target, ok := p.(RelayGroupVisibilityTarget)
+		if !ok {
+			return defaultKey
+		}
+		if key, ok := target.RelayGroupVisibilityKey(callerSessionKey); ok && key != "" {
+			return key
+		}
+		return defaultKey
+	}
+	return defaultKey
 }
 
 // ── Persistence ─────────────────────────────────────────────
