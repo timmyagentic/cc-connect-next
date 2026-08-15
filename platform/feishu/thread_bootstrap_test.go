@@ -152,6 +152,8 @@ func TestDispatchMessageCompletesBootstrapOnlyAfterCoreDispatch(t *testing.T) {
 		sessionKey = "feishu:oc_chat:root:" + rootMsgID
 		fileKey    = "file_current"
 		fileMsgID  = "om_file"
+		imageKey   = "image_current"
+		imageMsgID = "om_image"
 	)
 
 	var rootCalls atomic.Int32
@@ -177,6 +179,9 @@ func TestDispatchMessageCompletesBootstrapOnlyAfterCoreDispatch(t *testing.T) {
 		case "/open-apis/im/v1/messages/" + fileMsgID + "/resources/" + fileKey:
 			w.Header().Set("Content-Type", "application/octet-stream")
 			_, _ = w.Write([]byte("file payload"))
+		case "/open-apis/im/v1/messages/" + imageMsgID + "/resources/" + imageKey:
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -242,6 +247,32 @@ func TestDispatchMessageCompletesBootstrapOnlyAfterCoreDispatch(t *testing.T) {
 	}
 	if p.markThreadSessionActive(fileSessionKey) {
 		t.Fatal("file turn with injected root context must complete bootstrap")
+	}
+
+	imageSessionKey := "feishu:oc_chat:root:om_image_topic"
+	bootstrap, queued, wait, done := p.prepareThreadBootstrapDispatch(imageSessionKey)
+	if !bootstrap || queued || wait != nil || done == nil {
+		t.Fatalf("image bootstrap ticket = (%v, %v, %v, %v)", bootstrap, queued, wait != nil, done != nil)
+	}
+	p.dispatchMessage(context.Background(), "image", `{"image_key":"`+imageKey+`"}`, nil,
+		imageMsgID, imageSessionKey, "", "", replyContext{
+			sessionKey: imageSessionKey, bootstrapThread: bootstrap, bootstrapWait: wait, bootstrapDone: done,
+		}, "", 0)
+	select {
+	case msg := <-got:
+		if msg.MessageID != imageMsgID || len(msg.Images) != 1 {
+			t.Fatalf("root image dispatch = id %q images %d", msg.MessageID, len(msg.Images))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("unparented bootstrap image was buffered instead of dispatched")
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("image bootstrap FIFO ticket was not released")
+	}
+	if p.markThreadSessionActive(imageSessionKey) {
+		t.Fatal("dispatched root image must complete bootstrap")
 	}
 }
 

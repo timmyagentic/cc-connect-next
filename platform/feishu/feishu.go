@@ -1658,7 +1658,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		// watermark (PR #1168) to drop the oldest image (issue #1395).
 		// We only coalesce plain image messages (no quoted context) because
 		// quoted images are usually a single image replying to a prior text.
-		if parentID == "" {
+		if parentID == "" && !rctx.bootstrapThread {
 			p.bufferImage(sessionKey, &imageBatchEntry{
 				sessionKey:   sessionKey,
 				userID:       userID,
@@ -2025,6 +2025,16 @@ func (p *Platform) resolveMentionsInContent(ctx context.Context, chatID, content
 	return p.resolveMentionsWithFormat(ctx, chatID, content, false)
 }
 
+func (p *Platform) prepareOutboundMentions(ctx context.Context, chatID, content string) (string, bool) {
+	// Never combine model-supplied native tags with resolver-produced tags in a
+	// MsgTypeText payload. A card remains the fail-closed transport for the
+	// entire answer, even if it also contains a configured alias.
+	if hasNativeTextMention(content) {
+		return content, false
+	}
+	return p.resolveMentionsWithFormatResult(ctx, chatID, content, false)
+}
+
 func (p *Platform) resolveMentionsWithFormat(ctx context.Context, chatID, content string, useCardFormat bool) string {
 	resolved, _ := p.resolveMentionsWithFormatResult(ctx, chatID, content, useCardFormat)
 	return resolved
@@ -2285,7 +2295,7 @@ func (p *interactivePlatform) SendRichCardTerminalText(ctx context.Context, rctx
 	if !ok {
 		return nil, fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
 	}
-	msgType, body := buildReplyContent(content)
+	msgType, body := buildReplyContentWithResolvedMention(content, true)
 	if msgType != larkim.MsgTypeText || !hasNativeTextMention(content) {
 		return nil, fmt.Errorf("%s: terminal text fallback requires a resolved native mention", p.tag())
 	}
@@ -3096,8 +3106,8 @@ func (p *Platform) Reply(ctx context.Context, rctx any, content string) error {
 		return fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
 	}
 
-	content = p.resolveMentionsInContent(ctx, rc.chatID, content)
-	msgType, msgBody := buildReplyContent(content)
+	content, resolvedMention := p.prepareOutboundMentions(ctx, rc.chatID, content)
+	msgType, msgBody := buildReplyContentWithResolvedMention(content, resolvedMention)
 
 	if !p.shouldUseThreadOrReplyAPI(rc) {
 		return p.sendNewMessageToChat(ctx, rc, msgType, msgBody)
@@ -3118,8 +3128,8 @@ func (p *Platform) Send(ctx context.Context, rctx any, content string) error {
 		return p.Reply(ctx, rctx, content)
 	}
 
-	content = p.resolveMentionsInContent(ctx, rc.chatID, content)
-	msgType, msgBody := buildReplyContent(content)
+	content, resolvedMention := p.prepareOutboundMentions(ctx, rc.chatID, content)
+	msgType, msgBody := buildReplyContentWithResolvedMention(content, resolvedMention)
 	return p.sendNewMessageToChat(ctx, rc, msgType, msgBody)
 }
 
@@ -3132,12 +3142,16 @@ func (p *Platform) SendWithStatusFooter(ctx context.Context, rctx any, content, 
 	if !ok {
 		return fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
 	}
-	content = p.resolveMentionsInContent(ctx, rc.chatID, content)
-	if strings.TrimSpace(footer) == "" || hasNativeTextMention(content) {
+	content, resolvedMention := p.prepareOutboundMentions(ctx, rc.chatID, content)
+	if strings.TrimSpace(footer) == "" || resolvedMention {
 		if strings.TrimSpace(footer) != "" {
 			content += "\n\n" + footer
 		}
-		return p.Send(ctx, rctx, content)
+		msgType, msgBody := buildReplyContentWithResolvedMention(content, resolvedMention)
+		if p.shouldUseThreadOrReplyAPI(rc) {
+			return p.replyMessage(ctx, rc, msgType, msgBody)
+		}
+		return p.sendNewMessageToChat(ctx, rc, msgType, msgBody)
 	}
 	processedBody := sanitizeMarkdownURLs(preprocessFeishuMarkdown(content))
 	processedFooter := sanitizeMarkdownURLs(preprocessFeishuMarkdown(footer))
@@ -3373,9 +3387,15 @@ func detectMimeType(data []byte) string {
 }
 
 func buildReplyContent(content string) (msgType string, body string) {
+	return buildReplyContentWithResolvedMention(content, false)
+}
+
+func buildReplyContentWithResolvedMention(content string, resolvedMention bool) (msgType string, body string) {
 	// Feishu only generates a native mention event for MsgTypeText. A card or
 	// post at-tag can look correct while silently failing to notify the target.
-	if !containsMarkdown(content) || hasNativeTextMention(content) {
+	// Only a tag produced by this resolver may force native text; literal model
+	// output stays on a non-notifying card/post transport.
+	if resolvedMention || (!containsMarkdown(content) && !hasNativeTextMention(content)) {
 		b, _ := json.Marshal(map[string]string{"text": content})
 		return larkim.MsgTypeText, string(b)
 	}

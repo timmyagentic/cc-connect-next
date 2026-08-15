@@ -99,9 +99,34 @@ func TestResolveMentionsMentionMapOverridesMembersAndForcesText(t *testing.T) {
 	if !strings.Contains(resolved, `<at user_id="ou_reviewer">Reviewer</at>`) {
 		t.Fatalf("ordinary member target was not resolved: %q", resolved)
 	}
-	msgType, _ := buildReplyContent(resolved)
+	msgType, _ := buildReplyContentWithResolvedMention(resolved, true)
 	if msgType != larkim.MsgTypeText {
 		t.Fatalf("resolved mentions must use text delivery for native notification, got %q", msgType)
+	}
+}
+
+func TestLegacyReplyTransportRequiresResolverProducedMention(t *testing.T) {
+	base := &Platform{
+		platformName:    "feishu",
+		resolveMentions: true,
+		mentionMap:      map[string]string{"Reviewer-Bot": "ou_bot"},
+	}
+	raw := `<at user_id="ou_untrusted">Example</at>`
+	for _, content := range []string{raw, "**示例** " + raw} {
+		msgType, _ := buildReplyContent(content)
+		if msgType == larkim.MsgTypeText {
+			t.Fatalf("literal native markup forced text transport: %q", content)
+		}
+	}
+
+	mixed := raw + "；请 @Reviewer-Bot 复核"
+	prepared, resolved := base.prepareOutboundMentions(context.Background(), "oc_chat", mixed)
+	if resolved || prepared != mixed {
+		t.Fatalf("literal markup plus alias must fail closed: (%q, %v)", prepared, resolved)
+	}
+	msgType, _ := buildReplyContentWithResolvedMention(prepared, resolved)
+	if msgType == larkim.MsgTypeText {
+		t.Fatal("literal markup plus alias forced text transport")
 	}
 }
 
