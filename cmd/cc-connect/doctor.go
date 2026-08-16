@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -38,19 +39,22 @@ func runDoctor(args []string) {
 	os.Exit(runDoctorHealthCheck(args))
 }
 
-func printDoctorUsage(w *os.File) {
-	fmt.Fprintln(w, "usage: cc-connect-next doctor [flags]")
-	fmt.Fprintln(w, "       cc-connect-next doctor user-isolation [flags]")
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Checks the configured agent, platforms, dependencies, and network without")
-	fmt.Fprintln(w, "connecting to any platform. Exits 1 when a check fails.")
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Flags:")
-	fmt.Fprintln(w, "  --config <path>    Path to config file (default: auto-discover)")
-	fmt.Fprintln(w, "  --project <name>   Check a single project")
-	fmt.Fprintln(w, "")
-	fmt.Fprintln(w, "Subcommands:")
-	fmt.Fprintln(w, "  user-isolation     Audit run_as_user projects and emit an isolation report")
+const doctorUsage = `usage: cc-connect-next doctor [flags]
+       cc-connect-next doctor user-isolation [flags]
+
+Checks the configured agent, platforms, dependencies, and network without
+connecting to any platform. Exits 1 when a check fails.
+
+Flags:
+  --config <path>    Path to config file (default: auto-discover)
+  --project <name>   Check a single project
+
+Subcommands:
+  user-isolation     Audit run_as_user projects and emit an isolation report
+`
+
+func printDoctorUsage(w io.Writer) {
+	_, _ = fmt.Fprint(w, doctorUsage)
 }
 
 // runDoctorHealthCheck runs the health check and returns the process exit code.
@@ -174,14 +178,14 @@ func workDirCheck(cfg *config.Config, proj config.ProjectConfig) []core.DoctorCh
 
 	workDir, _ := proj.Agent.Options["work_dir"].(string)
 	workDir = strings.TrimSpace(workDir)
-	switch {
-	case workDir == "":
+	switch workDir {
+	case "":
 		return []core.DoctorCheckResult{{
 			Name:   "Work Directory",
 			Status: core.DoctorWarn,
 			Detail: "not set; the agent decides where it runs",
 		}}
-	case workDir == config.PlaceholderWorkDir:
+	case config.PlaceholderWorkDir:
 		// Reported by the Config File check, with the instruction attached.
 		return nil
 	default:
