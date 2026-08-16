@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.0 (2026-08-16)
+## v0.1.0 (2026-08-17)
 
 First stable release. Code-identical to `v0.1.0-beta.3`: this tag promotes the
 beta line, so the GitHub release becomes the latest one and npm `latest` moves
