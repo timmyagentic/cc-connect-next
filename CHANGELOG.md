@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.1 (2026-08-18)
+
+Stable release promoted from `v0.1.1-beta.1`, built from the latest `main`.
+It delivers the unified stable-only updater, the dedicated Codex usage-limit
+card, and the Feishu lifecycle-card copy fix. `npm latest` moves to this
+version; the explicit `@beta` channel remains available for future prereleases.
+
+See `changelogs/v0.1.1.md` for the bilingual release notes.
+
 ## v0.1.1-beta.1 (2026-08-18)
 
 First beta after the v0.1.0 stable release, built from the latest `main`.
