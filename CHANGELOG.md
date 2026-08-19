@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## v0.1.2 (2026-08-19)
+
+Stable release built from the latest `main`. Delivers issue #27 end to end:
+configurable queue-vs-steer handling for busy sessions, native Codex
+`turn/steer` on the app-server backend, the `/ps` concurrent-exec fix, and the
+Feishu rich-card handoff to the newest steered message. Verified against real
+Feishu and a real Codex app-server.
+
+See `changelogs/v0.1.2.md` for the bilingual release notes.
 
 ### Configurable queue vs native steer for busy sessions (#27)
 
