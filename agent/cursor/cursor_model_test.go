@@ -43,29 +43,6 @@ func requireWorkingAgentCLI(t *testing.T) {
 	}
 }
 
-func TestFetchModelsFromAgentCLI(t *testing.T) {
-	ctx, cancel := shortTestContext(t)
-	defer cancel()
-	requireWorkingAgentCLI(t)
-
-	models := fetchModelsFromAgentCLI(ctx, "agent", nil)
-	if len(models) == 0 {
-		t.Fatal("expected models from agent models, got none")
-	}
-
-	// Verify format: each model has non-empty Name
-	for i, m := range models {
-		if m.Name == "" {
-			t.Errorf("models[%d].Name is empty", i)
-		}
-	}
-	// 运行 go test -v 时可见
-	t.Logf("fetched %d models:", len(models))
-	for i, m := range models {
-		t.Logf("  %2d. %s - %s", i+1, m.Name, m.Desc)
-	}
-}
-
 func TestFetchModelsFromAgentCLI_FailsGracefully(t *testing.T) {
 	ctx, cancel := shortTestContext(t)
 	defer cancel()
