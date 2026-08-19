@@ -108,7 +108,12 @@ type Config struct {
 	Relay              RelayConfig             `toml:"relay"`               // bot-to-bot relay behavior
 	Cron               CronConfig              `toml:"cron"`
 	Queue              QueueConfig             `toml:"queue"`
-	Webhook            WebhookConfig           `toml:"webhook"`
+	// UpdateNotice controls the daemon-side update reminder: when a newer
+	// stable release is published, each project's most recently active
+	// session receives one localized notice per version. nil/true = enabled
+	// (default); false = disabled.
+	UpdateNotice *bool         `toml:"update_notice"`
+	Webhook      WebhookConfig `toml:"webhook"`
 	Bridge             BridgeConfig            `toml:"bridge"`
 	Management         ManagementConfig        `toml:"management"`
 	Hooks              []HookConfig            `toml:"hooks"`

@@ -1118,6 +1118,18 @@ func main() {
 		webhookSrv.Start()
 	}
 
+	// Start the daemon-side update notice (on by default): reminds each
+	// project's most recently active chat once per newly published stable
+	// release. Disable with update_notice = false.
+	var updateNotifier *core.UpdateNotifier
+	if cfg.UpdateNotice == nil || *cfg.UpdateNotice {
+		updateNotifier = core.NewUpdateNotifier(cfg.DataDir)
+		for i, e := range engines {
+			updateNotifier.RegisterEngine(cfg.Projects[i].Name, e)
+		}
+		updateNotifier.Start()
+	}
+
 	// Start management API server if enabled
 	var mgmtSrv *core.ManagementServer
 	if cfg.Management.Enabled != nil && *cfg.Management.Enabled {
@@ -1371,6 +1383,9 @@ func main() {
 	}
 	if webhookSrv != nil {
 		webhookSrv.Stop()
+	}
+	if updateNotifier != nil {
+		updateNotifier.Stop()
 	}
 	heartbeatSched.Stop()
 	if timerSched != nil {
