@@ -27,6 +27,16 @@
 # 地区写法（如 "zh-CN"、"en-US"）会归一到对应语言；无法识别的值回退为自动检测并在启动时告警。
 # language = "zh"
 
+# Daemon-side update notice / 新版本主动提醒
+# When a newer stable release is published, each project's most recently
+# active chat receives ONE localized reminder per version (persisted across
+# restarts, so it can never repeat or spam). Users then run /upgrade or
+# /upgrade confirm from chat. Default: enabled.
+# 当发布新的稳定版时，每个项目最近活跃的会话会收到一条本地化提醒（每个版本
+# 仅提醒一次，状态跨重启持久化，不会重复打扰）。用户可在聊天中用 /upgrade
+# 查看详情或 /upgrade confirm 直接升级。默认开启。
+# update_notice = true
+
 # Shell for /shell commands, cron exec, hooks, and webhook exec.
 # /shell 命令、cron exec、hooks 和 webhook exec 使用的 shell。
 # Default / 默认: "sh" (Unix) or "powershell.exe" (Windows)

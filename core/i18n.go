@@ -566,6 +566,9 @@ const (
 	MsgSteerOutcomeUnknown     MsgKey = "steer_outcome_unknown"
 	MsgSteerMergedCompleted    MsgKey = "steer_merged_completed"
 
+	// Proactive update notice (daemon-side)
+	MsgUpdateNoticeAvailable MsgKey = "update_notice_available"
+
 	MsgWhoamiTitle     MsgKey = "whoami_title"
 	MsgWhoamiCardTitle MsgKey = "whoami_card_title"
 	MsgWhoamiName      MsgKey = "whoami_name"
@@ -3538,6 +3541,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "↪️ 補充內容已被接受，但任務恰好完成，請查看上方回答。",
 		LangJapanese:           "↪️ 追加内容は受け付けられましたが、タスクがちょうど完了しました。上の回答をご覧ください。",
 		LangSpanish:            "↪️ Tu añadido fue aceptado justo cuando la tarea terminó; consulta la respuesta anterior.",
+	},
+	MsgUpdateNoticeAvailable: {
+		LangEnglish:            "📦 cc-connect-next %s has been released (you are on %s). Send `/upgrade` for details, or `/upgrade confirm` to update now.",
+		LangChinese:            "📦 cc-connect-next %s 已发布（当前版本 %s）。发送 `/upgrade` 查看详情，或发送 `/upgrade confirm` 直接升级。",
+		LangTraditionalChinese: "📦 cc-connect-next %s 已發布（目前版本 %s）。傳送 `/upgrade` 查看詳情，或傳送 `/upgrade confirm` 直接升級。",
+		LangJapanese:           "📦 cc-connect-next %s がリリースされました（現在のバージョン %s）。`/upgrade` で詳細を確認、`/upgrade confirm` で今すぐ更新できます。",
+		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s). Envía `/upgrade` para más detalles o `/upgrade confirm` para actualizar ahora.",
 	},
 	MsgWhoamiTitle: {
 		LangEnglish:            "🪪 **Your Identity**",

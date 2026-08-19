@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Proactive update notice
+
+The daemon now reminds users when a newer stable release ships. Every update
+surface used to be pull-only (`/upgrade`, `check-update`, the CLI usage hint),
+so a user running an old daemon never learned that a new version existed. The
+daemon now checks GitHub for the newest stable release (2 minutes after
+startup, then every 24 hours) and sends each project's most recently active
+chat one localized notice per version — state persists across restarts, so a
+version is never announced twice. Disable with `update_notice = false`.
+
+Also ports the applicable upstream v1.5.0 P1 stability fixes (#1693):
+restart-notify panic recovery and the cross-type image batch flush that
+prevented a rapid image+text pair from dropping the buffered image.
+
 ## v0.1.2 (2026-08-19)
 
 Stable release built from the latest `main`. Delivers issue #27 end to end:
