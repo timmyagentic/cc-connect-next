@@ -175,6 +175,15 @@ func (cs *codexSession) Send(prompt string, images []core.ImageAttachment, files
 	return nil
 }
 
+// Steer implements core.SteerableSession by reporting that the exec backend
+// cannot append input to an in-flight turn: every Send launches a separate
+// `codex exec` process, so a mid-turn Send would race the running turn
+// (concurrent `exec resume` against the same thread) instead of supplementing
+// it. Native steering requires backend = "app_server" (issue #27).
+func (cs *codexSession) Steer(string, []core.ImageAttachment, []core.FileAttachment) error {
+	return core.ErrSteerUnsupported
+}
+
 func (cs *codexSession) stageImages(prompt string, images []core.ImageAttachment) (string, []string, error) {
 	if len(images) == 0 {
 		return prompt, nil, nil

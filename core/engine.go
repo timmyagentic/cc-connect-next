@@ -30,6 +30,14 @@ const maxPlatformMessageLen = 4000
 const telegramBotCommandLimit = 100
 const defaultMaxQueuedMessages = 5 // default cap for queued messages per session
 
+// Busy-message modes: what happens to an ordinary message that arrives while
+// a turn is active. Mirrors config.BusyMessageMode* (core does not import
+// config).
+const (
+	BusyMessageModeQueue = "queue"
+	BusyMessageModeSteer = "steer"
+)
+
 // defaultPendingRestartTimeout is how long the post-restart notify
 // dispatcher waits for the target platform to reach ready before
 // dropping the notify with a warning. 10s covers the typical 2-3s
@@ -432,9 +440,13 @@ type Engine struct {
 	eventIdleTimeout  time.Duration
 	maxTurnTime       time.Duration // absolute wall-clock cap per turn (0 = disabled)
 	maxQueuedMessages int
-	dirHistory        *DirHistory
-	baseWorkDir       string
-	projectState      *ProjectStateStore
+	// busyMessageMode: "queue" (default) keeps busy-session messages in the
+	// FIFO; "steer" appends them to the in-flight turn on SteerableSession
+	// agents, falling back to the queue on definitive steer failures.
+	busyMessageMode string
+	dirHistory      *DirHistory
+	baseWorkDir     string
+	projectState    *ProjectStateStore
 
 	// Auto-compress settings
 	autoCompressEnabled   bool
@@ -833,6 +845,7 @@ func NewEngine(name string, ag Agent, platforms []Platform, sessionStorePath str
 		references:            DefaultReferenceRenderCfg(),
 		eventIdleTimeout:      defaultEventIdleTimeout,
 		maxQueuedMessages:     defaultMaxQueuedMessages,
+		busyMessageMode:       BusyMessageModeQueue,
 		showContextIndicator:  true,
 		showWorkdirIndicator:  true,
 		shell:                 defaultShell(),
@@ -1453,6 +1466,15 @@ func (e *Engine) SetEventIdleTimeout(d time.Duration) {
 func (e *Engine) SetMaxQueuedMessages(n int) {
 	if n > 0 {
 		e.maxQueuedMessages = n
+	}
+}
+
+// SetBusyMessageMode sets the busy-session message policy: "queue" or
+// "steer". Unrecognized values are ignored (the safe default stays "queue").
+func (e *Engine) SetBusyMessageMode(mode string) {
+	switch mode {
+	case BusyMessageModeQueue, BusyMessageModeSteer:
+		e.busyMessageMode = mode
 	}
 }
 
@@ -3161,8 +3183,16 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPreviousProcessing))
 			return
 		}
-		// Session is busy — try to queue the message for the running turn
-		// so the agent processes it immediately after the current turn ends.
+		// Session is busy. In steer mode, first try to append the message to
+		// the turn already in flight (native steering); definitive failures
+		// fall back to the FIFO below, unknown outcomes are final (no queue,
+		// to avoid duplicate delivery).
+		if e.busyMessageMode == BusyMessageModeSteer &&
+			e.trySteerBusyMessage(p, msg, interactiveKey, session, sessions) {
+			return
+		}
+		// Try to queue the message for the running turn so the agent
+		// processes it immediately after the current turn ends.
 		if e.queueMessageForBusySession(p, msg, interactiveKey) {
 			// Race guard: the drain loop in processInteractiveMessageWith may
 			// have just finished (session unlocked) between our TryLock failure
@@ -3259,6 +3289,73 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 
 	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgSessionAutoResetIdle, int(e.resetOnIdle/time.Minute)))
 	return newSession
+}
+
+// trySteerBusyMessage attempts to append a busy-session message to the turn
+// already in flight (busy_message_mode = "steer"). Returns true when the
+// message was fully handled — either delivered into the current turn, dropped
+// as stale, or the steer outcome is unknown (in which case the user was told
+// and the message must NOT also be queued, to avoid duplicate delivery).
+// Returns false when the caller should fall back to the FIFO queue: the
+// session lacks the steer capability, or the steer was definitively rejected
+// without delivering anything.
+func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey string, session *Session, sessions *SessionManager) bool {
+	e.interactiveMu.Lock()
+	state, hasState := e.interactiveStates[interactiveKey]
+	e.interactiveMu.Unlock()
+	if !hasState || state == nil {
+		return false
+	}
+
+	state.mu.Lock()
+	as := state.agentSession
+	if as == nil || !as.Alive() {
+		state.mu.Unlock()
+		return false
+	}
+	if e.isStaleUserMessageLocked(state, msg.UserMessageTimeMs) {
+		snap := userMessageWatermarkSnapshotLocked(state)
+		state.mu.Unlock()
+		e.logStaleUserMessageDropped("reject_before_steer", msg, interactiveKey, snap)
+		return true
+	}
+	state.mu.Unlock()
+
+	steerable, ok := as.(SteerableSession)
+	if !ok {
+		return false
+	}
+
+	prompt := e.buildSenderPrompt(msg.Content, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey)
+	err := steerable.Steer(prompt, msg.Images, msg.Files)
+	switch {
+	case err == nil:
+		e.noteUserMessageAccepted(interactiveKey, msg.UserMessageTimeMs)
+		session.AddHistory("user", msg.Content)
+		sessions.Save()
+		slog.Info("busy message steered into active turn",
+			"session", msg.SessionKey,
+			"interactive_key", interactiveKey,
+			"msg_id", msg.MessageID,
+			"user", msg.UserName,
+		)
+		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgSteered, msg.Content))
+		return true
+	case errors.Is(err, ErrSteerOutcomeUnknown):
+		// The input may already be inside the active turn; re-queueing could
+		// deliver it twice. Tell the user explicitly and stop here.
+		slog.Warn("busy message steer outcome unknown; not queueing",
+			"session", msg.SessionKey, "msg_id", msg.MessageID, "error", err)
+		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgSteerOutcomeUnknown, msg.Content))
+		return true
+	default:
+		// Definitive non-acceptance (unsupported backend, no active turn,
+		// turn mismatch, rejection): nothing was delivered, so the FIFO
+		// fallback is safe and preserves the message.
+		slog.Debug("busy message steer unavailable; falling back to queue",
+			"session", msg.SessionKey, "msg_id", msg.MessageID, "error", err)
+		return false
+	}
 }
 
 // queueMessageForBusySession queues a message for later delivery when the
@@ -7027,6 +7124,33 @@ func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPsNoSession))
 		return
 	}
+	// Sessions with a native steer capability route /ps through Steer so the
+	// input is appended to the in-flight turn. A generic Send here would start
+	// the NEXT turn on such backends — for Codex exec it would even launch a
+	// concurrent `codex exec resume` racing the running turn (issue #27), so
+	// steer-aware sessions never fall back to Send.
+	if steerable, ok := state.agentSession.(SteerableSession); ok {
+		err := steerable.Steer(text, nil, nil)
+		switch {
+		case err == nil:
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPsSent))
+		case errors.Is(err, ErrSteerUnsupported):
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSteerUnsupportedBackend))
+		case errors.Is(err, ErrSteerNoActiveTurn), errors.Is(err, ErrSteerTurnMismatch):
+			// Definitive: nothing was delivered. /ps means "supplement the
+			// task currently running", so do not silently queue a new turn.
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSteerTurnGone))
+		case errors.Is(err, ErrSteerOutcomeUnknown):
+			slog.Warn("ps: steer outcome unknown", "error", err)
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSteerOutcomeUnknown))
+		default:
+			slog.Error("ps: steer failed", "error", err)
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPsSendFailed))
+		}
+		return
+	}
+	// Legacy path: persistent-process agents treat a mid-turn Send as
+	// supplemental stdin input to the current turn.
 	if err := state.agentSession.Send(text, nil, nil); err != nil {
 		slog.Error("ps: send failed", "error", err)
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPsSendFailed))

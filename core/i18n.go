@@ -554,6 +554,12 @@ const (
 	MsgPsEmpty           MsgKey = "ps_empty"
 	MsgPsNoSession       MsgKey = "ps_no_session"
 
+	// Steer (append input to the in-flight turn, issue #27)
+	MsgSteered                 MsgKey = "steered"
+	MsgSteerUnsupportedBackend MsgKey = "steer_unsupported_backend"
+	MsgSteerTurnGone           MsgKey = "steer_turn_gone"
+	MsgSteerOutcomeUnknown     MsgKey = "steer_outcome_unknown"
+
 	MsgWhoamiTitle     MsgKey = "whoami_title"
 	MsgWhoamiCardTitle MsgKey = "whoami_card_title"
 	MsgWhoamiName      MsgKey = "whoami_name"
@@ -3475,6 +3481,34 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "目前沒有正在執行的任務。",
 		LangJapanese:           "現在実行中のタスクはありません。",
 		LangSpanish:            "No hay ninguna tarea en ejecución.",
+	},
+	MsgSteered: {
+		LangEnglish:            "↪️ Added to the current task.",
+		LangChinese:            "↪️ 已并入当前任务。",
+		LangTraditionalChinese: "↪️ 已併入目前任務。",
+		LangJapanese:           "↪️ 現在のタスクに追加しました。",
+		LangSpanish:            "↪️ Añadido a la tarea en curso.",
+	},
+	MsgSteerUnsupportedBackend: {
+		LangEnglish:            "❌ This agent backend cannot add input to a running turn. Native steering for Codex requires `backend = \"app_server\"` in [projects.agent.options]; otherwise wait for the current task to finish and send a normal message.",
+		LangChinese:            "❌ 当前 Agent 后端不支持向进行中的回合追加内容。Codex 的原生 steer 需要在 [projects.agent.options] 中设置 `backend = \"app_server\"`；否则请等当前任务结束后作为普通消息发送。",
+		LangTraditionalChinese: "❌ 目前 Agent 後端不支援向進行中的回合追加內容。Codex 的原生 steer 需要在 [projects.agent.options] 中設定 `backend = \"app_server\"`；否則請等目前任務結束後以一般訊息傳送。",
+		LangJapanese:           "❌ このエージェントバックエンドは実行中のターンへの入力追加に対応していません。Codex のネイティブ steer には [projects.agent.options] で `backend = \"app_server\"` の設定が必要です。設定しない場合は、現在のタスク終了後に通常メッセージとして送信してください。",
+		LangSpanish:            "❌ Este backend del agente no puede añadir entrada a un turno en ejecución. El steering nativo de Codex requiere `backend = \"app_server\"` en [projects.agent.options]; de lo contrario, espera a que termine la tarea actual y envía un mensaje normal.",
+	},
+	MsgSteerTurnGone: {
+		LangEnglish:            "⚠️ The running turn just ended, so your addition was not delivered. Please send it as a normal message.",
+		LangChinese:            "⚠️ 进行中的回合刚刚结束，补充内容未送达。请作为普通消息重新发送。",
+		LangTraditionalChinese: "⚠️ 進行中的回合剛剛結束，補充內容未送達。請以一般訊息重新傳送。",
+		LangJapanese:           "⚠️ 実行中のターンがちょうど終了したため、追加内容は届いていません。通常メッセージとして再送信してください。",
+		LangSpanish:            "⚠️ El turno en ejecución acaba de terminar, por lo que tu añadido no se entregó. Envíalo como mensaje normal.",
+	},
+	MsgSteerOutcomeUnknown: {
+		LangEnglish:            "⚠️ Could not confirm whether your addition reached the current turn (request timed out). It was NOT re-queued to avoid duplicates — check the upcoming output before resending.",
+		LangChinese:            "⚠️ 无法确认补充内容是否已并入当前回合（请求超时）。为避免重复投递，消息未自动排队；请先观察后续输出再决定是否重发。",
+		LangTraditionalChinese: "⚠️ 無法確認補充內容是否已併入目前回合（請求逾時）。為避免重複投遞，訊息未自動排隊；請先觀察後續輸出再決定是否重發。",
+		LangJapanese:           "⚠️ 追加内容が現在のターンに反映されたか確認できませんでした（リクエストタイムアウト）。重複を避けるため再キューはしていません。今後の出力を確認してから再送信してください。",
+		LangSpanish:            "⚠️ No se pudo confirmar si tu añadido llegó al turno actual (tiempo de espera agotado). NO se volvió a encolar para evitar duplicados; revisa la próxima salida antes de reenviar.",
 	},
 	MsgWhoamiTitle: {
 		LangEnglish:            "🪪 **Your Identity**",

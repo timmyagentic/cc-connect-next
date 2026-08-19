@@ -24,6 +24,10 @@ type rpcResponseEnvelope struct {
 	ID     any             `json:"id"`
 	Result json.RawMessage `json:"result"`
 	Error  *rpcError       `json:"error"`
+	// localFailure marks envelopes synthesized by rejectPending when the
+	// transport dies, as opposed to real server responses. Callers that need
+	// to distinguish "server rejected" from "outcome unknown" check this.
+	localFailure bool `json:"-"`
 }
 
 type rpcNotificationEnvelope struct {
@@ -62,6 +66,23 @@ type turnStartResponse struct {
 	Turn struct {
 		ID string `json:"id"`
 	} `json:"turn"`
+}
+
+// turnSteerResponse decodes the turn/steer result. The app-server returns the
+// id of the turn the input was appended to as a flat "turnId"; a nested
+// "turn.id" is tolerated for forward compatibility.
+type turnSteerResponse struct {
+	TurnID string `json:"turnId"`
+	Turn   struct {
+		ID string `json:"id"`
+	} `json:"turn"`
+}
+
+func (r turnSteerResponse) turnID() string {
+	if r.TurnID != "" {
+		return r.TurnID
+	}
+	return r.Turn.ID
 }
 
 type turnNotification struct {
@@ -508,6 +529,96 @@ func (s *appServerSession) Send(prompt string, images []core.ImageAttachment, fi
 	s.pendingMsgs = s.pendingMsgs[:0]
 	s.stateMu.Unlock()
 
+	return nil
+}
+
+// Steer implements core.SteerableSession: it appends user input to the
+// in-flight turn via the app-server's native turn/steer method instead of
+// starting a new turn. The expectedTurnId precondition makes the server
+// reject the request if the snapshotted turn completed or changed in the
+// meantime, so a definitive rejection can safely fall back to queueing.
+//
+// Deliberately NOT done here: mutating currentTurn, clearing pendingMsgs, or
+// emitting any lifecycle event — the original turn's single completion/result
+// remains authoritative (issue #27).
+func (s *appServerSession) Steer(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
+	if !s.alive.Load() {
+		return fmt.Errorf("session is closed: %w", core.ErrSteerRejected)
+	}
+
+	if len(files) > 0 {
+		filePaths := core.SaveFilesToDisk(s.workDir, files)
+		prompt = core.AppendFileRefs(prompt, filePaths)
+	}
+
+	prompt, imagePaths, err := s.stageImages(prompt, images)
+	if err != nil {
+		return fmt.Errorf("%v: %w", err, core.ErrSteerRejected)
+	}
+
+	// Snapshot the active turn under the state lock. No preamble handling:
+	// a turn in flight implies the preamble decision was already made by the
+	// Send that started it.
+	s.stateMu.Lock()
+	expectedTurn := s.currentTurn
+	s.stateMu.Unlock()
+	threadID := s.CurrentSessionID()
+	if threadID == "" || expectedTurn == "" {
+		return core.ErrSteerNoActiveTurn
+	}
+
+	input := make([]map[string]any, 0, 1+len(imagePaths))
+	input = append(input, map[string]any{
+		"type":          "text",
+		"text":          prompt,
+		"text_elements": []any{},
+	})
+	for _, path := range imagePaths {
+		input = append(input, map[string]any{
+			"type": "localImage",
+			"path": path,
+		})
+	}
+
+	params := map[string]any{
+		"threadId":       threadID,
+		"input":          input,
+		"expectedTurnId": expectedTurn,
+	}
+
+	// Decode into a raw message so a server response that fails to parse is
+	// still recognized as "accepted" rather than misreported as a failure.
+	var raw json.RawMessage
+	rpcErr, responded := s.requestClassified("turn/steer", params, &raw, appServerRequestTimeout)
+	if rpcErr != nil {
+		if !responded {
+			// Timeout / transport failure: the input may or may not be inside
+			// the active turn. Callers must not re-send it automatically.
+			return fmt.Errorf("codex app-server turn/steer: %v: %w", rpcErr, core.ErrSteerOutcomeUnknown)
+		}
+		// Definitive server rejection. If the active turn moved on while the
+		// request was in flight, surface that as a turn mismatch.
+		s.stateMu.Lock()
+		nowTurn := s.currentTurn
+		s.stateMu.Unlock()
+		if nowTurn != expectedTurn {
+			return fmt.Errorf("codex app-server turn/steer: %v: %w", rpcErr, core.ErrSteerTurnMismatch)
+		}
+		return fmt.Errorf("codex app-server turn/steer: %v: %w", rpcErr, core.ErrSteerRejected)
+	}
+
+	var resp turnSteerResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		// The server accepted the steer; only our decode failed. Treat as
+		// success (re-sending would duplicate input), but log for diagnosis.
+		slog.Warn("codex app-server: turn/steer response decode failed; treating as accepted", "error", err)
+		return nil
+	}
+	if got := resp.turnID(); got != "" && got != expectedTurn {
+		// Accepted, but not by the turn we expected. The input WAS delivered
+		// somewhere, so this must never trigger a queue fallback.
+		return fmt.Errorf("codex app-server turn/steer accepted by turn %s, expected %s: %w", got, expectedTurn, core.ErrSteerOutcomeUnknown)
+	}
 	return nil
 }
 
@@ -1579,7 +1690,7 @@ func (s *appServerSession) rejectPending(err error) {
 	for id, ch := range s.pending {
 		delete(s.pending, id)
 		select {
-		case ch <- rpcResponseEnvelope{ID: id, Error: &rpcError{Message: err.Error()}}:
+		case ch <- rpcResponseEnvelope{ID: id, Error: &rpcError{Message: err.Error()}, localFailure: true}:
 		default:
 		}
 	}
@@ -1590,6 +1701,17 @@ func (s *appServerSession) request(method string, params any, out any) error {
 }
 
 func (s *appServerSession) requestWithTimeout(method string, params any, out any, timeout time.Duration) error {
+	err, _ := s.requestClassified(method, params, out, timeout)
+	return err
+}
+
+// requestClassified behaves like requestWithTimeout but also reports whether
+// the server produced a response envelope for this request. responded=true
+// with a non-nil error means the server definitively rejected the request;
+// responded=false means the outcome is uncertain (write failure, timeout, or
+// session shutdown). Callers that must never duplicate input (turn/steer)
+// use this to distinguish "rejected" from "unknown".
+func (s *appServerSession) requestClassified(method string, params any, out any, timeout time.Duration) (err error, responded bool) {
 	id := s.nextID.Add(1)
 	ch := make(chan rpcResponseEnvelope, 1)
 
@@ -1612,14 +1734,14 @@ func (s *appServerSession) requestWithTimeout(method string, params any, out any
 		s.pendingMu.Lock()
 		delete(s.pending, id)
 		s.pendingMu.Unlock()
-		return err
+		return err, false
 	}
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		s.pendingMu.Lock()
 		delete(s.pending, id)
 		s.pendingMu.Unlock()
-		return fmt.Errorf("%s timed out", method)
+		return fmt.Errorf("%s timed out", method), false
 	}
 
 	timer := time.NewTimer(remaining)
@@ -1628,21 +1750,21 @@ func (s *appServerSession) requestWithTimeout(method string, params any, out any
 	select {
 	case resp := <-ch:
 		if resp.Error != nil {
-			return classifyCodexError(fmt.Errorf("%s", strings.TrimSpace(resp.Error.Message)))
+			return classifyCodexError(fmt.Errorf("%s", strings.TrimSpace(resp.Error.Message))), !resp.localFailure
 		}
 		if out != nil {
 			if err := json.Unmarshal(resp.Result, out); err != nil {
-				return fmt.Errorf("decode %s response: %w", method, err)
+				return fmt.Errorf("decode %s response: %w", method, err), true
 			}
 		}
-		return nil
+		return nil, true
 	case <-ctxDone:
-		return s.contextErr()
+		return s.contextErr(), false
 	case <-timer.C:
 		s.pendingMu.Lock()
 		delete(s.pending, id)
 		s.pendingMu.Unlock()
-		return fmt.Errorf("%s timed out", method)
+		return fmt.Errorf("%s timed out", method), false
 	}
 }
 
