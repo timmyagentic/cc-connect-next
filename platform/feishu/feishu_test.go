@@ -1857,3 +1857,137 @@ func TestNewPlatformReactionOptOutCoversDoneReaction(t *testing.T) {
 		})
 	}
 }
+
+// ── #1693 P1-B: per-session image batch flush ───────────────────
+
+// TestFlushImageBatchForSession verifies the per-session flush helper ported
+// from upstream #1693 P1-B. When a non-image message (text/audio/file/post/
+// media/...) arrives for a session that has a pending image batch, the batch
+// must be dispatched BEFORE the new message so core/engine's create_time
+// watermark does not drop the buffered image as stale.
+func TestFlushImageBatchForSession(t *testing.T) {
+	const appID = "cli_per_session"
+	const appSecret = "secret-per-session"
+
+	imageBytes := []byte{0x89, 'P', 'N', 'G', 'F', '\r', '\n', 0x1a, '\n'}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(t, w, map[string]any{"code": 0, "msg": "success", "data": map[string]any{}})
+	}))
+	defer srv.Close()
+
+	received := make(chan *core.Message, 2)
+	p := &Platform{
+		platformName: "feishu",
+		domain:       srv.URL,
+		appID:        appID,
+		appSecret:    appSecret,
+		dedup:        &core.MessageDedup{},
+		client: lark.NewClient(appID, appSecret,
+			lark.WithOpenBaseUrl(srv.URL),
+			lark.WithHttpClient(srv.Client()),
+		),
+		handler: func(_ core.Platform, msg *core.Message) {
+			received <- msg
+		},
+		imageBatch: make(map[string]*imageBatchEntry),
+		// Long batch window so the timer cannot fire on its own before the
+		// flush path is exercised.
+		imageBatchWindow: 5 * time.Second,
+	}
+
+	sessionKey := "feishu:oc_per_session:ou_user"
+	p.bufferImage(sessionKey, &imageBatchEntry{
+		sessionKey:   sessionKey,
+		userID:       "ou_user",
+		chatName:     "oc_per_session",
+		rctx:         replyContext{messageID: "om_per_session", chatID: "oc_per_session", sessionKey: sessionKey},
+		images:       []core.ImageAttachment{{MimeType: "image/png", Data: imageBytes}},
+		messageIDs:   []string{"om_per_session"},
+		createTimeMs: 1710000000000,
+	})
+
+	p.imageBatchMu.Lock()
+	if len(p.imageBatch) != 1 {
+		p.imageBatchMu.Unlock()
+		t.Fatalf("imageBatch size = %d before flush, want 1", len(p.imageBatch))
+	}
+	p.imageBatchMu.Unlock()
+
+	// Flush only this session. The image must be dispatched synchronously —
+	// dispatchToCore relies on this ordering so the image reaches the engine
+	// before the newer message advances the user-message watermark.
+	p.flushImageBatchForSession(sessionKey)
+
+	p.imageBatchMu.Lock()
+	batchSize := len(p.imageBatch)
+	p.imageBatchMu.Unlock()
+	if batchSize != 0 {
+		t.Fatalf("imageBatch size = %d after flushImageBatchForSession, want 0", batchSize)
+	}
+
+	select {
+	case msg := <-received:
+		if len(msg.Images) != 1 {
+			t.Fatalf("flushed message has %d images, want 1", len(msg.Images))
+		}
+		if msg.SessionKey != sessionKey {
+			t.Errorf("flushed message session = %q, want %q", msg.SessionKey, sessionKey)
+		}
+	default:
+		t.Fatal("flushImageBatchForSession did not synchronously dispatch the batch")
+	}
+}
+
+// TestFlushImageBatchForSession_NoBatchIsSafe verifies the per-session flush
+// helper is a safe no-op when nothing is buffered for that session (the
+// common case for sessions that only ever send text) and for an empty key.
+func TestFlushImageBatchForSession_NoBatchIsSafe(t *testing.T) {
+	p := &Platform{
+		platformName: "feishu",
+		imageBatch:   make(map[string]*imageBatchEntry),
+	}
+	p.flushImageBatchForSession("feishu:oc_empty:ou_user")
+	p.flushImageBatchForSession("") // empty session key is also a safe no-op
+	if n := len(p.imageBatch); n != 0 {
+		t.Fatalf("imageBatch size = %d, want 0", n)
+	}
+}
+
+// TestFlushImageBatchForSession_OtherSessionsUntouched ensures flushing one
+// session's batch does not disturb batches buffered for other sessions.
+func TestFlushImageBatchForSession_OtherSessionsUntouched(t *testing.T) {
+	received := make(chan *core.Message, 2)
+	p := &Platform{
+		platformName: "feishu",
+		handler: func(_ core.Platform, msg *core.Message) {
+			received <- msg
+		},
+		imageBatch:       make(map[string]*imageBatchEntry),
+		imageBatchWindow: 5 * time.Second,
+	}
+	for _, key := range []string{"feishu:oc_a:ou_u", "feishu:oc_b:ou_u"} {
+		p.bufferImage(key, &imageBatchEntry{
+			sessionKey:   key,
+			userID:       "ou_u",
+			rctx:         replyContext{messageID: "om_" + key, sessionKey: key},
+			images:       []core.ImageAttachment{{MimeType: "image/png", Data: []byte{1}}},
+			messageIDs:   []string{"om_" + key},
+			createTimeMs: 1710000000000,
+		})
+	}
+
+	p.flushImageBatchForSession("feishu:oc_a:ou_u")
+
+	p.imageBatchMu.Lock()
+	_, aLeft := p.imageBatch["feishu:oc_a:ou_u"]
+	_, bLeft := p.imageBatch["feishu:oc_b:ou_u"]
+	p.imageBatchMu.Unlock()
+	if aLeft || !bLeft {
+		t.Fatalf("after flushing a: aLeft=%v bLeft=%v, want false/true", aLeft, bLeft)
+	}
+	if got := len(received); got != 1 {
+		t.Fatalf("dispatched %d batches, want exactly 1", got)
+	}
+}

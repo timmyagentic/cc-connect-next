@@ -198,6 +198,24 @@ func (e *Engine) SetPendingRestartTimeout(d time.Duration) {
 func (e *Engine) runPendingRestartNotify(req *RestartRequest, firedCh chan struct{}) {
 	defer close(firedCh)
 
+	// Recover from any panic inside dispatch (ReconstructReplyCtx / Send) so a
+	// platform-side panic cannot take down the whole cc-connect-next process.
+	// Ported from upstream #1693 P1-A. Without this defer, a panic in the
+	// restart-notify goroutine kills the daemon because no higher-level
+	// recover exists on this path.
+	defer func() {
+		if r := recover(); r != nil {
+			const maxStackBytes = 8192
+			stack := make([]byte, maxStackBytes)
+			n := runtime.Stack(stack, false)
+			slog.Error("restart notify panic",
+				"platform", req.Platform,
+				"session", req.SessionKey,
+				"panic", r,
+				"stack", string(stack[:n]))
+		}
+	}()
+
 	// Wait briefly for the platform to reach ready if it's not already.
 	// Upper bound: matches the typical Telegram 2-3 s connect window
 	// with margin (see defaultPendingRestartTimeout), and short enough

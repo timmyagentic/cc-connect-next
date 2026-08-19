@@ -1407,6 +1407,34 @@ func (p *Platform) flushImageBatchByRef(sessionKey string, ref *imageBatchEntry)
 	p.dispatchImageBatchEntry(current)
 }
 
+// flushImageBatchForSession synchronously dispatches the pending image batch
+// (if any) for the given session key, then returns. Called from dispatchToCore
+// before a non-batched message reaches the engine, so an image already
+// buffered for this session is delivered before the new message advances the
+// user-message watermark. Without this flush, the batch timer can fire AFTER
+// the newer message has set the watermark, and the engine drops the image as
+// stale. Ported from upstream #1693 P1-B (fixes upstream #1395).
+//
+// Safe to call when no batch is buffered for this session — it is a no-op.
+func (p *Platform) flushImageBatchForSession(sessionKey string) {
+	if sessionKey == "" {
+		return
+	}
+	p.imageBatchMu.Lock()
+	entry, ok := p.imageBatch[sessionKey]
+	if !ok {
+		p.imageBatchMu.Unlock()
+		return
+	}
+	if entry.timer != nil {
+		entry.timer.Stop()
+	}
+	delete(p.imageBatch, sessionKey)
+	p.imageBatchMu.Unlock()
+
+	p.dispatchImageBatchEntry(entry)
+}
+
 // flushImageBatches synchronously dispatches any pending image batches.
 // Intended to be called from Stop() so buffered images aren't lost when
 // cc-connect-next shuts down.
@@ -1712,6 +1740,12 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			files = append(files, quotedFiles...)
 			msg.Files = append(files, msg.Files...)
 		}
+		// Flush any image batch buffered earlier in this session so those
+		// images reach the engine (and its user-message watermark) before
+		// this newer message does (#1693 P1-B). The batched-image path calls
+		// bufferImage and returns before reaching here, so batch coalescing
+		// is unaffected.
+		p.flushImageBatchForSession(msg.SessionKey)
 		if p.dispatchCoreMessage(msg) {
 			messageDispatched = true
 		}
