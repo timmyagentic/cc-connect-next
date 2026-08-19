@@ -146,6 +146,52 @@ type CronConfig struct {
 // QueueConfig controls the per-session message queue.
 type QueueConfig struct {
 	MaxDepth *int `toml:"max_depth"` // max queued messages per session; default 5
+	// BusyMessageMode controls what happens to an ordinary message that
+	// arrives while a turn is active: "queue" (default) keeps the existing
+	// FIFO behavior; "steer" appends eligible input to the in-flight turn on
+	// agents that support native steering (falling back to the queue when
+	// steering is definitively unavailable). Overridable per project via
+	// projects.busy_message_mode.
+	BusyMessageMode *string `toml:"busy_message_mode"`
+}
+
+// Busy-message modes accepted by queue.busy_message_mode and
+// projects.busy_message_mode.
+const (
+	BusyMessageModeQueue = "queue"
+	BusyMessageModeSteer = "steer"
+)
+
+// NormalizeBusyMessageMode canonicalizes a busy-message mode value.
+// ok=false means the value is unrecognized (empty is valid: "use default").
+func NormalizeBusyMessageMode(raw string) (mode string, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "":
+		return "", true
+	case BusyMessageModeQueue:
+		return BusyMessageModeQueue, true
+	case BusyMessageModeSteer:
+		return BusyMessageModeSteer, true
+	default:
+		return "", false
+	}
+}
+
+// ResolveBusyMessageMode returns the effective busy-message mode for a
+// project: the project-level override when set, else the global [queue]
+// setting, else the backward-compatible default "queue".
+func (c *Config) ResolveBusyMessageMode(proj *ProjectConfig) string {
+	if proj != nil {
+		if mode, ok := NormalizeBusyMessageMode(proj.BusyMessageMode); ok && mode != "" {
+			return mode
+		}
+	}
+	if c != nil && c.Queue.BusyMessageMode != nil {
+		if mode, ok := NormalizeBusyMessageMode(*c.Queue.BusyMessageMode); ok && mode != "" {
+			return mode
+		}
+	}
+	return BusyMessageModeQueue
 }
 
 // WebhookConfig controls the external HTTP webhook endpoint.
@@ -482,11 +528,16 @@ type ProjectConfig struct {
 	// init flow to bind existing local directories. Default false keeps init
 	// limited to git URLs; use /workspace bind or /workspace route for explicit
 	// local bindings.
-	WorkspaceInitAllowLocalPaths *bool              `toml:"workspace_init_allow_local_paths,omitempty"`
-	Agent                        AgentConfig        `toml:"agent"`
-	Platforms                    []PlatformConfig   `toml:"platforms"`
-	Heartbeat                    HeartbeatConfig    `toml:"heartbeat"`
-	AutoCompress                 AutoCompressConfig `toml:"auto_compress"`
+	WorkspaceInitAllowLocalPaths *bool `toml:"workspace_init_allow_local_paths,omitempty"`
+	// BusyMessageMode overrides the global queue.busy_message_mode for this
+	// project: "queue" or "steer". Empty inherits the global setting. Useful
+	// because one process can host projects with different agent backends,
+	// and only some backends support native steering.
+	BusyMessageMode string             `toml:"busy_message_mode,omitempty"`
+	Agent           AgentConfig        `toml:"agent"`
+	Platforms       []PlatformConfig   `toml:"platforms"`
+	Heartbeat       HeartbeatConfig    `toml:"heartbeat"`
+	AutoCompress    AutoCompressConfig `toml:"auto_compress"`
 	// ResetOnIdleMins automatically rotates to a new cc-connect-next session after
 	// the current session has been inactive for the specified number of minutes.
 	// 0 or nil disables the behavior.
@@ -1046,6 +1097,11 @@ func (c *Config) validateInternal(permissive bool) error {
 	if c.Relay.TimeoutSecs != nil && *c.Relay.TimeoutSecs < 0 {
 		return fmt.Errorf("config: relay.timeout_secs must be >= 0")
 	}
+	if c.Queue.BusyMessageMode != nil {
+		if _, ok := NormalizeBusyMessageMode(*c.Queue.BusyMessageMode); !ok {
+			return fmt.Errorf("config: queue.busy_message_mode must be \"queue\" or \"steer\"")
+		}
+	}
 	switch strings.ToLower(strings.TrimSpace(c.Relay.Visibility)) {
 	case "", "full", "summary", "none":
 	default:
@@ -1080,6 +1136,9 @@ func (c *Config) validateInternal(permissive bool) error {
 		}
 		if proj.ResetOnIdleMins != nil && *proj.ResetOnIdleMins < 0 {
 			return fmt.Errorf("config: %s.reset_on_idle_mins must be >= 0", prefix)
+		}
+		if _, ok := NormalizeBusyMessageMode(proj.BusyMessageMode); !ok {
+			return fmt.Errorf("config: %s.busy_message_mode must be \"queue\" or \"steer\"", prefix)
 		}
 		if err := validateRunAsUser(prefix, proj.RunAsUser); err != nil {
 			return err

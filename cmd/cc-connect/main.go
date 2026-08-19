@@ -718,6 +718,9 @@ func main() {
 			engine.SetMaxQueuedMessages(*cfg.Queue.MaxDepth)
 		}
 
+		// Wire busy-message policy (queue | steer), project override first
+		engine.SetBusyMessageMode(cfg.ResolveBusyMessageMode(&proj))
+
 		// Wire auto-compress settings
 		if proj.AutoCompress.Enabled != nil && *proj.AutoCompress.Enabled {
 			minGap := 30 * time.Minute

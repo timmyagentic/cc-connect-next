@@ -432,6 +432,29 @@ type AgentSession interface {
 	Close() error
 }
 
+// SteerableSession is an optional capability for agent sessions that can
+// append user input to the turn that is already in flight ("steering"),
+// as opposed to Send, which starts the next turn.
+//
+// Contract:
+//   - Steer never starts a new turn and never emits a second turn lifecycle;
+//     the original turn's single completion/result remains authoritative.
+//   - When there is definitively no active turn, implementations return an
+//     error wrapping ErrSteerNoActiveTurn.
+//   - When the active turn changed before the steer was accepted, they return
+//     an error wrapping ErrSteerTurnMismatch.
+//   - When the backend cannot steer at all, they return an error wrapping
+//     ErrSteerUnsupported.
+//   - When acceptance is uncertain (e.g. RPC timeout after the request may
+//     have been written), they return an error wrapping ErrSteerOutcomeUnknown
+//     so callers know re-sending could duplicate input.
+//
+// The engine type-asserts this capability; agents that do not implement it
+// keep their existing behavior (busy messages stay in the FIFO queue).
+type SteerableSession interface {
+	Steer(prompt string, images []ImageAttachment, files []FileAttachment) error
+}
+
 // PermissionResult represents the user's decision on a permission request.
 type PermissionResult struct {
 	Behavior     string         `json:"behavior"`               // "allow" or "deny"
@@ -732,6 +755,12 @@ const (
 	CardStatusWorking  CardStatus = "working"  // blue
 	CardStatusDone     CardStatus = "done"     // green
 	CardStatusError    CardStatus = "error"    // red
+	// CardStatusRedirected is the neutral terminal state of a lifecycle card
+	// whose in-flight turn was steered to a newer trigger message (issue #27).
+	// The turn is neither done nor failed here — its presentation simply
+	// continues in a newer card, so the frozen card keeps already-visible
+	// partial output under a grey "continued in a newer message" header.
+	CardStatusRedirected CardStatus = "redirected" // neutral/grey
 )
 
 // PreviewStatusUpdater is an optional interface for platforms that support

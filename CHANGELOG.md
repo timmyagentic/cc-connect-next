@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Configurable queue vs native steer for busy sessions (#27)
+
+Messages that arrive while a turn is active can now be **steered** into the
+running turn instead of queued, via `[queue] busy_message_mode = "steer"`
+(default remains `"queue"`; per-project override: `projects.busy_message_mode`).
+
+- New agent-neutral `SteerableSession` capability in core. Codex implements
+  native steering on the app-server backend with `turn/steer` +
+  `expectedTurnId`; the exec backend explicitly reports steering as
+  unsupported, so `/ps` can no longer launch a concurrent `codex exec resume`
+  against a running turn.
+- `/ps` (and `/btw`) dispatch through the steer capability. Definitive
+  failures produce clear localized errors; an unknown steer outcome (RPC
+  timeout) is never silently re-queued, to avoid duplicate delivery.
+- Rich-card presentation handoff: a successful steer creates a successor card
+  replying to the newest message, freezes the previous card in a neutral grey
+  "Continued in a newer message" state that retains its visible partial
+  answer, and renders all further progress plus the final answer only in the
+  newest card. Rapid consecutive steers chain; exactly one card reaches Done
+  per turn.
+
 ## v0.1.1 (2026-08-18)
 
 Stable release promoted from `v0.1.1-beta.1`, built from the latest `main`.

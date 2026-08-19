@@ -110,6 +110,11 @@ type RichCardCopy struct {
 	UsageLimit        string
 	UsageLimitBody    string
 	UsageLimitSummary string
+	// Steer / presentation handoff copy (issue #27).
+	Steering          string // pending phase title while a steer is awaiting acceptance
+	Redirected        string // header title of a card frozen by a successful steer
+	RedirectedBody    string // static notice appended below retained partial output
+	RedirectedSummary string // collapsed summary line for a redirected card
 }
 
 // LocalizedRichCardSupporter is an optional extension for native rich-card

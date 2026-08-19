@@ -7293,6 +7293,19 @@ func buildRichCardJSONBytes(status core.CardStatus, phase string, steps []core.T
 				body = copy.ErrorBody
 			}
 		}
+	case core.CardStatusRedirected:
+		// Neutral terminal state: the turn was steered to a newer trigger
+		// message. Retain the already-visible partial (markdown) and append a
+		// short handoff notice; never render this as done or failed.
+		headerTemplate = "grey"
+		headerTitle = "↪️ " + copy.Redirected
+		summary = copy.RedirectedSummary
+		notice := "> ↪️ " + copy.RedirectedBody
+		if body == "" {
+			body = notice
+		} else {
+			body = body + "\n\n" + notice
+		}
 	case core.CardStatusThinking, core.CardStatusWorking:
 		if answering {
 			headerTitle = "✍️ " + copy.Answering
@@ -7306,6 +7319,12 @@ func buildRichCardJSONBytes(status core.CardStatus, phase string, steps []core.T
 			if phase == "tool" {
 				phaseText = copy.CallingTools
 				summary = copy.ToolSummary
+			}
+			if phase == "steering" && strings.TrimSpace(copy.Steering) != "" {
+				// Successor card pending phase: a steer request is awaiting
+				// acceptance for the turn already in flight (issue #27).
+				phaseText = copy.Steering
+				summary = stripRichCardMarkdown(copy.Steering)
 			}
 			headerTitle = "⏳ " + phaseText
 			lines := make([]string, 0, 2)

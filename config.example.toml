@@ -255,6 +255,40 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 #                            # 自定义回复内容；留空则使用 i18n 默认值（"⏳ 处理中..."）
 
 # =============================================================================
+# Message Queue & Busy-Message Handling / 消息队列与忙时消息处理
+# =============================================================================
+# What happens to an ordinary message that arrives while the agent is still
+# working on the previous one.
+# 当上一条消息仍在处理中时，新到的普通消息如何处理。
+#
+# busy_message_mode:
+# - "queue" (default): keep the message in a per-session FIFO and process it
+#   as a NEW turn after the current one completes.
+#   "queue"（默认）：进入会话级 FIFO 队列，等当前回合结束后作为新回合处理。
+# - "steer": append the message to the turn ALREADY RUNNING on agents that
+#   support native steering (currently Codex with backend = "app_server").
+#   The running task incorporates it mid-flight instead of starting a new
+#   turn, and the progress card hands over to the newest message. When
+#   steering is definitively unavailable (unsupported backend, turn just
+#   ended), the message safely falls back to the queue.
+#   "steer"：在支持原生 steer 的 agent 上（目前为 backend = "app_server" 的
+#   Codex）把消息并入正在执行的回合：任务在进行中吸收补充内容，进度卡片交接到
+#   最新消息。steer 确定不可用时（后端不支持、回合刚结束）安全回退到队列。
+#
+# `/ps <message>` always steers explicitly, regardless of this setting.
+# `/ps <消息>` 始终是显式 steer，不受该配置影响。
+
+# [queue]
+# max_depth = 5              # Max queued messages per session (default: 5) / 每会话最大排队消息数（默认 5）
+# busy_message_mode = "queue" # "queue" | "steer" (default: "queue") / 忙时消息模式（默认 "queue"）
+
+# Per-project override (one process can host different agent backends):
+# 每项目覆盖（同一进程可承载不同的 agent 后端）：
+# [[projects]]
+# name = "codex-project"
+# busy_message_mode = "steer"
+
+# =============================================================================
 # Rate Limiting / 速率限制
 # =============================================================================
 # Per-session sliding-window rate limiter. Prevents users from flooding the bot
@@ -1530,6 +1564,18 @@ app_secret = "your-feishu-app-secret"
 #
 # Optional: specify Codex reasoning effort / 可选：指定 Codex 推理强度
 # reasoning_effort = "high"  # "minimal" | "low" | "medium" | "high" | "xhigh"
+#
+# Optional: Codex backend / 可选：Codex 后端
+# - "exec" (default): each turn runs a `codex exec --json` subprocess.
+#   "exec"（默认）：每个回合运行一次 `codex exec --json` 子进程。
+# - "app_server": persistent `codex app-server` JSON-RPC session. Required
+#   for native steering (`/ps` and busy_message_mode = "steer"): input is
+#   appended to the running turn via turn/steer instead of racing a second
+#   exec process against it.
+#   "app_server"：常驻 `codex app-server` JSON-RPC 会话。原生 steer（`/ps`
+#   与 busy_message_mode = "steer"）必须使用该后端：补充内容通过 turn/steer
+#   并入进行中的回合，而不是并发启动第二个 exec 进程。
+# backend = "app_server"
 #
 # Optional: project system prompt / 可选：项目系统提示
 # Codex has no native system-prompt flag, so cc-connect-next injects this as a
