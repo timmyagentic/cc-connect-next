@@ -272,31 +272,34 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 # 当上一条消息仍在处理中时，新到的普通消息如何处理。
 #
 # busy_message_mode:
-# - "queue" (default): keep the message in a per-session FIFO and process it
-#   as a NEW turn after the current one completes.
-#   "queue"（默认）：进入会话级 FIFO 队列，等当前回合结束后作为新回合处理。
-# - "steer": append the message to the turn ALREADY RUNNING on agents that
-#   support native steering (currently Codex with backend = "app_server").
-#   The running task incorporates it mid-flight instead of starting a new
-#   turn, and the progress card hands over to the newest message. When
-#   steering is definitively unavailable (unsupported backend, turn just
-#   ended), the message safely falls back to the queue.
-#   "steer"：在支持原生 steer 的 agent 上（目前为 backend = "app_server" 的
-#   Codex）把消息并入正在执行的回合：任务在进行中吸收补充内容，进度卡片交接到
-#   最新消息。steer 确定不可用时（后端不支持、回合刚结束）安全回退到队列。
+# - "steer" (default): append the message to the turn ALREADY RUNNING on
+#   agents that support native steering (currently Codex with
+#   backend = "app_server"). The running task incorporates it mid-flight
+#   instead of starting a new turn, and the progress card hands over to the
+#   newest message. When steering is unavailable (non-steerable agent, Codex
+#   exec backend, turn just ended), the message transparently falls back to
+#   the queue — so the default is safe for every agent.
+#   "steer"（默认）：在支持原生 steer 的 agent 上（目前为 backend = "app_server"
+#   的 Codex）把消息并入正在执行的回合：任务在进行中吸收补充内容，进度卡片交接
+#   到最新消息。steer 不可用时（agent 不支持、Codex exec 后端、回合刚结束）
+#   透明回退到队列，因此该默认值对所有 agent 都安全。
+# - "queue": always keep the message in a per-session FIFO and process it as
+#   a NEW turn after the current one completes (pre-v0.1.3 behavior).
+#   "queue"：始终进入会话级 FIFO 队列，等当前回合结束后作为新回合处理
+#   （v0.1.3 之前的行为）。
 #
 # `/ps <message>` always steers explicitly, regardless of this setting.
 # `/ps <消息>` 始终是显式 steer，不受该配置影响。
 
 # [queue]
 # max_depth = 5              # Max queued messages per session (default: 5) / 每会话最大排队消息数（默认 5）
-# busy_message_mode = "queue" # "queue" | "steer" (default: "queue") / 忙时消息模式（默认 "queue"）
+# busy_message_mode = "steer" # "steer" | "queue" (default: "steer") / 忙时消息模式（默认 "steer"）
 
 # Per-project override (one process can host different agent backends):
 # 每项目覆盖（同一进程可承载不同的 agent 后端）：
 # [[projects]]
-# name = "codex-project"
-# busy_message_mode = "steer"
+# name = "conservative-project"
+# busy_message_mode = "queue"
 
 # =============================================================================
 # Rate Limiting / 速率限制

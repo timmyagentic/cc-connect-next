@@ -79,17 +79,15 @@ reset_on_idle_mins = 60
 ```toml
 [queue]
 max_depth = 5
-busy_message_mode = "queue"   # "queue"（默认）或 "steer"
+busy_message_mode = "steer"   # "steer"（默认）或 "queue"
 
 # 每项目覆盖：
 [[projects]]
-name = "codex-project"
-busy_message_mode = "steer"
+name = "conservative-project"
+busy_message_mode = "queue"
 ```
 
-**`queue`（默认）。** 忙时消息进入会话级 FIFO，当前回合结束后作为新回合处理，行为与以往完全一致。
-
-**`steer`。** 在支持原生 steer 的 agent 上，忙时消息直接并入进行中的回合。目前支持 app-server 后端的 Codex：
+**`steer`（默认）。** 在支持原生 steer 的 agent 上，忙时消息直接并入进行中的回合；不支持该能力的 agent（以及 Codex exec 后端）透明回退到 FIFO 队列，因此默认值对所有 agent 都安全。原生 steer 目前指 app-server 后端的 Codex：
 
 ```toml
 [projects.agent.options]
@@ -97,7 +95,9 @@ mode = "yolo"
 backend = "app_server"   # 原生 steer 必需
 ```
 
-steer 通过 `turn/steer` 发送，并用 `expectedTurnId` 锁定当前回合，不会与回合完成产生竞态。steer 确定不可用时（后端不支持、回合刚好结束），消息安全回退到队列。若 steer 结果**未知**（RPC 超时），消息刻意**不会**自动重新排队——那可能造成重复投递——你会收到明确的警告提示。
+steer 通过 `turn/steer` 发送，并用 `expectedTurnId` 锁定当前回合，不会与回合完成产生竞态。steer 确定不可用时（后端不支持、回合刚好结束），消息安全回退到队列。
+
+**`queue`。** 设置 `busy_message_mode = "queue"` 可始终使用会话级 FIFO：忙时消息在当前回合结束后作为新回合处理（v0.1.3 之前的行为）。若 steer 结果**未知**（RPC 超时），消息刻意**不会**自动重新排队——那可能造成重复投递——你会收到明确的警告提示。
 
 **`/ps <消息>`**（别名 `/btw`）无论配置为何种模式，始终是显式 steer。在支持 steer 的后端上它并入进行中的回合；在 Codex 默认的 `exec` 后端上，它现在会返回明确报错，而不是对同一线程并发启动第二个 `codex exec` 进程。不支持 steer 能力的 agent 保持原有行为（回合中 stdin 注入）。
 
