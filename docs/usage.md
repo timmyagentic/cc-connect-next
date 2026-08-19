@@ -5,6 +5,7 @@ Complete guide to using cc-connect-next features.
 ## Table of Contents
 
 - [Session Management](#session-management)
+- [Busy Messages: Queue vs Steer](#busy-messages-queue-vs-steer)
 - [Permission Modes](#permission-modes)
 - [API Provider Management](#api-provider-management)
 - [Model Selection](#model-selection)
@@ -67,6 +68,46 @@ To restore the previous behavior of always continuing, set `reset_on_idle_mins =
 ### Model switch preserves history
 
 `/model` preserves the current session — the agent resumes the conversation with the new model (no extra token cost). Model switching affects the shared agent instance — if multiple platforms use the same project, the model change applies to all of them.
+
+---
+
+## Busy Messages: Queue vs Steer
+
+When a message arrives while the agent is still working on the previous one, two intents exist:
+
+- **Queue** — "finish the current task, then handle this as a separate request."
+- **Steer** — "incorporate this correction, constraint, or new evidence into the task already running."
+
+```toml
+[queue]
+max_depth = 5
+busy_message_mode = "queue"   # "queue" (default) or "steer"
+
+# Per-project override:
+[[projects]]
+name = "codex-project"
+busy_message_mode = "steer"
+```
+
+**`queue` (default).** Busy messages enter a per-session FIFO and are processed as new turns after the current one completes, exactly as before.
+
+**`steer`.** Busy messages are appended to the in-flight turn on agents that support native steering. Currently that is Codex with the app-server backend:
+
+```toml
+[projects.agent.options]
+mode = "yolo"
+backend = "app_server"   # required for native steering
+```
+
+The steer is sent as `turn/steer` with the active turn pinned via `expectedTurnId`, so it can never race a completing turn. When steering is definitively unavailable (unsupported backend, the turn just ended), the message safely falls back to the queue. If the steer outcome is *unknown* (RPC timeout), the message is deliberately **not** re-queued — that could deliver it twice — and you get an explicit warning instead.
+
+**`/ps <message>`** (alias `/btw`) always steers explicitly, regardless of the configured mode. On steer-capable backends it appends to the running turn; on Codex's default `exec` backend it now returns a clear error instead of launching a second `codex exec` process against the same thread. Agents without a steer capability keep the historical behavior (mid-turn stdin injection).
+
+**Rich card handoff.** On rich-card platforms (Feishu), a successful steer moves the live progress card to the newest message:
+
+1. The steered message immediately gets its own card in an "Adding this message to the current task..." state.
+2. Once the steer is confirmed, the previous card freezes into a neutral grey **Continued in a newer message** state, keeping whatever partial answer was already visible.
+3. All further progress and the final answer render only in the newest card — one turn, one Done card. Rapid consecutive steers chain the same way; only the newest card stays active.
 
 ---
 

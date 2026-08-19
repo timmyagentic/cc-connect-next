@@ -5,6 +5,7 @@ cc-connect-next 完整功能使用指南。
 ## 目录
 
 - [会话管理](#会话管理)
+- [忙时消息：排队 vs 并入（steer）](#忙时消息排队-vs-并入steer)
 - [权限模式](#权限模式)
 - [API Provider 管理](#api-provider-管理)
 - [模型选择](#模型选择)
@@ -65,6 +66,46 @@ reset_on_idle_mins = 60
 ### 切换模型时保留历史
 
 `/model` 切换模型时保留当前会话——agent 会在新模型下继续对话（不额外消耗 token）。注意模型切换作用于共享的 agent 实例——如果多个平台使用同一个 project，模型变更会影响所有平台。
+
+---
+
+## 忙时消息：排队 vs 并入（steer）
+
+当上一条消息仍在处理中时，新消息背后可能是两种意图：
+
+- **排队（queue）**——"先做完当前任务，再把这条当作独立请求处理。"
+- **并入（steer）**——"把这条纠正、约束或新证据并入正在执行的任务。"
+
+```toml
+[queue]
+max_depth = 5
+busy_message_mode = "queue"   # "queue"（默认）或 "steer"
+
+# 每项目覆盖：
+[[projects]]
+name = "codex-project"
+busy_message_mode = "steer"
+```
+
+**`queue`（默认）。** 忙时消息进入会话级 FIFO，当前回合结束后作为新回合处理，行为与以往完全一致。
+
+**`steer`。** 在支持原生 steer 的 agent 上，忙时消息直接并入进行中的回合。目前支持 app-server 后端的 Codex：
+
+```toml
+[projects.agent.options]
+mode = "yolo"
+backend = "app_server"   # 原生 steer 必需
+```
+
+steer 通过 `turn/steer` 发送，并用 `expectedTurnId` 锁定当前回合，不会与回合完成产生竞态。steer 确定不可用时（后端不支持、回合刚好结束），消息安全回退到队列。若 steer 结果**未知**（RPC 超时），消息刻意**不会**自动重新排队——那可能造成重复投递——你会收到明确的警告提示。
+
+**`/ps <消息>`**（别名 `/btw`）无论配置为何种模式，始终是显式 steer。在支持 steer 的后端上它并入进行中的回合；在 Codex 默认的 `exec` 后端上，它现在会返回明确报错，而不是对同一线程并发启动第二个 `codex exec` 进程。不支持 steer 能力的 agent 保持原有行为（回合中 stdin 注入）。
+
+**卡片交接。** 在富卡片平台（飞书）上，steer 成功后进行中的进度卡片会交接到最新消息：
+
+1. 被 steer 的消息立刻获得自己的卡片，显示"正在将此消息并入当前任务…"。
+2. steer 确认后，旧卡片冻结为中性灰色的**已转到更新的消息**状态，保留已经可见的部分回答。
+3. 后续进度与最终回答只渲染在最新卡片中——一个回合只有一张 Done 卡片。连续多次 steer 依次交接，只有最新卡片保持活跃。
 
 ---
 
