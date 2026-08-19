@@ -602,6 +602,45 @@ type interactiveState struct {
 	// currentTurnUserMessageTimeMs is the UserMessageTimeMs for the in-flight
 	// foreground turn (including a queued turn after EventResult).
 	currentTurnUserMessageTimeMs int64
+
+	// Steer presentation handoff (issue #27). When a busy-session message is
+	// appended to the in-flight turn via SteerableSession, the visible
+	// presentation (reply context + lifecycle card) must transfer to the
+	// newest trigger message. The steer initiator appends a record here after
+	// the backend confirms acceptance; the event loop adopts it at the next
+	// safe boundary. presentationOpen is owned by the event loop: it is true
+	// only while the loop can still adopt handoffs for the current turn, so
+	// an initiator that finds it false knows the turn already finalized.
+	pendingHandoffs  []steerHandoff
+	handoffSignal    chan struct{} // buffered(1); poked when a handoff is appended
+	presentationOpen bool
+	// presentationGeneration increments on every adopted handoff. Async
+	// operations snapshot it and re-check before mutating a card so late work
+	// from an old generation cannot overwrite a redirected card.
+	presentationGeneration uint64
+}
+
+// steerHandoff transfers ownership of the in-flight turn's presentation from
+// the original trigger message/card to a newer steered message (issue #27).
+type steerHandoff struct {
+	messageID         string
+	platform          Platform
+	replyCtx          any
+	cardHandle        any          // successor card pre-created in "steering" phase; nil when not rich-card mode
+	richCardCopy      RichCardCopy // locale copy resolved from the steered message text
+	hasRichCardCopy   bool
+	content           string
+	fromVoice         bool
+	userMessageTimeMs int64
+}
+
+// handoffSignalCh lazily creates the steer handoff signal channel.
+// state.mu must be held by the caller.
+func (s *interactiveState) handoffSignalChLocked() chan struct{} {
+	if s.handoffSignal == nil {
+		s.handoffSignal = make(chan struct{}, 1)
+	}
+	return s.handoffSignal
 }
 
 // latestUserMessageWatermarkLocked returns the highest UserMessageTimeMs among
@@ -3326,6 +3365,11 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		return false
 	}
 
+	// Create the successor lifecycle card ("C2") in a pending steering phase
+	// BEFORE the RPC so the sender gets immediate acknowledgement replying to
+	// their own message (issue #27 card handoff).
+	cardHandle, cardCopy := e.beginSteerPresentation(p, msg.ReplyCtx, msg.Content)
+
 	prompt := e.buildSenderPrompt(msg.Content, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey)
 	err := steerable.Steer(prompt, msg.Images, msg.Files)
 	switch {
@@ -3339,23 +3383,150 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 			"msg_id", msg.MessageID,
 			"user", msg.UserName,
 		)
-		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgSteered, msg.Content))
+		committed := e.commitSteerPresentation(interactiveKey, steerHandoff{
+			messageID:         msg.MessageID,
+			platform:          p,
+			replyCtx:          msg.ReplyCtx,
+			cardHandle:        cardHandle,
+			richCardCopy:      cardCopy,
+			hasRichCardCopy:   true,
+			content:           msg.Content,
+			fromVoice:         msg.FromVoice,
+			userMessageTimeMs: msg.UserMessageTimeMs,
+		})
+		switch {
+		case committed && cardHandle != nil:
+			// The successor card itself is the acknowledgement.
+		case committed:
+			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgSteered, msg.Content))
+		default:
+			// The turn finalized while the steer RPC was in flight; the final
+			// answer (already incorporating this input) went to the original
+			// card. Resolve the pending successor card neutrally.
+			body := e.i18n.TForText(MsgSteerMergedCompleted, msg.Content)
+			if !e.patchSteerCard(p, cardHandle, CardStatusRedirected, "redirected", body, cardCopy) {
+				e.reply(p, msg.ReplyCtx, body)
+			}
+		}
 		return true
 	case errors.Is(err, ErrSteerOutcomeUnknown):
 		// The input may already be inside the active turn; re-queueing could
 		// deliver it twice. Tell the user explicitly and stop here.
 		slog.Warn("busy message steer outcome unknown; not queueing",
 			"session", msg.SessionKey, "msg_id", msg.MessageID, "error", err)
-		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgSteerOutcomeUnknown, msg.Content))
+		body := e.i18n.TForText(MsgSteerOutcomeUnknown, msg.Content)
+		if !e.patchSteerCard(p, cardHandle, CardStatusError, "error", body, cardCopy) {
+			e.reply(p, msg.ReplyCtx, body)
+		}
 		return true
 	default:
 		// Definitive non-acceptance (unsupported backend, no active turn,
 		// turn mismatch, rejection): nothing was delivered, so the FIFO
-		// fallback is safe and preserves the message.
+		// fallback is safe and preserves the message. The transient pending
+		// card is removed — the queued turn will create its own card and the
+		// queue path sends its own textual acknowledgement.
 		slog.Debug("busy message steer unavailable; falling back to queue",
 			"session", msg.SessionKey, "msg_id", msg.MessageID, "error", err)
+		e.removeSteerPendingCard(p, cardHandle)
 		return false
 	}
+}
+
+// beginSteerPresentation creates the successor lifecycle card replying to the
+// steered message, shown in a pending "steering" phase until the backend
+// confirms acceptance. Returns a nil handle when the platform or display mode
+// does not use rich cards (callers then keep plain-text acknowledgements).
+// The returned copy is resolved from the steered message's own language.
+func (e *Engine) beginSteerPresentation(p Platform, replyCtx any, content string) (any, RichCardCopy) {
+	cardCopy := e.i18n.RichCardCopyForText(content)
+	display, _ := e.displayRuntimeSnapshot()
+	if display.CardMode != "rich" {
+		return nil, cardCopy
+	}
+	supporter, okSupport := p.(RichCardSupporter)
+	starter, okStart := p.(PreviewStarter)
+	if !okSupport || !okStart {
+		return nil, cardCopy
+	}
+	var card string
+	if localized, ok := p.(LocalizedRichCardSupporter); ok {
+		card = localized.BuildLocalizedRichCard(CardStatusWorking, "steering", nil, "", false, "", cardCopy)
+	} else {
+		card = supporter.BuildRichCard(CardStatusWorking, "steering", nil, "", false, "")
+	}
+	handle, err := starter.SendPreviewStart(e.ctx, replyCtx, card)
+	if err != nil {
+		slog.Debug("steer: failed to create pending successor card", "platform", p.Name(), "error", err)
+		return nil, cardCopy
+	}
+	return handle, cardCopy
+}
+
+// patchSteerCard patches a steer-related lifecycle card into a given state.
+// Returns false when the card cannot be updated (nil handle or unsupported
+// platform); callers then fall back to a plain text message.
+func (e *Engine) patchSteerCard(p Platform, handle any, status CardStatus, phase string, body string, cardCopy RichCardCopy) bool {
+	if handle == nil {
+		return false
+	}
+	supporter, okSupport := p.(RichCardSupporter)
+	updater, okUpdate := p.(MessageUpdater)
+	if !okSupport || !okUpdate {
+		return false
+	}
+	var card string
+	if localized, ok := p.(LocalizedRichCardSupporter); ok {
+		card = localized.BuildLocalizedRichCard(status, phase, nil, body, false, "", cardCopy)
+	} else {
+		card = supporter.BuildRichCard(status, phase, nil, body, false, "")
+	}
+	if err := updater.UpdateMessage(e.ctx, handle, card); err != nil {
+		slog.Debug("steer: failed to patch lifecycle card", "platform", p.Name(), "status", string(status), "error", err)
+		return false
+	}
+	return true
+}
+
+// removeSteerPendingCard deletes a transient pending successor card after a
+// definitive steer rejection whose fallback re-routes the message elsewhere
+// (e.g. into the FIFO queue, where its own turn will create a fresh card).
+func (e *Engine) removeSteerPendingCard(p Platform, handle any) {
+	if handle == nil {
+		return
+	}
+	cleaner, ok := p.(PreviewCleaner)
+	if !ok {
+		return
+	}
+	if err := cleaner.DeletePreviewMessage(e.ctx, handle); err != nil {
+		slog.Debug("steer: failed to remove pending successor card", "platform", p.Name(), "error", err)
+	}
+}
+
+// commitSteerPresentation hands the successor presentation to the event loop.
+// Returns false when the turn's presentation is no longer open (the turn
+// finalized while the steer RPC was in flight); the caller then resolves the
+// successor card itself.
+func (e *Engine) commitSteerPresentation(interactiveKey string, h steerHandoff) bool {
+	e.interactiveMu.Lock()
+	state := e.interactiveStates[interactiveKey]
+	e.interactiveMu.Unlock()
+	if state == nil {
+		return false
+	}
+	state.mu.Lock()
+	if !state.presentationOpen {
+		state.mu.Unlock()
+		return false
+	}
+	state.pendingHandoffs = append(state.pendingHandoffs, h)
+	ch := state.handoffSignalChLocked()
+	state.mu.Unlock()
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+	return true
 }
 
 // queueMessageForBusySession queues a message for later delivery when the
@@ -4884,6 +5055,35 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 	}
 	defer e.finishInteractiveTurn(state)
 
+	// Steer presentation handoff (issue #27): open the adoption window for
+	// this foreground turn. Whatever path the loop exits through, close the
+	// window and resolve any handoff that was accepted but never adopted so
+	// its successor card cannot spin forever.
+	state.mu.Lock()
+	state.pendingHandoffs = nil
+	state.presentationOpen = true
+	handoffCh := state.handoffSignalChLocked()
+	state.mu.Unlock()
+	select {
+	case <-handoffCh: // drain a stale signal left over from a previous turn
+	default:
+	}
+	defer func() {
+		state.mu.Lock()
+		state.presentationOpen = false
+		orphanHandoffs := state.pendingHandoffs
+		state.pendingHandoffs = nil
+		state.mu.Unlock()
+		for _, h := range orphanHandoffs {
+			// The steer was accepted by the backend, but the turn terminated
+			// before the event loop could adopt the handoff. The original
+			// card already carries the terminal outcome; resolve the pending
+			// successor card neutrally.
+			e.patchSteerCard(h.platform, h.cardHandle, CardStatusRedirected, "redirected",
+				e.i18n.T(MsgSteerMergedCompleted), h.richCardCopy)
+		}
+	}()
+
 	if msgID != "" {
 		state.mu.Lock()
 		state.currentMessageID = msgID
@@ -5247,6 +5447,144 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 		turnDeadlineCh = turnDeadlineTimer.C
 	}
 
+	// applySteerHandoffList adopts steer presentation handoffs (issue #27):
+	// the same agent turn keeps running, but every future progress/answer
+	// update renders into the successor card replying to the newest steered
+	// message, while the previous card freezes in a neutral Redirected state
+	// that retains its already-visible partial output. This mirrors the
+	// queued-turn reset in the EventResult branch, except that no new Send is
+	// issued and the turn clock keeps running — steer stays inside one turn.
+	applySteerHandoffList := func(handoffs []steerHandoff) {
+		for _, h := range handoffs {
+			state.mu.Lock()
+			oldPlatform := state.platform
+			state.platform = h.platform
+			state.replyCtx = h.replyCtx
+			state.currentMessageID = h.messageID
+			state.fromVoice = h.fromVoice
+			state.currentTurnUserMessageTimeMs = h.userMessageTimeMs
+			// Fence: async work that captured an older generation must not
+			// mutate a card that has been frozen by this handoff.
+			state.presentationGeneration++
+			state.mu.Unlock()
+
+			// Freeze the previous presentation with the text confirmed
+			// visible; persist it so the successor's final answer does not
+			// erase already-read output from history.
+			frozenPartial := persistVisibleRichPartial(oldPlatform)
+			if cardMessageID != nil && usesRichCard(oldPlatform) {
+				supporter, okSupport := oldPlatform.(RichCardSupporter)
+				updater, okUpdate := oldPlatform.(MessageUpdater)
+				if okSupport && okUpdate {
+					card := buildRichCard(oldPlatform, supporter, CardStatusRedirected, "redirected", toolSteps, frozenPartial, false, "")
+					if err := updater.UpdateMessage(e.ctx, cardMessageID, card); err != nil {
+						slog.Debug("steer: failed to freeze previous card", "platform", oldPlatform.Name(), "error", err)
+					}
+				}
+			}
+			if streamCard != nil {
+				// Legacy streaming card: freeze with its streamed content plus
+				// the localized handoff notice (previous turn's locale).
+				frozenBody := strings.TrimSpace(cardAnswerText.String())
+				if notice := strings.TrimSpace(turnRichCardCopy.RedirectedBody); notice != "" {
+					if frozenBody == "" {
+						frozenBody = notice
+					} else {
+						frozenBody = frozenBody + "\n\n" + notice
+					}
+				}
+				if !streamCard.Failed() {
+					if err := streamCard.Finalize(e.ctx, frozenBody); err != nil {
+						slog.Debug("steer: failed to freeze legacy streaming card", "error", err)
+					}
+				}
+				streamCard = nil
+			}
+			sp.discard()
+
+			// Adopt the successor trigger context.
+			msgID = h.messageID
+			silentCancelCh = state.silentTurnCancellationSignal(msgID)
+			cancelTerminalRender()
+			cancelTerminalDelivery()
+			terminalDeliveryCtx, cancelTerminalDelivery, terminalRenderCtx, cancelTerminalRender = newTerminalDeliveryContexts(silentCancelCh, stopCh)
+			replyCtx = h.replyCtx
+
+			// Locale and card copy follow the newest trigger message, exactly
+			// like a queued turn would.
+			e.i18n.DetectAndSet(h.content)
+			if h.hasRichCardCopy {
+				turnRichCardCopy = h.richCardCopy
+			} else {
+				turnRichCardCopy = e.i18n.RichCardCopyForText(h.content)
+			}
+			state.setTurnRichCardCopy(h.messageID, turnRichCardCopy)
+			turnDisplay, turnStreamPreview = e.displayRuntimeSnapshot()
+			agentFooterFilter.Reset(turnDisplay.HideAgentFooter)
+
+			// Post-boundary events only: the successor card must not
+			// mechanically duplicate output already retained in the frozen
+			// card, so all presentation cursors restart at the boundary.
+			textParts = nil
+			segmentStart = 0
+			silentHold = false
+			legacyPermissionDeliveredPrefix = ""
+			partialText = ""
+			toolSteps = nil
+			cardToolCalls = nil
+			cardThinkingText = ""
+			cardAnswerText.Reset()
+			richAnswerStarted = false
+			richAnswerStartedAt = time.Time{}
+			lastRichCardUpdate = time.Time{}
+			lastRichCardInput = ""
+			lastRichCardPreview = ""
+			partialPersisted = false
+
+			steerRenderer := func(content string) string {
+				return e.renderOutgoingContentForWorkspace(h.platform, content, workspaceDir)
+			}
+			sp = newStreamPreview(turnStreamPreview, h.platform, h.replyCtx, e.ctx, steerRenderer)
+			cp = newCompactProgressWriter(e.ctx, h.platform, h.replyCtx, e.agent.Name(), e.i18n.CurrentLang(), steerRenderer)
+
+			// Typing indicator follows the newest trigger context.
+			if stopTyping != nil {
+				stopTyping()
+				stopTyping = nil
+			}
+			if ti, ok := h.platform.(TypingIndicator); ok {
+				stopTyping = ti.StartTyping(e.ctx, h.replyCtx)
+			}
+
+			// Adopt the pre-created successor card. When none exists (non-rich
+			// platform or creation failure), the lazy per-event creation paths
+			// build one on the next update; legacy card platforms get a fresh
+			// streaming card for the new reply context.
+			cardMessageID = h.cardHandle
+			if cardMessageID == nil && !usesRichCard(h.platform) {
+				if scp, ok := h.platform.(StreamingCardPlatform); ok {
+					if sc, err := scp.CreateStreamingCard(e.ctx, h.replyCtx); err != nil {
+						slog.Debug("steer: streaming card creation failed for successor context", "error", err)
+					} else {
+						streamCard = sc
+					}
+				}
+			}
+
+			slog.Info("steer presentation handoff adopted",
+				"session", sessionKey,
+				"msg_id", h.messageID,
+			)
+		}
+	}
+	applySteerHandoffs := func() {
+		state.mu.Lock()
+		handoffs := state.pendingHandoffs
+		state.pendingHandoffs = nil
+		state.mu.Unlock()
+		applySteerHandoffList(handoffs)
+	}
+
 	events := state.agentSession.Events()
 	var deferredEvent Event
 	hasDeferredEvent := false
@@ -5289,6 +5627,11 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					removeRichCardForFallback(p, cardMessageID)
 				}
 				return
+			case <-handoffCh:
+				// A steer was accepted mid-turn: adopt the presentation
+				// handoff even while no agent events are flowing.
+				applySteerHandoffs()
+				continue
 			case event, ok = <-events:
 				if !ok {
 					// A closed transport is also a semantic assistant boundary.
@@ -5434,6 +5777,10 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				slog.Warn("slow agent first event", "elapsed", elapsed, "session", sessionKey, "event_type", event.Type)
 			}
 		}
+
+		// Adopt any pending steer handoff before rendering this event so the
+		// post-boundary stream lands in the successor card, not the frozen one.
+		applySteerHandoffs()
 
 		state.mu.Lock()
 		p := state.platform
@@ -6026,6 +6373,18 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				)
 				continue
 			}
+			// Adopt any steer handoff that raced turn completion, then close
+			// the adoption window: a steer accepted after this point resolves
+			// against the completed turn (the initiator patches its own
+			// successor card). This guarantees the final answer renders in the
+			// newest adopted card and that only one card reaches Done.
+			applySteerHandoffs()
+			state.mu.Lock()
+			state.presentationOpen = false
+			steerLeftover := state.pendingHandoffs
+			state.pendingHandoffs = nil
+			state.mu.Unlock()
+			applySteerHandoffList(steerLeftover)
 			cp.Finalize(ProgressCardStateCompleted)
 			// Use state.agentSession.CurrentSessionID() instead of event.SessionID.
 			// event.SessionID may be empty in some cases, causing the agent_session_id
@@ -6509,6 +6868,8 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				state.currentMessageID = queued.messageID
 				state.fromVoice = queued.fromVoice
 				state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
+				// Re-open the steer adoption window for the queued turn.
+				state.presentationOpen = true
 				state.mu.Unlock()
 
 				// Stop the previous turn's typing indicator
@@ -7130,22 +7491,59 @@ func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
 	// concurrent `codex exec resume` racing the running turn (issue #27), so
 	// steer-aware sessions never fall back to Send.
 	if steerable, ok := state.agentSession.(SteerableSession); ok {
+		// Rich-card mode: the successor card replying to the /ps message is
+		// itself the acknowledgement, replacing the plain "P.S. delivered"
+		// text so the sender gets exactly one feedback surface (issue #27).
+		cardHandle, cardCopy := e.beginSteerPresentation(p, msg.ReplyCtx, text)
 		err := steerable.Steer(text, nil, nil)
 		switch {
 		case err == nil:
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPsSent))
+			session := sessions.GetOrCreateActive(msg.SessionKey)
+			session.AddHistory("user", text)
+			sessions.Save()
+			committed := e.commitSteerPresentation(iKey, steerHandoff{
+				messageID:         msg.MessageID,
+				platform:          p,
+				replyCtx:          msg.ReplyCtx,
+				cardHandle:        cardHandle,
+				richCardCopy:      cardCopy,
+				hasRichCardCopy:   true,
+				content:           text,
+				userMessageTimeMs: msg.UserMessageTimeMs,
+			})
+			switch {
+			case committed && cardHandle != nil:
+				// Successor card is the acknowledgement.
+			case committed:
+				e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPsSent))
+			default:
+				// Turn finalized during the steer RPC; the answer went to the
+				// original card and already incorporates this input.
+				body := e.i18n.T(MsgSteerMergedCompleted)
+				if !e.patchSteerCard(p, cardHandle, CardStatusRedirected, "redirected", body, cardCopy) {
+					e.reply(p, msg.ReplyCtx, body)
+				}
+			}
 		case errors.Is(err, ErrSteerUnsupported):
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSteerUnsupportedBackend))
+			if !e.patchSteerCard(p, cardHandle, CardStatusError, "error", e.i18n.T(MsgSteerUnsupportedBackend), cardCopy) {
+				e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSteerUnsupportedBackend))
+			}
 		case errors.Is(err, ErrSteerNoActiveTurn), errors.Is(err, ErrSteerTurnMismatch):
 			// Definitive: nothing was delivered. /ps means "supplement the
 			// task currently running", so do not silently queue a new turn.
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSteerTurnGone))
+			if !e.patchSteerCard(p, cardHandle, CardStatusError, "error", e.i18n.T(MsgSteerTurnGone), cardCopy) {
+				e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSteerTurnGone))
+			}
 		case errors.Is(err, ErrSteerOutcomeUnknown):
 			slog.Warn("ps: steer outcome unknown", "error", err)
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSteerOutcomeUnknown))
+			if !e.patchSteerCard(p, cardHandle, CardStatusError, "error", e.i18n.T(MsgSteerOutcomeUnknown), cardCopy) {
+				e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSteerOutcomeUnknown))
+			}
 		default:
 			slog.Error("ps: steer failed", "error", err)
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPsSendFailed))
+			if !e.patchSteerCard(p, cardHandle, CardStatusError, "error", e.i18n.T(MsgPsSendFailed), cardCopy) {
+				e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPsSendFailed))
+			}
 		}
 		return
 	}

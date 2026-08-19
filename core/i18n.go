@@ -390,6 +390,11 @@ const (
 	MsgRichCardUsageLimit        MsgKey = "rich_card_usage_limit"
 	MsgRichCardUsageLimitBody    MsgKey = "rich_card_usage_limit_body"
 	MsgRichCardUsageLimitSummary MsgKey = "rich_card_usage_limit_summary"
+	// Steer / presentation handoff (issue #27)
+	MsgRichCardSteering          MsgKey = "rich_card_steering"
+	MsgRichCardRedirected        MsgKey = "rich_card_redirected"
+	MsgRichCardRedirectedBody    MsgKey = "rich_card_redirected_body"
+	MsgRichCardRedirectedSummary MsgKey = "rich_card_redirected_summary"
 	MsgCardTitleModel            MsgKey = "card_title_model"
 	MsgCardTitleReasoning        MsgKey = "card_title_reasoning"
 	MsgCardTitleMode             MsgKey = "card_title_mode"
@@ -559,6 +564,7 @@ const (
 	MsgSteerUnsupportedBackend MsgKey = "steer_unsupported_backend"
 	MsgSteerTurnGone           MsgKey = "steer_turn_gone"
 	MsgSteerOutcomeUnknown     MsgKey = "steer_outcome_unknown"
+	MsgSteerMergedCompleted    MsgKey = "steer_merged_completed"
 
 	MsgWhoamiTitle     MsgKey = "whoami_title"
 	MsgWhoamiCardTitle MsgKey = "whoami_card_title"
@@ -2649,6 +2655,22 @@ var messages = map[MsgKey]map[Language]string{
 		LangEnglish: "Token usage limit reached", LangChinese: "Token 使用额度已用完", LangTraditionalChinese: "Token 使用額度已用完",
 		LangJapanese: "トークン利用上限に達しました", LangSpanish: "Límite de uso de tokens alcanzado",
 	},
+	MsgRichCardSteering: {
+		LangEnglish: "Adding this message to the current task...", LangChinese: "正在将此消息并入当前任务…", LangTraditionalChinese: "正在將此訊息併入目前任務…",
+		LangJapanese: "このメッセージを現在のタスクに追加しています…", LangSpanish: "Añadiendo este mensaje a la tarea en curso...",
+	},
+	MsgRichCardRedirected: {
+		LangEnglish: "Continued in a newer message", LangChinese: "已转到更新的消息", LangTraditionalChinese: "已轉到較新的訊息",
+		LangJapanese: "新しいメッセージに引き継がれました", LangSpanish: "Continúa en un mensaje más reciente",
+	},
+	MsgRichCardRedirectedBody: {
+		LangEnglish: "This task continues in the card replying to the newer message.", LangChinese: "该任务将在回复更新消息的卡片中继续。", LangTraditionalChinese: "該任務將在回覆較新訊息的卡片中繼續。",
+		LangJapanese: "このタスクは、より新しいメッセージへの返信カードで続行されます。", LangSpanish: "Esta tarea continúa en la tarjeta que responde al mensaje más reciente.",
+	},
+	MsgRichCardRedirectedSummary: {
+		LangEnglish: "Continued in a newer message", LangChinese: "已转到更新的消息", LangTraditionalChinese: "已轉到較新的訊息",
+		LangJapanese: "新しいメッセージに引き継がれました", LangSpanish: "Continúa en un mensaje más reciente",
+	},
 	MsgCardTitleModel: {
 		LangEnglish: "Model", LangChinese: "模型", LangTraditionalChinese: "模型",
 		LangJapanese: "モデル", LangSpanish: "Modelo",
@@ -3509,6 +3531,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⚠️ 無法確認補充內容是否已併入目前回合（請求逾時）。為避免重複投遞，訊息未自動排隊；請先觀察後續輸出再決定是否重發。",
 		LangJapanese:           "⚠️ 追加内容が現在のターンに反映されたか確認できませんでした（リクエストタイムアウト）。重複を避けるため再キューはしていません。今後の出力を確認してから再送信してください。",
 		LangSpanish:            "⚠️ No se pudo confirmar si tu añadido llegó al turno actual (tiempo de espera agotado). NO se volvió a encolar para evitar duplicados; revisa la próxima salida antes de reenviar.",
+	},
+	MsgSteerMergedCompleted: {
+		LangEnglish:            "↪️ Your addition was accepted just as the task finished — see the answer above.",
+		LangChinese:            "↪️ 补充内容已被接受，但任务恰好完成，请查看上方回答。",
+		LangTraditionalChinese: "↪️ 補充內容已被接受，但任務恰好完成，請查看上方回答。",
+		LangJapanese:           "↪️ 追加内容は受け付けられましたが、タスクがちょうど完了しました。上の回答をご覧ください。",
+		LangSpanish:            "↪️ Tu añadido fue aceptado justo cuando la tarea terminó; consulta la respuesta anterior.",
 	},
 	MsgWhoamiTitle: {
 		LangEnglish:            "🪪 **Your Identity**",
@@ -4409,6 +4438,10 @@ func richCardCopyForLanguage(lang Language) RichCardCopy {
 		UsageLimit:        t(MsgRichCardUsageLimit),
 		UsageLimitBody:    t(MsgRichCardUsageLimitBody),
 		UsageLimitSummary: t(MsgRichCardUsageLimitSummary),
+		Steering:          t(MsgRichCardSteering),
+		Redirected:        t(MsgRichCardRedirected),
+		RedirectedBody:    t(MsgRichCardRedirectedBody),
+		RedirectedSummary: t(MsgRichCardRedirectedSummary),
 	}
 }
 

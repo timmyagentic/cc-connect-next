@@ -755,6 +755,12 @@ const (
 	CardStatusWorking  CardStatus = "working"  // blue
 	CardStatusDone     CardStatus = "done"     // green
 	CardStatusError    CardStatus = "error"    // red
+	// CardStatusRedirected is the neutral terminal state of a lifecycle card
+	// whose in-flight turn was steered to a newer trigger message (issue #27).
+	// The turn is neither done nor failed here — its presentation simply
+	// continues in a newer card, so the frozen card keeps already-visible
+	// partial output under a grey "continued in a newer message" header.
+	CardStatusRedirected CardStatus = "redirected" // neutral/grey
 )
 
 // PreviewStatusUpdater is an optional interface for platforms that support
