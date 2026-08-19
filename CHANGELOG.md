@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## v0.1.3 (2026-08-20)
+
+Stable release: the daemon now proactively reminds users once per new stable
+release, the two applicable upstream v1.5.0 P1 stability fixes are ported, and
+the README is rebuilt as a modern bilingual landing page.
+
+See `changelogs/v0.1.3.md` for the bilingual release notes.
 
 ### Proactive update notice
 
