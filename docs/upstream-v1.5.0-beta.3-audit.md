@@ -30,3 +30,21 @@ cc-connect-next forked from official CC Connect v1.4.1 (`7fcad099`). Official v1
 3. Preserve the Next identities (`cc-connect-next`, `.cc-connect-next`, independent services and sockets).
 4. Treat Feishu routing, reply context, card lifecycle, and migration inventory as protected contracts.
 5. Require focused regression tests before implementation, then full Go, race, release-local, archive, and real-client gates.
+
+## v1.5.0 final delta (audited 2026-08-19)
+
+Official v1.5.0 (`17c61062`, released 2026-08-16) stabilizes beta.1–beta.5.
+Delta since the audited `v1.5.0-beta.3`: 12 commits, of which one touches
+core/Feishu (`44c07b61`, #1693 P1 stability). No overlap with Next-only
+features (busy-message steer, rich-card handoff, usage-limit card, unified
+updater — none exist upstream; upstream `/ps` still calls plain `Send`).
+
+| Upstream change | Decision | Reason / implementation |
+|---|---|---|
+| `44c07b61` P1-A — recover in `runPendingRestartNotify` | Reimplemented | Next shares the same goroutine shape with no higher-level recover; a platform panic during restart notify would kill the daemon. Ported with the panic/stack log and a crash-reproducing regression test. |
+| `44c07b61` P1-B — flush pending image batch before non-image dispatch | Adapted | Next has the same image batch + user-message watermark stale-drop, so a rapid image+text pair could drop the buffered image. Next routes every branch through one `dispatchToCore` closure, so the flush lives there instead of upstream's eight per-branch call sites; the non-batched image dispatch path is covered as well. |
+| `44c07b61` P1-C — idle-close timer arming order | Not applicable | Fixes `agent_session_idle_timeout_mins` (#1338), which was deferred at the beta.3 gate and never imported. |
+| `1ddbac04`, `6c860798` — Kimi Code CLI native dialect + probe gate | Deferred | Feature work for the Kimi agent; import as one unit with real-CLI QA when needed. |
+| `c2bfb444`, `e3ea0cb5` — Pi v0.84.0 toolcall_end + willRetry | Deferred | Pi compatibility updates; import when a Pi deployment needs v0.84.0. |
+| `cc869faa` — WeCom quoted messages as agent context | Deferred | Platform enhancement outside the Feishu contract; needs WeCom QA. |
+| `d5144e88` — web work_dir validation | Deferred | Next's web admin diverged; revisit with the next web batch. |
