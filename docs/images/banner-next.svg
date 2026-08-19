@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200">
+  <defs>
+    <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#0ea5e9;stop-opacity:1" />
+      <stop offset="55%" style="stop-color:#0284c7;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#0ea5e9;stop-opacity:0" />
+      <stop offset="50%" style="stop-color:#38bdf8;stop-opacity:0.9" />
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:0" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="200" fill="#0f172a"/>
+
+  <!-- Decorative connection line -->
+  <line x1="80" y1="40" x2="720" y2="40" stroke="url(#lineGrad)" stroke-width="1.5"/>
+  <circle cx="400" cy="40" r="4" fill="#38bdf8"/>
+  <circle cx="260" cy="40" r="2.5" fill="#0ea5e9" opacity="0.8"/>
+  <circle cx="540" cy="40" r="2.5" fill="#7c3aed" opacity="0.8"/>
+
+  <!-- Title -->
+  <text x="400" y="118" font-family="system-ui, -apple-system, sans-serif" font-size="58" fill="url(#textGrad)" text-anchor="middle" font-weight="bold" filter="url(#glow)" letter-spacing="-2">cc-connect-next</text>
+
+  <!-- Subtitle -->
+  <text x="400" y="152" font-family="system-ui, -apple-system, sans-serif" font-size="16" fill="#94a3b8" text-anchor="middle">Privacy-first AI agent bridge · Native Feishu Card 2.0 streaming</text>
+
+  <!-- Decorative bottom line -->
+  <line x1="80" y1="176" x2="720" y2="176" stroke="url(#lineGrad)" stroke-width="1"/>
+</svg>

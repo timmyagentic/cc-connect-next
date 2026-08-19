@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 470" font-family="system-ui, -apple-system, 'PingFang SC', sans-serif">
+  <defs>
+    <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="860" height="470" fill="#0f172a"/>
+
+  <!-- ═══════════ Row 1: one turn, one card ═══════════ -->
+  <text x="430" y="34" font-size="15" fill="#e2e8f0" text-anchor="middle" font-weight="600">One agent turn · one quoted native card · in-place updates</text>
+
+  <!-- Card 1: thinking -->
+  <g filter="url(#cardShadow)">
+    <rect x="28" y="56" width="180" height="104" rx="10" fill="#1e293b" stroke="#334155"/>
+    <rect x="28" y="56" width="180" height="30" rx="10" fill="#2563eb"/>
+    <rect x="28" y="72" width="180" height="14" fill="#2563eb"/>
+    <text x="40" y="76" font-size="12" fill="#ffffff" font-weight="600">⏳ 正在思考…</text>
+    <text x="40" y="108" font-size="11" fill="#cbd5e1">推理 2 次 · 工具 0 次</text>
+    <text x="40" y="130" font-size="10" fill="#64748b">🔒 不透出推理与工具明细</text>
+  </g>
+  <line x1="214" y1="108" x2="238" y2="108" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Card 2: tools -->
+  <g filter="url(#cardShadow)">
+    <rect x="244" y="56" width="180" height="104" rx="10" fill="#1e293b" stroke="#334155"/>
+    <rect x="244" y="56" width="180" height="30" rx="10" fill="#2563eb"/>
+    <rect x="244" y="72" width="180" height="14" fill="#2563eb"/>
+    <text x="256" y="76" font-size="12" fill="#ffffff" font-weight="600">⏳ 正在调用工具…</text>
+    <text x="256" y="108" font-size="11" fill="#cbd5e1">推理 4 次 · 工具 3 次</text>
+    <text x="256" y="130" font-size="10" fill="#64748b">anonymous progress only</text>
+  </g>
+  <line x1="430" y1="108" x2="454" y2="108" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Card 3: answering -->
+  <g filter="url(#cardShadow)">
+    <rect x="460" y="56" width="180" height="104" rx="10" fill="#1e293b" stroke="#334155"/>
+    <rect x="460" y="56" width="180" height="30" rx="10" fill="#2563eb"/>
+    <rect x="460" y="72" width="180" height="14" fill="#2563eb"/>
+    <text x="472" y="76" font-size="12" fill="#ffffff" font-weight="600">✍️ 正在回答</text>
+    <text x="472" y="108" font-size="11" fill="#e2e8f0">部署失败的根因是……▌</text>
+    <text x="472" y="130" font-size="10" fill="#64748b">CardKit typewriter streaming</text>
+  </g>
+  <line x1="646" y1="108" x2="670" y2="108" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Card 4: done -->
+  <g filter="url(#cardShadow)">
+    <rect x="676" y="56" width="156" height="104" rx="10" fill="#1e293b" stroke="#334155"/>
+    <rect x="676" y="56" width="156" height="30" rx="10" fill="#16a34a"/>
+    <rect x="676" y="72" width="156" height="14" fill="#16a34a"/>
+    <text x="688" y="76" font-size="12" fill="#ffffff" font-weight="600">✅ 已完成</text>
+    <text x="688" y="108" font-size="11" fill="#e2e8f0">完整回答与图片</text>
+    <text x="688" y="130" font-size="10" fill="#64748b">same card, finalized</text>
+  </g>
+
+  <!-- ═══════════ Divider ═══════════ -->
+  <line x1="40" y1="196" x2="820" y2="196" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- ═══════════ Row 2: steer handoff ═══════════ -->
+  <text x="430" y="228" font-size="15" fill="#e2e8f0" text-anchor="middle" font-weight="600">Steer: a busy-session message joins the running turn — the card hands over</text>
+
+  <!-- User supplement bubble -->
+  <g filter="url(#cardShadow)">
+    <rect x="330" y="250" width="220" height="34" rx="17" fill="#334155"/>
+    <text x="440" y="272" font-size="11.5" fill="#e2e8f0" text-anchor="middle">补充：顺便检查一下并发锁 💬</text>
+  </g>
+  <line x1="440" y1="284" x2="440" y2="306" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="452" y="300" font-size="10" fill="#7c8ea6">turn/steer · same turn, no new turn</text>
+
+  <!-- Card A: frozen redirected -->
+  <g filter="url(#cardShadow)">
+    <rect x="96" y="316" width="240" height="118" rx="10" fill="#1e293b" stroke="#334155"/>
+    <rect x="96" y="316" width="240" height="30" rx="10" fill="#475569"/>
+    <rect x="96" y="332" width="240" height="14" fill="#475569"/>
+    <text x="108" y="336" font-size="12" fill="#ffffff" font-weight="600">↪️ 已转到更新的消息</text>
+    <text x="108" y="368" font-size="11" fill="#cbd5e1">部署失败的根因是配置漂移，</text>
+    <text x="108" y="384" font-size="11" fill="#cbd5e1">建议先比对两套环境……</text>
+    <text x="108" y="406" font-size="10" fill="#64748b">frozen · keeps the visible partial</text>
+    <text x="108" y="422" font-size="10" fill="#64748b">never Done, never Error</text>
+  </g>
+  <line x1="342" y1="374" x2="516" y2="374" stroke="#64748b" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="429" y="366" font-size="10" fill="#7c8ea6" text-anchor="middle">presentation handoff</text>
+
+  <!-- Card B: successor done -->
+  <g filter="url(#cardShadow)">
+    <rect x="524" y="316" width="240" height="118" rx="10" fill="#1e293b" stroke="#334155"/>
+    <rect x="524" y="316" width="240" height="30" rx="10" fill="#16a34a"/>
+    <rect x="524" y="332" width="240" height="14" fill="#16a34a"/>
+    <text x="536" y="336" font-size="12" fill="#ffffff" font-weight="600">✅ 已完成</text>
+    <text x="536" y="368" font-size="11" fill="#e2e8f0">……并发锁的问题也已确认：</text>
+    <text x="536" y="384" font-size="11" fill="#e2e8f0">写锁竞争来自重试风暴。</text>
+    <text x="536" y="406" font-size="10" fill="#64748b">replies to the newest message</text>
+    <text x="536" y="422" font-size="10" fill="#64748b">the only card that reaches Done</text>
+  </g>
+</svg>
