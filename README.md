@@ -24,7 +24,7 @@ Run Claude Code, Codex, Cursor, or any of 14 coding agents on your own machine �
 ## ✨ Highlights
 
 - 🔒 **Privacy-first Feishu Card 2.0 lifecycle** — one agent turn stays in one quoted native card: `⏳ thinking` → `⏳ calling tools` → `✍️ answering` (CardKit typewriter streaming) → `✅ done`. Only anonymous progress counts are ever rendered; reasoning text, tool names, inputs, results, model, token, and workdir details are dropped at **two** layers and the card has no expandable panel.
-- 🎛️ **Steer the running turn** — busy-session messages can be configured to *queue* (FIFO, default) or ***steer***: appended to the task already running via Codex's native `turn/steer`, with the live card handing over to the newest message. `/ps` steers explicitly on any mode. *(v0.1.2)*
+- 🎛️ **Steer the running turn** — messages that arrive while the agent is busy join the task **already running** (the default) via Codex's native `turn/steer`, with the live card handing over to the newest message; agents without the capability fall back to the FIFO queue transparently, and `busy_message_mode = "queue"` restores queue-always. `/ps` steers explicitly on any mode.
 - 🚚 **Auditable one-command migration** — `cc-connect-next migrate` inventories the official install, hashes every source file, stages, verifies, and activates atomically with timestamped backups and a full SHA-256 manifest. It fails closed rather than ever activating an incomplete target.
 - 🔔 **Self-maintaining installs** — `cc-connect-next update` follows the stable channel with checksum verification for both npm and standalone binaries, and a running daemon reminds each project's most recent chat **once per new release** (`update_notice = false` to opt out).
 - 🤖 **14 agents × 15 platforms** — one process hosts multiple projects, each binding a code directory to its own agent and platforms, with per-project permissions, providers, models, and display settings.
@@ -67,16 +67,16 @@ See [INSTALL.md](INSTALL.md) for standalone binaries, building from source, and 
 
 Two intents exist for a message that arrives while the agent is busy — and they are different features:
 
-| | `queue` (default) | `steer` |
+| | `steer` (default) | `queue` |
 |---|---|---|
-| Meaning | "finish this task, then handle my message as a new request" | "incorporate this correction into the task **already running**" |
-| Mechanism | per-session FIFO, new turn after the current one | native `turn/steer` pinned to the active turn (`expectedTurnId`) |
-| Card behavior | new card when its turn starts | live card hands over to the newest message |
-| Requirements | any agent | Codex with `backend = "app_server"` |
+| Meaning | "incorporate this correction into the task **already running**" | "finish this task, then handle my message as a new request" |
+| Mechanism | native `turn/steer` pinned to the active turn (`expectedTurnId`) | per-session FIFO, new turn after the current one |
+| Card behavior | live card hands over to the newest message | new card when its turn starts |
+| Requirements | Codex with `backend = "app_server"` (others fall back to queue) | any agent |
 
 ```toml
 [queue]
-busy_message_mode = "steer"     # "queue" (default) or "steer"
+busy_message_mode = "steer"     # "steer" (default) or "queue"
 
 [projects.agent.options]
 backend = "app_server"
@@ -165,7 +165,7 @@ cc-connect-next forked from CC Connect v1.4.1 and tracks upstream through per-ch
 |---|---|---|
 | Feishu answers | message stream / legacy cards | single Card 2.0 lifecycle with typewriter streaming |
 | Reasoning & tool details in chat | rendered | anonymous counts only, enforced at two layers |
-| Busy-session messages | FIFO queue; `/ps` raw send | configurable queue **or** native steer with card handoff |
+| Busy-session messages | FIFO queue; `/ps` raw send | native steer with card handoff by default, queue configurable |
 | Updates | manual | stable-channel updater + once-per-release daemon notice |
 | Migration path | — | audited one-command migration with manifest and rollback |
 | Runtime identity | `cc-connect` · `~/.cc-connect` | independent everything; both coexist |

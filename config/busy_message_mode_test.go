@@ -32,14 +32,18 @@ func TestResolveBusyMessageMode(t *testing.T) {
 	steer := "steer"
 	queue := "queue"
 
-	// Default: queue.
+	// Default: steer (agents without the capability fall back to the queue).
 	cfg := &Config{}
 	proj := &ProjectConfig{}
-	if got := cfg.ResolveBusyMessageMode(proj); got != BusyMessageModeQueue {
-		t.Fatalf("default mode = %q, want queue", got)
+	if got := cfg.ResolveBusyMessageMode(proj); got != BusyMessageModeSteer {
+		t.Fatalf("default mode = %q, want steer", got)
 	}
 
-	// Global steer applies to projects without an override.
+	// Global queue opts back into the pre-v0.1.3 FIFO behavior.
+	cfg.Queue.BusyMessageMode = &queue
+	if got := cfg.ResolveBusyMessageMode(proj); got != BusyMessageModeQueue {
+		t.Fatalf("global queue = %q, want queue", got)
+	}
 	cfg.Queue.BusyMessageMode = &steer
 	if got := cfg.ResolveBusyMessageMode(proj); got != BusyMessageModeSteer {
 		t.Fatalf("global steer = %q, want steer", got)

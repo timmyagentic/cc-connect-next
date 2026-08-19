@@ -400,11 +400,40 @@ func TestHandleMessage_BusySteerMode_SteersInsteadOfQueueing(t *testing.T) {
 	}
 }
 
-func TestHandleMessage_DefaultQueueMode_DoesNotSteer(t *testing.T) {
+func TestHandleMessage_DefaultMode_Steers(t *testing.T) {
+	// Since v0.1.3 the default busy-message mode is steer.
+	p := &stubPlatformEngine{n: "test"}
+	sess := newSteerableSession("hm-default")
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	// No SetBusyMessageMode call: the default applies.
+
+	key := "test:user1"
+	unlock := installBusySteerableState(t, e, p, key, sess)
+	defer unlock()
+
+	msg := &Message{SessionKey: key, MessageID: "m2", UserID: "u1", Content: "by default", ReplyCtx: "ctx2"}
+	e.handleMessage(p, msg)
+
+	if calls := sess.getSteerCalls(); len(calls) != 1 || !strings.Contains(calls[0], "by default") {
+		t.Fatalf("default mode must steer, got %v", calls)
+	}
+
+	e.interactiveMu.Lock()
+	state := e.interactiveStates[key]
+	e.interactiveMu.Unlock()
+	state.mu.Lock()
+	pending := len(state.pendingMessages)
+	state.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("default steer must not queue, found %d entries", pending)
+	}
+}
+
+func TestHandleMessage_ExplicitQueueMode_DoesNotSteer(t *testing.T) {
 	p := &stubPlatformEngine{n: "test"}
 	sess := newSteerableSession("hm-queue")
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
-	// Default mode: queue. No SetBusyMessageMode call.
+	e.SetBusyMessageMode(BusyMessageModeQueue)
 
 	key := "test:user1"
 	unlock := installBusySteerableState(t, e, p, key, sess)
@@ -414,7 +443,7 @@ func TestHandleMessage_DefaultQueueMode_DoesNotSteer(t *testing.T) {
 	e.handleMessage(p, msg)
 
 	if calls := sess.getSteerCalls(); len(calls) != 0 {
-		t.Fatalf("default queue mode must not steer, got %v", calls)
+		t.Fatalf("explicit queue mode must not steer, got %v", calls)
 	}
 	e.interactiveMu.Lock()
 	state := e.interactiveStates[key]

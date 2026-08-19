@@ -112,13 +112,13 @@ type Config struct {
 	// stable release is published, each project's most recently active
 	// session receives one localized notice per version. nil/true = enabled
 	// (default); false = disabled.
-	UpdateNotice *bool         `toml:"update_notice"`
-	Webhook      WebhookConfig `toml:"webhook"`
-	Bridge             BridgeConfig            `toml:"bridge"`
-	Management         ManagementConfig        `toml:"management"`
-	Hooks              []HookConfig            `toml:"hooks"`
-	IdleTimeoutMins    *int                    `toml:"idle_timeout_mins,omitempty"`  // max minutes between consecutive agent events; 0 = no timeout; default 120
-	MaxTurnTimeMins    *int                    `toml:"max_turn_time_mins,omitempty"` // absolute wall-clock cap per turn in minutes; 0 = disabled (default)
+	UpdateNotice    *bool            `toml:"update_notice"`
+	Webhook         WebhookConfig    `toml:"webhook"`
+	Bridge          BridgeConfig     `toml:"bridge"`
+	Management      ManagementConfig `toml:"management"`
+	Hooks           []HookConfig     `toml:"hooks"`
+	IdleTimeoutMins *int             `toml:"idle_timeout_mins,omitempty"`  // max minutes between consecutive agent events; 0 = no timeout; default 120
+	MaxTurnTimeMins *int             `toml:"max_turn_time_mins,omitempty"` // absolute wall-clock cap per turn in minutes; 0 = disabled (default)
 	// WorkspaceIdleTimeoutMins controls the workspace idle reaper timeout
 	// (multi-workspace mode) for every engine in the process. 0 disables
 	// reaping. Default: 15 minutes. Defined as a top-level (process-global)
@@ -152,11 +152,12 @@ type CronConfig struct {
 type QueueConfig struct {
 	MaxDepth *int `toml:"max_depth"` // max queued messages per session; default 5
 	// BusyMessageMode controls what happens to an ordinary message that
-	// arrives while a turn is active: "queue" (default) keeps the existing
-	// FIFO behavior; "steer" appends eligible input to the in-flight turn on
-	// agents that support native steering (falling back to the queue when
-	// steering is definitively unavailable). Overridable per project via
-	// projects.busy_message_mode.
+	// arrives while a turn is active: "steer" (default) appends eligible
+	// input to the in-flight turn on agents that support native steering,
+	// transparently falling back to the FIFO queue when steering is
+	// unavailable (non-steerable agents, Codex exec backend, no active
+	// turn); "queue" always keeps the pre-v0.1.3 FIFO behavior.
+	// Overridable per project via projects.busy_message_mode.
 	BusyMessageMode *string `toml:"busy_message_mode"`
 }
 
@@ -184,7 +185,8 @@ func NormalizeBusyMessageMode(raw string) (mode string, ok bool) {
 
 // ResolveBusyMessageMode returns the effective busy-message mode for a
 // project: the project-level override when set, else the global [queue]
-// setting, else the backward-compatible default "queue".
+// setting, else the default "steer" (safe everywhere: agents without the
+// steer capability transparently fall back to the FIFO queue).
 func (c *Config) ResolveBusyMessageMode(proj *ProjectConfig) string {
 	if proj != nil {
 		if mode, ok := NormalizeBusyMessageMode(proj.BusyMessageMode); ok && mode != "" {
@@ -196,7 +198,7 @@ func (c *Config) ResolveBusyMessageMode(proj *ProjectConfig) string {
 			return mode
 		}
 	}
-	return BusyMessageModeQueue
+	return BusyMessageModeSteer
 }
 
 // WebhookConfig controls the external HTTP webhook endpoint.

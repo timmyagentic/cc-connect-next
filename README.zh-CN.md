@@ -24,7 +24,7 @@
 ## ✨ 亮点
 
 - 🔒 **隐私优先的飞书 Card 2.0 生命周期** —— 一次 Agent 回合始终是同一张引用原始提问的原生卡片：`⏳ 正在思考` → `⏳ 正在调用工具` → `✍️ 正在回答`（CardKit 打字机流式）→ `✅ 已完成`。只渲染匿名进度计数；推理文本、工具名称、参数、结果、模型、token、工作目录在**两层**被丢弃，卡片中不存在可展开面板。
-- 🎛️ **并入正在执行的回合（steer）** —— 忙时消息可配置为*排队*（FIFO，默认）或 ***steer***：通过 Codex 原生 `turn/steer` 直接并入正在运行的任务，进度卡片同步交接到最新消息。`/ps` 在任何模式下都是显式 steer。*（v0.1.2）*
+- 🎛️ **并入正在执行的回合（steer）** —— 忙时消息默认直接并入**正在运行**的任务（Codex 原生 `turn/steer`），进度卡片同步交接到最新消息；不支持该能力的 agent 透明回退到 FIFO 队列，`busy_message_mode = "queue"` 可恢复始终排队。`/ps` 在任何模式下都是显式 steer。
 - 🚚 **可审计的一键迁移** —— `cc-connect-next migrate` 清点官方安装、对每个源文件计算哈希、staging 构建校验后原子启用，附带时间戳备份和完整 SHA-256 manifest；宁可安全失败也绝不启用不完整的目标。
 - 🔔 **自我维护的安装** —— `cc-connect-next update` 只走稳定通道并校验 checksums（npm 与独立二进制都支持）；运行中的 daemon 会在新稳定版发布后向每个项目最近活跃的会话**每版本提醒一次**（`update_notice = false` 可关）。
 - 🤖 **14 种 Agent × 15 个平台** —— 单进程承载多个项目，每个项目把一个代码目录绑定到独立的 Agent 与平台，各自拥有权限、provider、模型与展示配置。
@@ -67,16 +67,16 @@ cc-connect-next daemon install --config ~/.cc-connect-next/config.toml
 
 忙时消息背后有两种不同的意图——它们是两个不同的功能：
 
-| | `queue`（默认） | `steer` |
+| | `steer`（默认） | `queue` |
 |---|---|---|
-| 语义 | “先做完当前任务，再把这条当作新请求” | “把这条纠正并入**正在运行**的任务” |
-| 机制 | 会话级 FIFO，当前回合结束后开新回合 | 原生 `turn/steer` 锁定当前回合（`expectedTurnId`） |
-| 卡片行为 | 排队回合开始时创建新卡片 | 进行中的卡片交接到最新消息 |
-| 要求 | 任意 Agent | Codex + `backend = "app_server"` |
+| 语义 | “把这条纠正并入**正在运行**的任务” | “先做完当前任务，再把这条当作新请求” |
+| 机制 | 原生 `turn/steer` 锁定当前回合（`expectedTurnId`） | 会话级 FIFO，当前回合结束后开新回合 |
+| 卡片行为 | 进行中的卡片交接到最新消息 | 排队回合开始时创建新卡片 |
+| 要求 | Codex + `backend = "app_server"`（其余回退排队） | 任意 Agent |
 
 ```toml
 [queue]
-busy_message_mode = "steer"     # "queue"（默认）或 "steer"
+busy_message_mode = "steer"     # "steer"（默认）或 "queue"
 
 [projects.agent.options]
 backend = "app_server"
@@ -165,7 +165,7 @@ cc-connect-next 从 CC Connect v1.4.1 分叉，通过逐项审计而非整体合
 |---|---|---|
 | 飞书回答 | 消息流 / legacy 卡片 | 单卡片 Card 2.0 生命周期 + 打字机流式 |
 | 聊天中的推理/工具明细 | 会渲染 | 只有匿名计数，两层强制丢弃 |
-| 忙时消息 | 仅 FIFO 排队；`/ps` 裸发送 | 可配置排队**或**原生 steer + 卡片交接 |
+| 忙时消息 | 仅 FIFO 排队；`/ps` 裸发送 | 默认原生 steer + 卡片交接，可配置排队 |
 | 更新 | 手动 | 稳定通道更新器 + daemon 每版本一次的主动提醒 |
 | 迁移路径 | — | 带 manifest 与回滚的可审计一键迁移 |
 | 运行时身份 | `cc-connect` · `~/.cc-connect` | 全部独立，可并存 |

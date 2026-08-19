@@ -458,9 +458,10 @@ type Engine struct {
 	eventIdleTimeout  time.Duration
 	maxTurnTime       time.Duration // absolute wall-clock cap per turn (0 = disabled)
 	maxQueuedMessages int
-	// busyMessageMode: "queue" (default) keeps busy-session messages in the
-	// FIFO; "steer" appends them to the in-flight turn on SteerableSession
-	// agents, falling back to the queue on definitive steer failures.
+	// busyMessageMode: "steer" (default) appends busy-session messages to
+	// the in-flight turn on SteerableSession agents, falling back to the
+	// FIFO on definitive steer failures or absent capability; "queue"
+	// always uses the FIFO.
 	busyMessageMode string
 	dirHistory      *DirHistory
 	baseWorkDir     string
@@ -902,7 +903,7 @@ func NewEngine(name string, ag Agent, platforms []Platform, sessionStorePath str
 		references:            DefaultReferenceRenderCfg(),
 		eventIdleTimeout:      defaultEventIdleTimeout,
 		maxQueuedMessages:     defaultMaxQueuedMessages,
-		busyMessageMode:       BusyMessageModeQueue,
+		busyMessageMode:       BusyMessageModeSteer,
 		showContextIndicator:  true,
 		showWorkdirIndicator:  true,
 		shell:                 defaultShell(),

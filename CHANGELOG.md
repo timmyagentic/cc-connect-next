@@ -2,11 +2,22 @@
 
 ## v0.1.3 (2026-08-20)
 
-Stable release: the daemon now proactively reminds users once per new stable
-release, the two applicable upstream v1.5.0 P1 stability fixes are ported, and
-the README is rebuilt as a modern bilingual landing page.
+Stable release: steer becomes the default busy-message mode, the daemon now
+proactively reminds users once per new stable release, the two applicable
+upstream v1.5.0 P1 stability fixes are ported, and the README is rebuilt as a
+modern bilingual landing page.
 
 See `changelogs/v0.1.3.md` for the bilingual release notes.
+
+### Steer is now the default busy-message mode
+
+`busy_message_mode` now defaults to `"steer"`: a message that arrives while
+the agent is busy joins the turn already running (Codex app-server backend),
+with the live card handing over to the newest message. The default is safe for
+every agent — sessions without the steer capability, the Codex exec backend,
+and just-ended turns all fall back transparently to the FIFO queue. Set
+`busy_message_mode = "queue"` globally or per project to restore the previous
+queue-always behavior.
 
 ### Proactive update notice
 
