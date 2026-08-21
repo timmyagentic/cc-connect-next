@@ -163,6 +163,8 @@ type appServerRequestUserInputAnswer struct {
 
 type appServerSession struct {
 	url            string
+	cliBin         string   // CLI binary from the cmd option, default "codex"
+	cliExtraArgs   []string // extra args from cmd, placed before the app-server subcommand
 	workDir        string
 	model          string
 	effort         string
@@ -212,25 +214,52 @@ const (
 	appServerUsageRefreshTimeout = 1500 * time.Millisecond
 )
 
-func newAppServerSession(ctx context.Context, url, workDir, model, effort, mode, resumeID, baseURL, modelProvider string, extraEnv []string, codexHome string, systemPrompt string, appendPrompt string) (*appServerSession, error) {
+// appServerSessionParams bundles the launch configuration for a Codex
+// app-server session. The previous positional-string signature let call sites
+// silently drop fields — that is exactly how the cmd binary and extra args
+// were lost on this backend (issue #37).
+type appServerSessionParams struct {
+	url           string
+	cliBin        string   // CLI binary from the cmd option, default "codex"
+	cliExtraArgs  []string // extra args from cmd, placed before the app-server subcommand
+	workDir       string
+	model         string
+	effort        string
+	mode          string
+	resumeID      string
+	baseURL       string
+	modelProvider string
+	extraEnv      []string
+	codexHome     string
+	systemPrompt  string
+	appendPrompt  string
+}
+
+func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appServerSession, error) {
+	cliBin := strings.TrimSpace(p.cliBin)
+	if cliBin == "" {
+		cliBin = "codex"
+	}
 	sessionCtx, cancel := context.WithCancel(ctx)
 	s := &appServerSession{
-		url:              url,
-		workDir:          workDir,
-		model:            model,
-		effort:           effort,
-		mode:             mode,
-		baseURL:          baseURL,
-		modelProvider:    modelProvider,
-		extraEnv:         append([]string(nil), extraEnv...),
-		codexHome:        strings.TrimSpace(codexHome),
-		promptPreamble:   buildCodexPromptPreamble(systemPrompt, appendPrompt),
+		url:              p.url,
+		cliBin:           cliBin,
+		cliExtraArgs:     append([]string(nil), p.cliExtraArgs...),
+		workDir:          p.workDir,
+		model:            p.model,
+		effort:           p.effort,
+		mode:             p.mode,
+		baseURL:          p.baseURL,
+		modelProvider:    p.modelProvider,
+		extraEnv:         append([]string(nil), p.extraEnv...),
+		codexHome:        strings.TrimSpace(p.codexHome),
+		promptPreamble:   buildCodexPromptPreamble(p.systemPrompt, p.appendPrompt),
 		events:           make(chan core.Event, 128),
 		ctx:              sessionCtx,
 		cancel:           cancel,
 		pending:          make(map[int64]chan rpcResponseEnvelope),
 		pendingApprovals: make(map[string]chan core.PermissionResult),
-		preambleSent:     resumeID != "" && resumeID != core.ContinueSession,
+		preambleSent:     p.resumeID != "" && p.resumeID != core.ContinueSession,
 	}
 	s.alive.Store(true)
 
@@ -244,7 +273,7 @@ func newAppServerSession(ctx context.Context, url, workDir, model, effort, mode,
 		return nil, err
 	}
 
-	if err := s.ensureThread(resumeID); err != nil {
+	if err := s.ensureThread(p.resumeID); err != nil {
 		_ = s.Close()
 		return nil, err
 	}
@@ -255,24 +284,35 @@ func newAppServerSession(ctx context.Context, url, workDir, model, effort, mode,
 	return s, nil
 }
 
-func (s *appServerSession) connect() error {
-	args := []string{"app-server"}
-	if strings.TrimSpace(s.url) != "" {
-		args = append(args, "--listen", strings.TrimSpace(s.url))
+// buildAppServerLaunchArgs builds the argv (after the binary) used to spawn
+// the Codex app-server. cliExtraArgs from the user's cmd option go before the
+// app-server subcommand — the same global-flag position the exec backend uses
+// — so the structured options emitted after them win on duplicate -c keys
+// (codex resolves -c last-wins).
+func buildAppServerLaunchArgs(cliExtraArgs []string, url, model, effort, modelProvider, baseURL string) []string {
+	args := append([]string(nil), cliExtraArgs...)
+	args = append(args, "app-server")
+	if strings.TrimSpace(url) != "" {
+		args = append(args, "--listen", strings.TrimSpace(url))
 	}
-	if model := strings.TrimSpace(s.model); model != "" {
+	if model = strings.TrimSpace(model); model != "" {
 		args = append(args, "-c", fmt.Sprintf("model=%q", model))
 	}
-	if effort := strings.TrimSpace(s.effort); effort != "" {
+	if effort = strings.TrimSpace(effort); effort != "" {
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", effort))
 	}
-	if provider := strings.TrimSpace(s.modelProvider); provider != "" {
-		args = append(args, "-c", fmt.Sprintf("model_provider=%q", provider))
+	if modelProvider = strings.TrimSpace(modelProvider); modelProvider != "" {
+		args = append(args, "-c", fmt.Sprintf("model_provider=%q", modelProvider))
 	}
-	if baseURL := strings.TrimSpace(s.baseURL); baseURL != "" {
+	if baseURL = strings.TrimSpace(baseURL); baseURL != "" {
 		args = append(args, "-c", fmt.Sprintf("openai_base_url=%q", baseURL))
 	}
-	cmd := exec.CommandContext(s.ctx, "codex", args...)
+	return args
+}
+
+func (s *appServerSession) connect() error {
+	args := buildAppServerLaunchArgs(s.cliExtraArgs, s.url, s.model, s.effort, s.modelProvider, s.baseURL)
+	cmd := exec.CommandContext(s.ctx, s.cliBin, args...)
 	cmd.Dir = s.workDir
 	env := append([]string(nil), s.extraEnv...)
 	if s.codexHome != "" {

@@ -155,7 +155,11 @@ func normalizeReasoningEffort(raw string) string {
 		return "high"
 	case "xhigh", "x-high", "very-high":
 		return "xhigh"
+	case "max":
+		return "max"
 	default:
+		slog.Warn("codex: unsupported reasoning_effort, falling back to CLI default",
+			"value", raw, "supported", "low, medium, high, xhigh, max")
 		return ""
 	}
 }
@@ -215,7 +219,7 @@ func (a *Agent) GetReasoningEffort() string {
 }
 
 func (a *Agent) AvailableReasoningEfforts() []string {
-	return []string{"low", "medium", "high", "xhigh"}
+	return []string{"low", "medium", "high", "xhigh", "max"}
 }
 
 func (a *Agent) configuredModels() []core.ModelOption {
@@ -472,7 +476,22 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 
 	if backend == "app_server" {
-		return newAppServerSession(ctx, appServerURL, workDir, model, reasoningEffort, mode, sessionID, baseURL, provName, extraEnv, codexHome, systemPrompt, appendPrompt)
+		return newAppServerSession(ctx, appServerSessionParams{
+			url:           appServerURL,
+			cliBin:        cliBin,
+			cliExtraArgs:  cliExtraArgs,
+			workDir:       workDir,
+			model:         model,
+			effort:        reasoningEffort,
+			mode:          mode,
+			resumeID:      sessionID,
+			baseURL:       baseURL,
+			modelProvider: provName,
+			extraEnv:      extraEnv,
+			codexHome:     codexHome,
+			systemPrompt:  systemPrompt,
+			appendPrompt:  appendPrompt,
+		})
 	}
 	if codexHome != "" {
 		extraEnv = append(extraEnv, "CODEX_HOME="+codexHome)

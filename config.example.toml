@@ -1553,8 +1553,10 @@ app_secret = "your-feishu-app-secret"
 # =============================================================================
 # Requires: npm install -g @openai/codex
 # 需要安装：npm install -g @openai/codex
-# Codex uses `codex exec --json` under the hood.
-# Codex 底层使用 `codex exec --json` 命令。
+# Codex runs a persistent `codex app-server` by default; the `exec` backend
+# runs `codex exec --json` per turn instead.
+# Codex 默认运行常驻 `codex app-server`；`exec` 后端则每回合运行
+# `codex exec --json` 子进程。
 
 # [[projects]]
 # name = "my-codex-project"
@@ -1576,7 +1578,23 @@ app_secret = "your-feishu-app-secret"
 # model = "o3"
 #
 # Optional: specify Codex reasoning effort / 可选：指定 Codex 推理强度
-# reasoning_effort = "high"  # "minimal" | "low" | "medium" | "high" | "xhigh"
+# Unsupported values fall back to the Codex CLI default (with a warning).
+# 不支持的值会回退到 Codex CLI 默认强度（并记录警告）。
+# reasoning_effort = "high"  # "low" | "medium" | "high" | "xhigh" | "max"
+#
+# Optional: CLI binary and extra global args / 可选：CLI 二进制与额外全局参数
+# Extra args are passed on both backends, placed before the subcommand
+# (`app-server` / `exec`). Structured options above (model, reasoning_effort,
+# provider) are emitted after them, so they win when both set the same
+# `-c` key (codex resolves duplicate `-c` last-wins).
+# 额外参数在两种后端下都会透传，置于子命令（`app-server` / `exec`）之前。
+# 上方的结构化选项（model、reasoning_effort、provider）在其后输出，
+# 因此与同名 `-c` 键冲突时以结构化选项为准（codex 对重复 `-c` 后者生效）。
+# Any `-c` override (from cmd or structured options) beats Codex's own
+# ~/.codex/config.toml, per standard codex CLI semantics.
+# 任何 `-c` 覆盖（无论来自 cmd 还是结构化选项）都优先于 Codex 自身的
+# ~/.codex/config.toml，这是 codex CLI 的标准语义。
+# cmd = 'codex -c service_tier="fast" -c features.fast_mode=true'
 #
 # Optional: Codex backend / 可选：Codex 后端
 # - "app_server" (default): persistent local `codex app-server` JSON-RPC

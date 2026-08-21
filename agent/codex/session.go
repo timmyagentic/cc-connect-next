@@ -136,10 +136,7 @@ func (cs *codexSession) Send(prompt string, images []core.ImageAttachment, files
 	if !isResume {
 		prompt = prependCodexPromptPreamble(prompt, cs.promptPreamble)
 	}
-	args := cs.buildExecArgs(prompt, imagePaths)
-	if len(cs.cliExtraArgs) > 0 {
-		args = append(append([]string{}, cs.cliExtraArgs...), args...)
-	}
+	args := cs.launchArgs(prompt, imagePaths)
 
 	bin := cs.cmd
 	if bin == "" {
@@ -210,6 +207,17 @@ func (cs *codexSession) stageImages(prompt string, images []core.ImageAttachment
 	}
 
 	return prompt, imagePaths, nil
+}
+
+// launchArgs composes the full exec argv: cliExtraArgs from the user's cmd
+// option go before the exec subcommand (global-flag position), so the
+// structured options emitted by buildExecArgs win on duplicate -c keys.
+func (cs *codexSession) launchArgs(prompt string, imagePaths []string) []string {
+	args := cs.buildExecArgs(prompt, imagePaths)
+	if len(cs.cliExtraArgs) > 0 {
+		args = append(append([]string{}, cs.cliExtraArgs...), args...)
+	}
+	return args
 }
 
 func (cs *codexSession) buildExecArgs(prompt string, imagePaths []string) []string {
@@ -673,8 +681,14 @@ func codexToolSuccess(status string, exitCode *int) bool {
 	return s == "completed" || s == "success" || s == "succeeded" || s == "ok"
 }
 
-func loadCodexRuntimeConfig(ctx context.Context, workDir string, extraEnv []string) (string, string, error) {
-	cmd := exec.CommandContext(ctx, "codex", "app-server")
+func loadCodexRuntimeConfig(ctx context.Context, cliBin string, cliExtraArgs []string, workDir string, extraEnv []string) (string, string, error) {
+	if cliBin = strings.TrimSpace(cliBin); cliBin == "" {
+		cliBin = "codex"
+	}
+	// Same argv shape as the app-server session launch: cmd extras before the
+	// subcommand, so config/read reports the values the real process sees.
+	args := append(append([]string(nil), cliExtraArgs...), "app-server")
+	cmd := exec.CommandContext(ctx, cliBin, args...)
 	cmd.Dir = workDir
 	prepareCmdForKill(cmd)
 	if len(extraEnv) > 0 {
@@ -856,7 +870,7 @@ func (cs *codexSession) runtimeConfig() (string, string) {
 	ctx, cancel := context.WithTimeout(cs.ctx, codexRuntimeConfigTimeout)
 	defer cancel()
 
-	model, effort, err := loadCodexRuntimeConfig(ctx, cs.workDir, cs.extraEnv)
+	model, effort, err := loadCodexRuntimeConfig(ctx, cs.cmd, cs.cliExtraArgs, cs.workDir, cs.extraEnv)
 	if err == nil {
 		cs.runtimeCfgModel = model
 		cs.runtimeCfgEffort = effort
