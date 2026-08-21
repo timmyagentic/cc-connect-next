@@ -45,6 +45,34 @@ func TestBootstrapConfig_WritesTheSharedStarterTemplate(t *testing.T) {
 	}
 }
 
+func TestBootstrapConfig_FirstInstallEnablesNativeCodexSteer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := bootstrapConfig(path); err != nil {
+		t.Fatalf("bootstrapConfig() error = %v", err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load(bootstrapped config) error = %v", err)
+	}
+	if len(cfg.Projects) != 1 {
+		t.Fatalf("projects = %d, want 1", len(cfg.Projects))
+	}
+
+	proj := &cfg.Projects[0]
+	if proj.Agent.Type != "codex" {
+		t.Fatalf("first-install agent = %q, want codex", proj.Agent.Type)
+	}
+	if got := proj.Agent.Options["backend"]; got != "app_server" {
+		t.Fatalf("first-install Codex backend = %#v, want app_server", got)
+	}
+	if got := proj.Agent.Options["app_server_url"]; got != "stdio" {
+		t.Fatalf("first-install Codex app_server_url = %#v, want stdio", got)
+	}
+	if got := cfg.ResolveBusyMessageMode(proj); got != config.BusyMessageModeSteer {
+		t.Fatalf("first-install busy-message mode = %q, want steer", got)
+	}
+}
+
 func TestStarterPlaceholderRefusal_NamesEveryPlaceholderAndItsNextStep(t *testing.T) {
 	cfg, path := loadStarterConfig(t)
 

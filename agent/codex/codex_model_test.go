@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/timmyagentic/cc-connect-next/core"
@@ -64,9 +65,43 @@ func TestNormalizeAppServerURL_StdIOIsExplicit(t *testing.T) {
 	}
 }
 
-func TestNormalizeAppServerURL_EmptyKeepsWebSocketDefault(t *testing.T) {
-	if got := normalizeAppServerURL(""); got != "ws://127.0.0.1:3845" {
-		t.Fatalf("normalizeAppServerURL(empty) = %q, want ws://127.0.0.1:3845", got)
+func TestNormalizeBackend_EmptyDefaultsToNativeAppServer(t *testing.T) {
+	if got := normalizeBackend(""); got != "app_server" {
+		t.Fatalf("normalizeBackend(empty) = %q, want app_server", got)
+	}
+}
+
+func TestNormalizeBackend_ExplicitExecRemainsAvailable(t *testing.T) {
+	for _, raw := range []string{"exec", " EXEC "} {
+		if got := normalizeBackend(raw); got != "exec" {
+			t.Fatalf("normalizeBackend(%q) = %q, want exec", raw, got)
+		}
+	}
+}
+
+func TestNormalizeAppServerURL_EmptyDefaultsToStdIO(t *testing.T) {
+	if got := normalizeAppServerURL(""); got != "stdio://" {
+		t.Fatalf("normalizeAppServerURL(empty) = %q, want stdio://", got)
+	}
+}
+
+func TestNativeSteerStatus_ReflectsConfiguredBackend(t *testing.T) {
+	var _ core.NativeSteerDoctorInfo = (*Agent)(nil)
+
+	appServer := &Agent{backend: "app_server"}
+	if available, detail := appServer.NativeSteerStatus(); !available || detail == "" {
+		t.Fatalf("app-server NativeSteerStatus() = %v, %q; want available with detail", available, detail)
+	}
+
+	execBackend := &Agent{backend: "exec"}
+	available, detail := execBackend.NativeSteerStatus()
+	if available {
+		t.Fatal("exec NativeSteerStatus() = available, want unavailable")
+	}
+	for _, want := range []string{"fall back to FIFO", `backend = "app_server"`, `busy_message_mode = "queue"`} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("exec NativeSteerStatus() detail = %q, want %q", detail, want)
+		}
 	}
 }
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.1.4 (2026-08-21)
+
+Patch release that makes the v0.1.3 steer-by-default policy usable after a
+direct install. New starter configs now select Codex app-server over stdio,
+and existing Codex configs that omit backend details resolve to the same
+native-steer path. Explicit `backend = "exec"` remains supported and continues
+to fall back to FIFO for busy messages.
+
+See `changelogs/v0.1.4.md` for the bilingual release notes.
+
+### Direct installs now get a steer-capable default chain
+
+- The generated starter config explicitly sets
+  `[queue] busy_message_mode = "steer"`, uses Codex, and configures
+  `backend = "app_server"` with `app_server_url = "stdio"`.
+- Codex configurations that omit `backend` or `app_server_url` now default to
+  app-server and stdio respectively, so upgrading an existing minimal config
+  fixes the same gap without requiring a config rewrite.
+- `cc-connect-next doctor` reports whether the selected agent/backend can
+  natively steer or whether busy messages will use the FIFO fallback.
+- Installation, configuration, usage, npm, and Feishu card-contract docs now
+  describe the actual default and the explicit exec compatibility opt-out.
+
 ## v0.1.3 (2026-08-20)
 
 Stable release: steer becomes the default busy-message mode, the daemon now

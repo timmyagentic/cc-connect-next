@@ -87,19 +87,19 @@ name = "conservative-project"
 busy_message_mode = "queue"
 ```
 
-**`steer`（默认）。** 在支持原生 steer 的 agent 上，忙时消息直接并入进行中的回合；不支持该能力的 agent（以及 Codex exec 后端）透明回退到 FIFO 队列，因此默认值对所有 agent 都安全。原生 steer 目前指 app-server 后端的 Codex：
+**`steer`（默认）。** 在支持原生 steer 的 agent 上，忙时消息直接并入进行中的回合；不支持该能力的 agent（以及显式选择的 Codex exec 后端）透明回退到 FIFO 队列，因此默认值对所有 agent 都安全。Codex 现在默认通过 stdio 使用原生 steer 的 app-server 后端：
 
 ```toml
 [projects.agent.options]
-mode = "yolo"
-backend = "app_server"   # 原生 steer 必需
+backend = "app_server"   # 默认；原生 turn/steer
+app_server_url = "stdio" # 默认；本地子进程传输
 ```
 
 steer 通过 `turn/steer` 发送，并用 `expectedTurnId` 锁定当前回合，不会与回合完成产生竞态。steer 确定不可用时（后端不支持、回合刚好结束），消息安全回退到队列。
 
 **`queue`。** 设置 `busy_message_mode = "queue"` 可始终使用会话级 FIFO：忙时消息在当前回合结束后作为新回合处理（v0.1.3 之前的行为）。若 steer 结果**未知**（RPC 超时），消息刻意**不会**自动重新排队——那可能造成重复投递——你会收到明确的警告提示。
 
-**`/ps <消息>`**（别名 `/btw`）无论配置为何种模式，始终是显式 steer。在支持 steer 的后端上它并入进行中的回合；在 Codex 默认的 `exec` 后端上，它现在会返回明确报错，而不是对同一线程并发启动第二个 `codex exec` 进程。不支持 steer 能力的 agent 保持原有行为（回合中 stdin 注入）。
+**`/ps <消息>`**（别名 `/btw`）无论配置为何种模式，始终是显式 steer。在支持 steer 的后端上它并入进行中的回合；在显式选择的 Codex `exec` 后端上，它会返回明确报错，而不是对同一线程并发启动第二个 `codex exec` 进程。不支持 steer 能力的 agent 保持原有行为（回合中 stdin 注入）。
 
 **卡片交接。** 在富卡片平台（飞书）上，steer 成功后进行中的进度卡片会交接到最新消息：
 

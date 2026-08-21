@@ -1579,16 +1579,19 @@ app_secret = "your-feishu-app-secret"
 # reasoning_effort = "high"  # "minimal" | "low" | "medium" | "high" | "xhigh"
 #
 # Optional: Codex backend / 可选：Codex 后端
-# - "exec" (default): each turn runs a `codex exec --json` subprocess.
-#   "exec"（默认）：每个回合运行一次 `codex exec --json` 子进程。
-# - "app_server": persistent `codex app-server` JSON-RPC session. Required
-#   for native steering (`/ps` and busy_message_mode = "steer"): input is
-#   appended to the running turn via turn/steer instead of racing a second
+# - "app_server" (default): persistent local `codex app-server` JSON-RPC
+#   session over stdio. Native steering (`/ps` and busy_message_mode = "steer")
+#   appends input to the running turn via turn/steer instead of racing a second
 #   exec process against it.
-#   "app_server"：常驻 `codex app-server` JSON-RPC 会话。原生 steer（`/ps`
-#   与 busy_message_mode = "steer"）必须使用该后端：补充内容通过 turn/steer
-#   并入进行中的回合，而不是并发启动第二个 exec 进程。
+#   "app_server"（默认）：通过 stdio 启动本地常驻 `codex app-server` JSON-RPC
+#   会话。原生 steer（`/ps` 与 busy_message_mode = "steer"）通过 turn/steer
+#   把补充内容并入进行中的回合，而不是并发启动第二个 exec 进程。
+# - "exec": explicit compatibility opt-out; each turn runs a
+#   `codex exec --json` subprocess and busy messages fall back to FIFO.
+#   "exec"：显式兼容退出路径；每个回合运行 `codex exec --json` 子进程，
+#   忙时消息回退到 FIFO 队列。
 # backend = "app_server"
+# app_server_url = "stdio"
 #
 # Optional: project system prompt / 可选：项目系统提示
 # Codex has no native system-prompt flag, so cc-connect-next injects this as a
