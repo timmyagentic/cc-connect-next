@@ -120,13 +120,12 @@ project author from chat. No GitHub account is needed: the daemon submits the
 report through an author-operated relay and replies with the issue link.
 
 ```
-/feedback <describe the problem>   # report anything
-/feedback error                    # report the most recent error in this chat
-/feedback config                   # report config keys this build does not support
+/feedback <describe it>   # one command — recent errors and unsupported
+                          # config keys are attached automatically
 ```
 
 The daemon also prompts you proactively: after a turn fails it points at
-`/feedback error` (at most once per 10 minutes per chat), and on startup it
+`/feedback` (at most once per 10 minutes per chat), and on startup it
 announces config keys it cannot consume (once per distinct key set).
 
 Reports are submitted the moment you send the command — invoking `/feedback`

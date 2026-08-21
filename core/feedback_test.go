@@ -3,6 +3,7 @@ package core
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func newFeedbackTestEngine(t *testing.T) (*Engine, *restartNotifyStub) {
@@ -46,9 +47,9 @@ func TestCmdFeedback_SubmitsImmediately(t *testing.T) {
 	// Invoking /feedback IS the consent: one command, immediate submission.
 	e.cmdFeedback(plat, feedbackTestMsg(), "I need per-project webhook retries")
 	if posted == nil {
-		t.Fatal("submission must happen on the first command, without confirm")
+		t.Fatal("submission must happen on the first command")
 	}
-	if posted.Schema != 1 || posted.Trigger != "user" || posted.InstallID != "install-test" {
+	if posted.Schema != 1 || posted.InstallID != "install-test" {
 		t.Errorf("submission envelope wrong: %+v", posted)
 	}
 	if !strings.Contains(posted.Title, "[feedback] I need per-project webhook retries") {
@@ -63,21 +64,22 @@ func TestCmdFeedback_SubmitsImmediately(t *testing.T) {
 	}
 }
 
-func TestCmdFeedback_ConfirmAndCancelShowUsageNotAnIssue(t *testing.T) {
-	// confirm/cancel are leftovers of the removed two-step flow; they must
-	// never be submitted as a literal report.
+func TestCmdFeedback_ReservedWordsWithNoContextShowUsage(t *testing.T) {
+	// error/config/confirm/cancel are earlier-iteration spellings, not
+	// descriptions; with nothing to attach they must not file anything.
 	e, plat := newFeedbackTestEngine(t)
 	submitted := false
 	e.feedbackPostFn = func(string, FeedbackSubmission) (string, error) {
 		submitted = true
 		return "https://example/1", nil
 	}
-	e.cmdFeedback(plat, feedbackTestMsg(), "confirm")
-	e.cmdFeedback(plat, feedbackTestMsg(), "cancel")
-	if submitted {
-		t.Fatal("confirm/cancel must not submit anything")
+	for _, w := range []string{"", "error", "config", "confirm", "cancel"} {
+		e.cmdFeedback(plat, feedbackTestMsg(), w)
 	}
-	if sent := plat.sentTexts(); len(sent) != 2 || !strings.Contains(sent[0], "/feedback <") {
+	if submitted {
+		t.Fatal("reserved words with no attachable context must not submit")
+	}
+	if sent := plat.sentTexts(); len(sent) != 5 || !strings.Contains(sent[0], "/feedback <") {
 		t.Fatalf("expected usage replies, got %v", sent)
 	}
 }
@@ -91,7 +93,7 @@ func TestCmdFeedback_DisabledChannel(t *testing.T) {
 	}
 }
 
-func TestCmdFeedback_ConfigSubmitsGapKeys(t *testing.T) {
+func TestCmdFeedback_BareSubmitsGapKeys(t *testing.T) {
 	e, plat := newFeedbackTestEngine(t)
 	e.SetFeedbackCapabilityGaps([]string{"display.sparkles", "feedbak.enabled"})
 	var posted *FeedbackSubmission
@@ -100,21 +102,14 @@ func TestCmdFeedback_ConfigSubmitsGapKeys(t *testing.T) {
 		return "https://example/2", nil
 	}
 
-	e.cmdFeedback(plat, feedbackTestMsg(), "config")
-	if posted == nil || posted.Trigger != "config_keys" {
-		t.Fatalf("expected immediate config_keys submission, got %+v", posted)
+	e.cmdFeedback(plat, feedbackTestMsg(), "")
+	if posted == nil {
+		t.Fatal("bare /feedback with gap keys must submit")
 	}
-	if !strings.Contains(posted.Title, "display.sparkles") || !strings.Contains(posted.Body, "feedbak.enabled") {
-		t.Errorf("submission must name the keys: title=%q", posted.Title)
+	if !strings.Contains(posted.Title, "unsupported config") || !strings.Contains(posted.Body, "display.sparkles") || !strings.Contains(posted.Body, "feedbak.enabled") {
+		t.Errorf("submission must carry the keys: title=%q body=%q", posted.Title, posted.Body)
 	}
-
-	// With no gap keys there is nothing to submit.
-	posted = nil
-	e.SetFeedbackCapabilityGaps(nil)
-	e.cmdFeedback(plat, feedbackTestMsg(), "config")
-	if posted != nil {
-		t.Error("config with no gap keys must not submit")
-	}
+	_ = plat
 }
 
 func TestNotifyCapabilityGap_DeliversToRecentSession(t *testing.T) {
@@ -125,7 +120,7 @@ func TestNotifyCapabilityGap_DeliversToRecentSession(t *testing.T) {
 		t.Fatal("expected delivery")
 	}
 	sent := plat.sentTexts()
-	if len(sent) != 1 || !strings.Contains(sent[0], "display.sparkles") || !strings.Contains(sent[0], "/feedback config") {
+	if len(sent) != 1 || !strings.Contains(sent[0], "display.sparkles") || !strings.Contains(sent[0], "/feedback") {
 		t.Fatalf("gap notice must name the key and the reporting command, got %v", sent)
 	}
 }
@@ -179,33 +174,67 @@ func TestFeedbackNotifier_RetriesUntilSessionExists(t *testing.T) {
 	}
 }
 
-func TestCmdFeedback_ErrorSubmitsRecordedError(t *testing.T) {
+func TestCmdFeedback_AttachesRecentErrorAndGaps(t *testing.T) {
 	e, plat := newFeedbackTestEngine(t)
+	e.SetFeedbackCapabilityGaps([]string{"display.sparkles"})
+	e.recordFeedbackError("feishu:oc_chat:ou_user", "codex app-server turn/start: boom")
 	var posted *FeedbackSubmission
 	e.feedbackPostFn = func(_ string, sub FeedbackSubmission) (string, error) {
 		posted = &sub
 		return "https://example/3", nil
 	}
 
-	// No error recorded yet.
-	e.cmdFeedback(plat, feedbackTestMsg(), "error")
-	if posted != nil {
-		t.Fatal("no recorded error must mean no submission")
+	// One report carries the description plus every piece of context on hand.
+	e.cmdFeedback(plat, feedbackTestMsg(), "sending fails")
+	if posted == nil {
+		t.Fatal("expected submission")
 	}
-	if sent := plat.sentTexts(); len(sent) != 1 || !strings.Contains(sent[0], "/feedback <") {
-		t.Fatalf("expected no-error reply, got %v", sent)
+	if !strings.Contains(posted.Title, "[feedback] sending fails") {
+		t.Errorf("title must come from the description, got %q", posted.Title)
+	}
+	for _, want := range []string{"sending fails", "turn/start: boom", "display.sparkles"} {
+		if !strings.Contains(posted.Body, want) {
+			t.Errorf("body missing %q: %q", want, posted.Body)
+		}
+	}
+}
+
+func TestCmdFeedback_BareSubmitsRecentError(t *testing.T) {
+	e, plat := newFeedbackTestEngine(t)
+	e.recordFeedbackError("feishu:oc_chat:ou_user", "codex app-server turn/start: boom")
+	var posted *FeedbackSubmission
+	e.feedbackPostFn = func(_ string, sub FeedbackSubmission) (string, error) {
+		posted = &sub
+		return "https://example/4", nil
 	}
 
-	e.recordFeedbackError("feishu:oc_chat:ou_user", "codex app-server turn/start: boom")
 	e.cmdFeedback(plat, feedbackTestMsg(), "error")
-	if posted == nil || posted.Trigger != "error" {
-		t.Fatalf("expected immediate error submission, got %+v", posted)
+	if posted == nil {
+		t.Fatal("legacy /feedback error spelling must still report the recent error")
 	}
 	if !strings.Contains(posted.Title, "[feedback] error: codex app-server turn/start: boom") {
 		t.Errorf("title = %q", posted.Title)
 	}
-	if !strings.Contains(posted.Body, "turn/start: boom") {
-		t.Errorf("body must include the recorded error, got %q", posted.Body)
+}
+
+func TestCmdFeedback_StaleErrorIsNotAttached(t *testing.T) {
+	e, plat := newFeedbackTestEngine(t)
+	e.recordFeedbackError("feishu:oc_chat:ou_user", "ancient failure")
+	e.feedbackMu.Lock()
+	e.feedbackErrors["feishu:oc_chat:ou_user"].At = time.Now().Add(-time.Hour)
+	e.feedbackMu.Unlock()
+	var posted *FeedbackSubmission
+	e.feedbackPostFn = func(_ string, sub FeedbackSubmission) (string, error) {
+		posted = &sub
+		return "https://example/5", nil
+	}
+
+	e.cmdFeedback(plat, feedbackTestMsg(), "unrelated wish")
+	if posted == nil {
+		t.Fatal("expected submission")
+	}
+	if strings.Contains(posted.Body, "ancient failure") {
+		t.Errorf("stale error must not be attached: %q", posted.Body)
 	}
 }
 
@@ -213,7 +242,7 @@ func TestFeedbackErrorHint_ThrottledPerSession(t *testing.T) {
 	e, plat := newFeedbackTestEngine(t)
 	e.maybeSendFeedbackErrorHint(plat, "rctx", "feishu:oc_chat:ou_user")
 	e.maybeSendFeedbackErrorHint(plat, "rctx", "feishu:oc_chat:ou_user")
-	if sent := plat.sentTexts(); len(sent) != 1 || !strings.Contains(sent[0], "/feedback error") {
+	if sent := plat.sentTexts(); len(sent) != 1 || !strings.Contains(sent[0], "/feedback") {
 		t.Fatalf("hint must be sent exactly once within the cooldown, got %v", sent)
 	}
 	// A different session has its own budget.

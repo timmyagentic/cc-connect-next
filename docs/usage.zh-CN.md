@@ -117,12 +117,10 @@ steer 通过 `turn/steer` 发送，并用 `expectedTurnId` 锁定当前回合，
 并回执 issue 链接。
 
 ```
-/feedback <描述问题>   # 反馈任何问题
-/feedback error        # 反馈本会话最近一次错误
-/feedback config       # 反馈当前版本不支持的配置项
+/feedback <描述>   # 一个命令——最近的错误和不支持的配置项会自动附上
 ```
 
-daemon 也会主动提示：回合失败后会提示 `/feedback error`（每个会话每 10 分钟
+daemon 也会主动提示：回合失败后会提示 `/feedback`（每个会话每 10 分钟
 至多一次）；启动时会通告配置里无法消费的配置项（每组键只提醒一次）。
 
 发送命令即提交——调用 `/feedback` 本身就是同意。凭据、会话/用户 ID、文件路径
