@@ -7267,12 +7267,12 @@ func buildCardJSONWithStatus(content string, status core.CardStatus) string {
 // cc-connect-next. Reasoning text, tool names, inputs, results, model metadata,
 // token counts, context usage, and work directories are deliberately ignored:
 // only anonymous activity counts may appear before the answer starts.
-func buildRichCard(status core.CardStatus, phase string, steps []core.ToolStep, markdown string, streaming bool, _ string) string {
-	return buildRichCardWithCopy(status, phase, steps, markdown, streaming, core.NewI18n(core.LangChinese).RichCardCopy())
+func buildRichCard(status core.CardStatus, phase string, steps []core.ToolStep, markdown string, streaming bool, statusFooter string) string {
+	return buildRichCardWithCopy(status, phase, steps, markdown, streaming, statusFooter, core.NewI18n(core.LangChinese).RichCardCopy())
 }
 
-func buildRichCardWithCopy(status core.CardStatus, phase string, steps []core.ToolStep, markdown string, streaming bool, copy core.RichCardCopy) string {
-	b, err := buildRichCardJSONBytes(status, phase, steps, markdown, streaming, copy)
+func buildRichCardWithCopy(status core.CardStatus, phase string, steps []core.ToolStep, markdown string, streaming bool, statusFooter string, copy core.RichCardCopy) string {
+	b, err := buildRichCardJSONBytes(status, phase, steps, markdown, streaming, statusFooter, copy)
 	if err != nil {
 		slog.Debug("feishu: build rich card marshal failed, fallback to basic card", "error", err)
 		fallback := strings.TrimSpace(markdown)
@@ -7284,7 +7284,7 @@ func buildRichCardWithCopy(status core.CardStatus, phase string, steps []core.To
 	return string(b)
 }
 
-func buildRichCardJSONBytes(status core.CardStatus, phase string, steps []core.ToolStep, markdown string, streaming bool, copy core.RichCardCopy) ([]byte, error) {
+func buildRichCardJSONBytes(status core.CardStatus, phase string, steps []core.ToolStep, markdown string, streaming bool, statusFooter string, copy core.RichCardCopy) ([]byte, error) {
 	reasoningCount := 0
 	toolCount := 0
 	for _, step := range steps {
@@ -7394,17 +7394,32 @@ func buildRichCardJSONBytes(status core.CardStatus, phase string, steps []core.T
 			"template": headerTemplate,
 			"title":    map[string]any{"tag": "plain_text", "content": headerTitle},
 		},
-		"body": map[string]any{
-			"direction": "vertical",
-			"padding":   "12px 12px 12px 12px",
-			"elements": []map[string]any{{
-				"tag":        "markdown",
-				"element_id": richCardMainTextElementID,
-				"content":    sanitizeCardMarkdownForCard(body),
-				"text_align": "left",
-				"text_size":  "normal",
-			}},
-		},
+	}
+	elements := []map[string]any{{
+		"tag":        "markdown",
+		"element_id": richCardMainTextElementID,
+		"content":    sanitizeCardMarkdownForCard(body),
+		"text_align": "left",
+		"text_size":  "normal",
+	}}
+	// Reply footer (model · effort): rendered as a dim notation block after
+	// the answer body, mirroring the legacy buildCardJSONWithStatusFooter
+	// styling. Only on settled cards — during streaming the footer is noise
+	// and the engine passes "" anyway.
+	if footer := strings.TrimSpace(statusFooter); footer != "" && !streaming {
+		elements = append(elements,
+			map[string]any{"tag": "hr"},
+			map[string]any{
+				"tag":       "markdown",
+				"content":   sanitizeCardMarkdownForCard(footer),
+				"text_size": "notation",
+			},
+		)
+	}
+	card["body"] = map[string]any{
+		"direction": "vertical",
+		"padding":   "12px 12px 12px 12px",
+		"elements":  elements,
 	}
 	return json.Marshal(card)
 }
@@ -7475,8 +7490,8 @@ func (p *interactivePlatform) BuildRichCard(status core.CardStatus, title string
 
 // BuildLocalizedRichCard implements core.LocalizedRichCardSupporter. The
 // engine supplies copy for the active conversation locale.
-func (p *interactivePlatform) BuildLocalizedRichCard(status core.CardStatus, title string, steps []core.ToolStep, markdown string, streaming bool, _ string, copy core.RichCardCopy) string {
-	return buildRichCardWithCopy(status, title, steps, markdown, streaming, copy)
+func (p *interactivePlatform) BuildLocalizedRichCard(status core.CardStatus, title string, steps []core.ToolStep, markdown string, streaming bool, statusFooter string, copy core.RichCardCopy) string {
+	return buildRichCardWithCopy(status, title, steps, markdown, streaming, statusFooter, copy)
 }
 
 // SplitMarkdownByTables implements core.MarkdownTableSplitter.

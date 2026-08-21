@@ -257,8 +257,8 @@ type DisplayConfig struct {
 	ToolMaxLen           *int    `toml:"tool_max_len"`           // max chars for tool use messages; 0 = no truncation; default 500
 	ToolMessages         *bool   `toml:"tool_messages"`          // whether tool progress messages are shown; default false unless mode = "full" is spelled out
 	HistoryMaxLen        *int    `toml:"history_max_len"`        // max chars per /history entry; 0 = no truncation; default 1000
-	ShowContextIndicator *bool   `toml:"show_context_indicator"` // whether [ctx: ~N%] suffix is shown; default false
-	ReplyFooter          *bool   `toml:"reply_footer"`           // whether Codex-like footer is shown; default false
+	ShowContextIndicator *bool   `toml:"show_context_indicator"` // DEPRECATED no-op: the footer no longer renders token/ctx metadata
+	ReplyFooter          *bool   `toml:"reply_footer"`           // whether the "model · effort" footer is shown; default false
 	HideAgentFooter      *bool   `toml:"hide_agent_footer"`      // strip agent-emitted model/token footer lines; default false
 }
 
@@ -563,15 +563,14 @@ type ProjectConfig struct {
 	// (LD_PRELOAD, PATH, HOME, etc.) are rejected at config validation.
 	// Use this only for variables the target user cannot set in their profile.
 	RunAsEnv []string `toml:"run_as_env,omitempty"`
-	// ShowContextIndicator: true = render the reply footer's first line
-	// (model · effort · token usage · context %); nil/false = hide that line.
-	// Subordinate to ReplyFooter — the master footer toggle.
+	// ShowContextIndicator: DEPRECATED no-op, kept so existing configs parse.
+	// The footer no longer renders token usage or context %.
 	ShowContextIndicator *bool `toml:"show_context_indicator,omitempty"`
-	// ShowWorkdirIndicator: nil/true = render the reply footer's second line
-	// (workspace directory); false = hide that line. Subordinate to ReplyFooter.
+	// ShowWorkdirIndicator: DEPRECATED no-op, kept so existing configs parse.
+	// The footer no longer renders the workspace directory.
 	ShowWorkdirIndicator *bool `toml:"show_workdir_indicator,omitempty"`
-	// ReplyFooter: true = render the reply footer; nil/false = disable it
-	// entirely (the per-line indicator flags above become no-ops).
+	// ReplyFooter: true = render the "model · effort" footer under finished
+	// replies (plain replies and rich cards alike); nil/false = no footer.
 	ReplyFooter      *bool        `toml:"reply_footer,omitempty"`
 	InjectSender     *bool        `toml:"inject_sender,omitempty"`     // prepend sender identity (platform + user ID) to each message sent to the agent
 	DisabledCommands []string     `toml:"disabled_commands,omitempty"` // commands to disable for this project (e.g. ["restart", "upgrade"])
