@@ -576,6 +576,11 @@ const (
 	MsgFeedbackDisabled      MsgKey = "feedback_disabled"
 	MsgFeedbackHint          MsgKey = "feedback_hint"
 	MsgFeedbackErrorHint     MsgKey = "feedback_error_hint"
+	MsgFeedbackAskTitle      MsgKey = "feedback_ask_title"
+	MsgFeedbackAskError      MsgKey = "feedback_ask_error"
+	MsgFeedbackAskGap        MsgKey = "feedback_ask_gap"
+	MsgFeedbackBtnSubmit     MsgKey = "feedback_btn_submit"
+	MsgFeedbackBtnDismiss    MsgKey = "feedback_btn_dismiss"
 	MsgFeedbackNoError       MsgKey = "feedback_no_error"
 	MsgFeedbackCapabilityGap MsgKey = "feedback_capability_gap"
 
@@ -3565,6 +3570,41 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "\U0001F4EE 把使用中的任何問題或想要的能力直接回饋給專案作者：\n`/feedback <描述>`\n最近的錯誤和不支援的設定項會自動附上，內容自動去敏，無需 GitHub 帳號。",
 		LangJapanese:           "\U0001F4EE 利用中の問題や欲しい機能をそのまま作者に報告できます：\n`/feedback <内容を記述>`\n直近のエラーや未対応の設定キーは自動的に添付され、内容はマスキングされます。GitHub アカウントは不要です。",
 		LangSpanish:            "\U0001F4EE Informa de cualquier problema o deseo directamente al autor del proyecto:\n`/feedback <descr\u00edbelo>`\nLos errores recientes y las claves de configuraci\u00f3n no admitidas se adjuntan autom\u00e1ticamente, todo se redacta y no se necesita cuenta de GitHub.",
+	},
+	MsgFeedbackAskTitle: {
+		LangEnglish:            "Report to the author?",
+		LangChinese:            "要反馈给作者吗？",
+		LangTraditionalChinese: "要回饋給作者嗎？",
+		LangJapanese:           "作者に報告しますか？",
+		LangSpanish:            "\u00bfInformar al autor?",
+	},
+	MsgFeedbackAskError: {
+		LangEnglish:            "A problem just occurred:\n\n%s\n\nWould you like to report it straight to the project author? The details are attached and redacted automatically; no GitHub account is needed.",
+		LangChinese:            "刚才遇到了一个问题：\n\n%s\n\n是否需要直接反馈给项目作者？详情会自动附上并脱敏，无需 GitHub 账号。",
+		LangTraditionalChinese: "剛才遇到了一個問題：\n\n%s\n\n是否需要直接回饋給專案作者？詳情會自動附上並去敏，無需 GitHub 帳號。",
+		LangJapanese:           "問題が発生しました：\n\n%s\n\nこの問題をそのまま作者に報告しますか？詳細は自動的に添付・マスキングされ、GitHub アカウントは不要です。",
+		LangSpanish:            "Acaba de ocurrir un problema:\n\n%s\n\n\u00bfQuieres informarlo directamente al autor del proyecto? Los detalles se adjuntan y redactan autom\u00e1ticamente; no se necesita cuenta de GitHub.",
+	},
+	MsgFeedbackAskGap: {
+		LangEnglish:            "Your config contains key(s) this version does not support: %s.\n\nWould you like to report this need straight to the project author? The details are attached and redacted automatically; no GitHub account is needed.",
+		LangChinese:            "你的配置里有当前版本不支持的配置项：%s。\n\n是否需要把这个需求直接反馈给项目作者？详情会自动附上并脱敏，无需 GitHub 账号。",
+		LangTraditionalChinese: "你的設定裡有目前版本不支援的設定項：%s。\n\n是否需要把這個需求直接回饋給專案作者？詳情會自動附上並去敏，無需 GitHub 帳號。",
+		LangJapanese:           "設定に現在のバージョンが対応していないキーがあります：%s。\n\nこの要望をそのまま作者に報告しますか？詳細は自動的に添付・マスキングされ、GitHub アカウントは不要です。",
+		LangSpanish:            "Tu configuraci\u00f3n contiene clave(s) que esta versi\u00f3n no admite: %s.\n\n\u00bfQuieres informar esta necesidad directamente al autor del proyecto? Los detalles se adjuntan y redactan autom\u00e1ticamente; no se necesita cuenta de GitHub.",
+	},
+	MsgFeedbackBtnSubmit: {
+		LangEnglish:            "Report to author",
+		LangChinese:            "反馈给作者",
+		LangTraditionalChinese: "回饋給作者",
+		LangJapanese:           "作者に報告",
+		LangSpanish:            "Informar al autor",
+	},
+	MsgFeedbackBtnDismiss: {
+		LangEnglish:            "Ignore",
+		LangChinese:            "忽略",
+		LangTraditionalChinese: "忽略",
+		LangJapanese:           "無視する",
+		LangSpanish:            "Ignorar",
 	},
 	MsgFeedbackErrorHint: {
 		LangEnglish:            "\U0001F4A1 Hit a problem? Send `/feedback` to report it straight to the author \u2014 the error details are attached automatically, redacted, no GitHub account needed.",

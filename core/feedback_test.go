@@ -251,3 +251,104 @@ func TestFeedbackErrorHint_ThrottledPerSession(t *testing.T) {
 		t.Fatalf("second session must get its own hint, got %v", sent)
 	}
 }
+
+func newFeedbackCardEngine(t *testing.T) (*Engine, *stubCardPlatform) {
+	t.Helper()
+	plat := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+	e := NewEngine("test", &stubAgent{}, []Platform{plat}, "", LangEnglish)
+	e.SetFeedbackConfig(true, "https://relay.example/v1/feedback", "install-test")
+	return e, plat
+}
+
+func feedbackAskButtons(t *testing.T, card *Card) []CardButton {
+	t.Helper()
+	for _, el := range card.Elements {
+		if actions, ok := el.(CardActions); ok {
+			return actions.Buttons
+		}
+	}
+	t.Fatalf("card has no button row: %#v", card)
+	return nil
+}
+
+// The ask replaces the typed-command hint on card platforms: summarized
+// problem + agree/ignore buttons, no command for the user to learn.
+func TestFeedbackErrorAsk_CardCarriesSummaryAndButtons(t *testing.T) {
+	e, plat := newFeedbackCardEngine(t)
+	e.recordFeedbackError("feishu:oc_chat:ou_user", "codex app-server turn/start: boom")
+
+	e.maybeSendFeedbackErrorHint(plat, "rctx", "feishu:oc_chat:ou_user")
+
+	plat.mu.Lock()
+	cards := append([]*Card(nil), plat.sentCards...)
+	plat.mu.Unlock()
+	if len(cards) != 1 {
+		t.Fatalf("expected one ask card, got %d", len(cards))
+	}
+	var body string
+	for _, el := range cards[0].Elements {
+		if md, ok := el.(CardMarkdown); ok {
+			body += md.Content
+		}
+	}
+	if !strings.Contains(body, "turn/start: boom") {
+		t.Errorf("ask card must summarize the problem, got %q", body)
+	}
+	buttons := feedbackAskButtons(t, cards[0])
+	if len(buttons) != 2 || buttons[0].Value != "act:/feedback submit" || buttons[1].Value != "act:/feedback dismiss" {
+		t.Errorf("expected submit/dismiss buttons, got %#v", buttons)
+	}
+}
+
+func TestFeedbackErrorAsk_TextFallbackWithoutCards(t *testing.T) {
+	e, plat := newFeedbackTestEngine(t) // restartNotifyStub: no CardSender
+	e.recordFeedbackError("feishu:oc_chat:ou_user", "boom")
+	e.maybeSendFeedbackErrorHint(plat, "rctx", "feishu:oc_chat:ou_user")
+	if sent := plat.sentTexts(); len(sent) != 1 || !strings.Contains(sent[0], "/feedback") {
+		t.Fatalf("non-card platforms keep the /feedback text pointer, got %v", sent)
+	}
+}
+
+func TestNotifyCapabilityGap_CardAskOnCardPlatforms(t *testing.T) {
+	e, plat := newFeedbackCardEngine(t)
+	touchSession(e, "feishu:oc_chat:ou_user")
+	e.SetFeedbackCapabilityGaps([]string{"display.sparkles"})
+
+	if !e.NotifyCapabilityGap([]string{"display.sparkles"}) {
+		t.Fatal("expected delivery")
+	}
+	plat.mu.Lock()
+	cards := append([]*Card(nil), plat.sentCards...)
+	plat.mu.Unlock()
+	if len(cards) != 1 {
+		t.Fatalf("expected the gap ask as a card, got %d cards and texts %v", len(cards), plat.getSent())
+	}
+}
+
+func TestHandleFeedbackCardAction_SubmitFilesReport(t *testing.T) {
+	e, _ := newFeedbackCardEngine(t)
+	e.SetFeedbackCapabilityGaps([]string{"display.sparkles"})
+	posted := make(chan FeedbackSubmission, 1)
+	e.feedbackPostFn = func(_ string, sub FeedbackSubmission) (string, error) {
+		posted <- sub
+		return "https://example/9", nil
+	}
+
+	e.handleFeedbackCardAction("submit", "feishu:oc_chat:ou_user")
+	select {
+	case sub := <-posted:
+		if !strings.Contains(sub.Body, "display.sparkles") {
+			t.Errorf("submission must carry the gap context, got %q", sub.Body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("button agreement must file the report")
+	}
+
+	// dismiss must never submit.
+	e.handleFeedbackCardAction("dismiss", "feishu:oc_chat:ou_user")
+	select {
+	case <-posted:
+		t.Fatal("dismiss must not submit")
+	case <-time.After(100 * time.Millisecond):
+	}
+}

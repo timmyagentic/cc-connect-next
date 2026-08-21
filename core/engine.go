@@ -12697,6 +12697,11 @@ func (e *Engine) handleCardNav(action string, sessionKey string) *Card {
 		return e.handleModelCardAction(args, sessionKey)
 	}
 
+	if prefix == "act" && cmd == "/feedback" {
+		e.handleFeedbackCardAction(args, sessionKey)
+		return nil
+	}
+
 	if prefix == "act" {
 		e.executeCardAction(cmd, args, sessionKey)
 	}

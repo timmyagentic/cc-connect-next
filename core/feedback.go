@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -220,9 +221,10 @@ func (e *Engine) recordFeedbackError(sessionKey, errText string) {
 	e.feedbackErrors[sessionKey] = &feedbackError{Text: errText, At: time.Now()}
 }
 
-// maybeSendFeedbackErrorHint follows a delivered error with a one-line "you
-// can report this" pointer, at most once per session per cooldown window so
-// repeated failures do not double the noise.
+// maybeSendFeedbackErrorHint follows a delivered error with the "report this
+// to the author?" ask — the summarized problem plus agree/ignore buttons on
+// card platforms, a one-line /feedback pointer elsewhere — at most once per
+// session per cooldown window so repeated failures do not double the noise.
 func (e *Engine) maybeSendFeedbackErrorHint(p Platform, replyCtx any, sessionKey string) {
 	if !e.feedbackActive() {
 		return
@@ -236,8 +238,22 @@ func (e *Engine) maybeSendFeedbackErrorHint(p Platform, replyCtx any, sessionKey
 	if due {
 		e.feedbackErrorHintAt[sessionKey] = time.Now()
 	}
+	fe := e.feedbackErrors[sessionKey]
 	e.feedbackMu.Unlock()
 	if !due {
+		return
+	}
+	if fe != nil {
+		line := fe.Text
+		if i := strings.IndexByte(line, '\n'); i >= 0 {
+			line = line[:i]
+		}
+		line = redactFeedbackText(line)
+		if len(line) > 200 {
+			line = line[:200] + "…"
+		}
+		body := e.i18n.Tf(MsgFeedbackAskError, "`"+line+"`")
+		_ = e.sendFeedbackAsk(p, replyCtx, body, e.i18n.T(MsgFeedbackErrorHint))
 		return
 	}
 	e.send(p, replyCtx, e.i18n.T(MsgFeedbackErrorHint))
@@ -250,8 +266,71 @@ func (e *Engine) NotifyCapabilityGap(keys []string) bool {
 	if !e.feedbackActive() || len(keys) == 0 {
 		return false
 	}
-	content := e.i18n.Tf(MsgFeedbackCapabilityGap, "`"+strings.Join(keys, "`, `")+"`")
-	return e.notifyMostRecentSession(content, "feedback notice")
+	quoted := "`" + strings.Join(keys, "`, `") + "`"
+	body := e.i18n.Tf(MsgFeedbackAskGap, quoted)
+	fallback := e.i18n.Tf(MsgFeedbackCapabilityGap, quoted)
+	return e.notifyMostRecentSessionFn("feedback notice", func(p Platform, replyCtx any) error {
+		return e.sendFeedbackAsk(p, replyCtx, body, fallback)
+	})
+}
+
+// sendFeedbackAsk delivers the "report this to the author?" ask. On card
+// platforms the problem summary comes with two buttons — agreeing is one
+// tap, there is no command to learn. Platforms without cards fall back to a
+// one-line /feedback pointer.
+func (e *Engine) sendFeedbackAsk(p Platform, replyCtx any, body, fallback string) error {
+	if sender, ok := p.(CardSender); ok {
+		card := NewCard().
+			Title(e.i18n.T(MsgFeedbackAskTitle), "orange").
+			Markdown(body).
+			Buttons(
+				PrimaryBtn(e.i18n.T(MsgFeedbackBtnSubmit), "act:/feedback submit"),
+				DefaultBtn(e.i18n.T(MsgFeedbackBtnDismiss), "act:/feedback dismiss"),
+			).
+			Build()
+		ctx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
+		defer cancel()
+		if err := sender.SendCard(ctx, replyCtx, card); err == nil {
+			return nil
+		}
+		// Card delivery failed; degrade to the text pointer below.
+	}
+	return e.sendWithError(p, replyCtx, fallback)
+}
+
+// handleFeedbackCardAction reacts to the ask-card buttons. "submit" is the
+// user's agreement: file the report right away (async — the relay POST must
+// not block the platform's card callback). "dismiss" needs no reply; the
+// platform's generic toast acknowledges the tap.
+func (e *Engine) handleFeedbackCardAction(args, sessionKey string) {
+	if strings.TrimSpace(args) != "submit" {
+		return
+	}
+	platformName := ""
+	if idx := strings.Index(sessionKey, ":"); idx > 0 {
+		platformName = sessionKey[:idx]
+	}
+	var target Platform
+	for _, p := range e.platforms {
+		if p.Name() == platformName {
+			target = p
+			break
+		}
+	}
+	if target == nil {
+		return
+	}
+	rc, ok := target.(ReplyContextReconstructor)
+	if !ok {
+		return
+	}
+	replyCtx, err := rc.ReconstructReplyCtx(sessionKey)
+	if err != nil {
+		slog.Debug("feedback: reconstruct reply context failed", "session_key", sessionKey, "error", err)
+		return
+	}
+	msg := &Message{SessionKey: sessionKey, Platform: target.Name(), ReplyCtx: replyCtx}
+	go e.cmdFeedback(target, msg, "")
 }
 
 // feedbackHint returns the one-line /feedback pointer appended to

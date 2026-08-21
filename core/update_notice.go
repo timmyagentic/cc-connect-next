@@ -217,6 +217,15 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 // true only when a message was actually delivered, so callers can retry
 // later instead of losing the notice. logTag labels the slog lines.
 func (e *Engine) notifyMostRecentSession(content, logTag string) bool {
+	return e.notifyMostRecentSessionFn(logTag, func(p Platform, replyCtx any) error {
+		return e.sendWithError(p, replyCtx, content)
+	})
+}
+
+// notifyMostRecentSessionFn is the delivery-agnostic core of
+// notifyMostRecentSession: deliver is invoked per candidate (newest first)
+// until one send succeeds.
+func (e *Engine) notifyMostRecentSessionFn(logTag string, deliver func(Platform, any) error) bool {
 	sessions := e.sessions.AllSessions()
 	idToKey, _ := e.sessions.SessionKeyMap()
 	type candidate struct {
@@ -270,7 +279,7 @@ func (e *Engine) notifyMostRecentSession(content, logTag string) bool {
 				"session_key", c.key, "error", err)
 			continue
 		}
-		if err := e.sendWithError(target, replyCtx, content); err != nil {
+		if err := deliver(target, replyCtx); err != nil {
 			slog.Debug(logTag+": send failed", "session_key", c.key, "error", err)
 			continue
 		}
