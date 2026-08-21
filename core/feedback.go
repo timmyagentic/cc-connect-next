@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -55,7 +56,12 @@ type feedbackError struct {
 	At   time.Time
 }
 
-const feedbackErrorHintCooldown = 10 * time.Minute
+const (
+	feedbackErrorHintCooldown = 10 * time.Minute
+	// feedbackErrorAttachWindow bounds how long a recorded error stays
+	// attachable to a report; older failures are likely unrelated.
+	feedbackErrorAttachWindow = 30 * time.Minute
+)
 
 // FeedbackSubmission is the relay wire format (schema 1).
 type FeedbackSubmission struct {
@@ -65,7 +71,6 @@ type FeedbackSubmission struct {
 	OS        string `json:"os"`
 	Arch      string `json:"arch"`
 	Agent     string `json:"agent"`
-	Trigger   string `json:"trigger"`
 	Title     string `json:"title"`
 	Body      string `json:"body"`
 }
@@ -107,14 +112,16 @@ func (e *Engine) feedbackActive() bool {
 	return e.feedbackEnabled && e.feedbackEndpoint != ""
 }
 
-// cmdFeedback implements /feedback:
+// cmdFeedback implements /feedback: one command, one kind of report.
 //
-//	/feedback <description>  report the described problem to the author
-//	/feedback error          report the most recent error in this session
-//	/feedback config         report the detected unsupported config keys
+//	/feedback <description>
 //
-// Invoking the command is the consent: the report is submitted immediately
-// (redacted), with no confirm step.
+// There are no categories to pick. Whatever context the daemon has on hand —
+// the most recent error in this session (if fresh) and any config keys this
+// build does not consume — is attached to the report automatically, and a
+// bare /feedback submits with just that context when any exists. Invoking
+// the command is the consent: the report goes out immediately (redacted),
+// with no confirm step.
 func (e *Engine) cmdFeedback(p Platform, msg *Message, raw string) {
 	if !e.feedbackActive() {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackDisabled))
@@ -122,44 +129,51 @@ func (e *Engine) cmdFeedback(p Platform, msg *Message, raw string) {
 	}
 	key := feedbackSessionKey(p, msg)
 
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	// confirm/cancel are leftovers of the removed two-step flow; show usage
-	// instead of filing an issue literally titled "confirm".
-	case "", "confirm", "cancel":
+	desc := strings.TrimSpace(raw)
+	switch strings.ToLower(desc) {
+	// Sub-command spellings from earlier iterations carry no descriptive
+	// content of their own; treat them as a bare /feedback.
+	case "error", "config", "confirm", "cancel":
+		desc = ""
+	}
+
+	e.feedbackMu.Lock()
+	fe := e.feedbackErrors[key]
+	e.feedbackMu.Unlock()
+	if fe != nil && time.Since(fe.At) > feedbackErrorAttachWindow {
+		// A stale error is more likely unrelated to what the user is
+		// reporting now; do not drag it into the report.
+		fe = nil
+	}
+	gaps := e.FeedbackCapabilityGaps()
+
+	if desc == "" && fe == nil && len(gaps) == 0 {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackUsage))
-	case "error":
-		e.feedbackMu.Lock()
-		fe := e.feedbackErrors[key]
-		e.feedbackMu.Unlock()
-		if fe == nil {
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackNoError))
-			return
+		return
+	}
+
+	e.submitFeedback(p, msg, feedbackTitle(desc, fe, gaps), e.buildFeedbackBody(desc, fe, gaps))
+}
+
+// feedbackTitle derives the issue title from the best available signal:
+// the user's own words, else the attached error, else the config gap.
+func feedbackTitle(desc string, fe *feedbackError, gaps []string) string {
+	switch {
+	case desc != "":
+		return feedbackTitleFromDescription(desc)
+	case fe != nil:
+		line := fe.Text
+		if i := strings.IndexByte(line, '\n'); i >= 0 {
+			line = line[:i]
 		}
-		errLine := fe.Text
-		if i := strings.IndexByte(errLine, '\n'); i >= 0 {
-			errLine = errLine[:i]
-		}
-		title := feedbackTitleFromDescription("error: " + errLine)
-		desc := "A turn failed with the following error (" + fe.At.UTC().Format(time.RFC3339) + "):\n\n```\n" + fe.Text + "\n```"
-		e.submitFeedback(p, msg, title, desc, "error")
-	case "config":
-		keys := e.FeedbackCapabilityGaps()
-		if len(keys) == 0 {
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackNothingToReport))
-			return
-		}
-		title := "Unsupported config key(s): " + strings.Join(keys, ", ")
-		desc := "The configuration below is not consumed by this build:\n\n- `" +
-			strings.Join(keys, "`\n- `") + "`\n\nReported so the author knows this capability is wanted."
-		e.submitFeedback(p, msg, title, desc, "config_keys")
+		return feedbackTitleFromDescription("error: " + line)
 	default:
-		desc := strings.TrimSpace(raw)
-		e.submitFeedback(p, msg, feedbackTitleFromDescription(desc), desc, "user")
+		return feedbackTitleFromDescription("unsupported config: " + strings.Join(gaps, ", "))
 	}
 }
 
-// submitFeedback redacts, assembles, and posts a report in one step.
-func (e *Engine) submitFeedback(p Platform, msg *Message, title, description, trigger string) {
+// submitFeedback posts a report in one step.
+func (e *Engine) submitFeedback(p Platform, msg *Message, title, body string) {
 	e.feedbackMu.Lock()
 	endpoint := e.feedbackEndpoint
 	installID := e.feedbackInstallID
@@ -172,9 +186,8 @@ func (e *Engine) submitFeedback(p Platform, msg *Message, title, description, tr
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
 		Agent:     e.agent.Name(),
-		Trigger:   trigger,
 		Title:     redactFeedbackText(title),
-		Body:      e.buildFeedbackBody(description, trigger),
+		Body:      body,
 	}
 
 	postFn := e.feedbackPostFn
@@ -188,12 +201,12 @@ func (e *Engine) submitFeedback(p Platform, msg *Message, title, description, tr
 		return
 	}
 
-	slog.Info("feedback: submitted", "trigger", trigger, "issue_url", issueURL)
+	slog.Info("feedback: submitted", "issue_url", issueURL)
 	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgFeedbackSubmitted, issueURL))
 }
 
 // recordFeedbackError remembers the most recent turn error per session so a
-// later `/feedback error` can report it. Any user-visible failure — agent
+// later /feedback can attach it. Any user-visible failure — agent
 // errors, idle timeouts, platform failures — may be recorded here; the
 // feedback channel is for every problem users hit, not just config gaps.
 func (e *Engine) recordFeedbackError(sessionKey, errText string) {
@@ -208,9 +221,10 @@ func (e *Engine) recordFeedbackError(sessionKey, errText string) {
 	e.feedbackErrors[sessionKey] = &feedbackError{Text: errText, At: time.Now()}
 }
 
-// maybeSendFeedbackErrorHint follows a delivered error with a one-line "you
-// can report this" pointer, at most once per session per cooldown window so
-// repeated failures do not double the noise.
+// maybeSendFeedbackErrorHint follows a delivered error with the "report this
+// to the author?" ask — the summarized problem plus agree/ignore buttons on
+// card platforms, a one-line /feedback pointer elsewhere — at most once per
+// session per cooldown window so repeated failures do not double the noise.
 func (e *Engine) maybeSendFeedbackErrorHint(p Platform, replyCtx any, sessionKey string) {
 	if !e.feedbackActive() {
 		return
@@ -224,8 +238,22 @@ func (e *Engine) maybeSendFeedbackErrorHint(p Platform, replyCtx any, sessionKey
 	if due {
 		e.feedbackErrorHintAt[sessionKey] = time.Now()
 	}
+	fe := e.feedbackErrors[sessionKey]
 	e.feedbackMu.Unlock()
 	if !due {
+		return
+	}
+	if fe != nil {
+		line := fe.Text
+		if i := strings.IndexByte(line, '\n'); i >= 0 {
+			line = line[:i]
+		}
+		line = redactFeedbackText(line)
+		if len(line) > 200 {
+			line = line[:200] + "…"
+		}
+		body := e.i18n.Tf(MsgFeedbackAskError, "`"+line+"`")
+		_ = e.sendFeedbackAsk(p, replyCtx, body, e.i18n.T(MsgFeedbackErrorHint))
 		return
 	}
 	e.send(p, replyCtx, e.i18n.T(MsgFeedbackErrorHint))
@@ -238,8 +266,71 @@ func (e *Engine) NotifyCapabilityGap(keys []string) bool {
 	if !e.feedbackActive() || len(keys) == 0 {
 		return false
 	}
-	content := e.i18n.Tf(MsgFeedbackCapabilityGap, "`"+strings.Join(keys, "`, `")+"`")
-	return e.notifyMostRecentSession(content, "feedback notice")
+	quoted := "`" + strings.Join(keys, "`, `") + "`"
+	body := e.i18n.Tf(MsgFeedbackAskGap, quoted)
+	fallback := e.i18n.Tf(MsgFeedbackCapabilityGap, quoted)
+	return e.notifyMostRecentSessionFn("feedback notice", func(p Platform, replyCtx any) error {
+		return e.sendFeedbackAsk(p, replyCtx, body, fallback)
+	})
+}
+
+// sendFeedbackAsk delivers the "report this to the author?" ask. On card
+// platforms the problem summary comes with two buttons — agreeing is one
+// tap, there is no command to learn. Platforms without cards fall back to a
+// one-line /feedback pointer.
+func (e *Engine) sendFeedbackAsk(p Platform, replyCtx any, body, fallback string) error {
+	if sender, ok := p.(CardSender); ok {
+		card := NewCard().
+			Title(e.i18n.T(MsgFeedbackAskTitle), "orange").
+			Markdown(body).
+			Buttons(
+				PrimaryBtn(e.i18n.T(MsgFeedbackBtnSubmit), "act:/feedback submit"),
+				DefaultBtn(e.i18n.T(MsgFeedbackBtnDismiss), "act:/feedback dismiss"),
+			).
+			Build()
+		ctx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
+		defer cancel()
+		if err := sender.SendCard(ctx, replyCtx, card); err == nil {
+			return nil
+		}
+		// Card delivery failed; degrade to the text pointer below.
+	}
+	return e.sendWithError(p, replyCtx, fallback)
+}
+
+// handleFeedbackCardAction reacts to the ask-card buttons. "submit" is the
+// user's agreement: file the report right away (async — the relay POST must
+// not block the platform's card callback). "dismiss" needs no reply; the
+// platform's generic toast acknowledges the tap.
+func (e *Engine) handleFeedbackCardAction(args, sessionKey string) {
+	if strings.TrimSpace(args) != "submit" {
+		return
+	}
+	platformName := ""
+	if idx := strings.Index(sessionKey, ":"); idx > 0 {
+		platformName = sessionKey[:idx]
+	}
+	var target Platform
+	for _, p := range e.platforms {
+		if p.Name() == platformName {
+			target = p
+			break
+		}
+	}
+	if target == nil {
+		return
+	}
+	rc, ok := target.(ReplyContextReconstructor)
+	if !ok {
+		return
+	}
+	replyCtx, err := rc.ReconstructReplyCtx(sessionKey)
+	if err != nil {
+		slog.Debug("feedback: reconstruct reply context failed", "session_key", sessionKey, "error", err)
+		return
+	}
+	msg := &Message{SessionKey: sessionKey, Platform: target.Name(), ReplyCtx: replyCtx}
+	go e.cmdFeedback(target, msg, "")
 }
 
 // feedbackHint returns the one-line /feedback pointer appended to
@@ -280,18 +371,32 @@ func feedbackTitleFromDescription(desc string) string {
 
 func isUTF8Start(b byte) bool { return b&0xC0 != 0x80 }
 
-func (e *Engine) buildFeedbackBody(description, trigger string) string {
+func (e *Engine) buildFeedbackBody(description string, fe *feedbackError, gaps []string) string {
 	description = strings.TrimSpace(redactFeedbackText(description))
 	if len(description) > feedbackMaxDescription {
 		description = description[:feedbackMaxDescription] + "\n\n_[truncated]_"
 	}
 	var b strings.Builder
-	b.WriteString(description)
+	if description != "" {
+		b.WriteString(description)
+	}
+	if fe != nil {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		fmt.Fprintf(&b, "**Most recent error in this chat** (%s):\n\n```\n%s\n```",
+			fe.At.UTC().Format(time.RFC3339), redactFeedbackText(fe.Text))
+	}
+	if len(gaps) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("**Config keys not consumed by this build**:\n\n- `" + strings.Join(gaps, "`\n- `") + "`")
+	}
 	b.WriteString("\n\n---\n**Environment (auto-generated)**\n")
 	fmt.Fprintf(&b, "- cc-connect-next: %s\n", CurrentVersion)
 	fmt.Fprintf(&b, "- OS/Arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Fprintf(&b, "- Agent: %s\n", e.agent.Name())
-	fmt.Fprintf(&b, "- Trigger: %s\n", trigger)
 	b.WriteString("\n_Reported via in-app feedback; the reporter did not use a GitHub account._")
 	return b.String()
 }

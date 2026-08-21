@@ -23,7 +23,6 @@ interface Submission {
   os?: string;
   arch?: string;
   agent?: string;
-  trigger?: string;
   title: string;
   body: string;
 }
@@ -88,7 +87,6 @@ export default {
 
     const repo = env.REPO || "timmyagentic/cc-connect-next";
     const labels = ["user-feedback"];
-    if (sub.trigger === "config_keys") labels.push("config-gap");
 
     const gh = (path: string, init?: RequestInit) =>
       fetch(`https://api.github.com${path}`, {
@@ -102,14 +100,14 @@ export default {
         },
       });
 
-    // Dedup: identical (trigger, title) reports thread onto one open issue as
+    // Dedup: identical titles thread onto one open issue as
     // "+1" comments instead of flooding the tracker — the comment count then
     // doubles as a frequency signal for triage. Best-effort only: the search
     // index lags a few seconds, so near-simultaneous duplicates may still
     // create two issues, and closed issues intentionally get a fresh one.
-    const fp = await fingerprint(`${sub.trigger}\n${sub.title}`);
+    const fp = await fingerprint(sub.title);
     const marker = `ccn-fp:${fp}`;
-    const envLine = `${sub.version ?? "?"} · ${sub.os ?? "?"}/${sub.arch ?? "?"} · ${sub.agent ?? "?"} · ${sub.trigger ?? "?"}`;
+    const envLine = `${sub.version ?? "?"} · ${sub.os ?? "?"}/${sub.arch ?? "?"} · ${sub.agent ?? "?"}`;
 
     try {
       const q = encodeURIComponent(`repo:${repo} is:issue is:open label:user-feedback "${marker}"`);
