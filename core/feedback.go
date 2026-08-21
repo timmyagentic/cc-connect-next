@@ -52,9 +52,18 @@ const (
 type feedbackDraft struct {
 	Title     string
 	Body      string
-	Trigger   string // "user" | "config_keys"
+	Trigger   string // "user" | "config_keys" | "error"
 	CreatedAt time.Time
 }
+
+// feedbackError is the most recent user-visible failure in a session,
+// reportable via `/feedback error`.
+type feedbackError struct {
+	Text string
+	At   time.Time
+}
+
+const feedbackErrorHintCooldown = 10 * time.Minute
 
 // FeedbackSubmission is the relay wire format (schema 1).
 type FeedbackSubmission struct {
@@ -134,6 +143,21 @@ func (e *Engine) cmdFeedback(p Platform, msg *Message, raw string) {
 		} else {
 			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackNoDraft))
 		}
+	case "error":
+		e.feedbackMu.Lock()
+		fe := e.feedbackErrors[key]
+		e.feedbackMu.Unlock()
+		if fe == nil {
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackNoError))
+			return
+		}
+		errLine := fe.Text
+		if i := strings.IndexByte(errLine, '\n'); i >= 0 {
+			errLine = errLine[:i]
+		}
+		title := feedbackTitleFromDescription("error: " + errLine)
+		desc := "A turn failed with the following error (" + fe.At.UTC().Format(time.RFC3339) + "):\n\n```\n" + fe.Text + "\n```"
+		e.stageFeedbackDraft(p, msg, key, title, desc, "error")
 	case "config":
 		keys := e.FeedbackCapabilityGaps()
 		if len(keys) == 0 {
@@ -211,6 +235,45 @@ func (e *Engine) submitFeedbackDraft(p Platform, msg *Message, key string) {
 
 	slog.Info("feedback: submitted", "trigger", draft.Trigger, "issue_url", issueURL)
 	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgFeedbackSubmitted, issueURL))
+}
+
+// recordFeedbackError remembers the most recent turn error per session so a
+// later `/feedback error` can report it. Any user-visible failure — agent
+// errors, idle timeouts, platform failures — may be recorded here; the
+// feedback channel is for every problem users hit, not just config gaps.
+func (e *Engine) recordFeedbackError(sessionKey, errText string) {
+	if !e.feedbackActive() || strings.TrimSpace(errText) == "" {
+		return
+	}
+	e.feedbackMu.Lock()
+	defer e.feedbackMu.Unlock()
+	if e.feedbackErrors == nil {
+		e.feedbackErrors = make(map[string]*feedbackError)
+	}
+	e.feedbackErrors[sessionKey] = &feedbackError{Text: errText, At: time.Now()}
+}
+
+// maybeSendFeedbackErrorHint follows a delivered error with a one-line "you
+// can report this" pointer, at most once per session per cooldown window so
+// repeated failures do not double the noise.
+func (e *Engine) maybeSendFeedbackErrorHint(p Platform, replyCtx any, sessionKey string) {
+	if !e.feedbackActive() {
+		return
+	}
+	e.feedbackMu.Lock()
+	if e.feedbackErrorHintAt == nil {
+		e.feedbackErrorHintAt = make(map[string]time.Time)
+	}
+	last := e.feedbackErrorHintAt[sessionKey]
+	due := time.Since(last) >= feedbackErrorHintCooldown
+	if due {
+		e.feedbackErrorHintAt[sessionKey] = time.Now()
+	}
+	e.feedbackMu.Unlock()
+	if !due {
+		return
+	}
+	e.send(p, replyCtx, e.i18n.T(MsgFeedbackErrorHint))
 }
 
 // NotifyCapabilityGap proactively tells the project's most recently active

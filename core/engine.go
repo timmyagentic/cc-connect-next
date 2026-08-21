@@ -473,13 +473,15 @@ type Engine struct {
 
 	// Feedback channel state (see core/feedback.go). feedbackPostFn is a
 	// test seam; production uses postFeedback.
-	feedbackMu        sync.Mutex
-	feedbackEnabled   bool
-	feedbackEndpoint  string
-	feedbackInstallID string
-	feedbackGapKeys   []string
-	feedbackDrafts    map[string]*feedbackDraft
-	feedbackPostFn    func(endpoint string, sub FeedbackSubmission) (string, error)
+	feedbackMu          sync.Mutex
+	feedbackEnabled     bool
+	feedbackEndpoint    string
+	feedbackInstallID   string
+	feedbackGapKeys     []string
+	feedbackDrafts      map[string]*feedbackDraft
+	feedbackErrors      map[string]*feedbackError
+	feedbackErrorHintAt map[string]time.Time
+	feedbackPostFn      func(endpoint string, sub FeedbackSubmission) (string, error)
 
 	// When true, /list etc. only show sessions tracked by cc-connect-next,
 	// hiding sessions created by direct CLI usage in the same work_dir.
@@ -7036,6 +7038,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			if event.Error != nil {
 				errMsg := event.Error.Error()
 				slog.Error("agent error", "error", event.Error)
+				e.recordFeedbackError(sessionKey, errMsg)
 				e.hooks.Emit(HookEvent{
 					Event:      HookEventError,
 					SessionKey: sessionKey,
@@ -7064,6 +7067,9 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				}
 			} else if !updatedRichError && usesRichCard(p) {
 				sendGenericRichFailure(p, replyCtx, cardMessageID, safePartial)
+			}
+			if event.Error != nil {
+				e.maybeSendFeedbackErrorHint(p, replyCtx, sessionKey)
 			}
 			// Only drop queued messages if the agent session is dead.
 			// Some agents (e.g. Codex) emit EventError for per-turn failures
@@ -7445,6 +7451,7 @@ var builtinCommands = []struct {
 	{[]string{"skills", "skill"}, "skills"},
 	{[]string{"config"}, "config"},
 	{[]string{"doctor"}, "doctor"},
+	{[]string{"feedback", "fb"}, "feedback"},
 	{[]string{"upgrade", "update"}, "upgrade"},
 	{[]string{"restart"}, "restart"},
 	{[]string{"alias"}, "alias"},

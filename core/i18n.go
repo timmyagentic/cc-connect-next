@@ -578,6 +578,8 @@ const (
 	MsgFeedbackNoDraft       MsgKey = "feedback_no_draft"
 	MsgFeedbackDisabled      MsgKey = "feedback_disabled"
 	MsgFeedbackHint          MsgKey = "feedback_hint"
+	MsgFeedbackErrorHint     MsgKey = "feedback_error_hint"
+	MsgFeedbackNoError       MsgKey = "feedback_no_error"
 	MsgFeedbackCapabilityGap MsgKey = "feedback_capability_gap"
 
 	MsgWhoamiTitle     MsgKey = "whoami_title"
@@ -3561,11 +3563,25 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s). Envía `/upgrade` para más detalles o `/upgrade confirm` para actualizar ahora.",
 	},
 	MsgFeedbackUsage: {
-		LangEnglish:            "📮 Report a problem or missing capability to the project author:\n`/feedback <describe what you need>` — preview the report\n`/feedback confirm` — submit the previewed report\n`/feedback cancel` — discard it\nNo GitHub account is needed; nothing is sent without your confirmation.",
-		LangChinese:            "📮 向项目作者反馈问题或缺失的能力：\n`/feedback <描述你的需求>` — 生成反馈预览\n`/feedback confirm` — 提交预览的反馈\n`/feedback cancel` — 放弃\n无需 GitHub 账号；未经你确认不会发送任何内容。",
-		LangTraditionalChinese: "📮 向專案作者回饋問題或缺少的能力：\n`/feedback <描述你的需求>` — 產生回饋預覽\n`/feedback confirm` — 送出預覽的回饋\n`/feedback cancel` — 放棄\n無需 GitHub 帳號；未經你確認不會送出任何內容。",
-		LangJapanese:           "📮 問題や不足している機能を作者に報告できます：\n`/feedback <内容を記述>` — レポートをプレビュー\n`/feedback confirm` — プレビューした内容を送信\n`/feedback cancel` — 破棄\nGitHub アカウントは不要です。確認なしに送信されることはありません。",
-		LangSpanish:            "📮 Informa de un problema o capacidad faltante al autor del proyecto:\n`/feedback <describe lo que necesitas>` — vista previa del informe\n`/feedback confirm` — enviar el informe previsualizado\n`/feedback cancel` — descartarlo\nNo se necesita cuenta de GitHub; nada se envía sin tu confirmación.",
+		LangEnglish:            "📮 Report any problem or missing capability to the project author:\n`/feedback <describe the problem>` — preview the report\n`/feedback error` — report the most recent error in this chat\n`/feedback confirm` — submit the previewed report\n`/feedback cancel` — discard it\nNo GitHub account is needed; nothing is sent without your confirmation.",
+		LangChinese:            "📮 向项目作者反馈使用中遇到的任何问题或缺失的能力：\n`/feedback <描述问题>` — 生成反馈预览\n`/feedback error` — 反馈本会话最近一次错误\n`/feedback confirm` — 提交预览的反馈\n`/feedback cancel` — 放弃\n无需 GitHub 账号；未经你确认不会发送任何内容。",
+		LangTraditionalChinese: "📮 向專案作者回饋使用中遇到的任何問題或缺少的能力：\n`/feedback <描述問題>` — 產生回饋預覽\n`/feedback error` — 回饋本會話最近一次錯誤\n`/feedback confirm` — 送出預覽的回饋\n`/feedback cancel` — 放棄\n無需 GitHub 帳號；未經你確認不會送出任何內容。",
+		LangJapanese:           "📮 利用中に遇った問題や不足している機能を作者に報告できます：\n`/feedback <問題を記述>` — レポートをプレビュー\n`/feedback error` — このチャットの直近のエラーを報告\n`/feedback confirm` — プレビューした内容を送信\n`/feedback cancel` — 破棄\nGitHub アカウントは不要です。確認なしに送信されることはありません。",
+		LangSpanish:            "📮 Informa de cualquier problema o capacidad faltante al autor del proyecto:\n`/feedback <describe el problema>` — vista previa del informe\n`/feedback error` — informar del error más reciente de este chat\n`/feedback confirm` — enviar el informe previsualizado\n`/feedback cancel` — descartarlo\nNo se necesita cuenta de GitHub; nada se envía sin tu confirmación.",
+	},
+	MsgFeedbackErrorHint: {
+		LangEnglish:            "💡 Hit a problem? Send `/feedback error` to report this error to the author — you preview before anything is sent, and no GitHub account is needed.",
+		LangChinese:            "💡 遇到问题了？发送 `/feedback error` 把这个错误反馈给作者——提交前会先预览，无需 GitHub 账号。",
+		LangTraditionalChinese: "💡 遇到問題了？傳送 `/feedback error` 把這個錯誤回饋給作者——送出前會先預覽，無需 GitHub 帳號。",
+		LangJapanese:           "💡 問題が発生しましたか？`/feedback error` でこのエラーを作者に報告できます。送信前にプレビューでき、GitHub アカウントは不要です。",
+		LangSpanish:            "💡 ¿Encontraste un problema? Envía `/feedback error` para informar de este error al autor: hay vista previa antes de enviar y no se necesita cuenta de GitHub.",
+	},
+	MsgFeedbackNoError: {
+		LangEnglish:            "No recent error is recorded for this chat. Describe the problem instead: `/feedback <description>`.",
+		LangChinese:            "本会话没有记录到最近的错误。可以改用 `/feedback <描述>` 直接描述问题。",
+		LangTraditionalChinese: "本會話沒有記錄到最近的錯誤。可以改用 `/feedback <描述>` 直接描述問題。",
+		LangJapanese:           "このチャットには直近のエラーが記録されていません。`/feedback <内容>` で問題を直接記述してください。",
+		LangSpanish:            "No hay ningún error reciente registrado en este chat. Describe el problema con `/feedback <descripción>`.",
 	},
 	MsgFeedbackPreview: {
 		LangEnglish:            "📮 **Feedback preview** — exactly this will be submitted:\n\n**Title**: %s\n\n%s\n\nSend `/feedback confirm` to submit, or `/feedback cancel` to discard.",

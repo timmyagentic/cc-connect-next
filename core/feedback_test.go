@@ -192,3 +192,47 @@ func TestFeedbackNotifier_RetriesUntilSessionExists(t *testing.T) {
 		t.Fatalf("notice must be delivered once a session exists, got %v", got)
 	}
 }
+
+func TestCmdFeedback_ErrorDraftFromRecordedError(t *testing.T) {
+	e, plat := newFeedbackTestEngine(t)
+	var posted *FeedbackSubmission
+	e.feedbackPostFn = func(_ string, sub FeedbackSubmission) (string, error) {
+		posted = &sub
+		return "https://example/3", nil
+	}
+
+	// No error recorded yet.
+	e.cmdFeedback(plat, feedbackTestMsg(), "error")
+	if sent := plat.sentTexts(); len(sent) != 1 || !strings.Contains(sent[0], "/feedback <") {
+		t.Fatalf("expected no-error reply, got %v", sent)
+	}
+
+	e.recordFeedbackError("feishu:oc_chat:ou_user", "codex app-server turn/start: boom")
+	e.cmdFeedback(plat, feedbackTestMsg(), "error")
+	sent := plat.sentTexts()
+	if !strings.Contains(sent[len(sent)-1], "turn/start: boom") {
+		t.Fatalf("error preview must include the recorded error, got %q", sent[len(sent)-1])
+	}
+
+	e.cmdFeedback(plat, feedbackTestMsg(), "confirm")
+	if posted == nil || posted.Trigger != "error" {
+		t.Fatalf("expected error-triggered submission, got %+v", posted)
+	}
+	if !strings.Contains(posted.Title, "[feedback] error: codex app-server turn/start: boom") {
+		t.Errorf("title = %q", posted.Title)
+	}
+}
+
+func TestFeedbackErrorHint_ThrottledPerSession(t *testing.T) {
+	e, plat := newFeedbackTestEngine(t)
+	e.maybeSendFeedbackErrorHint(plat, "rctx", "feishu:oc_chat:ou_user")
+	e.maybeSendFeedbackErrorHint(plat, "rctx", "feishu:oc_chat:ou_user")
+	if sent := plat.sentTexts(); len(sent) != 1 || !strings.Contains(sent[0], "/feedback error") {
+		t.Fatalf("hint must be sent exactly once within the cooldown, got %v", sent)
+	}
+	// A different session has its own budget.
+	e.maybeSendFeedbackErrorHint(plat, "rctx2", "feishu:oc_other:ou_user")
+	if sent := plat.sentTexts(); len(sent) != 2 {
+		t.Fatalf("second session must get its own hint, got %v", sent)
+	}
+}
