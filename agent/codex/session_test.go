@@ -26,13 +26,18 @@ func TestNormalizeReasoningEffort_RejectsMinimal(t *testing.T) {
 func TestAvailableReasoningEfforts_ExcludesMinimal(t *testing.T) {
 	agent := &Agent{}
 	got := agent.AvailableReasoningEfforts()
-	want := []string{"low", "medium", "high", "xhigh"}
+	want := []string{"low", "medium", "high", "xhigh", "max"}
 	if len(got) != len(want) {
 		t.Fatalf("AvailableReasoningEfforts len = %d, want %d, got=%v", len(got), len(want), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("AvailableReasoningEfforts[%d] = %q, want %q, got=%v", i, got[i], want[i], got)
+		}
+	}
+	for _, effort := range got {
+		if effort == "minimal" || effort == "min" {
+			t.Fatalf("AvailableReasoningEfforts must not include %q, got=%v", effort, got)
 		}
 	}
 }
