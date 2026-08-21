@@ -16,7 +16,7 @@ import (
 
 func TestAppServerLaunchArgs_PropagatesCmdExtraArgs(t *testing.T) {
 	extras := []string{"-c", `service_tier="fast"`, "-c", "features.fast_mode=true"}
-	args := buildAppServerLaunchArgs(extras, "stdio://", "o3", "max", "myprov", "https://api.example.com")
+	args := (&appServerSession{cliExtraArgs: extras, url: "stdio://", model: "o3", effort: "max", modelProvider: "myprov", baseURL: "https://api.example.com"}).launchArgs()
 
 	want := []string{
 		"-c", `service_tier="fast"`,
@@ -34,7 +34,7 @@ func TestAppServerLaunchArgs_PropagatesCmdExtraArgs(t *testing.T) {
 }
 
 func TestAppServerLaunchArgs_NoExtrasKeepsLegacyShape(t *testing.T) {
-	args := buildAppServerLaunchArgs(nil, "stdio://", "o3", "high", "", "")
+	args := (&appServerSession{url: "stdio://", model: "o3", effort: "high"}).launchArgs()
 
 	want := []string{
 		"app-server",
@@ -51,7 +51,7 @@ func TestAppServerLaunchArgs_NoExtrasKeepsLegacyShape(t *testing.T) {
 // after cmd extras — the same precedence the exec backend has always had.
 func TestAppServerLaunchArgs_StructuredOptionsWinOverCmdExtras(t *testing.T) {
 	extras := []string{"-c", `model_reasoning_effort="low"`}
-	args := buildAppServerLaunchArgs(extras, "stdio://", "", "high", "", "")
+	args := (&appServerSession{cliExtraArgs: extras, url: "stdio://", effort: "high"}).launchArgs()
 
 	lowIdx := slices.Index(args, `model_reasoning_effort="low"`)
 	highIdx := slices.Index(args, `model_reasoning_effort="high"`)
@@ -70,7 +70,7 @@ func TestCmdExtraArgs_ExecAndAppServerParity(t *testing.T) {
 
 	cs := &codexSession{mode: "full-auto", workDir: t.TempDir(), cliExtraArgs: extras}
 	execArgs := cs.launchArgs("hello", nil)
-	appServerArgs := buildAppServerLaunchArgs(extras, "stdio://", "", "", "", "")
+	appServerArgs := (&appServerSession{cliExtraArgs: extras, url: "stdio://"}).launchArgs()
 
 	for name, args := range map[string][]string{"exec": execArgs, "app_server": appServerArgs} {
 		if len(args) < 3 || !reflect.DeepEqual(args[:2], extras) {

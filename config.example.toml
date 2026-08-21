@@ -1582,19 +1582,27 @@ app_secret = "your-feishu-app-secret"
 # 不支持的值会回退到 Codex CLI 默认强度（并记录警告）。
 # reasoning_effort = "high"  # "low" | "medium" | "high" | "xhigh" | "max"
 #
+# Optional: Codex service tier / 可选：Codex 服务档位
+# Passed through verbatim as `-c service_tier=...` on both backends; valid
+# values are model-catalog-driven (e.g. "default", "fast"). Prefer this over
+# injecting `-c service_tier=...` through `cmd`.
+# 两种后端均原样下发为 `-c service_tier=...`；合法取值由模型目录决定
+# （如 "default"、"fast"）。优先使用本选项，而不是经 `cmd` 注入。
+# service_tier = "fast"
+#
 # Optional: CLI binary and extra global args / 可选：CLI 二进制与额外全局参数
 # Extra args are passed on both backends, placed before the subcommand
 # (`app-server` / `exec`). Structured options above (model, reasoning_effort,
-# provider) are emitted after them, so they win when both set the same
-# `-c` key (codex resolves duplicate `-c` last-wins).
+# service_tier, provider) are emitted after them, so they win when both set
+# the same `-c` key (codex resolves duplicate `-c` last-wins).
 # 额外参数在两种后端下都会透传，置于子命令（`app-server` / `exec`）之前。
-# 上方的结构化选项（model、reasoning_effort、provider）在其后输出，
-# 因此与同名 `-c` 键冲突时以结构化选项为准（codex 对重复 `-c` 后者生效）。
+# 上方的结构化选项（model、reasoning_effort、service_tier、provider）在其后
+# 输出，因此与同名 `-c` 键冲突时以结构化选项为准（codex 对重复 `-c` 后者生效）。
 # Any `-c` override (from cmd or structured options) beats Codex's own
 # ~/.codex/config.toml, per standard codex CLI semantics.
 # 任何 `-c` 覆盖（无论来自 cmd 还是结构化选项）都优先于 Codex 自身的
 # ~/.codex/config.toml，这是 codex CLI 的标准语义。
-# cmd = 'codex -c service_tier="fast" -c features.fast_mode=true'
+# cmd = 'codex --profile work'
 #
 # Optional: Codex backend / 可选：Codex 后端
 # - "app_server" (default): persistent local `codex app-server` JSON-RPC

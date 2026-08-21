@@ -27,6 +27,7 @@ type codexSession struct {
 	workDir        string
 	model          string
 	effort         string
+	serviceTier    string // Codex service tier, e.g. "fast"; catalog-driven, passed through verbatim
 	mode           string
 	baseURL        string   // provider base URL; passed as -c openai_base_url=<url>
 	modelProvider  string   // Codex model_provider name; passed as -c model_provider=<name>
@@ -87,20 +88,40 @@ func prependCodexPromptPreamble(prompt string, preamble string) string {
 	return "Before answering, follow these project-level instructions for this cc-connect-next session. They are not user content.\n\n" + preamble + "\n\n---\n\nUser message:\n" + prompt
 }
 
-func newCodexSession(ctx context.Context, cliBin string, cliExtraArgs []string, workDir, model, effort, mode, resumeID, baseURL string, extraEnv []string, modelProvider string, systemPrompt string, appendPrompt string) (*codexSession, error) {
+// codexSessionParams bundles the launch configuration for an exec-backend
+// Codex session. Mirrors appServerSessionParams: positional same-typed string
+// parameters let call sites silently drop or swap fields (issue #37).
+type codexSessionParams struct {
+	cliBin        string
+	cliExtraArgs  []string
+	workDir       string
+	model         string
+	effort        string
+	serviceTier   string
+	mode          string
+	resumeID      string
+	baseURL       string
+	modelProvider string
+	extraEnv      []string
+	systemPrompt  string
+	appendPrompt  string
+}
+
+func newCodexSession(ctx context.Context, p codexSessionParams) (*codexSession, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	cs := &codexSession{
-		workDir:        workDir,
-		model:          model,
-		effort:         effort,
-		mode:           mode,
-		baseURL:        baseURL,
-		modelProvider:  modelProvider,
-		cmd:            cliBin,
-		cliExtraArgs:   cliExtraArgs,
-		extraEnv:       extraEnv,
-		promptPreamble: buildCodexPromptPreamble(systemPrompt, appendPrompt),
+		workDir:        p.workDir,
+		model:          p.model,
+		effort:         p.effort,
+		serviceTier:    p.serviceTier,
+		mode:           p.mode,
+		baseURL:        p.baseURL,
+		modelProvider:  p.modelProvider,
+		cmd:            p.cliBin,
+		cliExtraArgs:   p.cliExtraArgs,
+		extraEnv:       p.extraEnv,
+		promptPreamble: buildCodexPromptPreamble(p.systemPrompt, p.appendPrompt),
 		events:         make(chan core.Event, 64),
 		ctx:            sessionCtx,
 		cancel:         cancel,
@@ -108,8 +129,8 @@ func newCodexSession(ctx context.Context, cliBin string, cliExtraArgs []string, 
 	}
 	cs.alive.Store(true)
 
-	if resumeID != "" && resumeID != core.ContinueSession {
-		cs.threadID.Store(resumeID)
+	if p.resumeID != "" && p.resumeID != core.ContinueSession {
+		cs.threadID.Store(p.resumeID)
 	}
 
 	return cs, nil
@@ -281,6 +302,9 @@ func (cs *codexSession) buildExecArgs(prompt string, imagePaths []string) []stri
 	}
 	if cs.effort != "" {
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", cs.effort))
+	}
+	if tier := strings.TrimSpace(cs.serviceTier); tier != "" {
+		args = append(args, "-c", fmt.Sprintf("service_tier=%q", tier))
 	}
 
 	if isResume {
