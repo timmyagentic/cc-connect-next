@@ -125,7 +125,34 @@ func doctorProjectResults(ctx context.Context, cfg *config.Config, proj config.P
 	}
 	defer func() { _ = agent.Stop() }()
 
+	results = append(results, busyMessageSteerCheck(cfg, proj, agent))
 	return append(results, core.RunDoctorChecksWithPlatformResults(ctx, agent, platformResults)...)
+}
+
+func busyMessageSteerCheck(cfg *config.Config, proj config.ProjectConfig, agent core.Agent) core.DoctorCheckResult {
+	const name = "Busy Message Steering"
+	if cfg.ResolveBusyMessageMode(&proj) == config.BusyMessageModeQueue {
+		return core.DoctorCheckResult{
+			Name:   name,
+			Status: core.DoctorPass,
+			Detail: "disabled by configuration; busy messages use the FIFO queue",
+		}
+	}
+
+	if info, ok := agent.(core.NativeSteerDoctorInfo); ok {
+		available, detail := info.NativeSteerStatus()
+		status := core.DoctorWarn
+		if available {
+			status = core.DoctorPass
+		}
+		return core.DoctorCheckResult{Name: name, Status: status, Detail: detail}
+	}
+
+	return core.DoctorCheckResult{
+		Name:   name,
+		Status: core.DoctorWarn,
+		Detail: `the configured agent does not advertise native turn/steer; busy messages fall back to FIFO. Set busy_message_mode = "queue" to make that behavior explicit`,
+	}
 }
 
 // projectConfigChecks reports what can be judged from the configuration file

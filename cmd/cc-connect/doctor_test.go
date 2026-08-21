@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +9,23 @@ import (
 	"github.com/timmyagentic/cc-connect-next/config"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
+
+type doctorSteerAgent struct {
+	available bool
+	detail    string
+}
+
+func (a *doctorSteerAgent) Name() string { return "doctor-steer" }
+func (a *doctorSteerAgent) StartSession(context.Context, string) (core.AgentSession, error) {
+	return nil, nil
+}
+func (a *doctorSteerAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, error) {
+	return nil, nil
+}
+func (a *doctorSteerAgent) Stop() error { return nil }
+func (a *doctorSteerAgent) NativeSteerStatus() (bool, string) {
+	return a.available, a.detail
+}
 
 func findCheck(t *testing.T, results []core.DoctorCheckResult, name string) core.DoctorCheckResult {
 	t.Helper()
@@ -134,6 +152,39 @@ func TestDoctorHasFailure(t *testing.T) {
 	}
 	if !doctorHasFailure([]core.DoctorCheckResult{{Status: core.DoctorPass}, {Status: core.DoctorFail}}) {
 		t.Fatal("a failed check must fail the command")
+	}
+}
+
+func TestBusyMessageSteerCheck_WarnsWhenRequestedBackendCannotSteer(t *testing.T) {
+	cfg := &config.Config{}
+	proj := config.ProjectConfig{BusyMessageMode: config.BusyMessageModeSteer}
+	agent := &doctorSteerAgent{
+		detail: `Codex exec backend cannot steer; set backend = "app_server" or busy_message_mode = "queue"`,
+	}
+
+	got := busyMessageSteerCheck(cfg, proj, agent)
+	if got.Status != core.DoctorWarn {
+		t.Fatalf("steer with incapable backend = %+v, want warning", got)
+	}
+	for _, want := range []string{"cannot steer", `backend = "app_server"`, `busy_message_mode = "queue"`} {
+		if !strings.Contains(got.Detail, want) {
+			t.Fatalf("detail %q does not contain %q", got.Detail, want)
+		}
+	}
+}
+
+func TestBusyMessageSteerCheck_PassesForNativeBackendOrExplicitQueue(t *testing.T) {
+	cfg := &config.Config{}
+	capable := &doctorSteerAgent{available: true, detail: "native turn/steer is available"}
+
+	steer := busyMessageSteerCheck(cfg, config.ProjectConfig{}, capable)
+	if steer.Status != core.DoctorPass || !strings.Contains(steer.Detail, "available") {
+		t.Fatalf("default steer with capable backend = %+v, want pass", steer)
+	}
+
+	queue := busyMessageSteerCheck(cfg, config.ProjectConfig{BusyMessageMode: config.BusyMessageModeQueue}, &doctorSteerAgent{})
+	if queue.Status != core.DoctorPass || !strings.Contains(queue.Detail, "FIFO queue") {
+		t.Fatalf("explicit queue with incapable backend = %+v, want pass", queue)
 	}
 }
 

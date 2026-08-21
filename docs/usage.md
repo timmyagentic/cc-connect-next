@@ -89,19 +89,19 @@ name = "conservative-project"
 busy_message_mode = "queue"
 ```
 
-**`steer` (default).** Busy messages are appended to the in-flight turn on agents that support native steering; agents without the capability (and the Codex exec backend) transparently fall back to the FIFO queue, so the default is safe everywhere. Native steering currently means Codex with the app-server backend:
+**`steer` (default).** Busy messages are appended to the in-flight turn on agents that support native steering; agents without the capability (and an explicitly selected Codex exec backend) transparently fall back to the FIFO queue, so the default is safe everywhere. Codex now defaults to the native-steer app-server backend over stdio:
 
 ```toml
 [projects.agent.options]
-mode = "yolo"
-backend = "app_server"   # required for native steering
+backend = "app_server"   # default; native turn/steer
+app_server_url = "stdio" # default; local subprocess transport
 ```
 
 The steer is sent as `turn/steer` with the active turn pinned via `expectedTurnId`, so it can never race a completing turn. When steering is definitively unavailable (unsupported backend, the turn just ended), the message safely falls back to the queue.
 
 **`queue`.** Set `busy_message_mode = "queue"` to always use the per-session FIFO: busy messages are processed as new turns after the current one completes (the pre-v0.1.3 behavior). If the steer outcome is *unknown* (RPC timeout), the message is deliberately **not** re-queued — that could deliver it twice — and you get an explicit warning instead.
 
-**`/ps <message>`** (alias `/btw`) always steers explicitly, regardless of the configured mode. On steer-capable backends it appends to the running turn; on Codex's default `exec` backend it now returns a clear error instead of launching a second `codex exec` process against the same thread. Agents without a steer capability keep the historical behavior (mid-turn stdin injection).
+**`/ps <message>`** (alias `/btw`) always steers explicitly, regardless of the configured mode. On steer-capable backends it appends to the running turn; on an explicitly selected Codex `exec` backend it returns a clear error instead of launching a second `codex exec` process against the same thread. Agents without a steer capability keep the historical behavior (mid-turn stdin injection).
 
 **Rich card handoff.** On rich-card platforms (Feishu), a successful steer moves the live progress card to the newest message:
 

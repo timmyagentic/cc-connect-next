@@ -52,6 +52,14 @@ type AgentDoctorInfo interface {
 	CLIDisplayName() string // e.g. "Claude", "Codex" (for display in doctor output)
 }
 
+// NativeSteerDoctorInfo is an optional agent-level diagnostic capability.
+// It describes whether the configured backend can append input to a turn that
+// is already running. Detail is printed by the CLI and therefore must not
+// contain credentials, URLs with credentials, or other sensitive values.
+type NativeSteerDoctorInfo interface {
+	NativeSteerStatus() (available bool, detail string)
+}
+
 // RunDoctorChecks performs all diagnostic checks for a running instance,
 // whose platforms are live.
 func RunDoctorChecks(ctx context.Context, agent Agent, platforms []Platform) []DoctorCheckResult {

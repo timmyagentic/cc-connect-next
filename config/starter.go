@@ -12,7 +12,7 @@ import (
 // looks unfinished.
 const (
 	StarterProjectName = "my-project"
-	StarterAgentType   = "claudecode"
+	StarterAgentType   = "codex"
 
 	PlaceholderWorkDir         = "/path/to/your/project"
 	PlaceholderFeishuAppID     = "your-feishu-app-id"
@@ -32,9 +32,10 @@ var starterPlaceholderFixes = map[string]string{
 // The Feishu-shaped tables are generated from RecommendedFeishuProfile rather
 // than spelled out again here: the template a new user gets and the profile
 // `feishu setup` offers are the same recommendation, so they must not be able
-// to disagree. Only credentials, the work directory, and the agent choice are
-// left for the user, and each of those is a placeholder the startup preflight
-// refuses to run with.
+// to disagree. Credentials and the work directory are the only placeholders
+// the startup preflight refuses to run with. The agent and its backend are
+// usable defaults: Codex app-server over stdio so the default busy-message
+// policy can actually use native turn/steer.
 func StarterConfigTOML() string {
 	settings := RecommendedFeishuProfile(StarterAgentType)
 
@@ -49,6 +50,9 @@ func StarterConfigTOML() string {
 [log]
 level = "info"
 
+[queue]
+busy_message_mode = "steer"
+
 [[projects]]
 name = "` + StarterProjectName + `"
 
@@ -58,7 +62,9 @@ type = "` + StarterAgentType + `"   # "claudecode", "codex", "cursor", "gemini",
 [projects.agent.options]
 work_dir = "` + PlaceholderWorkDir + `"   # REPLACE: absolute path of the project the agent works in
 mode = "default"
-# model = "claude-sonnet-4-20250514"
+backend = "app_server"                    # native turn/steer and interactive approvals
+app_server_url = "stdio"                  # launch a local codex app-server subprocess
+# backend = "exec"                        # explicit opt-out: busy messages fall back to FIFO
 
 # The tables below are the recommended Feishu profile: a quoted answer card
 # that carries the final answer and nothing else, clickable file references,

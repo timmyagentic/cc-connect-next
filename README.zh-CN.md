@@ -72,7 +72,7 @@ cc-connect-next daemon install --config ~/.cc-connect-next/config.toml
 | 语义 | “把这条纠正并入**正在运行**的任务” | “先做完当前任务，再把这条当作新请求” |
 | 机制 | 原生 `turn/steer` 锁定当前回合（`expectedTurnId`） | 会话级 FIFO，当前回合结束后开新回合 |
 | 卡片行为 | 进行中的卡片交接到最新消息 | 排队回合开始时创建新卡片 |
-| 要求 | Codex + `backend = "app_server"`（其余回退排队） | 任意 Agent |
+| 要求 | Codex（默认 app-server/stdio 后端；其余回退排队） | 任意 Agent |
 
 ```toml
 [queue]

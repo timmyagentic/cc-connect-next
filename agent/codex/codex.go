@@ -22,10 +22,10 @@ func init() {
 	core.RegisterAgent("codex", New)
 }
 
-// Agent drives OpenAI Codex CLI using `codex exec --json`.
+// Agent drives OpenAI Codex CLI using its app-server backend by default.
 //
-// `codex exec` has no approval IPC, so approvals are not interactive on the
-// exec backend. To get interactive approvals, switch to backend="app_server".
+// Set backend="exec" explicitly to use `codex exec --json`. That backend has
+// no approval IPC and cannot append input to a running turn.
 //
 // Modes on the exec backend (maps to codex exec flags):
 //   - "suggest":   --sandbox read-only       + approval_policy=never (no prompts)
@@ -110,8 +110,10 @@ func New(opts map[string]any) (core.Agent, error) {
 
 func normalizeBackend(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "app-server", "app_server", "appserver", "ws":
+	case "", "app-server", "app_server", "appserver", "ws":
 		return "app_server"
+	case "exec":
+		return "exec"
 	default:
 		return "exec"
 	}
@@ -120,7 +122,7 @@ func normalizeBackend(raw string) string {
 func normalizeAppServerURL(raw string) string {
 	url := strings.TrimSpace(raw)
 	if url == "" {
-		return "ws://127.0.0.1:3845"
+		return "stdio://"
 	}
 	if strings.EqualFold(url, "stdio") {
 		return "stdio://"
@@ -159,6 +161,19 @@ func normalizeReasoningEffort(raw string) string {
 }
 
 func (a *Agent) Name() string { return "codex" }
+
+// NativeSteerStatus reports the configured backend's native turn/steer
+// capability without exposing the configured endpoint.
+func (a *Agent) NativeSteerStatus() (bool, string) {
+	a.mu.RLock()
+	backend := a.backend
+	a.mu.RUnlock()
+
+	if backend == "app_server" {
+		return true, "Codex app-server backend is configured; native turn/steer is available"
+	}
+	return false, `Codex exec backend cannot steer a running turn; busy messages fall back to FIFO. Set backend = "app_server" and app_server_url = "stdio", or set busy_message_mode = "queue"`
+}
 
 func (a *Agent) SetWorkDir(dir string) {
 	a.mu.Lock()
@@ -311,7 +326,6 @@ func readCodexCachedModels() []core.ModelOption {
 	return parseCodexModelsJSON(b)
 }
 
-
 // parseCodexModelsJSON parses a Codex models JSON file (model_catalog.json
 // or models_cache.json) into a deduplicated, filtered slice of ModelOption.
 // It is shared by readCodexCachedModels and readCodexModelCatalog.
@@ -356,7 +370,6 @@ func parseCodexModelsJSON(data []byte) []core.ModelOption {
 	}
 	return models
 }
-
 
 // readCodexModelCatalog reads $CODEX_HOME/config.toml to find the
 // model_catalog_json setting, then reads and parses that JSON file.
@@ -744,7 +757,7 @@ func (a *Agent) activeProviderCodexConfig() (name string, apiKey string, wireAPI
 // PermissionModes returns the supported codex permission modes.
 //
 // Behavior depends on backend:
-//   - exec backend (default): codex exec has no approval IPC, so all modes run
+//   - exec backend (when explicitly selected): codex exec has no approval IPC, so all modes run
 //     with approval_policy=never. Sandbox tier is what controls access. The
 //     "suggest" label refers to the *intent* (read-only safety) — the CLI does
 //     not pop interactive approval prompts on this backend.

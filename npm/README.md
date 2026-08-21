@@ -29,13 +29,17 @@ cc-connect-next update
 ## Usage
 
 ```bash
-# Create config
-cc-connect-next --version
+# Create ~/.cc-connect-next/config.toml
+cc-connect-next
 
-# Edit config.toml, then run
+# Replace every REPLACE value, then run
 cc-connect-next
 cc-connect-next --config /path/to/config.toml
 ```
+
+The starter config uses Codex app-server over stdio with native busy-message
+steering enabled. Set `backend = "exec"` explicitly if you need the legacy
+per-turn subprocess path; busy messages then fall back to the FIFO queue.
 
 ## Documentation
 

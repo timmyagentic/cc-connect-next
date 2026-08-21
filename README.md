@@ -72,7 +72,7 @@ Two intents exist for a message that arrives while the agent is busy — and the
 | Meaning | "incorporate this correction into the task **already running**" | "finish this task, then handle my message as a new request" |
 | Mechanism | native `turn/steer` pinned to the active turn (`expectedTurnId`) | per-session FIFO, new turn after the current one |
 | Card behavior | live card hands over to the newest message | new card when its turn starts |
-| Requirements | Codex with `backend = "app_server"` (others fall back to queue) | any agent |
+| Requirements | Codex (the default app-server/stdio backend; others fall back to queue) | any agent |
 
 ```toml
 [queue]

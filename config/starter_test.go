@@ -87,6 +87,36 @@ func TestStarterConfigTOML_LoadsAndValidates(t *testing.T) {
 	}
 }
 
+func TestStarterConfigTOML_DefaultsToNativeCodexSteer(t *testing.T) {
+	tables := rawTables(t, StarterConfigTOML())
+
+	if got := tables["[queue]"]["busy_message_mode"]; got != `"steer"` {
+		t.Fatalf("starter busy_message_mode = %s, want explicit steer", got)
+	}
+	if got := tables["[projects.agent]"]["type"]; !strings.HasPrefix(got, `"codex"`) {
+		t.Fatalf("starter agent type = %s, want codex", got)
+	}
+	if got := tables["[projects.agent.options]"]["backend"]; !strings.HasPrefix(got, `"app_server"`) {
+		t.Fatalf("starter Codex backend = %s, want app_server", got)
+	}
+	if got := tables["[projects.agent.options]"]["app_server_url"]; !strings.HasPrefix(got, `"stdio"`) {
+		t.Fatalf("starter Codex app_server_url = %s, want stdio", got)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(StarterConfigTOML()), 0o600); err != nil {
+		t.Fatalf("write starter config: %v", err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(starter config) error = %v", err)
+	}
+	proj := &cfg.Projects[0]
+	if got := cfg.ResolveBusyMessageMode(proj); got != BusyMessageModeSteer {
+		t.Fatalf("starter effective busy-message mode = %q, want steer", got)
+	}
+}
+
 func TestFindStarterPlaceholders_ReportsEveryValueTheTemplateAsksToReplace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte(StarterConfigTOML()), 0o600); err != nil {
