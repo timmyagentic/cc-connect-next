@@ -90,15 +90,60 @@ export default {
     const labels = ["user-feedback"];
     if (sub.trigger === "config_keys") labels.push("config-gap");
 
-    const resp = await fetch(`https://api.github.com/repos/${repo}/issues`, {
+    const gh = (path: string, init?: RequestInit) =>
+      fetch(`https://api.github.com${path}`, {
+        ...init,
+        headers: {
+          authorization: `Bearer ${env.GITHUB_TOKEN}`,
+          accept: "application/vnd.github+json",
+          "content-type": "application/json",
+          "user-agent": "cc-connect-feedback-relay",
+          ...(init?.headers || {}),
+        },
+      });
+
+    // Dedup: identical (trigger, title) reports thread onto one open issue as
+    // "+1" comments instead of flooding the tracker — the comment count then
+    // doubles as a frequency signal for triage. Best-effort only: the search
+    // index lags a few seconds, so near-simultaneous duplicates may still
+    // create two issues, and closed issues intentionally get a fresh one.
+    const fp = await fingerprint(`${sub.trigger}\n${sub.title}`);
+    const marker = `ccn-fp:${fp}`;
+    const envLine = `${sub.version ?? "?"} · ${sub.os ?? "?"}/${sub.arch ?? "?"} · ${sub.agent ?? "?"} · ${sub.trigger ?? "?"}`;
+
+    try {
+      const q = encodeURIComponent(`repo:${repo} is:issue is:open label:user-feedback "${marker}"`);
+      const searchResp = await gh(`/search/issues?q=${q}&per_page=1`);
+      if (searchResp.ok) {
+        const found = (await searchResp.json()) as {
+          items?: { number: number; html_url: string }[];
+        };
+        const existing = found.items?.[0];
+        if (existing) {
+          const commentResp = await gh(`/repos/${repo}/issues/${existing.number}/comments`, {
+            method: "POST",
+            body: JSON.stringify({ body: `+1 — ${envLine}` }),
+          });
+          if (!commentResp.ok) {
+            console.error(`dedup comment failed: ${commentResp.status}`);
+          }
+          return json(200, { issue_url: existing.html_url, deduplicated: true });
+        }
+      } else {
+        console.error(`dedup search failed: ${searchResp.status}`);
+      }
+    } catch (err) {
+      console.error(`dedup lookup error: ${err}`);
+      // fall through to plain creation
+    }
+
+    const resp = await gh(`/repos/${repo}/issues`, {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${env.GITHUB_TOKEN}`,
-        accept: "application/vnd.github+json",
-        "content-type": "application/json",
-        "user-agent": "cc-connect-feedback-relay",
-      },
-      body: JSON.stringify({ title: sub.title, body: sub.body, labels }),
+      body: JSON.stringify({
+        title: sub.title,
+        body: `${sub.body}\n\n\`${marker}\``,
+        labels,
+      }),
     });
 
     if (!resp.ok) {
@@ -114,3 +159,11 @@ export default {
     return json(200, { issue_url: issue.html_url });
   },
 };
+
+async function fingerprint(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 12);
+}

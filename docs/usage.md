@@ -6,6 +6,7 @@ Complete guide to using cc-connect-next features.
 
 - [Session Management](#session-management)
 - [Busy Messages: Queue vs Steer](#busy-messages-queue-vs-steer)
+- [Feedback Channel (`/feedback`)](#feedback-channel-feedback)
 - [Permission Modes](#permission-modes)
 - [API Provider Management](#api-provider-management)
 - [Model Selection](#model-selection)
@@ -108,6 +109,31 @@ The steer is sent as `turn/steer` with the active turn pinned via `expectedTurnI
 1. The steered message immediately gets its own card in an "Adding this message to the current task..." state.
 2. Once the steer is confirmed, the previous card freezes into a neutral grey **Continued in a newer message** state, keeping whatever partial answer was already visible.
 3. All further progress and the final answer render only in the newest card — one turn, one Done card. Rapid consecutive steers chain the same way; only the newest card stays active.
+
+---
+
+## Feedback Channel (`/feedback`)
+
+When you hit a problem — a failed turn, a config key this build does not
+support, or a capability you wish existed — you can report it straight to the
+project author from chat. No GitHub account is needed: the daemon submits the
+report through an author-operated relay and replies with the issue link.
+
+```
+/feedback <describe the problem>   # report anything
+/feedback error                    # report the most recent error in this chat
+/feedback config                   # report config keys this build does not support
+```
+
+The daemon also prompts you proactively: after a turn fails it points at
+`/feedback error` (at most once per 10 minutes per chat), and on startup it
+announces config keys it cannot consume (once per distinct key set).
+
+Reports are submitted the moment you send the command — invoking `/feedback`
+is the consent. Credentials, chat/user ids, and filesystem paths are redacted
+automatically, and the auto-generated environment section carries only the
+version, OS/arch, and agent type. Disable the whole channel with
+`[feedback] enabled = false` in config.toml.
 
 ---
 

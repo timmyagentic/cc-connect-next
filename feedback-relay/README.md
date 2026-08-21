@@ -27,6 +27,12 @@ chars, body ≤ 12000 chars, `user-feedback` label on every issue
 (`config-gap` added for unsupported-config reports) so triage and bulk
 cleanup stay easy.
 
+Dedup: identical (trigger, title) reports carry a `ccn-fp:<hash>` marker in
+the issue body; while such an issue is open, further reports become "+1"
+comments on it (with version/os/agent), so the comment count doubles as a
+frequency signal. Best-effort — GitHub's search index lags a few seconds, and
+closed issues intentionally get a fresh issue when the problem recurs.
+
 ## Deploy (author only)
 
 ```bash

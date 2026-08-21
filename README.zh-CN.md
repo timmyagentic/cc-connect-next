@@ -30,6 +30,8 @@
 - 🤖 **14 种 Agent × 15 个平台** —— 单进程承载多个项目，每个项目把一个代码目录绑定到独立的 Agent 与平台，各自拥有权限、provider、模型与展示配置。
 - 🌍 **生产级配套** —— `doctor` 诊断、launchd/systemd/Windows daemon、Web 管理台（Beta）、定时任务与 webhook、机器人间 relay、语音输入/输出（STT/TTS）、多工作区路由，五语言 i18n（en、zh、zh-TW、ja、es）。
 
+- **一句话反馈。** 遇到 bug 或缺失的能力？`/feedback` 直接把问题提交为作者仓库的 GitHub issue——自动脱敏、无需 GitHub 账号，回合失败时 daemon 还会主动提示你。
+
 ## 🎬 实际效果
 
 <div align="center">

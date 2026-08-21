@@ -30,6 +30,8 @@ Run Claude Code, Codex, Cursor, or any of 14 coding agents on your own machine �
 - 🤖 **14 agents × 15 platforms** — one process hosts multiple projects, each binding a code directory to its own agent and platforms, with per-project permissions, providers, models, and display settings.
 - 🌍 **Production niceties** — `doctor` diagnostics, launchd/systemd/Windows daemon, web admin (beta), cron & webhooks, bot-to-bot relay, voice in/out (STT/TTS), multi-workspace routing, and full i18n in five languages (en, zh, zh-TW, ja, es).
 
+- **One-command feedback.** Hit a bug or a missing capability? `/feedback` reports it straight to the author as a GitHub issue — redacted automatically, no GitHub account needed, and the daemon points you at it whenever a turn fails.
+
 ## 🎬 What it looks like
 
 <div align="center">
