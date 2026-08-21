@@ -36,6 +36,7 @@ type Agent struct {
 	workDir         string
 	model           string
 	reasoningEffort string
+	serviceTier     string // Codex service tier (e.g. "fast"); catalog-driven, passed through verbatim
 	mode            string // "suggest" | "auto-edit" | "full-auto" | "yolo"
 	backend         string // "exec" | "app_server"
 	appServerURL    string
@@ -58,6 +59,7 @@ func New(opts map[string]any) (core.Agent, error) {
 	}
 	model, _ := opts["model"].(string)
 	reasoningEffort, _ := opts["reasoning_effort"].(string)
+	serviceTier, _ := opts["service_tier"].(string)
 	mode, _ := opts["mode"].(string)
 	backend, _ := opts["backend"].(string)
 	appServerURL, _ := opts["app_server_url"].(string)
@@ -95,6 +97,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		workDir:         workDir,
 		model:           model,
 		reasoningEffort: normalizeReasoningEffort(reasoningEffort),
+		serviceTier:     strings.TrimSpace(serviceTier),
 		mode:            mode,
 		backend:         backend,
 		appServerURL:    appServerURL,
@@ -441,6 +444,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	mode := a.mode
 	model := a.model
 	reasoningEffort := a.reasoningEffort
+	serviceTier := a.serviceTier
 	backend := a.backend
 	appServerURL := a.appServerURL
 	codexHome := a.codexHome
@@ -483,6 +487,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 			workDir:       workDir,
 			model:         model,
 			effort:        reasoningEffort,
+			serviceTier:   serviceTier,
 			mode:          mode,
 			resumeID:      sessionID,
 			baseURL:       baseURL,
@@ -497,7 +502,21 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		extraEnv = append(extraEnv, "CODEX_HOME="+codexHome)
 	}
 
-	return newCodexSession(ctx, cliBin, cliExtraArgs, workDir, model, reasoningEffort, mode, sessionID, baseURL, extraEnv, provName, systemPrompt, appendPrompt)
+	return newCodexSession(ctx, codexSessionParams{
+		cliBin:        cliBin,
+		cliExtraArgs:  cliExtraArgs,
+		workDir:       workDir,
+		model:         model,
+		effort:        reasoningEffort,
+		serviceTier:   serviceTier,
+		mode:          mode,
+		resumeID:      sessionID,
+		baseURL:       baseURL,
+		modelProvider: provName,
+		extraEnv:      extraEnv,
+		systemPrompt:  systemPrompt,
+		appendPrompt:  appendPrompt,
+	})
 }
 
 func (a *Agent) ListSessions(_ context.Context) ([]core.AgentSessionInfo, error) {
@@ -555,6 +574,9 @@ func (a *Agent) WorkspaceAgentOptions() map[string]any {
 	}
 	if a.reasoningEffort != "" {
 		opts["reasoning_effort"] = a.reasoningEffort
+	}
+	if a.serviceTier != "" {
+		opts["service_tier"] = a.serviceTier
 	}
 	if a.appServerURL != "" {
 		opts["app_server_url"] = a.appServerURL
