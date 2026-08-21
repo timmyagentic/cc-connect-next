@@ -40,7 +40,7 @@ const (
 	// DefaultFeedbackEndpoint is the author-operated relay. Overridable via
 	// [feedback] endpoint; an unreachable relay degrades to a message that
 	// points at the public issue tracker.
-	DefaultFeedbackEndpoint = "https://cc-connect-feedback.timmyagentic.workers.dev/v1/feedback"
+	DefaultFeedbackEndpoint = "https://cc-connect-feedback.qianbi3956001.workers.dev/v1/feedback"
 
 	feedbackFallbackURL    = "https://github.com/timmyagentic/cc-connect-next/issues/new"
 	feedbackDraftTTL       = 30 * time.Minute
