@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.1.5 (2026-08-22)
+
+Stable release: a complete in-app feedback loop (problem summarized, one tap
+files an anonymous GitHub issue through the author's relay — no GitHub
+account needed), a per-session capability brief so the agent answers
+configuration questions from the real option set, the issue #37 fix for cmd
+extra args on the Codex app-server backend, first-class `service_tier`,
+`reasoning_effort = "max"`, and an opt-in `model · effort` footer on rich
+cards.
+
+See `changelogs/v0.1.5.md` for the bilingual release notes.
+
+### Feedback loop
+
+- Failed turns are followed by an ask card ("Report to the author?") with
+  agree/ignore buttons; agreement files a redacted anonymous issue with the
+  error and config context attached. `/feedback <description>` works
+  everywhere; duplicates thread onto the existing issue as "+1" comments.
+- A capability brief injected once per session tells the agent exactly which
+  agent options exist, so unsupported wishes are answered honestly and
+  routed to feedback instead of invented config keys.
+- Unknown top-level config keys are announced after startup.
+
+### Codex
+
+- `cmd` extra args and custom binaries now reach the app-server backend
+  (issue #37); structured options win on duplicate `-c` keys.
+- `service_tier` is a first-class option; `reasoning_effort` accepts `max`.
+
+### Cards
+
+- `reply_footer = true` now renders on rich cards too, slimmed to a single
+  `model · effort` line; `show_context_indicator` / `show_workdir_indicator`
+  are deprecated no-ops.
+
+
 ## v0.1.4 (2026-08-21)
 
 Patch release that makes the v0.1.3 steer-by-default policy usable after a
