@@ -471,6 +471,16 @@ type Engine struct {
 	showWorkdirIndicator bool
 	replyFooterEnabled   bool
 
+	// Feedback channel state (see core/feedback.go). feedbackPostFn is a
+	// test seam; production uses postFeedback.
+	feedbackMu        sync.Mutex
+	feedbackEnabled   bool
+	feedbackEndpoint  string
+	feedbackInstallID string
+	feedbackGapKeys   []string
+	feedbackDrafts    map[string]*feedbackDraft
+	feedbackPostFn    func(endpoint string, sub FeedbackSubmission) (string, error)
+
 	// When true, /list etc. only show sessions tracked by cc-connect-next,
 	// hiding sessions created by direct CLI usage in the same work_dir.
 	// Default false = show all sessions.
@@ -7698,6 +7708,8 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		e.cmdLang(p, msg, args)
 	case "quiet":
 		e.cmdQuiet(p, msg, args)
+	case "feedback":
+		e.cmdFeedback(p, msg, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "/feedback")))
 	case "provider":
 		e.cmdProvider(p, msg, args)
 	case "memory":
@@ -7792,8 +7804,9 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 			e.executeSkill(p, msg, skill, args)
 			return true
 		}
-		// Not a cc-connect-next command — notify user, then fall through to agent
-		e.send(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUnknownCommand), "/"+cmd))
+		// Not a cc-connect-next command — notify user, then fall through to agent.
+		// The feedback hint turns "this doesn't exist" into a reporting path.
+		e.send(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUnknownCommand), "/"+cmd)+e.feedbackHint())
 		return false
 	}
 	return true

@@ -112,7 +112,11 @@ type Config struct {
 	// stable release is published, each project's most recently active
 	// session receives one localized notice per version. nil/true = enabled
 	// (default); false = disabled.
-	UpdateNotice    *bool            `toml:"update_notice"`
+	UpdateNotice *bool `toml:"update_notice"`
+	// Feedback controls the in-app problem-reporting channel: /feedback plus
+	// proactive prompts when the config contains keys this build does not
+	// support. Submission always requires per-case user confirmation.
+	Feedback        FeedbackConfig   `toml:"feedback"`
 	Webhook         WebhookConfig    `toml:"webhook"`
 	Bridge          BridgeConfig     `toml:"bridge"`
 	Management      ManagementConfig `toml:"management"`
@@ -140,6 +144,25 @@ type Config struct {
 	// (50 MiB). Raise it to send larger files; the request body limit on the
 	// API side scales with this value to account for base64 expansion.
 	MaxAttachmentSizeMB int `toml:"max_attachment_size_mb,omitempty"`
+	// UnknownConfigKeys lists TOML keys present in the file that this build
+	// did not consume (populated at load time, never serialized). They feed
+	// the feedback channel's capability-gap prompt.
+	UnknownConfigKeys []string `toml:"-"`
+}
+
+// FeedbackConfig controls the in-app problem-reporting channel.
+type FeedbackConfig struct {
+	// Enabled: nil/true = /feedback and capability-gap prompts are available
+	// (submission still requires per-case confirmation); false = fully off.
+	Enabled *bool `toml:"enabled"`
+	// Endpoint overrides the author-operated relay URL. Empty = the built-in
+	// default (core.DefaultFeedbackEndpoint).
+	Endpoint string `toml:"endpoint,omitempty"`
+}
+
+// FeedbackEnabled resolves the [feedback] enabled flag (default true).
+func (c *Config) FeedbackEnabled() bool {
+	return c.Feedback.Enabled == nil || *c.Feedback.Enabled
 }
 
 // CronConfig controls cron job behavior.
@@ -682,8 +705,17 @@ func load(path string) (*Config, error) {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
 	cfg := &Config{Log: LogConfig{Level: "info"}}
-	if err := toml.Unmarshal(data, cfg); err != nil {
+	md, err := toml.Decode(string(data), cfg)
+	if err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	// Record keys the struct did not consume: they are either typos or
+	// capabilities this build lacks, and both deserve a visible prompt
+	// instead of silent no-op behavior. Keys inside map[string]any tables
+	// (agent/platform options, env) are consumed by the maps and thus never
+	// appear here.
+	for _, key := range md.Undecoded() {
+		cfg.UnknownConfigKeys = append(cfg.UnknownConfigKeys, key.String())
 	}
 	resolveEnvInConfig(cfg)
 	if cfg.DataDir == "" {
