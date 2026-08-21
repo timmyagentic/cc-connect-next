@@ -168,6 +168,7 @@ type appServerSession struct {
 	workDir        string
 	model          string
 	effort         string
+	serviceTier    string // Codex service tier, e.g. "fast"; catalog-driven, passed through verbatim
 	mode           string
 	baseURL        string
 	modelProvider  string
@@ -225,6 +226,7 @@ type appServerSessionParams struct {
 	workDir       string
 	model         string
 	effort        string
+	serviceTier   string
 	mode          string
 	resumeID      string
 	baseURL       string
@@ -248,6 +250,7 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 		workDir:          p.workDir,
 		model:            p.model,
 		effort:           p.effort,
+		serviceTier:      p.serviceTier,
 		mode:             p.mode,
 		baseURL:          p.baseURL,
 		modelProvider:    p.modelProvider,
@@ -284,34 +287,37 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 	return s, nil
 }
 
-// buildAppServerLaunchArgs builds the argv (after the binary) used to spawn
-// the Codex app-server. cliExtraArgs from the user's cmd option go before the
+// launchArgs builds the argv (after the binary) used to spawn the Codex
+// app-server. cliExtraArgs from the user's cmd option go before the
 // app-server subcommand — the same global-flag position the exec backend uses
 // — so the structured options emitted after them win on duplicate -c keys
 // (codex resolves -c last-wins).
-func buildAppServerLaunchArgs(cliExtraArgs []string, url, model, effort, modelProvider, baseURL string) []string {
-	args := append([]string(nil), cliExtraArgs...)
+func (s *appServerSession) launchArgs() []string {
+	args := append([]string(nil), s.cliExtraArgs...)
 	args = append(args, "app-server")
-	if strings.TrimSpace(url) != "" {
-		args = append(args, "--listen", strings.TrimSpace(url))
+	if url := strings.TrimSpace(s.url); url != "" {
+		args = append(args, "--listen", url)
 	}
-	if model = strings.TrimSpace(model); model != "" {
+	if model := strings.TrimSpace(s.model); model != "" {
 		args = append(args, "-c", fmt.Sprintf("model=%q", model))
 	}
-	if effort = strings.TrimSpace(effort); effort != "" {
+	if effort := strings.TrimSpace(s.effort); effort != "" {
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", effort))
 	}
-	if modelProvider = strings.TrimSpace(modelProvider); modelProvider != "" {
-		args = append(args, "-c", fmt.Sprintf("model_provider=%q", modelProvider))
+	if tier := strings.TrimSpace(s.serviceTier); tier != "" {
+		args = append(args, "-c", fmt.Sprintf("service_tier=%q", tier))
 	}
-	if baseURL = strings.TrimSpace(baseURL); baseURL != "" {
+	if provider := strings.TrimSpace(s.modelProvider); provider != "" {
+		args = append(args, "-c", fmt.Sprintf("model_provider=%q", provider))
+	}
+	if baseURL := strings.TrimSpace(s.baseURL); baseURL != "" {
 		args = append(args, "-c", fmt.Sprintf("openai_base_url=%q", baseURL))
 	}
 	return args
 }
 
 func (s *appServerSession) connect() error {
-	args := buildAppServerLaunchArgs(s.cliExtraArgs, s.url, s.model, s.effort, s.modelProvider, s.baseURL)
+	args := s.launchArgs()
 	cmd := exec.CommandContext(s.ctx, s.cliBin, args...)
 	cmd.Dir = s.workDir
 	env := append([]string(nil), s.extraEnv...)
