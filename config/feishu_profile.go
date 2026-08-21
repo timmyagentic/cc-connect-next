@@ -69,9 +69,9 @@ func RecommendedFeishuProfile(agentType string) []RecommendedFeishuSetting {
 		{feishuProfileTableDisplay, "tool_messages", "false",
 			"keep tool calls and their arguments out of the chat"},
 		{feishuProfileTableDisplay, "show_context_indicator", "false",
-			"keep model, token and context metadata out of the chat"},
+			"deprecated no-op, kept for config compatibility"},
 		{feishuProfileTableDisplay, "reply_footer", "false",
-			"keep the per-turn status footer out of the chat"},
+			"keep the \"model · effort\" footer out of the chat"},
 		{feishuProfileTableDisplay, "hide_agent_footer", "true",
 			"strip the equivalent model/token/context lines the agent emits itself"},
 

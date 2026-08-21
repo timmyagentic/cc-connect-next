@@ -139,10 +139,10 @@ thinking_messages = false   # Rich cards expose counts only, never reasoning tex
 # tool_max_len = 500        # Max chars for tool use messages (default: 500) / 工具调用消息最大字符数（默认 500）
 # history_max_len = 1000    # Max chars per /history entry (default: 1000; 0 = no truncation) / 每条历史记录最大字符数（默认 1000；0 表示不截断）
 tool_messages = false       # Rich cards expose counts only, never tool details
-show_context_indicator = false  # Keep model/token/context metadata out of chat
-#                                # 在助手回复末尾显示「[ctx: ~N%]」上下文占用提示（默认 false 隐藏）
-reply_footer = false             # Keep model/token/workdir footer out of chat
-#                                # 在助手回复底部显示类似 Codex 的状态行（默认 false 隐藏）
+show_context_indicator = false  # Deprecated no-op, kept for config compatibility
+#                                # 已废弃（无效果），仅为兼容保留
+reply_footer = false             # Keep the "model · effort" footer out of chat
+#                                # 在助手回复底部显示「model · effort」状态行（默认 false 隐藏）
 hide_agent_footer = true         # Strip equivalent model/token/context lines emitted by the Agent itself
 #                                # 隐藏 Agent 自己输出的模型、token、上下文状态行（默认 false）
 
@@ -750,12 +750,14 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 
 [[projects]]
 name = "my-backend"
-# reply_footer = true              # Master toggle for the per-turn reply footer (default: false / hidden)
-#                                   # 每条助手回复底部状态 footer 总开关（默认 false 隐藏）
-# show_context_indicator = true    # Show the footer's first line: model · [effort ·] out/in/cw/cr · ctx % (default: false)
-#                                   # 显示 footer 第一行：model · [effort ·] out/in/cw/cr · ctx %（默认 false 隐藏）
-# show_workdir_indicator = false   # Hide the footer's second line: workspace directory (default: true)
-#                                   # 隐藏 footer 第二行：工作区目录（默认 true 显示）
+# reply_footer = true              # Show "model · effort:x" under each finished reply, on plain replies
+#                                   # and rich cards alike (default: false / hidden)
+#                                   # 在每条完成的回复底部显示「model · effort:x」，普通回复与 rich 卡片
+#                                   # 均生效（默认 false 隐藏）
+# show_context_indicator = true    # DEPRECATED no-op: the footer no longer renders token/ctx metadata
+#                                   # 已废弃（无效果）：footer 不再渲染 token/上下文信息
+# show_workdir_indicator = false   # DEPRECATED no-op: the footer no longer renders the workspace directory
+#                                   # 已废弃（无效果）：footer 不再渲染工作区目录
 # disabled_commands = ["restart", "upgrade", "cron"]  # Disable specific commands for this project
 #                                                     # 禁用该项目的指定命令
 #

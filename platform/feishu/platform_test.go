@@ -1177,8 +1177,13 @@ func TestBuildRichCard_CompletedAndErrorStatesAreClean(t *testing.T) {
 	if strings.Contains(usageLimit, "本次处理未能完成") {
 		t.Fatalf("usage-limit card should not use generic failure copy: %q", usageLimit)
 	}
+	// The reply footer (model · effort) is rendered on terminal cards since
+	// the rich-footer change; only reasoning/tool details stay private.
 	for _, cardJSON := range []string{done, failed} {
-		for _, forbidden := range []string{"private reasoning", "secret command", "推理 1 次", "model · token · ctx", "collapsible_panel"} {
+		if !strings.Contains(cardJSON, "model · token · ctx") {
+			t.Fatalf("terminal rich card should render the status footer, got %q", cardJSON)
+		}
+		for _, forbidden := range []string{"private reasoning", "secret command", "推理 1 次", "collapsible_panel"} {
 			if strings.Contains(cardJSON, forbidden) {
 				t.Fatalf("terminal rich card leaked %q: %q", forbidden, cardJSON)
 			}
@@ -1207,10 +1212,10 @@ func TestBuildRichCard_LocalizesLifecycleForEverySupportedLanguage(t *testing.T)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			copy := core.NewI18n(tt.lang).RichCardCopy()
-			thinking := buildRichCardWithCopy(core.CardStatusThinking, "thinking", nil, "", true, copy)
-			tool := buildRichCardWithCopy(core.CardStatusWorking, "tool", steps, "", true, copy)
-			done := buildRichCardWithCopy(core.CardStatusDone, "done", steps, "result", false, copy)
-			failed := buildRichCardWithCopy(core.CardStatusError, "error", steps, "", false, copy)
+			thinking := buildRichCardWithCopy(core.CardStatusThinking, "thinking", nil, "", true, "", copy)
+			tool := buildRichCardWithCopy(core.CardStatusWorking, "tool", steps, "", true, "", copy)
+			done := buildRichCardWithCopy(core.CardStatusDone, "done", steps, "result", false, "", copy)
+			failed := buildRichCardWithCopy(core.CardStatusError, "error", steps, "", false, "", copy)
 			for label, assertion := range map[string]struct {
 				card string
 				want string
