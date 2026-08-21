@@ -453,6 +453,12 @@ func main() {
 		engine.SetShowWorkdirIndicator(showWorkdir)
 		engine.SetReplyFooterEnabled(showFooter)
 		engine.SetAttachmentSendEnabled(cfg.AttachmentSend != "off")
+		feedbackEndpoint := cfg.Feedback.Endpoint
+		if feedbackEndpoint == "" {
+			feedbackEndpoint = core.DefaultFeedbackEndpoint
+		}
+		engine.SetFeedbackConfig(cfg.FeedbackEnabled(), feedbackEndpoint, core.EnsureInstallID(cfg.DataDir))
+		engine.SetFeedbackCapabilityGaps(cfg.UnknownConfigKeys)
 		engine.SetFilterExternalSessions(proj.FilterExternalSessions != nil && *proj.FilterExternalSessions)
 		engine.SetBaseWorkDir(workDir)
 		engine.SetProjectStateStore(projectState)
@@ -1130,6 +1136,18 @@ func main() {
 		updateNotifier.Start()
 	}
 
+	// Start the feedback capability-gap notifier: when the config contains
+	// keys this build does not support, each project's most recently active
+	// chat is told once (per distinct key set) how to report the need.
+	var feedbackNotifier *core.FeedbackNotifier
+	if cfg.FeedbackEnabled() && len(cfg.UnknownConfigKeys) > 0 {
+		feedbackNotifier = core.NewFeedbackNotifier(cfg.DataDir)
+		for i, e := range engines {
+			feedbackNotifier.RegisterEngine(cfg.Projects[i].Name, e)
+		}
+		feedbackNotifier.Start()
+	}
+
 	// Start management API server if enabled
 	var mgmtSrv *core.ManagementServer
 	if cfg.Management.Enabled != nil && *cfg.Management.Enabled {
@@ -1386,6 +1404,9 @@ func main() {
 	}
 	if updateNotifier != nil {
 		updateNotifier.Stop()
+	}
+	if feedbackNotifier != nil {
+		feedbackNotifier.Stop()
 	}
 	heartbeatSched.Stop()
 	if timerSched != nil {

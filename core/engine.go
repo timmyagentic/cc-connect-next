@@ -471,6 +471,17 @@ type Engine struct {
 	showWorkdirIndicator bool
 	replyFooterEnabled   bool
 
+	// Feedback channel state (see core/feedback.go). feedbackPostFn is a
+	// test seam; production uses postFeedback.
+	feedbackMu          sync.Mutex
+	feedbackEnabled     bool
+	feedbackEndpoint    string
+	feedbackInstallID   string
+	feedbackGapKeys     []string
+	feedbackErrors      map[string]*feedbackError
+	feedbackErrorHintAt map[string]time.Time
+	feedbackPostFn      func(endpoint string, sub FeedbackSubmission) (string, error)
+
 	// When true, /list etc. only show sessions tracked by cc-connect-next,
 	// hiding sessions created by direct CLI usage in the same work_dir.
 	// Default false = show all sessions.
@@ -5003,6 +5014,8 @@ func (e *Engine) runUnsolicitedReader(ctx context.Context, cancel context.Cancel
 				if event.Error != nil {
 					slog.Error("unsolicited agent error", "error", event.Error, "session", sessionKey)
 					e.send(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
+					e.recordFeedbackError(sessionKey, event.Error.Error())
+					e.maybeSendFeedbackErrorHint(p, replyCtx, sessionKey)
 				}
 				state.mu.Lock()
 				state.eventsNeedResync = true
@@ -7026,6 +7039,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			if event.Error != nil {
 				errMsg := event.Error.Error()
 				slog.Error("agent error", "error", event.Error)
+				e.recordFeedbackError(sessionKey, errMsg)
 				e.hooks.Emit(HookEvent{
 					Event:      HookEventError,
 					SessionKey: sessionKey,
@@ -7054,6 +7068,9 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				}
 			} else if !updatedRichError && usesRichCard(p) {
 				sendGenericRichFailure(p, replyCtx, cardMessageID, safePartial)
+			}
+			if event.Error != nil {
+				e.maybeSendFeedbackErrorHint(p, replyCtx, sessionKey)
 			}
 			// Only drop queued messages if the agent session is dead.
 			// Some agents (e.g. Codex) emit EventError for per-turn failures
@@ -7084,6 +7101,8 @@ idleTimedOut:
 				e.send(timedOutPlatform, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), "agent session timed out (no response)"))
 			}
 		}
+		e.recordFeedbackError(sessionKey, fmt.Sprintf("agent session idle timeout: no events for %v, session killed", e.eventIdleTimeout))
+		e.maybeSendFeedbackErrorHint(timedOutPlatform, replyCtx, sessionKey)
 		e.cleanupInteractiveState(sessionKey, state)
 		return
 	}
@@ -7108,6 +7127,8 @@ turnDeadlineExceeded:
 					fmt.Sprintf("agent turn exceeded maximum time (%v), stopping", e.maxTurnTime)))
 			}
 		}
+		e.recordFeedbackError(sessionKey, fmt.Sprintf("agent turn exceeded max_turn_time (%v), stopped", e.maxTurnTime))
+		e.maybeSendFeedbackErrorHint(deadlinePlatform, replyCtx, sessionKey)
 
 		// Two-phase shutdown: first try a graceful stop so the agent can
 		// write its final state before dying (preserves --resume ability).
@@ -7435,6 +7456,7 @@ var builtinCommands = []struct {
 	{[]string{"skills", "skill"}, "skills"},
 	{[]string{"config"}, "config"},
 	{[]string{"doctor"}, "doctor"},
+	{[]string{"feedback", "fb"}, "feedback"},
 	{[]string{"upgrade", "update"}, "upgrade"},
 	{[]string{"restart"}, "restart"},
 	{[]string{"alias"}, "alias"},
@@ -7698,6 +7720,8 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		e.cmdLang(p, msg, args)
 	case "quiet":
 		e.cmdQuiet(p, msg, args)
+	case "feedback":
+		e.cmdFeedback(p, msg, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(raw), "/feedback")))
 	case "provider":
 		e.cmdProvider(p, msg, args)
 	case "memory":
@@ -7792,8 +7816,9 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 			e.executeSkill(p, msg, skill, args)
 			return true
 		}
-		// Not a cc-connect-next command — notify user, then fall through to agent
-		e.send(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUnknownCommand), "/"+cmd))
+		// Not a cc-connect-next command — notify user, then fall through to agent.
+		// The feedback hint turns "this doesn't exist" into a reporting path.
+		e.send(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUnknownCommand), "/"+cmd)+e.feedbackHint())
 		return false
 	}
 	return true
@@ -10064,6 +10089,7 @@ func helpCardGroups() []helpCardGroup {
 			items: []helpCardItem{
 				{command: "/status", action: "nav:/status"},
 				{command: "/doctor", action: "nav:/doctor"},
+				{command: "/feedback", action: "cmd:/feedback"},
 				{command: "/usage", action: "cmd:/usage"},
 				{command: "/config", action: "nav:/config"},
 				{command: "/bind", action: "cmd:/bind"},
@@ -11120,8 +11146,12 @@ func (e *Engine) processCompressEvents(state *interactiveState, session *Session
 			e.drainQueuedMessagesAfterCompress(state, session, sessions, sessionKey, unlocked)
 			return
 		case EventError:
+			if event.Error != nil {
+				e.recordFeedbackError(sessionKey, "compress failed: "+event.Error.Error())
+			}
 			if !auto && event.Error != nil {
 				e.reply(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
+				e.maybeSendFeedbackErrorHint(p, replyCtx, sessionKey)
 			}
 			// Only drop queued messages if the agent is dead; some agents
 			// emit per-turn EventError while staying alive.

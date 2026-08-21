@@ -569,6 +569,17 @@ const (
 	// Proactive update notice (daemon-side)
 	MsgUpdateNoticeAvailable MsgKey = "update_notice_available"
 
+	// Feedback channel (/feedback and proactive capability-gap prompts)
+	MsgFeedbackUsage           MsgKey = "feedback_usage"
+	MsgFeedbackSubmitted       MsgKey = "feedback_submitted"
+	MsgFeedbackSubmitFailed    MsgKey = "feedback_submit_failed"
+	MsgFeedbackNothingToReport MsgKey = "feedback_nothing_to_report"
+	MsgFeedbackDisabled        MsgKey = "feedback_disabled"
+	MsgFeedbackHint            MsgKey = "feedback_hint"
+	MsgFeedbackErrorHint       MsgKey = "feedback_error_hint"
+	MsgFeedbackNoError         MsgKey = "feedback_no_error"
+	MsgFeedbackCapabilityGap   MsgKey = "feedback_capability_gap"
+
 	MsgWhoamiTitle     MsgKey = "whoami_title"
 	MsgWhoamiCardTitle MsgKey = "whoami_card_title"
 	MsgWhoamiName      MsgKey = "whoami_name"
@@ -3548,6 +3559,69 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📦 cc-connect-next %s 已發布（目前版本 %s）。傳送 `/upgrade` 查看詳情，或傳送 `/upgrade confirm` 直接升級。",
 		LangJapanese:           "📦 cc-connect-next %s がリリースされました（現在のバージョン %s）。`/upgrade` で詳細を確認、`/upgrade confirm` で今すぐ更新できます。",
 		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s). Envía `/upgrade` para más detalles o `/upgrade confirm` para actualizar ahora.",
+	},
+	MsgFeedbackUsage: {
+		LangEnglish:            "\U0001F4EE Report any problem or missing capability straight to the project author:\n`/feedback <describe the problem>` \u2014 submit it\n`/feedback error` \u2014 submit the most recent error in this chat\nReports are redacted automatically; no GitHub account is needed.",
+		LangChinese:            "\U0001F4EE 把使用中遇到的任何问题或缺失的能力直接反馈给项目作者：\n`/feedback <描述问题>` \u2014 直接提交\n`/feedback error` \u2014 提交本会话最近一次错误\n内容自动脱敏；无需 GitHub 账号。",
+		LangTraditionalChinese: "\U0001F4EE 把使用中遇到的任何問題或缺少的能力直接回饋給專案作者：\n`/feedback <描述問題>` \u2014 直接送出\n`/feedback error` \u2014 送出本會話最近一次錯誤\n內容自動去敏；無需 GitHub 帳號。",
+		LangJapanese:           "\U0001F4EE 利用中に遇った問題や不足している機能をそのまま作者に報告できます：\n`/feedback <問題を記述>` \u2014 送信\n`/feedback error` \u2014 このチャットの直近のエラーを送信\n内容は自動的にマスキングされ、GitHub アカウントは不要です。",
+		LangSpanish:            "\U0001F4EE Informa de cualquier problema o capacidad faltante directamente al autor del proyecto:\n`/feedback <describe el problema>` \u2014 enviarlo\n`/feedback error` \u2014 enviar el error m\u00e1s reciente de este chat\nLos informes se redactan autom\u00e1ticamente; no se necesita cuenta de GitHub.",
+	},
+	MsgFeedbackErrorHint: {
+		LangEnglish:            "\U0001F4A1 Hit a problem? Send `/feedback error` to report this error straight to the author \u2014 redacted automatically, no GitHub account needed.",
+		LangChinese:            "\U0001F4A1 遇到问题了？发送 `/feedback error` 把这个错误直接反馈给作者——内容自动脱敏，无需 GitHub 账号。",
+		LangTraditionalChinese: "\U0001F4A1 遇到問題了？傳送 `/feedback error` 把這個錯誤直接回饋給作者——內容自動去敏，無需 GitHub 帳號。",
+		LangJapanese:           "\U0001F4A1 問題が発生しましたか？`/feedback error` でこのエラーをそのまま作者に報告できます。内容は自動マスキングされ、GitHub アカウントは不要です。",
+		LangSpanish:            "\U0001F4A1 \u00bfEncontraste un problema? Env\u00eda `/feedback error` para informar de este error directamente al autor: se redacta autom\u00e1ticamente y no se necesita cuenta de GitHub.",
+	},
+	MsgFeedbackNoError: {
+		LangEnglish:            "No recent error is recorded for this chat. Describe the problem instead: `/feedback <description>`.",
+		LangChinese:            "本会话没有记录到最近的错误。可以改用 `/feedback <描述>` 直接描述问题。",
+		LangTraditionalChinese: "本會話沒有記錄到最近的錯誤。可以改用 `/feedback <描述>` 直接描述問題。",
+		LangJapanese:           "このチャットには直近のエラーが記録されていません。`/feedback <内容>` で問題を直接記述してください。",
+		LangSpanish:            "No hay ningún error reciente registrado en este chat. Describe el problema con `/feedback <descripción>`.",
+	},
+	MsgFeedbackSubmitted: {
+		LangEnglish:            "✅ Feedback submitted. The author will see it here: %s",
+		LangChinese:            "✅ 反馈已提交，作者会在这里看到：%s",
+		LangTraditionalChinese: "✅ 回饋已送出，作者會在這裡看到：%s",
+		LangJapanese:           "✅ フィードバックを送信しました。作者はこちらで確認できます：%s",
+		LangSpanish:            "✅ Feedback enviado. El autor lo verá aquí: %s",
+	},
+	MsgFeedbackSubmitFailed: {
+		LangEnglish:            "\u26A0\uFE0F Could not reach the feedback relay. You can file the report manually at %s.",
+		LangChinese:            "\u26A0\uFE0F 反馈通道暂时不可用。你可以到 %s 手动反馈。",
+		LangTraditionalChinese: "\u26A0\uFE0F 回饋通道暫時無法使用。你可以到 %s 手動回饋。",
+		LangJapanese:           "\u26A0\uFE0F フィードバック中継に接続できませんでした。%s から手動で報告できます。",
+		LangSpanish:            "\u26A0\uFE0F No se pudo contactar el rel\u00e9 de feedback. Puedes informarlo manualmente en %s.",
+	},
+	MsgFeedbackNothingToReport: {
+		LangEnglish:            "Nothing to report: no unsupported config keys were detected. Describe a problem instead: `/feedback <description>`.",
+		LangChinese:            "没有可提交的内容：未检测到不支持的配置项。可以改用 `/feedback <描述>` 直接描述问题。",
+		LangTraditionalChinese: "沒有可送出的內容：未偵測到不支援的設定項。可以改用 `/feedback <描述>` 直接描述問題。",
+		LangJapanese:           "報告する内容がありません：未対応の設定キーは検出されていません。`/feedback <内容>` で問題を直接記述してください。",
+		LangSpanish:            "Nada que informar: no se detectaron claves de configuraci\u00f3n no admitidas. Describe un problema con `/feedback <descripci\u00f3n>`.",
+	},
+	MsgFeedbackDisabled: {
+		LangEnglish:            "The feedback channel is disabled in this deployment ([feedback] in config.toml).",
+		LangChinese:            "当前部署已关闭反馈通道（config.toml 的 [feedback] 段）。",
+		LangTraditionalChinese: "目前部署已關閉回饋通道（config.toml 的 [feedback] 段）。",
+		LangJapanese:           "このデプロイではフィードバックチャネルが無効になっています（config.toml の [feedback]）。",
+		LangSpanish:            "El canal de feedback está deshabilitado en este despliegue ([feedback] en config.toml).",
+	},
+	MsgFeedbackHint: {
+		LangEnglish:            "\U0001F4A1 Missing a capability? Send `/feedback <describe it>` to report it straight to the author \u2014 redacted automatically, no GitHub account needed.",
+		LangChinese:            "\U0001F4A1 需要的能力不存在？发送 `/feedback <描述>` 直接反馈给作者——内容自动脱敏，无需 GitHub 账号。",
+		LangTraditionalChinese: "\U0001F4A1 需要的能力不存在？傳送 `/feedback <描述>` 直接回饋給作者——內容自動去敏，無需 GitHub 帳號。",
+		LangJapanese:           "\U0001F4A1 必要な機能がありませんか？`/feedback <内容>` でそのまま作者に報告できます。内容は自動マスキングされ、GitHub アカウントは不要です。",
+		LangSpanish:            "\U0001F4A1 \u00bfFalta una capacidad? Env\u00eda `/feedback <descr\u00edbela>` para informar directamente al autor: se redacta autom\u00e1ticamente y no se necesita cuenta de GitHub.",
+	},
+	MsgFeedbackCapabilityGap: {
+		LangEnglish:            "\u2699\uFE0F Your config contains key(s) this version does not support: %s.\nIf you need this capability, send `/feedback config` to report it straight to the author (redacted automatically; no GitHub account needed). Otherwise just ignore this notice.",
+		LangChinese:            "\u2699\uFE0F 你的配置里有当前版本不支持的配置项：%s。\n如果你需要这个能力，发送 `/feedback config` 直接反馈给作者（内容自动脱敏，无需 GitHub 账号）；不需要则忽略本条即可。",
+		LangTraditionalChinese: "\u2699\uFE0F 你的設定裡有目前版本不支援的設定項：%s。\n如果你需要這個能力，傳送 `/feedback config` 直接回饋給作者（內容自動去敏，無需 GitHub 帳號）；不需要則忽略本條即可。",
+		LangJapanese:           "\u2699\uFE0F 設定に現在のバージョンが対応していないキーがあります：%s。\nこの機能が必要な場合は `/feedback config` でそのまま作者に報告できます（自動マスキング、GitHub アカウント不要）。不要であればこの通知は無視してください。",
+		LangSpanish:            "\u2699\uFE0F Tu configuraci\u00f3n contiene clave(s) que esta versi\u00f3n no admite: %s.\nSi necesitas esta capacidad, env\u00eda `/feedback config` para informar directamente al autor (redactado autom\u00e1ticamente; sin cuenta de GitHub). Si no, ignora este aviso.",
 	},
 	MsgWhoamiTitle: {
 		LangEnglish:            "🪪 **Your Identity**",

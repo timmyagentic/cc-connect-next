@@ -1,0 +1,11 @@
+{
+  // cc-connect-next anonymous feedback relay. See src/index.ts.
+  "name": "cc-connect-feedback",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "observability": { "enabled": true },
+  "vars": {
+    "REPO": "timmyagentic/cc-connect-next"
+  }
+  // Secret (never in this file): wrangler secret put GITHUB_TOKEN
+}

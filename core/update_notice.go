@@ -207,9 +207,16 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	if release == nil || release.TagName == "" {
 		return false
 	}
+	content := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
+	return e.notifyMostRecentSession(content, "update notice")
+}
 
-	// Rank this project's sessions by real user activity, newest first.
-	// UpdatedAt is the fallback for stores predating LastUserActivity.
+// notifyMostRecentSession delivers a proactive daemon-side message to this
+// engine's most recently active session (ranked by real user activity;
+// UpdatedAt is the fallback for stores predating LastUserActivity). Returns
+// true only when a message was actually delivered, so callers can retry
+// later instead of losing the notice. logTag labels the slog lines.
+func (e *Engine) notifyMostRecentSession(content, logTag string) bool {
 	sessions := e.sessions.AllSessions()
 	idToKey, _ := e.sessions.SessionKeyMap()
 	type candidate struct {
@@ -238,7 +245,6 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 		return candidates[i].lastSeen.After(candidates[j].lastSeen)
 	})
 
-	content := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
 	for _, c := range candidates {
 		platformName := ""
 		if idx := strings.Index(c.key, ":"); idx > 0 {
@@ -260,18 +266,17 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 		}
 		replyCtx, err := rc.ReconstructReplyCtx(c.key)
 		if err != nil {
-			slog.Debug("update notice: reconstruct reply context failed",
+			slog.Debug(logTag+": reconstruct reply context failed",
 				"session_key", c.key, "error", err)
 			continue
 		}
 		if err := e.sendWithError(target, replyCtx, content); err != nil {
-			slog.Debug("update notice: send failed", "session_key", c.key, "error", err)
+			slog.Debug(logTag+": send failed", "session_key", c.key, "error", err)
 			continue
 		}
-		slog.Info("update notice: delivered",
+		slog.Info(logTag+": delivered",
 			"project", e.name,
 			"session_key", c.key,
-			"latest", release.TagName,
 		)
 		return true
 	}
