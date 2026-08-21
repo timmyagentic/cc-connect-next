@@ -459,6 +459,12 @@ func main() {
 		}
 		engine.SetFeedbackConfig(cfg.FeedbackEnabled(), feedbackEndpoint, core.EnsureInstallID(cfg.DataDir))
 		engine.SetFeedbackCapabilityGaps(cfg.UnknownConfigKeys)
+		// Prevention at the source: tell the LLM what this deployment can
+		// actually be configured to do, so it answers config questions from
+		// the real option set instead of inventing keys.
+		if schema, ok := agent.(core.AgentOptionSchema); ok {
+			engine.SetCapabilityBrief(core.BuildCapabilityBrief(proj.Agent.Type, schema.KnownOptionKeys()))
+		}
 		engine.SetFilterExternalSessions(proj.FilterExternalSessions != nil && *proj.FilterExternalSessions)
 		engine.SetBaseWorkDir(workDir)
 		engine.SetProjectStateStore(projectState)
