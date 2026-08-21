@@ -396,13 +396,6 @@ func main() {
 	effectiveWorkDirs := make([]string, 0, len(cfg.Projects))
 
 	for _, proj := range cfg.Projects {
-		// Snapshot the user-authored option keys BEFORE any injection below
-		// (run_as_*, cc_data_dir, cc_project): the capability-gap diff must
-		// see only what the user wrote, never runtime-injected keys.
-		configuredOptionKeys := make([]string, 0, len(proj.Agent.Options))
-		for k := range proj.Agent.Options {
-			configuredOptionKeys = append(configuredOptionKeys, k)
-		}
 		// Inject project-level run_as_user / run_as_env into the agent's
 		// opts map so agents that support isolation can pick them up
 		// without needing their own top-level config plumbing.
@@ -465,13 +458,13 @@ func main() {
 			feedbackEndpoint = core.DefaultFeedbackEndpoint
 		}
 		engine.SetFeedbackConfig(cfg.FeedbackEnabled(), feedbackEndpoint, core.EnsureInstallID(cfg.DataDir))
-		// Capability gaps = TOML-level unknown keys (global) + agent option
-		// keys this agent's schema does not consume (per project).
-		gapKeys := append([]string(nil), cfg.UnknownConfigKeys...)
-		for _, k := range core.UnknownAgentOptionKeys(configuredOptionKeys, agent) {
-			gapKeys = append(gapKeys, "agent.options."+k)
+		engine.SetFeedbackCapabilityGaps(cfg.UnknownConfigKeys)
+		// Prevention at the source: tell the LLM what this deployment can
+		// actually be configured to do, so it answers config questions from
+		// the real option set instead of inventing keys.
+		if schema, ok := agent.(core.AgentOptionSchema); ok {
+			engine.SetCapabilityBrief(core.BuildCapabilityBrief(proj.Agent.Type, schema.KnownOptionKeys()))
 		}
-		engine.SetFeedbackCapabilityGaps(gapKeys)
 		engine.SetFilterExternalSessions(proj.FilterExternalSessions != nil && *proj.FilterExternalSessions)
 		engine.SetBaseWorkDir(workDir)
 		engine.SetProjectStateStore(projectState)
@@ -1152,11 +1145,8 @@ func main() {
 	// Start the feedback capability-gap notifier: when the config contains
 	// keys this build does not support, each project's most recently active
 	// chat is told once (per distinct key set) how to report the need.
-	// Gap keys are per-engine now (TOML-level + agent-option-level), so the
-	// notifier starts whenever feedback is enabled; CheckOnce skips engines
-	// that recorded no gaps.
 	var feedbackNotifier *core.FeedbackNotifier
-	if cfg.FeedbackEnabled() {
+	if cfg.FeedbackEnabled() && len(cfg.UnknownConfigKeys) > 0 {
 		feedbackNotifier = core.NewFeedbackNotifier(cfg.DataDir)
 		for i, e := range engines {
 			feedbackNotifier.RegisterEngine(cfg.Projects[i].Name, e)

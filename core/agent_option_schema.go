@@ -1,47 +1,37 @@
 package core
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
 
 // AgentOptionSchema is an optional Agent capability: implementations declare
 // the exhaustive set of [projects.agent.options] keys they consume. The
-// options table is free-form (map[string]any), so TOML-level unknown-key
-// detection cannot see inside it — an unsupported key like a service_tier
-// on a build that predates it would otherwise be silently ignored. Detected
-// gaps feed the feedback channel's capability-gap prompt.
+// declared surface powers the capability brief injected into the LLM's
+// session context, so the model answers configuration questions from the
+// real option set instead of inventing keys.
 type AgentOptionSchema interface {
 	KnownOptionKeys() []string
 }
 
-// bootstrapConsumedOptionKeys are option keys read by the bootstrap layer
-// (cmd/cc-connect) for every agent type rather than by the agent itself.
-var bootstrapConsumedOptionKeys = map[string]bool{
-	"provider": true,
-}
-
-// UnknownAgentOptionKeys returns the configured option keys that neither the
-// agent's declared schema nor the bootstrap layer consumes, sorted. Agents
-// that do not implement AgentOptionSchema yield nil — no declaration means
-// no claim, not "everything is unknown".
-func UnknownAgentOptionKeys(configuredKeys []string, agent Agent) []string {
-	schema, ok := agent.(AgentOptionSchema)
-	if !ok {
-		return nil
+// BuildCapabilityBrief renders the configuration-capability primer injected
+// once per session. It tells the model exactly which options exist for the
+// active agent and what to do when a user asks for something outside them:
+// say so plainly and point at /feedback — prevention at the source, instead
+// of detecting misconfiguration after the fact.
+func BuildCapabilityBrief(agentType string, keys []string) string {
+	if len(keys) == 0 {
+		return ""
 	}
-	known := make(map[string]bool)
-	for _, k := range schema.KnownOptionKeys() {
-		known[strings.ToLower(strings.TrimSpace(k))] = true
-	}
-	var unknown []string
-	for _, k := range configuredKeys {
-		norm := strings.ToLower(strings.TrimSpace(k))
-		if norm == "" || known[norm] || bootstrapConsumedOptionKeys[norm] {
-			continue
-		}
-		unknown = append(unknown, k)
-	}
-	sort.Strings(unknown)
-	return unknown
+	sorted := append([]string(nil), keys...)
+	sort.Strings(sorted)
+	return fmt.Sprintf(
+		"[cc-connect-next capability brief]\n"+
+			"This conversation is bridged through cc-connect-next %s. The active agent adapter is %q; "+
+			"the complete set of configurable options in config.toml under [projects.agent.options] is: `%s`. "+
+			"There are no other agent options in this build. If the user asks to configure this bridge beyond these options, "+
+			"tell them plainly that this deployment cannot do it, and that they can send `/feedback <description>` in this chat "+
+			"to report the need directly to the project author (no GitHub account required).",
+		CurrentVersion, agentType, strings.Join(sorted, "`, `"))
 }

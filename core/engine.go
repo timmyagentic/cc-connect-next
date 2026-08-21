@@ -473,11 +473,15 @@ type Engine struct {
 
 	// Feedback channel state (see core/feedback.go). feedbackPostFn is a
 	// test seam; production uses postFeedback.
-	feedbackMu          sync.Mutex
-	feedbackEnabled     bool
-	feedbackEndpoint    string
-	feedbackInstallID   string
-	feedbackGapKeys     []string
+	feedbackMu        sync.Mutex
+	feedbackEnabled   bool
+	feedbackEndpoint  string
+	feedbackInstallID string
+	feedbackGapKeys   []string
+	// capabilityBrief is prepended once per interactive session so the LLM
+	// knows this deployment's real configuration surface (see
+	// BuildCapabilityBrief). Set at bootstrap, read-only afterwards.
+	capabilityBrief     string
 	feedbackErrors      map[string]*feedbackError
 	feedbackErrorHintAt map[string]time.Time
 	feedbackPostFn      func(endpoint string, sub FeedbackSubmission) (string, error)
@@ -571,6 +575,9 @@ type queuedMessage struct {
 
 // interactiveState tracks a running interactive agent session and its permission state.
 type interactiveState struct {
+	// capabilityBriefSent flips after the capability brief has been
+	// prepended to a prompt for this state (guarded by mu).
+	capabilityBriefSent      bool
 	agentSession             AgentSession
 	platform                 Platform
 	replyCtx                 any
@@ -1166,6 +1173,29 @@ func (e *Engine) SetSkipGit(skipGit bool) {
 // accordingly (e.g. personal task views, role-based access control).
 func (e *Engine) SetInjectSender(v bool) {
 	e.injectSender = v
+}
+
+// SetCapabilityBrief wires the configuration-capability primer built at
+// bootstrap (BuildCapabilityBrief). Must be called before Start.
+func (e *Engine) SetCapabilityBrief(brief string) {
+	e.capabilityBrief = strings.TrimSpace(brief)
+}
+
+// buildCapabilityPrompt prepends the capability brief exactly once per
+// engine session state, so every conversation learns what this deployment
+// can be configured to do without paying the tokens on every turn.
+func (e *Engine) buildCapabilityPrompt(state *interactiveState, content string) string {
+	if e.capabilityBrief == "" || state == nil {
+		return content
+	}
+	state.mu.Lock()
+	sent := state.capabilityBriefSent
+	state.capabilityBriefSent = true
+	state.mu.Unlock()
+	if sent {
+		return content
+	}
+	return e.capabilityBrief + "\n\n" + content
 }
 
 // SetAttachmentSendEnabled controls whether side-channel image/file delivery is allowed.
@@ -3387,7 +3417,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	// their own message (issue #27 card handoff).
 	cardHandle, cardCopy := e.beginSteerPresentation(p, msg.ReplyCtx, msg.Content)
 
-	prompt := e.buildSenderPrompt(msg.Content, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey)
+	prompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(msg.Content, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
 	err := steerable.Steer(prompt, msg.Images, msg.Files)
 	switch {
 	case err == nil:
@@ -4206,7 +4236,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 		drainEvents(state.agentSession.Events())
 	}
 
-	promptContent := e.buildSenderPrompt(msg.Content, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey)
+	promptContent := e.buildCapabilityPrompt(state, e.buildSenderPrompt(msg.Content, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
 
 	sendStart := time.Now()
 	state.mu.Lock()
@@ -6898,7 +6928,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					}
 				}
 
-				queuedPrompt := e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey)
+				queuedPrompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
 
 				state.mu.Lock()
 				as := state.agentSession // capture under lock to avoid race with cleanup
@@ -7384,7 +7414,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		queuedRichCardCopy := e.i18n.RichCardCopyForText(queued.content)
 		e.i18n.DetectAndSet(queued.content)
 		state.setTurnRichCardCopy(queued.messageID, queuedRichCardCopy)
-		prompt := e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey)
+		prompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
 
 		state.mu.Lock()
 		as := state.agentSession // capture under lock to avoid race with cleanup (mirrors #1436)
