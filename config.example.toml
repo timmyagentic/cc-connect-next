@@ -37,15 +37,16 @@
 # 查看详情或 /upgrade confirm 直接升级。默认开启。
 # update_notice = true
 
-# In-app feedback channel. When your config contains keys this build does not
-# support, or you hit a missing capability, the daemon offers to report it to
-# the project author as a GitHub issue — no GitHub account needed. Nothing is
-# ever sent without your explicit `/feedback confirm`; the exact title and
-# body are previewed first, and credentials/ids/paths are redacted.
-# 应用内反馈通道。当配置里出现当前版本不支持的配置项、或你需要的能力不存在时，
-# 会提示你把需求反馈给作者（自动提交为 GitHub issue，无需 GitHub 账号）。
-# 任何内容都必须经你 `/feedback confirm` 确认后才发送；提交前会完整预览标题
-# 与正文，凭据/ID/路径会被脱敏。
+# In-app feedback channel. When you hit a problem — a turn error, a config
+# key this build does not support, or any missing capability — the daemon
+# prompts you to report it to the project author. Sending `/feedback ...`
+# submits it immediately as a GitHub issue (no GitHub account needed);
+# nothing is ever submitted in the background, and credentials/ids/paths are
+# redacted automatically.
+# 应用内反馈通道。当你遇到问题——回合报错、配置里出现当前版本不支持的配置项、
+# 或需要的能力不存在——会提示你可以反馈给作者。发送 `/feedback ...` 即直接
+# 提交为 GitHub issue（无需 GitHub 账号）；绝不会在后台擅自上报，凭据/ID/
+# 路径会自动脱敏。
 # [feedback]
 # enabled = true
 # endpoint = ""   # override the author-operated relay URL / 覆盖作者侧中继地址

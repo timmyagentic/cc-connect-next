@@ -32,7 +32,7 @@ user ou_1234567890abcdef in chat oc_fedcba0987654321 config at /Users/someone/pr
 	}
 }
 
-func TestCmdFeedback_PreviewThenConfirmSubmits(t *testing.T) {
+func TestCmdFeedback_SubmitsImmediately(t *testing.T) {
 	e, plat := newFeedbackTestEngine(t)
 	var posted *FeedbackSubmission
 	e.feedbackPostFn = func(endpoint string, sub FeedbackSubmission) (string, error) {
@@ -43,58 +43,42 @@ func TestCmdFeedback_PreviewThenConfirmSubmits(t *testing.T) {
 		return "https://github.com/timmyagentic/cc-connect-next/issues/99", nil
 	}
 
+	// Invoking /feedback IS the consent: one command, immediate submission.
 	e.cmdFeedback(plat, feedbackTestMsg(), "I need per-project webhook retries")
-	sent := plat.sentTexts()
-	if len(sent) != 1 || !strings.Contains(sent[0], "I need per-project webhook retries") {
-		t.Fatalf("expected preview containing the description, got %v", sent)
-	}
-	if !strings.Contains(sent[0], "[feedback] I need per-project webhook retries") {
-		t.Fatalf("preview must show the derived title, got %q", sent[0])
-	}
-
-	e.cmdFeedback(plat, feedbackTestMsg(), "confirm")
-	sent = plat.sentTexts()
 	if posted == nil {
-		t.Fatal("confirm must POST the draft")
+		t.Fatal("submission must happen on the first command, without confirm")
 	}
 	if posted.Schema != 1 || posted.Trigger != "user" || posted.InstallID != "install-test" {
 		t.Errorf("submission envelope wrong: %+v", posted)
 	}
+	if !strings.Contains(posted.Title, "[feedback] I need per-project webhook retries") {
+		t.Errorf("title = %q", posted.Title)
+	}
 	if !strings.Contains(posted.Body, "Environment (auto-generated)") {
 		t.Errorf("body missing environment section: %q", posted.Body)
 	}
-	if !strings.Contains(sent[len(sent)-1], "issues/99") {
-		t.Errorf("success reply must contain the issue URL, got %q", sent[len(sent)-1])
-	}
-
-	// The draft is consumed: a second confirm has nothing to submit.
-	posted = nil
-	e.cmdFeedback(plat, feedbackTestMsg(), "confirm")
-	if posted != nil {
-		t.Error("second confirm must not re-submit")
+	sent := plat.sentTexts()
+	if len(sent) != 1 || !strings.Contains(sent[0], "issues/99") {
+		t.Fatalf("expected one success reply with the issue URL, got %v", sent)
 	}
 }
 
-func TestCmdFeedback_ConfirmWithoutDraft(t *testing.T) {
-	e, plat := newFeedbackTestEngine(t)
-	e.cmdFeedback(plat, feedbackTestMsg(), "confirm")
-	if sent := plat.sentTexts(); len(sent) != 1 || !strings.Contains(sent[0], "/feedback <") {
-		t.Fatalf("expected no-draft reply, got %v", sent)
-	}
-}
-
-func TestCmdFeedback_CancelDiscardsDraft(t *testing.T) {
+func TestCmdFeedback_ConfirmAndCancelShowUsageNotAnIssue(t *testing.T) {
+	// confirm/cancel are leftovers of the removed two-step flow; they must
+	// never be submitted as a literal report.
 	e, plat := newFeedbackTestEngine(t)
 	submitted := false
 	e.feedbackPostFn = func(string, FeedbackSubmission) (string, error) {
 		submitted = true
 		return "https://example/1", nil
 	}
-	e.cmdFeedback(plat, feedbackTestMsg(), "something")
-	e.cmdFeedback(plat, feedbackTestMsg(), "cancel")
 	e.cmdFeedback(plat, feedbackTestMsg(), "confirm")
+	e.cmdFeedback(plat, feedbackTestMsg(), "cancel")
 	if submitted {
-		t.Error("cancelled draft must never be submitted")
+		t.Fatal("confirm/cancel must not submit anything")
+	}
+	if sent := plat.sentTexts(); len(sent) != 2 || !strings.Contains(sent[0], "/feedback <") {
+		t.Fatalf("expected usage replies, got %v", sent)
 	}
 }
 
@@ -107,7 +91,7 @@ func TestCmdFeedback_DisabledChannel(t *testing.T) {
 	}
 }
 
-func TestCmdFeedback_ConfigDraftFromGapKeys(t *testing.T) {
+func TestCmdFeedback_ConfigSubmitsGapKeys(t *testing.T) {
 	e, plat := newFeedbackTestEngine(t)
 	e.SetFeedbackCapabilityGaps([]string{"display.sparkles", "feedbak.enabled"})
 	var posted *FeedbackSubmission
@@ -117,17 +101,19 @@ func TestCmdFeedback_ConfigDraftFromGapKeys(t *testing.T) {
 	}
 
 	e.cmdFeedback(plat, feedbackTestMsg(), "config")
-	sent := plat.sentTexts()
-	if len(sent) != 1 || !strings.Contains(sent[0], "display.sparkles") || !strings.Contains(sent[0], "feedbak.enabled") {
-		t.Fatalf("config preview must list the unsupported keys, got %v", sent)
+	if posted == nil || posted.Trigger != "config_keys" {
+		t.Fatalf("expected immediate config_keys submission, got %+v", posted)
+	}
+	if !strings.Contains(posted.Title, "display.sparkles") || !strings.Contains(posted.Body, "feedbak.enabled") {
+		t.Errorf("submission must name the keys: title=%q", posted.Title)
 	}
 
-	e.cmdFeedback(plat, feedbackTestMsg(), "confirm")
-	if posted == nil || posted.Trigger != "config_keys" {
-		t.Fatalf("expected config_keys submission, got %+v", posted)
-	}
-	if !strings.Contains(posted.Title, "display.sparkles") {
-		t.Errorf("title must name the keys, got %q", posted.Title)
+	// With no gap keys there is nothing to submit.
+	posted = nil
+	e.SetFeedbackCapabilityGaps(nil)
+	e.cmdFeedback(plat, feedbackTestMsg(), "config")
+	if posted != nil {
+		t.Error("config with no gap keys must not submit")
 	}
 }
 
@@ -193,7 +179,7 @@ func TestFeedbackNotifier_RetriesUntilSessionExists(t *testing.T) {
 	}
 }
 
-func TestCmdFeedback_ErrorDraftFromRecordedError(t *testing.T) {
+func TestCmdFeedback_ErrorSubmitsRecordedError(t *testing.T) {
 	e, plat := newFeedbackTestEngine(t)
 	var posted *FeedbackSubmission
 	e.feedbackPostFn = func(_ string, sub FeedbackSubmission) (string, error) {
@@ -203,23 +189,23 @@ func TestCmdFeedback_ErrorDraftFromRecordedError(t *testing.T) {
 
 	// No error recorded yet.
 	e.cmdFeedback(plat, feedbackTestMsg(), "error")
+	if posted != nil {
+		t.Fatal("no recorded error must mean no submission")
+	}
 	if sent := plat.sentTexts(); len(sent) != 1 || !strings.Contains(sent[0], "/feedback <") {
 		t.Fatalf("expected no-error reply, got %v", sent)
 	}
 
 	e.recordFeedbackError("feishu:oc_chat:ou_user", "codex app-server turn/start: boom")
 	e.cmdFeedback(plat, feedbackTestMsg(), "error")
-	sent := plat.sentTexts()
-	if !strings.Contains(sent[len(sent)-1], "turn/start: boom") {
-		t.Fatalf("error preview must include the recorded error, got %q", sent[len(sent)-1])
-	}
-
-	e.cmdFeedback(plat, feedbackTestMsg(), "confirm")
 	if posted == nil || posted.Trigger != "error" {
-		t.Fatalf("expected error-triggered submission, got %+v", posted)
+		t.Fatalf("expected immediate error submission, got %+v", posted)
 	}
 	if !strings.Contains(posted.Title, "[feedback] error: codex app-server turn/start: boom") {
 		t.Errorf("title = %q", posted.Title)
+	}
+	if !strings.Contains(posted.Body, "turn/start: boom") {
+		t.Errorf("body must include the recorded error, got %q", posted.Body)
 	}
 }
 

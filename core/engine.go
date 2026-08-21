@@ -478,7 +478,6 @@ type Engine struct {
 	feedbackEndpoint    string
 	feedbackInstallID   string
 	feedbackGapKeys     []string
-	feedbackDrafts      map[string]*feedbackDraft
 	feedbackErrors      map[string]*feedbackError
 	feedbackErrorHintAt map[string]time.Time
 	feedbackPostFn      func(endpoint string, sub FeedbackSubmission) (string, error)

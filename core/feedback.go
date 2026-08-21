@@ -26,9 +26,10 @@ import (
 // GitHub issue.
 //
 // Two invariants are load-bearing:
-//   - Consent is per submission. The user sees the exact issue title and body
-//     (what you preview is what is sent) and must reply `/feedback confirm`.
-//     Nothing is ever posted in the background.
+//   - Submission is user-initiated, never background: invoking /feedback IS
+//     the consent, so the report is filed immediately — no confirm loop
+//     (product decision 2026-08-21). Proactive prompts only point at the
+//     command; they never submit anything themselves.
 //   - The payload must not carry credentials, chat/user ids, or filesystem
 //     paths. The description passes redactFeedbackText; the environment
 //     section is built from a fixed allowlist (version, OS, agent type).
@@ -43,18 +44,9 @@ const (
 	DefaultFeedbackEndpoint = "https://cc-connect-feedback.qianbi3956001.workers.dev/v1/feedback"
 
 	feedbackFallbackURL    = "https://github.com/timmyagentic/cc-connect-next/issues/new"
-	feedbackDraftTTL       = 30 * time.Minute
 	feedbackMaxDescription = 4000
 	feedbackPostTimeout    = 10 * time.Second
 )
-
-// feedbackDraft is a staged, previewed-but-not-yet-confirmed submission.
-type feedbackDraft struct {
-	Title     string
-	Body      string
-	Trigger   string // "user" | "config_keys" | "error"
-	CreatedAt time.Time
-}
 
 // feedbackError is the most recent user-visible failure in a session,
 // reportable via `/feedback error`.
@@ -117,32 +109,24 @@ func (e *Engine) feedbackActive() bool {
 
 // cmdFeedback implements /feedback:
 //
-//	/feedback <description>  stage a draft and show the exact issue preview
-//	/feedback config         stage a draft for the detected unsupported keys
-//	/feedback confirm        submit the previewed draft
-//	/feedback cancel         discard the previewed draft
+//	/feedback <description>  report the described problem to the author
+//	/feedback error          report the most recent error in this session
+//	/feedback config         report the detected unsupported config keys
+//
+// Invoking the command is the consent: the report is submitted immediately
+// (redacted), with no confirm step.
 func (e *Engine) cmdFeedback(p Platform, msg *Message, raw string) {
 	if !e.feedbackActive() {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackDisabled))
 		return
 	}
-	key := feedbackDraftKey(p, msg)
+	key := feedbackSessionKey(p, msg)
 
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "":
+	// confirm/cancel are leftovers of the removed two-step flow; show usage
+	// instead of filing an issue literally titled "confirm".
+	case "", "confirm", "cancel":
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackUsage))
-	case "confirm":
-		e.submitFeedbackDraft(p, msg, key)
-	case "cancel":
-		e.feedbackMu.Lock()
-		_, had := e.feedbackDrafts[key]
-		delete(e.feedbackDrafts, key)
-		e.feedbackMu.Unlock()
-		if had {
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackCancelled))
-		} else {
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackNoDraft))
-		}
 	case "error":
 		e.feedbackMu.Lock()
 		fe := e.feedbackErrors[key]
@@ -157,54 +141,29 @@ func (e *Engine) cmdFeedback(p Platform, msg *Message, raw string) {
 		}
 		title := feedbackTitleFromDescription("error: " + errLine)
 		desc := "A turn failed with the following error (" + fe.At.UTC().Format(time.RFC3339) + "):\n\n```\n" + fe.Text + "\n```"
-		e.stageFeedbackDraft(p, msg, key, title, desc, "error")
+		e.submitFeedback(p, msg, title, desc, "error")
 	case "config":
 		keys := e.FeedbackCapabilityGaps()
 		if len(keys) == 0 {
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackNoDraft))
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackNothingToReport))
 			return
 		}
 		title := "Unsupported config key(s): " + strings.Join(keys, ", ")
 		desc := "The configuration below is not consumed by this build:\n\n- `" +
 			strings.Join(keys, "`\n- `") + "`\n\nReported so the author knows this capability is wanted."
-		e.stageFeedbackDraft(p, msg, key, title, desc, "config_keys")
+		e.submitFeedback(p, msg, title, desc, "config_keys")
 	default:
 		desc := strings.TrimSpace(raw)
-		title := feedbackTitleFromDescription(desc)
-		e.stageFeedbackDraft(p, msg, key, title, desc, "user")
+		e.submitFeedback(p, msg, feedbackTitleFromDescription(desc), desc, "user")
 	}
 }
 
-func (e *Engine) stageFeedbackDraft(p Platform, msg *Message, key, title, description, trigger string) {
-	title = redactFeedbackText(title)
-	body := e.buildFeedbackBody(description, trigger)
-	draft := &feedbackDraft{Title: title, Body: body, Trigger: trigger, CreatedAt: time.Now()}
-
+// submitFeedback redacts, assembles, and posts a report in one step.
+func (e *Engine) submitFeedback(p Platform, msg *Message, title, description, trigger string) {
 	e.feedbackMu.Lock()
-	if e.feedbackDrafts == nil {
-		e.feedbackDrafts = make(map[string]*feedbackDraft)
-	}
-	e.feedbackDrafts[key] = draft
-	e.feedbackMu.Unlock()
-
-	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgFeedbackPreview, draft.Title, draft.Body))
-}
-
-func (e *Engine) submitFeedbackDraft(p Platform, msg *Message, key string) {
-	e.feedbackMu.Lock()
-	draft := e.feedbackDrafts[key]
-	if draft != nil && time.Since(draft.CreatedAt) > feedbackDraftTTL {
-		delete(e.feedbackDrafts, key)
-		draft = nil
-	}
 	endpoint := e.feedbackEndpoint
 	installID := e.feedbackInstallID
 	e.feedbackMu.Unlock()
-
-	if draft == nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFeedbackNoDraft))
-		return
-	}
 
 	submission := FeedbackSubmission{
 		Schema:    1,
@@ -213,9 +172,9 @@ func (e *Engine) submitFeedbackDraft(p Platform, msg *Message, key string) {
 		OS:        runtime.GOOS,
 		Arch:      runtime.GOARCH,
 		Agent:     e.agent.Name(),
-		Trigger:   draft.Trigger,
-		Title:     draft.Title,
-		Body:      draft.Body,
+		Trigger:   trigger,
+		Title:     redactFeedbackText(title),
+		Body:      e.buildFeedbackBody(description, trigger),
 	}
 
 	postFn := e.feedbackPostFn
@@ -229,11 +188,7 @@ func (e *Engine) submitFeedbackDraft(p Platform, msg *Message, key string) {
 		return
 	}
 
-	e.feedbackMu.Lock()
-	delete(e.feedbackDrafts, key)
-	e.feedbackMu.Unlock()
-
-	slog.Info("feedback: submitted", "trigger", draft.Trigger, "issue_url", issueURL)
+	slog.Info("feedback: submitted", "trigger", trigger, "issue_url", issueURL)
 	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgFeedbackSubmitted, issueURL))
 }
 
@@ -296,7 +251,7 @@ func (e *Engine) feedbackHint() string {
 	return "\n" + e.i18n.T(MsgFeedbackHint)
 }
 
-func feedbackDraftKey(p Platform, msg *Message) string {
+func feedbackSessionKey(p Platform, msg *Message) string {
 	if msg.SessionKey != "" {
 		return msg.SessionKey
 	}

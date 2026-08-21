@@ -2,7 +2,7 @@
 
 A Cloudflare Worker that lets cc-connect-next installations file feedback as
 GitHub issues **without the reporter needing a GitHub account**. The daemon
-POSTs a confirmed, redacted submission here; the Worker creates the issue
+POSTs a user-initiated, redacted submission here; the Worker creates the issue
 using a token that never leaves the author's infrastructure.
 
 ## Contract
