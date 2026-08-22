@@ -18374,3 +18374,85 @@ func TestPostPermissionPreviewSegmentRequiresAggregateEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatUsageReport_SingleSevenDayWindowDoesNotDuplicate(t *testing.T) {
+	// A bucket whose only window is the 7-day quota (e.g. some Codex accounts)
+	// must render that block exactly once — not once as secondary and again
+	// via the primary fallback (#1583).
+	report := &UsageReport{
+		Email: "dev@example.com",
+		Plan:  "team",
+		Buckets: []UsageBucket{{
+			Name:         "Rate limit",
+			Allowed:      true,
+			LimitReached: false,
+			Windows: []UsageWindow{
+				{Name: "Primary", UsedPercent: 40, WindowSeconds: 604800, ResetAfterSeconds: 100000},
+			},
+		}},
+	}
+
+	primary, secondary := selectUsageWindows(report)
+	if secondary == nil || secondary.WindowSeconds != 604800 {
+		t.Fatalf("secondary = %+v, want the 7-day window", secondary)
+	}
+	if primary == secondary {
+		t.Fatal("primary and secondary point at the same window; the block would render twice")
+	}
+	if primary != nil {
+		t.Fatalf("primary = %+v, want nil when the only window is the 7-day quota", primary)
+	}
+}
+
+func TestProcessInteractiveEvents_CardProgressTruncatesToolInputByToolMaxLen(t *testing.T) {
+	// tool_max_len must apply to the tool input embedded in the
+	// progress_style=card payload too, matching the legacy preview path
+	// (#1233). The original event.ToolInput stays untouched.
+	p := &stubCompactProgressPlatform{
+		stubPlatformEngine: stubPlatformEngine{n: "feishu"},
+		style:              "card",
+	}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	e.SetDisplayConfig(DisplayCfg{
+		Mode:             "full",
+		ThinkingMessages: true,
+		ThinkingMaxLen:   300,
+		ToolMaxLen:       50,
+		ToolMessages:     true,
+		CardMode:         "legacy",
+	})
+	sessionKey := "feishu:user-card-truncate"
+	session := e.sessions.GetOrCreateActive(sessionKey)
+	agentSession := newControllableSession("s-card-truncate")
+	state := &interactiveState{
+		agentSession: agentSession,
+		platform:     p,
+		replyCtx:     "ctx-card-truncate",
+	}
+	e.interactiveStates[sessionKey] = state
+
+	longInput := strings.Repeat("abcdefghij", 12) // 120 runes, limit is 50
+	agentSession.events <- Event{Type: EventThinking, Content: "Plan"}
+	agentSession.events <- Event{Type: EventToolUse, ToolName: "Bash", ToolInput: longInput}
+	agentSession.events <- Event{Type: EventText, Content: "done"}
+	agentSession.events <- Event{Type: EventResult, Content: "done", Done: true}
+
+	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-card-truncate", time.Now(), nil, nil, state.replyCtx)
+
+	frames := append(p.getPreviewStarts(), p.getPreviewEdits()...)
+	if len(frames) == 0 {
+		t.Fatal("no card frames rendered")
+	}
+	sawTruncated := false
+	for _, frame := range frames {
+		if strings.Contains(frame, longInput) {
+			t.Fatalf("card frame contains the full 120-rune tool input: %q", frame)
+		}
+		if strings.Contains(frame, strings.Repeat("abcdefghij", 5)+"...") {
+			sawTruncated = true
+		}
+	}
+	if !sawTruncated {
+		t.Fatalf("no card frame contains the truncated tool input; frames=%q", frames)
+	}
+}

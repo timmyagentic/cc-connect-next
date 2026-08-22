@@ -4965,7 +4965,7 @@ func (e *Engine) runUnsolicitedReader(ctx context.Context, cancel context.Cancel
 				}
 
 				if fullResponse != "" {
-					for _, chunk := range splitMessage(fullResponse, maxPlatformMessageLen) {
+					for _, chunk := range SplitMessageCodeFenceAware(fullResponse, maxPlatformMessageLen) {
 						e.send(p, replyCtx, chunk)
 					}
 				}
@@ -5910,7 +5910,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					} else {
 						segment := strings.Join(textParts[segmentStart:], "")
 						if segment != "" {
-							for _, chunk := range splitMessage(segment, maxPlatformMessageLen) {
+							for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
 								sendWorkspace(p, replyCtx, chunk)
 							}
 						}
@@ -5933,7 +5933,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					if !previewActive {
 						segment := strings.Join(textParts[segmentStart:], "")
 						if segment != "" {
-							for _, chunk := range splitMessage(segment, maxPlatformMessageLen) {
+							for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
 								sendWorkspace(p, replyCtx, chunk)
 							}
 						}
@@ -6000,7 +6000,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					} else {
 						segment := strings.Join(textParts[segmentStart:], "")
 						if segment != "" {
-							for _, chunk := range splitMessage(segment, maxPlatformMessageLen) {
+							for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
 								sendWorkspace(p, replyCtx, chunk)
 							}
 						}
@@ -6044,7 +6044,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					if !previewActive {
 						segment := strings.Join(textParts[segmentStart:], "")
 						if segment != "" {
-							for _, chunk := range splitMessage(segment, maxPlatformMessageLen) {
+							for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
 								sendWorkspace(p, replyCtx, chunk)
 							}
 						}
@@ -6056,7 +6056,10 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				if previewActive {
 					sp.detachPreview() // keep frozen preview visible as permanent message
 				}
-				toolInput := event.ToolInput
+				// tool_max_len applies to the card's rendered text and its
+				// structured payload alike (#1233); event.ToolInput itself is
+				// left untouched.
+				toolInput := truncateIf(event.ToolInput, turnDisplay.ToolMaxLen)
 				var formattedInput string
 				if toolInput == "" {
 					formattedInput = ""
@@ -6310,7 +6313,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					if !previewActive {
 						segment := strings.Join(textParts[segmentStart:], "")
 						if segment != "" {
-							for _, chunk := range splitMessage(segment, maxPlatformMessageLen) {
+							for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
 								sendWorkspace(p, replyCtx, chunk)
 							}
 						}
@@ -6578,7 +6581,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					slog.Error("streaming card finalize failed, sending fallback", "error", err)
 					discardStreamingCard()
 					// Fallback: send the response as a normal message
-					for _, chunk := range splitMessage(fullResponse, maxPlatformMessageLen) {
+					for _, chunk := range SplitMessageCodeFenceAware(fullResponse, maxPlatformMessageLen) {
 						if err := sendWorkspaceWithError(p, replyCtx, chunk); err != nil {
 							return
 						}
@@ -7275,7 +7278,7 @@ channelClosed:
 		if segmentStart < len(textParts) {
 			unsent := strings.Join(textParts[segmentStart:], "")
 			if unsent != "" {
-				for _, chunk := range splitMessage(unsent, maxPlatformMessageLen) {
+				for _, chunk := range SplitMessageCodeFenceAware(unsent, maxPlatformMessageLen) {
 					if err := sendWorkspaceWithError(p, replyCtx, chunk); err != nil {
 						return
 					}
@@ -7285,7 +7288,7 @@ channelClosed:
 	} else if sp.finish(fullResponse, "") {
 		slog.Debug("stream preview: finalized in-place (process exited)")
 	} else {
-		for _, chunk := range splitMessage(fullResponse, maxPlatformMessageLen) {
+		for _, chunk := range SplitMessageCodeFenceAware(fullResponse, maxPlatformMessageLen) {
 			if err := sendWorkspaceWithError(p, replyCtx, chunk); err != nil {
 				return
 			}
@@ -8422,7 +8425,7 @@ func (e *Engine) composeStatusFooter(agent Agent, session AgentSession) string {
 }
 
 func sendChunksWithStatusFooter(ctx context.Context, p Platform, replyCtx any, body, statusFooter string, sendFn func(Platform, any, string) error) bool {
-	chunks := splitMessage(body, maxPlatformMessageLen)
+	chunks := SplitMessageCodeFenceAware(body, maxPlatformMessageLen)
 	for i, chunk := range chunks {
 		isLast := i == len(chunks)-1
 		if isLast && statusFooter != "" {
@@ -9497,9 +9500,15 @@ func selectUsageWindows(report *UsageReport) (*UsageWindow, *UsageWindow) {
 			}
 		}
 		if primary == nil && len(bucket.Windows) > 0 {
-			primary = &bucket.Windows[0]
+			// Fall back to the first window when no 5-hour quota is reported
+			// (e.g. Codex accounts whose first bucket only exposes a 7-day
+			// window). Skip it if the slot is already occupied by the 7-day
+			// window so the same block is not rendered twice (#1583).
+			if secondary != &bucket.Windows[0] {
+				primary = &bucket.Windows[0]
+			}
 		}
-		if secondary == nil && len(bucket.Windows) > 1 {
+		if secondary == nil && len(bucket.Windows) > 1 && &bucket.Windows[1] != primary {
 			secondary = &bucket.Windows[1]
 		}
 		if primary != nil || secondary != nil {

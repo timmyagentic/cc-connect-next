@@ -260,6 +260,15 @@ func main() {
 		case "web":
 			runWeb(os.Args[2:])
 			return
+		default:
+			// A non-flag first argument that matches no subcommand is a typo
+			// (e.g. `cc-connect-next dcotor`); starting the daemon instead
+			// would silently do the wrong thing. Flags fall through to
+			// flag.Parse below unchanged.
+			if !strings.HasPrefix(os.Args[1], "-") {
+				fmt.Fprintf(os.Stderr, "unknown command %q\n\nSubcommands: config, config-example, update, check-update, migrate, provider,\n  send, cron, timer, at, relay, sessions, agent-sid, daemon, feishu, weixin,\n  doctor, web\nRun 'cc-connect-next --help' for flags.\n", os.Args[1])
+				os.Exit(2)
+			}
 		}
 	}
 

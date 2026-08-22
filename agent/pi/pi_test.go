@@ -1949,3 +1949,41 @@ func TestHandleAgentEnd_SkipsAssistantWithoutUsage(t *testing.T) {
 		t.Errorf("InputTokens = %d, want 3000", usage.InputTokens)
 	}
 }
+
+func TestAvailableModels_ModelsStoreFallback(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PI_CODING_AGENT_DIR", dir)
+
+	// settings.json without enabledModels: /model must fall back to pi's own
+	// catalog (models-store.json) instead of listing nothing (#1636).
+	writeFile := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	writeFile("settings.json", `{"defaultModel": "gpt-x"}`)
+	writeFile("models-store.json", `{
+		"deepseek": {"models": [{"id": "deepseek-chat", "name": "DeepSeek Chat"}]},
+		"openai":   {"models": [{"id": "gpt-x", "name": "GPT X"}, {"id": "", "name": "bad"}]}
+	}`)
+
+	a := &Agent{}
+	models := a.AvailableModels(context.Background())
+	if len(models) != 2 {
+		t.Fatalf("got %d models, want 2 (empty-ID entries skipped)", len(models))
+	}
+	if models[0].Name != "deepseek/deepseek-chat" || models[0].Alias != "deepseek-chat" || models[0].Desc != "DeepSeek Chat" {
+		t.Errorf("models[0] = %+v, want provider-qualified deepseek entry", models[0])
+	}
+	if models[1].Name != "openai/gpt-x" {
+		t.Errorf("models[1].Name = %q, want openai/gpt-x", models[1].Name)
+	}
+
+	// With enabledModels configured, settings still win over the store.
+	writeFile("settings.json", `{"enabledModels": ["anthropic/claude-x"]}`)
+	models = a.AvailableModels(context.Background())
+	if len(models) != 1 || models[0].Name != "anthropic/claude-x" {
+		t.Fatalf("models = %+v, want the single enabledModels entry", models)
+	}
+}
