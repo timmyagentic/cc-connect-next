@@ -22,6 +22,11 @@ import (
 //	effect. We probe the help text once and adapt accordingly. See #1456.
 type kimiFlagSupport struct {
 	Print bool
+	// WorkDir mirrors `--work-dir`: the newest Kimi Code CLI builds removed
+	// it and exit with `error: unknown option '--work-dir'` when it is
+	// passed (see #1476). The process working directory is set separately
+	// via exec.Cmd.Dir, so omitting the flag is functionally equivalent.
+	WorkDir bool
 }
 
 // probeKimiFlags runs `<cmd> --help` with a short timeout and returns the
@@ -49,7 +54,8 @@ func probeKimiFlags(parent context.Context, cmd string, timeout time.Duration) k
 
 	flags := parseKimiHelpFlags(out.String())
 	support := kimiFlagSupport{
-		Print: flags["--print"],
+		Print:   flags["--print"],
+		WorkDir: flags["--work-dir"],
 	}
 	slog.Debug("kimi: flag probe complete", "cmd", cmd, "support", support)
 	return support

@@ -51,6 +51,36 @@ const modernKimiHelp = `
    --plan                     Start a new session in Plan mode.
 `
 
+// modernKimiHelpWithoutWorkDir mirrors the newest Kimi Code CLI builds, which
+// dropped --work-dir as well: passing it exits with
+// `error: unknown option '--work-dir'`. This is the surface behind #1476.
+const modernKimiHelpWithoutWorkDir = `
+ Usage: kimi [OPTIONS] COMMAND [ARGS]...
+
+ Kimi, your next CLI agent.
+
+ Options:
+   -V, --version              Show version and exit.
+   -S, --session [ID]         Resume a session.
+   -c, --continue             Continue the most recent session.
+   -m, --model TEXT           LLM model to use.
+   -p, --prompt TEXT          Run a single prompt non-interactively.
+   --output-format FORMAT     Non-interactive output format.
+   -y, --yolo                 Auto-approve regular tool calls.
+   --plan                     Start a new session in Plan mode.
+`
+
+func TestParseKimiHelpFlags_WorkDirDetection(t *testing.T) {
+	legacy := parseKimiHelpFlags(legacyKimiHelp)
+	assert.True(t, legacy["--work-dir"], "legacy help must advertise --work-dir")
+
+	modern := parseKimiHelpFlags(modernKimiHelp)
+	assert.True(t, modern["--work-dir"], "modern help with -w, --work-dir must advertise it")
+
+	newest := parseKimiHelpFlags(modernKimiHelpWithoutWorkDir)
+	assert.False(t, newest["--work-dir"], "help without --work-dir must not advertise it")
+}
+
 func TestParseKimiHelpFlags_LegacyAdvertisesPrint(t *testing.T) {
 	flags := parseKimiHelpFlags(legacyKimiHelp)
 	assert.True(t, flags["--print"], "legacy help text advertises --print")

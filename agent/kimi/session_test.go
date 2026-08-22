@@ -184,6 +184,34 @@ func TestBuildArgs_NoPrintSupportOmitsPrintFlag(t *testing.T) {
 	assert.Contains(t, args, "hello")
 }
 
+// TestBuildArgs_WorkDirFlagGated covers the newest Kimi Code CLI builds,
+// which removed --work-dir and reject it outright (#1476). The process still
+// runs in the right directory via exec.Cmd.Dir, so the flag must simply be
+// omitted — and its value must not leak into args through a partial gate.
+func TestBuildArgs_WorkDirFlagGated(t *testing.T) {
+	ctx := context.Background()
+	ks, err := newKimiSession(ctx, "kimi", nil, "/tmp/proj", "", "default", "", nil, 0, kimiFlagSupport{WorkDir: false})
+	require.NoError(t, err)
+	defer func() { _ = ks.Close() }()
+
+	args := ks.buildArgs("hello")
+	assert.NotContains(t, args, "--work-dir")
+	assert.NotContains(t, args, "/tmp/proj")
+}
+
+// TestBuildArgs_WorkDirFlagEmitted covers CLIs that still advertise
+// --work-dir in --help: the flag keeps being passed for them.
+func TestBuildArgs_WorkDirFlagEmitted(t *testing.T) {
+	ctx := context.Background()
+	ks, err := newKimiSession(ctx, "kimi", nil, "/tmp/proj", "", "default", "", nil, 0, kimiFlagSupport{WorkDir: true})
+	require.NoError(t, err)
+	defer func() { _ = ks.Close() }()
+
+	args := ks.buildArgs("hello")
+	assert.Contains(t, args, "--work-dir")
+	assert.Contains(t, args, "/tmp/proj")
+}
+
 // TestBuildArgs_PrintSupportIncludesPrintFlag covers the legacy kimi-cli
 // branch — the binary advertises --print, so we must keep emitting it for
 // --output-format stream-json to take effect.

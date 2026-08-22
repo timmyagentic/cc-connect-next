@@ -41,6 +41,15 @@ type piSession struct {
 
 	thinkingBuf strings.Builder // accumulates thinking_delta chunks
 
+	// pendingErr buffers the most recent assistant errorMessage. Pi
+	// auto-retries transient provider failures (e.g. HTTP 429 rate limits)
+	// inside the same turn and announces this via agent_end.willRetry.
+	// Surfacing such errors immediately would make the engine fail the
+	// turn while Pi is still recovering it, and the retry outcome would
+	// be dropped as stale events. Only written from the readLoop
+	// goroutine, so it needs no lock.
+	pendingErr string
+
 	// modelsCW is a cached map of model ID → contextWindow, loaded once
 	// from ~/.pi/agent/models.json so every turn can look up the window.
 	// Loaded at session start and never refreshed — if models.json changes
@@ -201,6 +210,11 @@ func (s *piSession) readLoop(cmd *exec.Cmd, stdout io.ReadCloser, stderrBuf *byt
 		}
 	}
 
+	// Flush a deferred terminal error first in case the process exited
+	// without a final non-retry agent_end (the agent_end handler normally
+	// flushes pendingErr already).
+	s.flushPendingErr()
+
 	// Emit EventResult when the process finishes.
 	sid := s.CurrentSessionID()
 	evt := core.Event{Type: core.EventResult, SessionID: sid, Done: true}
@@ -236,6 +250,17 @@ func (s *piSession) handleEvent(raw map[string]any) {
 
 	case "agent_end":
 		s.handleAgentEnd(raw)
+		if willRetry, _ := raw["willRetry"].(bool); willRetry {
+			// Pi is auto-retrying a transient failure (e.g. 429) inside
+			// this turn: it emits agent_end with willRetry=true, then
+			// re-runs the agent loop and emits a fresh agent_start /
+			// agent_end cycle. Keep the turn open and wait for the
+			// retry outcome instead of closing the turn on a failure
+			// Pi is about to recover from.
+			break
+		}
+		// Turn is really over: surface a deferred assistant error, if any.
+		s.flushPendingErr()
 
 	case "agent_start", "turn_start", "turn_end", "message_start":
 		// Logged for debugging but no action needed.
@@ -292,6 +317,28 @@ func (s *piSession) handleMessageUpdate(raw map[string]any) {
 
 // emitToolFromMessage extracts tool call info from a toolcall_end event.
 func (s *piSession) emitToolFromMessage(ame map[string]any) {
+	// pi >= 0.84.0: message_update emits only assistantMessageEvent deltas
+	// (the cumulative message and assistantMessageEvent.partial were removed
+	// to make JSON streaming output linear). toolcall_end now carries the
+	// complete toolCall object directly, so read it before falling back to
+	// the pre-0.84.0 message/partial snapshots. (toolCall has carried the
+	// same finalized block on every released pi version, so the fast path
+	// always wins; the fallback is a defensive safety net.)
+	if tc, ok := ame["toolCall"].(map[string]any); ok {
+		if itemType, _ := tc["type"].(string); itemType == "toolCall" {
+			name, _ := tc["name"].(string)
+			input := extractToolInput(tc)
+			evt := core.Event{Type: core.EventToolUse, ToolName: name, ToolInput: input}
+			select {
+			case s.events <- evt:
+			case <-s.ctx.Done():
+			}
+			return
+		}
+		// type != "toolCall" cannot happen on the real pi wire; fall through
+		// to the pre-0.84.0 snapshot path rather than silently dropping.
+	}
+
 	msg, _ := ame["message"].(map[string]any)
 	if msg == nil {
 		msg, _ = ame["partial"].(map[string]any)
@@ -354,15 +401,31 @@ func (s *piSession) handleMessageEnd(raw map[string]any) {
 		}
 
 	case "assistant":
-		// Check for errors
 		if errMsg, _ := msg["errorMessage"].(string); errMsg != "" {
-			evt := core.Event{Type: core.EventError, Error: fmt.Errorf("%s", errMsg)}
-			select {
-			case s.events <- evt:
-			case <-s.ctx.Done():
-				return
-			}
+			// Defer surfacing: Pi may auto-retry this turn (announced
+			// via agent_end.willRetry). The buffered error is flushed
+			// by the agent_end handler once the turn truly ends, or by
+			// readLoop on process exit.
+			s.pendingErr = errMsg
+		} else {
+			// A healthy assistant message supersedes any earlier error
+			// that Pi has already retried successfully.
+			s.pendingErr = ""
 		}
+	}
+}
+
+// flushPendingErr surfaces a deferred assistant error once the turn is
+// really over (terminal agent_end or process exit). No-op when empty.
+func (s *piSession) flushPendingErr() {
+	if s.pendingErr == "" {
+		return
+	}
+	evt := core.Event{Type: core.EventError, Error: fmt.Errorf("%s", s.pendingErr)}
+	s.pendingErr = ""
+	select {
+	case s.events <- evt:
+	case <-s.ctx.Done():
 	}
 }
 
