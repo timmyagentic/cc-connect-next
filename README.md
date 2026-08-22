@@ -2,7 +2,7 @@
 
 <img src="docs/images/banner-next.svg" alt="cc-connect-next" width="720">
 
-**Chat with the AI coding agents on your machine — from Feishu, Telegram, Slack, Discord and 11 more platforms.**
+**The Feishu-native remote for the AI coding agents on your machine — plus Telegram, Slack, Discord and 11 more platforms.**
 
 A privacy-first successor to [CC Connect](https://github.com/chenhg5/cc-connect) with a native Feishu Card 2.0 answer lifecycle, mid-turn steering, and an auditable one-command migration.
 
@@ -41,6 +41,17 @@ Run Claude Code, Codex, Cursor, or any of 14 coding agents on your own machine �
 </div>
 
 When a supplement arrives mid-turn in steer mode (or via `/ps`), the input joins the **same** agent turn — no new turn, no concurrent process. The previous card freezes in a neutral grey *"Continued in a newer message"* state that keeps everything already visible, and all further progress plus the final answer render only in the card replying to the newest message. Exactly one card reaches Done per turn.
+
+## 🥇 Feishu as a first-class platform
+
+Most bridges port a Telegram bot to Feishu and stop at "it sends messages". cc-connect-next is built the other way around: Feishu is the reference platform, the integration is specified by an executable [answer-card contract](docs/feishu-card-contract.md), and it exercises the platform's advanced surface end to end. If your team lives in Feishu, this is the difference you feel daily:
+
+- **Answer cards, engineered** — CardKit typewriter streaming with monotonic sequencing (a delayed frame can never overwrite newer content) and a ≥900 ms answering dwell so even one-shot answers visibly animate. CardKit unavailable? Automatic fallback to in-place card updates. Tables beyond Feishu's component budget render as fenced text in the same card instead of overflowing into extra messages; a failed terminal update falls back to one tracked replacement card — never untracked multi-part replies. `NO_REPLY` recalls the optimistic card; recalling your question deletes the card and keeps partial output out of assistant history; `done_emoji` reacts to your message only after a visible successful answer.
+- **Mentions that actually notify** — `@DisplayName` in answers resolves to native Feishu at tags (lazy member fetch, 1-hour cache, longest-name-first matching; `mention_map` targets other bots with validated `ou_` IDs). Because at tags inside cards display but never notify, a final answer containing a resolved mention is delivered as a tracked quoted text message that genuinely notifies — then the lifecycle card is removed.
+- **Topics and groups done right** — `thread_isolation` gives every topic its own workspace binding, and the first @ in an existing topic backfills the thread history as context, in order. Per-chat no-@ allowlists (`group_reply_all_chats`) ship with the exact `im:message.group_msg` permission boundary documented. Quoted-file downloads are double-gated: the bot must be explicitly @-ed *and* the quoted file's uploader must be the requester. Agent-relay prompts stay inside the topic they started in.
+- **Operations that stay out of your way** — WebSocket long connection (no public IP, domain, or certificate) with automatic reconnection; permission confirmations and provider/model switching as interactive cards; remote markdown images uploaded once and reused by URL with a one-minute failure backoff, plus multi-image batching; `cc-connect-next feishu setup` interactive onboarding with a recommended app profile; per-turn locale snapshots across five languages.
+
+Every item above is a documented config key in the [Feishu guide](docs/feishu.md) or a tested guarantee in the [card contract](docs/feishu-card-contract.md) — not marketing copy.
 
 ## 🚀 Quick start
 
