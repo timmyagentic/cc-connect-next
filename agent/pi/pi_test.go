@@ -1129,6 +1129,15 @@ func TestHandleMessageEnd_AssistantError(t *testing.T) {
 		},
 	})
 
+	// Deferred: Pi may auto-retry this turn (agent_end.willRetry), so the
+	// error must not surface until the turn really ends.
+	if evts := drainEvents(s); len(evts) != 0 {
+		t.Fatalf("got %d events before agent_end, want 0 (deferred)", len(evts))
+	}
+
+	// A terminal agent_end (no willRetry) flushes the buffered error.
+	s.handleEvent(map[string]any{"type": "agent_end"})
+
 	evts := drainEvents(s)
 	if len(evts) != 1 {
 		t.Fatalf("got %d events, want 1", len(evts))
@@ -1138,6 +1147,85 @@ func TestHandleMessageEnd_AssistantError(t *testing.T) {
 	}
 	if evts[0].Error == nil || !strings.Contains(evts[0].Error.Error(), "400") {
 		t.Errorf("error = %v", evts[0].Error)
+	}
+}
+
+func TestAgentEnd_WillRetryKeepsTurnOpen(t *testing.T) {
+	s := newTestSession()
+	defer s.cancel()
+
+	// Transient failure: assistant error followed by a retrying agent_end.
+	s.handleEvent(map[string]any{
+		"type": "message_end",
+		"message": map[string]any{
+			"role":         "assistant",
+			"errorMessage": "429 rate limited",
+		},
+	})
+	s.handleEvent(map[string]any{"type": "agent_end", "willRetry": true})
+
+	if evts := drainEvents(s); len(evts) != 0 {
+		t.Fatalf("got %d events during retry window, want 0", len(evts))
+	}
+}
+
+func TestAgentEnd_PendingErrorDroppedAfterSuccessfulRetry(t *testing.T) {
+	s := newTestSession()
+	defer s.cancel()
+
+	s.handleEvent(map[string]any{
+		"type": "message_end",
+		"message": map[string]any{
+			"role":         "assistant",
+			"errorMessage": "429 rate limited",
+		},
+	})
+	s.handleEvent(map[string]any{"type": "agent_end", "willRetry": true})
+	// The retried run succeeds: a healthy assistant message supersedes the
+	// buffered error, and the terminal agent_end must not surface it.
+	s.handleEvent(map[string]any{
+		"type": "message_end",
+		"message": map[string]any{
+			"role": "assistant",
+		},
+	})
+	s.handleEvent(map[string]any{"type": "agent_end"})
+
+	if evts := drainEvents(s); len(evts) != 0 {
+		t.Fatalf("got %d events after recovered retry, want 0", len(evts))
+	}
+}
+
+func TestEmitToolFromMessage_ToolCallDirect(t *testing.T) {
+	s := newTestSession()
+	defer s.cancel()
+
+	// pi >= 0.84.0: toolcall_end carries the toolCall object directly and
+	// no longer includes the cumulative message/partial snapshots.
+	s.handleEvent(map[string]any{
+		"type": "message_update",
+		"assistantMessageEvent": map[string]any{
+			"type": "toolcall_end",
+			"toolCall": map[string]any{
+				"type":      "toolCall",
+				"name":      "bash",
+				"arguments": map[string]any{"command": "ls -la"},
+			},
+		},
+	})
+
+	evts := drainEvents(s)
+	if len(evts) != 1 {
+		t.Fatalf("got %d events, want 1", len(evts))
+	}
+	if evts[0].Type != core.EventToolUse {
+		t.Errorf("type = %s", evts[0].Type)
+	}
+	if evts[0].ToolName != "bash" {
+		t.Errorf("toolName = %q", evts[0].ToolName)
+	}
+	if evts[0].ToolInput != "ls -la" {
+		t.Errorf("toolInput = %q", evts[0].ToolInput)
 	}
 }
 

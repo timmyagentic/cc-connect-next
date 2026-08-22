@@ -94,7 +94,10 @@ func (ks *kimiSession) buildArgs(prompt string) []string {
 	if ks.model != "" {
 		args = append(args, "--model", ks.model)
 	}
-	if ks.workDir != "" {
+	if ks.workDir != "" && ks.flagSupport.WorkDir {
+		// Only CLIs that advertise --work-dir accept it; newer builds
+		// reject it outright (#1476). The process still runs in the right
+		// directory via exec.Cmd.Dir either way.
 		args = append(args, "--work-dir", ks.workDir)
 	}
 

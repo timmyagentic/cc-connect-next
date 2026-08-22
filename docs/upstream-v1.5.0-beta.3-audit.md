@@ -48,3 +48,20 @@ updater — none exist upstream; upstream `/ps` still calls plain `Send`).
 | `c2bfb444`, `e3ea0cb5` — Pi v0.84.0 toolcall_end + willRetry | Deferred | Pi compatibility updates; import when a Pi deployment needs v0.84.0. |
 | `cc869faa` — WeCom quoted messages as agent context | Deferred | Platform enhancement outside the Feishu contract; needs WeCom QA. |
 | `d5144e88` — web work_dir validation | Deferred | Next's web admin diverged; revisit with the next web batch. |
+
+## Post-v1.5.0 sync (audited 2026-08-22)
+
+Upstream `main` has exactly one commit after the `v1.5.0` tag. This pass
+imported it plus three previously deferred agent-compat changes whose target
+CLI versions are now current; each landed with the upstream regression tests
+adapted to Next's code shape.
+
+| Upstream change | Decision | Reason / implementation |
+|---|---|---|
+| `3727b740` — Codex `/list` reads `session_index.jsonl` thread names, keeps only the first `session_meta`, and skips subagent rollouts | Adapted | Next's `list.go` shares the pre-fix lineage. The title override is applied before Next's `patchSessionSource` (which only rewrites string-form `"source":"exec"`, so the object-form subagent source never collides). Four upstream regression tests imported. |
+| `6c860798` — gate Kimi `--work-dir` on the help probe | Reimplemented | Newest Kimi Code CLI builds reject `--work-dir` outright, breaking every non-default `work_dir` project. Next's probe already parses all help flags; `kimiFlagSupport` gains `WorkDir` and `buildArgs` gates on it. `exec.Cmd.Dir` is set separately, so behavior is identical either way. |
+| `c2bfb444` — Pi v0.84.0 `toolcall_end` without cumulative message | Adapted | Pi ≥ 0.84.0 removed the `message`/`partial` snapshots Next's extractor relied on; the direct `toolCall` object is now read first with the old snapshot path kept as fallback for older CLIs. |
+| `e3ea0cb5` — keep the turn open while Pi auto-retries (`willRetry`) | Adapted | Next surfaced every assistant `errorMessage` immediately, so a transient 429 Pi was already retrying looked like a hard turn failure. Errors are now buffered (`pendingErr`), cleared by a healthy assistant message, flushed on terminal `agent_end`, and flushed by `readLoop` on process exit — adapted to Next's JSON-mode-only session (upstream also patches an RPC mode Next does not have). |
+| `1ddbac04` — native Kimi Code CLI dialect | Deferred | Large surface (+795/−120 across the kimi adapter). Import as one unit with real-CLI QA before advertising newest-Kimi support. |
+| `cc869faa` — WeCom quoted messages | Already covered | Next's WeCom adapter already collects main + quote + mixed inbound parts (`wsQuoteBlock`, `wsCollectInboundParts`). |
+| `760079b` / `44c07b61` P1-C — agent idle close timer | Not applicable (re-verified) | Next has no per-process idle-close timer; its idle mechanisms (event-gap turn timeout, workspace reaper, `reset_on_idle_mins`) do not share upstream's arming-order bug shape. |
