@@ -34,7 +34,7 @@ cc-connect-next 是一个**独立后继**，不是补丁、代理或伴生插件
 
 聊天里 `/feedback` 直接把问题作为 GitHub issue 报给作者：自动脱敏、匿名中继、不需要 GitHub 账号；回合失败时 daemon 也会主动提示这个入口。
 
-其余能力（14 种 Agent × 15 个平台、cron 与 webhook、语音输入输出、Web 管理台、五种语言 i18n）见[主 README](../README.zh-CN.md)。
+其余能力（14 种 Agent × 15 个平台、cron 与 webhook、语音输入输出、Web 管理台、五种语言 i18n）见[主 README](../README.md)。
 
 ## 试用不需要"下决心"
 

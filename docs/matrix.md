@@ -310,4 +310,4 @@ proxy = "socks5://proxy-host:1080"
 - [Telegram Setup](./telegram.md)
 - [Discord Setup](./discord.md)
 - [Slack Setup](./slack.md)
-- [Back to README](../README.md)
+- [Back to README](../README.en.md)

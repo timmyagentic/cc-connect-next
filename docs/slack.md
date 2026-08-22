@@ -323,4 +323,4 @@ Make sure:
 - [Weibo Setup](./weibo.md)
 - [Telegram Setup](./telegram.md)
 - [Discord Setup](./discord.md)
-- [Back to README](../README.md)
+- [Back to README](../README.en.md)

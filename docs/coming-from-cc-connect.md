@@ -34,7 +34,7 @@ Official CC Connect queues busy-time messages FIFO: they wait for the next turn.
 
 `/feedback` in the chat files the problem as a GitHub issue to the author: automatically redacted, anonymously relayed, no GitHub account needed — and the daemon points you at it whenever a turn fails.
 
-Everything else (14 agents × 15 platforms, cron & webhooks, voice in/out, web admin, five-language i18n) is in the [main README](../README.md).
+Everything else (14 agents × 15 platforms, cron & webhooks, voice in/out, web admin, five-language i18n) is in the [main README](../README.en.md).
 
 ## Trying it requires no commitment
 

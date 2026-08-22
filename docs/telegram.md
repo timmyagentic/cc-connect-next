@@ -306,4 +306,4 @@ Make sure Group Privacy mode is disabled. In BotFather: `/mybots` → select bot
 - [Weibo Setup](./weibo.md)
 - [Slack Setup](./slack.md)
 - [Discord Setup](./discord.md)
-- [Back to README](../README.md)
+- [Back to README](../README.en.md)
