@@ -97,9 +97,17 @@ func (a *Agent) AvailableModels(_ context.Context) []core.ModelOption {
 	models, err := readSettingsModels()
 	if err != nil {
 		slog.Debug("pi: AvailableModels: read settings", "error", err)
-		return nil
 	}
-	return models
+	if len(models) > 0 {
+		return models
+	}
+	// When enabledModels is unset, fall back to pi's own model catalog
+	// (models-store.json); otherwise /model can only show the current model
+	// and never lists anything to switch to (#1636).
+	if store := readModelsStore(); len(store) > 0 {
+		return store
+	}
+	return nil
 }
 
 func (a *Agent) SetSessionEnv(env []string) {
@@ -415,6 +423,53 @@ func readSettingsModels() ([]core.ModelOption, error) {
 		models = append(models, option)
 	}
 	return models, nil
+}
+
+// modelsStoreJSON represents the structure of ~/.pi/agent/models-store.json,
+// the provider catalog pi itself maintains. Top-level keys are provider
+// names, each with a Models list. Note: distinct from models.json, which
+// carries per-model context-window sizes.
+type modelsStoreJSON map[string]struct {
+	Models []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"models"`
+}
+
+// readModelsStore reads all models from pi's models-store.json as
+// provider-qualified ModelOptions (Name = "provider/id", Alias = short id,
+// Desc = display name). Returns nil when the file is missing or unreadable.
+func readModelsStore() []core.ModelOption {
+	dir := piSettingsDir()
+	if dir == "" {
+		return nil
+	}
+	path := filepath.Join(dir, "models-store.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		slog.Debug("pi: read models-store", "path", path, "error", err)
+		return nil
+	}
+	var store modelsStoreJSON
+	if err := json.Unmarshal(data, &store); err != nil {
+		slog.Warn("pi: parse models-store", "path", path, "error", err)
+		return nil
+	}
+	var models []core.ModelOption
+	for provider, p := range store {
+		for _, m := range p.Models {
+			if m.ID == "" {
+				continue
+			}
+			models = append(models, core.ModelOption{
+				Name:  provider + "/" + m.ID,
+				Alias: m.ID,
+				Desc:  m.Name,
+			})
+		}
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
+	return models
 }
 
 // readDefaultModel returns the defaultModel from settings.json.

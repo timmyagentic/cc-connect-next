@@ -231,7 +231,12 @@ func (as *antigravitySession) readLoop(ctx context.Context, cmd *exec.Cmd, stdou
 			_ = os.Remove(f)
 		}
 
-		// Detect conversation ID if this was the first turn of a fresh session
+		err := cmd.Wait()
+
+		// Detect conversation ID if this was the first turn of a fresh session.
+		// agy may flush the chat file only while the process is exiting, so wait
+		// for process reaping before scanning the chat directory (#1584);
+		// otherwise resume gets no conversation ID and starts a fresh session.
 		if as.CurrentSessionID() == "" {
 			var sid string
 			for attempt := 0; attempt < 15; attempt++ {
@@ -252,7 +257,6 @@ func (as *antigravitySession) readLoop(ctx context.Context, cmd *exec.Cmd, stdou
 			}
 		}
 
-		err := cmd.Wait()
 		sid := as.CurrentSessionID()
 		if err != nil {
 			stderrMsg := strings.TrimSpace(stderrBuf.String())

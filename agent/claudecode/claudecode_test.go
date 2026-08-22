@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/timmyagentic/cc-connect-next/core"
@@ -12,7 +13,7 @@ import (
 
 func TestNew_ParsesRunAsUserAndRunAsEnv(t *testing.T) {
 	opts := map[string]any{
-		"work_dir":    "/tmp/claudecode-test",
+		"work_dir":    t.TempDir(),
 		"run_as_user": "partseeker-coder",
 		"run_as_env":  []any{"PGSSLROOTCERT", "PGSSLMODE"},
 	}
@@ -37,7 +38,7 @@ func TestNew_RunAsUserSkipsClaudeLookPath(t *testing.T) {
 	// skipped because the target user's PATH is what matters. Verify that
 	// New() doesn't fail even when claude isn't on this test process's PATH.
 	opts := map[string]any{
-		"work_dir":    "/tmp/claudecode-test",
+		"work_dir":    t.TempDir(),
 		"run_as_user": "target-that-definitely-exists",
 	}
 	// Note: this test relies on New() NOT calling exec.LookPath("claude")
@@ -634,7 +635,7 @@ func TestWorkspaceAgentOptions_RoundTripsThroughNew(t *testing.T) {
 		routerAPIKey:     "secret",
 	}
 	opts := parent.WorkspaceAgentOptions()
-	opts["work_dir"] = "/tmp/claudecode-test"
+	opts["work_dir"] = t.TempDir()
 	opts["run_as_user"] = "skip-lookpath"
 
 	a, err := New(opts)
@@ -873,4 +874,60 @@ func TestValidateSessionIDInProject_CrossProjectLeak(t *testing.T) {
 // regression can ship.
 func TestAgent_ImplementsSessionIDValidator(t *testing.T) {
 	var _ core.SessionIDValidator = (*Agent)(nil)
+}
+
+func TestScanSessionMeta_TitlePriority(t *testing.T) {
+	// Claude Code writes ai-title / custom-title entries into the transcript;
+	// they must win over the first user prompt, with custom-title highest.
+	tmpDir := t.TempDir()
+
+	write := func(name string, lines []string) string {
+		t.Helper()
+		path := filepath.Join(tmpDir, name)
+		data := ""
+		for _, line := range lines {
+			data += line + "\n"
+		}
+		if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		return path
+	}
+
+	both := write("both.jsonl", []string{
+		`{"type": "user", "message": {"content": "raw first prompt"}}`,
+		`{"type": "ai-title", "aiTitle": "AI generated title"}`,
+		`{"type": "custom-title", "customTitle": "User set title"}`,
+	})
+	if summary, _ := scanSessionMeta(both); summary != "User set title" {
+		t.Errorf("summary = %q, want custom title to win", summary)
+	}
+
+	aiOnly := write("ai.jsonl", []string{
+		`{"type": "user", "message": {"content": "raw first prompt"}}`,
+		`{"type": "ai-title", "aiTitle": "AI generated title"}`,
+	})
+	if summary, _ := scanSessionMeta(aiOnly); summary != "AI generated title" {
+		t.Errorf("summary = %q, want ai title", summary)
+	}
+
+	none := write("none.jsonl", []string{
+		`{"type": "user", "message": {"content": "first prompt"}}`,
+		`{"type": "user", "message": {"content": "second prompt"}}`,
+	})
+	if summary, _ := scanSessionMeta(none); summary != "first prompt" {
+		t.Errorf("summary = %q, want first user prompt fallback", summary)
+	}
+}
+
+func TestNew_WorkDirDoesNotExist(t *testing.T) {
+	_, err := New(map[string]any{
+		"work_dir": filepath.Join(t.TempDir(), "does-not-exist"),
+	})
+	if err == nil {
+		t.Fatal("expected error for non-existent work_dir, got nil")
+	}
+	if !strings.Contains(err.Error(), "work_dir") {
+		t.Fatalf("error should name work_dir, got: %v", err)
+	}
 }

@@ -116,3 +116,27 @@ func TestWorkspaceAgentOptions_PreservesStdIOAppServerURL(t *testing.T) {
 		t.Fatalf("WorkspaceAgentOptions()[app_server_url] = %#v, want stdio://", got)
 	}
 }
+
+func TestIsCodexChatModel(t *testing.T) {
+	accept := []string{
+		"gpt-5.3-codex", "gpt-5.4", "gpt-6", "gpt-4.1-mini", "gpt-4o",
+		"chatgpt-4o-latest", "codex-mini-latest", "o1-mini", "o3-mini",
+		"o4-mini", "o5-preview", "o1", "o3", "o4", "o5", "GPT-5.3-Codex",
+	}
+	for _, id := range accept {
+		if !isCodexChatModel(id) {
+			t.Errorf("isCodexChatModel(%q) = false, want true", id)
+		}
+	}
+	reject := []string{
+		"", "text-embedding-3-small", "whisper-1", "tts-1-hd", "dall-e-3",
+		"gpt-image-1", "gpt-4o-realtime-preview", "gpt-4o-transcribe",
+		"gpt-4o-search-preview", "gpt-4o-audio-preview", "omni-moderation-latest",
+		"claude-sonnet-4", "davinci-002", "babbage-002",
+	}
+	for _, id := range reject {
+		if isCodexChatModel(id) {
+			t.Errorf("isCodexChatModel(%q) = true, want false", id)
+		}
+	}
+}

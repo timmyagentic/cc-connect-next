@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+Full-history upstream audit: every one of the 91 official commits between
+v1.4.1 and v1.5.0 is now classified (ported / already present / deferred /
+not applicable) in `docs/upstream-v1.5.0-beta.3-audit.md`. Fixes imported in
+this pass:
+
+- **codex**: `/model` uses pattern matching instead of a stale allowlist, so
+  gpt-5.x / o5 / codex-* models from `/v1/models` appear in the chooser.
+- **core**: long replies split without breaking Markdown code fences; the
+  usage card no longer renders a lone 7-day window twice; `tool_max_len` now
+  applies to tool input in `progress_style = "card"`.
+- **claudecode**: session list prefers Claude Code's own ai/custom titles;
+  a missing `work_dir` fails at startup with a clear error; `sonnet[1m]`
+  joins the fallback model list.
+- **pi**: `/model` falls back to pi's `models-store.json` catalog when
+  `enabledModels` is unset.
+- **antigravity**: resume works — the conversation ID is detected after
+  process exit, when agy actually flushes its chat file.
+- **cli**: unknown top-level commands are rejected with the subcommand list
+  instead of silently starting the runtime.
+- **i18n**: `/model` switch confirmation says the model applies to the
+  current session too, in all five languages.
+
 ## v0.1.5 (2026-08-22)
 
 Stable release: a complete in-app feedback loop (problem summarized, one tap
