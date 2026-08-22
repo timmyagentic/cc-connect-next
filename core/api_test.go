@@ -227,6 +227,10 @@ func TestHandleSend_WorkDirStartsSideSession(t *testing.T) {
 		filepath.Join(t.TempDir(), "sessions.json"),
 		LangEnglish,
 	)
+	// The side-session turn persists workspace session state from its own
+	// goroutine after the final assertion; stop the engine before t.TempDir
+	// cleanup so a late save cannot race RemoveAll ("directory not empty").
+	t.Cleanup(func() { _ = engine.Stop() })
 	api := &APIServer{engines: map[string]*Engine{"test": engine}}
 
 	body, err := json.Marshal(map[string]any{
@@ -313,6 +317,10 @@ func TestHandleSend_WorkDirFollowsDirectParticipantOnInboundSession(t *testing.T
 		filepath.Join(t.TempDir(), "sessions.json"),
 		LangEnglish,
 	)
+	// The side-session turn persists workspace session state from its own
+	// goroutine after the final assertion; stop the engine before t.TempDir
+	// cleanup so a late save cannot race RemoveAll ("directory not empty").
+	t.Cleanup(func() { _ = engine.Stop() })
 	api := &APIServer{engines: map[string]*Engine{"test": engine}}
 
 	body, err := json.Marshal(map[string]any{
