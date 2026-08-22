@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 480" font-family="system-ui, -apple-system, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <!-- 16s looping SMIL demo of one agent turn: message → card lifecycle → steer handoff → Done.
+       All animations share dur=16s/repeatCount=indefinite; states are placed with keyTimes. -->
+  <defs>
+    <filter id="ds" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    <clipPath id="c1l1"><rect x="48" y="148" width="0" height="16">
+      <animate attributeName="width" values="0;0;160;160" keyTimes="0;0.2625;0.3375;1" dur="16s" repeatCount="indefinite"/>
+    </rect></clipPath>
+    <clipPath id="c1l2"><rect x="48" y="166" width="0" height="16">
+      <animate attributeName="width" values="0;0;200;200" keyTimes="0;0.3375;0.4125;1" dur="16s" repeatCount="indefinite"/>
+    </rect></clipPath>
+    <clipPath id="c2l1"><rect x="48" y="324" width="0" height="16">
+      <animate attributeName="width" values="0;0;195;195" keyTimes="0;0.5625;0.6375;1" dur="16s" repeatCount="indefinite"/>
+    </rect></clipPath>
+    <clipPath id="c2l2"><rect x="48" y="344" width="0" height="16">
+      <animate attributeName="width" values="0;0;185;185" keyTimes="0;0.6375;0.7125;1" dur="16s" repeatCount="indefinite"/>
+    </rect></clipPath>
+    <clipPath id="c2l3"><rect x="48" y="364" width="0" height="16">
+      <animate attributeName="width" values="0;0;180;180" keyTimes="0;0.7125;0.7875;1" dur="16s" repeatCount="indefinite"/>
+    </rect></clipPath>
+  </defs>
+
+  <rect width="860" height="480" fill="#0f172a"/>
+
+  <!-- ═══ Chat panel ═══ -->
+  <rect x="24" y="16" width="470" height="448" rx="14" fill="#0b1220" stroke="#1e293b"/>
+  <rect x="24" y="16" width="470" height="44" rx="14" fill="#111a2e"/>
+  <rect x="24" y="38" width="470" height="22" fill="#111a2e"/>
+  <line x1="24" y1="60" x2="494" y2="60" stroke="#1e293b"/>
+  <circle cx="47" cy="38" r="11" fill="#2563eb"/>
+  <text x="47" y="42" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">C</text>
+  <text x="64" y="36" font-size="12" font-weight="600" fill="#e2e8f0">CC Connect Bot</text>
+  <circle cx="68" cy="47" r="3" fill="#22c55e"/>
+  <text x="76" y="50" font-size="9.5" fill="#64748b">online · Feishu</text>
+
+  <!-- ═══ Scene (fades out at loop end) ═══ -->
+  <g>
+    <animate attributeName="opacity" values="1;1;0" keyTimes="0;0.95625;1" dur="16s" repeatCount="indefinite"/>
+
+    <!-- User message -->
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.03125;0.05;1" dur="16s" repeatCount="indefinite"/>
+      <animateTransform attributeName="transform" type="translate" values="0 10;0 10;0 0;0 0" keyTimes="0;0.03125;0.05;1" dur="16s" repeatCount="indefinite"/>
+      <rect x="274" y="72" width="200" height="30" rx="15" fill="#2563eb" filter="url(#ds)"/>
+      <text x="374" y="91" font-size="11.5" fill="#ffffff" text-anchor="middle">部署又失败了，帮我查一下根因 🙏</text>
+    </g>
+
+    <!-- Card 1: thinking → tools → answering → frozen handoff -->
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.08125;0.1;1" dur="16s" repeatCount="indefinite"/>
+      <animateTransform attributeName="transform" type="translate" values="0 10;0 10;0 0;0 0" keyTimes="0;0.08125;0.1;1" dur="16s" repeatCount="indefinite"/>
+      <rect x="36" y="112" width="280" height="118" rx="10" fill="#1e293b" stroke="#334155" filter="url(#ds)"/>
+      <rect x="36" y="112" width="280" height="26" rx="10" fill="#2563eb">
+        <animate attributeName="fill" values="#2563eb;#2563eb;#475569;#475569" keyTimes="0;0.425;0.43438;1" dur="16s" repeatCount="indefinite"/>
+      </rect>
+      <rect x="36" y="125" width="280" height="13" fill="#2563eb">
+        <animate attributeName="fill" values="#2563eb;#2563eb;#475569;#475569" keyTimes="0;0.425;0.43438;1" dur="16s" repeatCount="indefinite"/>
+      </rect>
+      <text x="48" y="129" font-size="11.5" font-weight="600" fill="#ffffff">⏳ 正在思考…
+        <animate attributeName="opacity" values="1;1;0;0" keyTimes="0;0.1875;0.19688;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="129" font-size="11.5" font-weight="600" fill="#ffffff" opacity="0">⏳ 正在调用工具…
+        <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.1875;0.19688;0.2625;0.27188;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="129" font-size="11.5" font-weight="600" fill="#ffffff" opacity="0">✍️ 正在回答
+        <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.2625;0.27188;0.425;0.43438;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="129" font-size="11.5" font-weight="600" fill="#ffffff" opacity="0">↪️ 已转到更新的消息
+        <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.425;0.43438;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="160" font-size="11" fill="#cbd5e1">推理 2 次 · 工具 0 次
+        <animate attributeName="opacity" values="1;1;0;0" keyTimes="0;0.1875;0.19688;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="160" font-size="11" fill="#cbd5e1" opacity="0">推理 5 次 · 工具 3 次
+        <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.1875;0.19688;0.2625;0.27188;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="160" font-size="11" fill="#e2e8f0" clip-path="url(#c1l1)">部署失败的根因是配置漂移，</text>
+      <text x="48" y="178" font-size="11" fill="#e2e8f0" clip-path="url(#c1l2)">建议先比对两套环境的探针配置……</text>
+      <text x="48" y="216" font-size="9.5" fill="#64748b">🔒 匿名进度计数 · 不透出推理与工具明细
+        <animate attributeName="opacity" values="1;1;0;0" keyTimes="0;0.425;0.43438;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="216" font-size="9.5" fill="#64748b" opacity="0">已冻结 · 保留已见内容 · 不会成为 Done
+        <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.425;0.43438;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+    </g>
+
+    <!-- Steer message (arrives mid-turn) -->
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.375;0.39375;1" dur="16s" repeatCount="indefinite"/>
+      <animateTransform attributeName="transform" type="translate" values="0 10;0 10;0 0;0 0" keyTimes="0;0.375;0.39375;1" dur="16s" repeatCount="indefinite"/>
+      <rect x="298" y="242" width="176" height="30" rx="15" fill="#2563eb" filter="url(#ds)"/>
+      <text x="386" y="261" font-size="11.5" fill="#ffffff" text-anchor="middle">补充：顺便检查一下并发锁 💬</text>
+    </g>
+
+    <!-- Card 2: replies to the newest message, the only card that reaches Done -->
+    <g opacity="0">
+      <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.475;0.49375;1" dur="16s" repeatCount="indefinite"/>
+      <animateTransform attributeName="transform" type="translate" values="0 10;0 10;0 0;0 0" keyTimes="0;0.475;0.49375;1" dur="16s" repeatCount="indefinite"/>
+      <text x="40" y="281" font-size="9.5" fill="#64748b">↩️ 回复：顺便检查一下并发锁</text>
+      <rect x="36" y="288" width="300" height="158" rx="10" fill="#1e293b" stroke="#334155" filter="url(#ds)"/>
+      <rect x="36" y="288" width="300" height="26" rx="10" fill="#2563eb">
+        <animate attributeName="fill" values="#2563eb;#2563eb;#16a34a;#16a34a" keyTimes="0;0.8125;0.82188;1" dur="16s" repeatCount="indefinite"/>
+      </rect>
+      <rect x="36" y="301" width="300" height="13" fill="#2563eb">
+        <animate attributeName="fill" values="#2563eb;#2563eb;#16a34a;#16a34a" keyTimes="0;0.8125;0.82188;1" dur="16s" repeatCount="indefinite"/>
+      </rect>
+      <text x="48" y="305" font-size="11.5" font-weight="600" fill="#ffffff">⏳ 正在调用工具…
+        <animate attributeName="opacity" values="1;1;0;0" keyTimes="0;0.5625;0.57188;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="305" font-size="11.5" font-weight="600" fill="#ffffff" opacity="0">✍️ 正在回答
+        <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.5625;0.57188;0.8125;0.82188;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="305" font-size="11.5" font-weight="600" fill="#ffffff" opacity="0">✅ 已完成
+        <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.8125;0.82188;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="336" font-size="11" fill="#cbd5e1">推理 7 次 · 工具 5 次
+        <animate attributeName="opacity" values="1;1;0;0" keyTimes="0;0.5625;0.57188;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="336" font-size="11" fill="#e2e8f0" clip-path="url(#c2l1)">根因：配置漂移导致健康检查超时；</text>
+      <text x="48" y="356" font-size="11" fill="#e2e8f0" clip-path="url(#c2l2)">并发锁问题也已确认——写锁竞争</text>
+      <text x="48" y="376" font-size="11" fill="#e2e8f0" clip-path="url(#c2l3)">来自重试风暴，已提交修复 PR。</text>
+      <text x="48" y="430" font-size="9.5" fill="#64748b" opacity="0">CardKit 打字机流式 · typewriter streaming
+        <animate attributeName="opacity" values="0;0;1;1;0;0" keyTimes="0;0.5625;0.57188;0.8125;0.82188;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+      <text x="48" y="430" font-size="9.5" fill="#64748b" opacity="0">本 turn 唯一到达 Done 的卡片
+        <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.8125;0.82188;1" dur="16s" repeatCount="indefinite"/>
+      </text>
+    </g>
+  </g>
+
+  <!-- ═══ Captions ═══ -->
+  <text x="530" y="44" font-size="15" font-weight="700" fill="#e2e8f0">What one turn feels like</text>
+  <text x="530" y="63" font-size="10.5" fill="#64748b">从飞书里发一句话，到唯一一张 ✅ 卡片 · 循环播放</text>
+
+  <g opacity="0.32">
+    <animate attributeName="opacity" values="0.32;0.32;1;1;0.32;0.32" keyTimes="0;0.08125;0.1;0.375;0.39375;1" dur="16s" repeatCount="indefinite"/>
+    <circle cx="541" cy="101" r="9" fill="#1e293b" stroke="#334155"/>
+    <text x="541" y="105" font-size="10" fill="#94a3b8" text-anchor="middle">1</text>
+    <text x="558" y="106" font-size="12.5" font-weight="600" fill="#e2e8f0">One turn, one native card</text>
+    <text x="558" y="124" font-size="10" fill="#64748b">整个回答停留在同一张卡片里，只透出匿名进度计数</text>
+  </g>
+  <g opacity="0.32">
+    <animate attributeName="opacity" values="0.32;0.32;1;1;0.32;0.32" keyTimes="0;0.375;0.39375;0.475;0.49375;1" dur="16s" repeatCount="indefinite"/>
+    <circle cx="541" cy="171" r="9" fill="#1e293b" stroke="#334155"/>
+    <text x="541" y="175" font-size="10" fill="#94a3b8" text-anchor="middle">2</text>
+    <text x="558" y="176" font-size="12.5" font-weight="600" fill="#e2e8f0">Steer the running turn</text>
+    <text x="558" y="194" font-size="10" fill="#64748b">任务跑着的时候补一句 — turn/steer 并入同一个 turn</text>
+  </g>
+  <g opacity="0.32">
+    <animate attributeName="opacity" values="0.32;0.32;1;1;0.32;0.32" keyTimes="0;0.475;0.49375;0.8125;0.82188;1" dur="16s" repeatCount="indefinite"/>
+    <circle cx="541" cy="241" r="9" fill="#1e293b" stroke="#334155"/>
+    <text x="541" y="245" font-size="10" fill="#94a3b8" text-anchor="middle">3</text>
+    <text x="558" y="246" font-size="12.5" font-weight="600" fill="#e2e8f0">The live card hands over</text>
+    <text x="558" y="264" font-size="10" fill="#64748b">旧卡片冻结成灰色、保留已见内容；新卡片打字机续写</text>
+  </g>
+  <g opacity="0.32">
+    <animate attributeName="opacity" values="0.32;0.32;1;1;0.32" keyTimes="0;0.8125;0.82188;0.95625;1" dur="16s" repeatCount="indefinite"/>
+    <circle cx="541" cy="311" r="9" fill="#1e293b" stroke="#334155"/>
+    <text x="541" y="315" font-size="10" fill="#94a3b8" text-anchor="middle">4</text>
+    <text x="558" y="316" font-size="12.5" font-weight="600" fill="#e2e8f0">Exactly one card reaches ✅ Done</text>
+    <text x="558" y="334" font-size="10" fill="#64748b">每个 turn 只有一张卡片到达完成态</text>
+  </g>
+
+  <text x="530" y="452" font-size="9.5" fill="#475569">Animated SVG · 非录屏，仅几 KB · plays automatically on GitHub</text>
+</svg>
