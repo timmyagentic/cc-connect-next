@@ -15,6 +15,8 @@ A privacy-first successor to [CC Connect](https://github.com/chenhg5/cc-connect)
 
 [中文文档](README.zh-CN.md) · [Install](INSTALL.md) · [Usage guide](docs/usage.md) · [Feishu setup](docs/feishu.md) · [Migration](docs/migration.md)
 
+<img src="docs/images/turn-demo.svg" alt="One agent turn in Feishu: message, streaming card lifecycle, mid-turn steer handoff, exactly one Done card" width="820">
+
 </div>
 
 ---

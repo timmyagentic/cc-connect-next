@@ -15,6 +15,8 @@
 
 [English](README.md) · [安装文档](INSTALL.md) · [使用指南](docs/usage.zh-CN.md) · [飞书配置](docs/feishu.md) · [迁移指南](docs/migration.zh-CN.md)
 
+<img src="docs/images/turn-demo.svg" alt="一次 Agent 回合：发消息、卡片流式生命周期、回合中途 steer 交接、唯一一张完成卡片" width="820">
+
 </div>
 
 ---
