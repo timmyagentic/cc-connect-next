@@ -161,7 +161,7 @@ The exact lifecycle, privacy boundary, fallback behavior, and verification comma
 
 ## 🆚 Versus official CC Connect
 
-cc-connect-next forked from CC Connect v1.4.1 and tracks upstream through per-change audits instead of merges ([policy & history](docs/upstream-v1.5.0-beta.3-audit.md)).
+cc-connect-next forked from CC Connect v1.4.1 and tracks upstream through per-change audits instead of merges ([policy & history](docs/upstream-v1.5.0-beta.3-audit.md)). Coming from the official version? The long-form walkthrough — what's actually different, the zero-risk trial, and rollback — is **[Coming from official CC Connect](docs/coming-from-cc-connect.md)**.
 
 | | CC Connect | cc-connect-next |
 |---|---|---|
@@ -180,6 +180,7 @@ cc-connect-next forked from CC Connect v1.4.1 and tracks upstream through per-ch
 | [Usage guide](docs/usage.md) | sessions, queue vs steer, permissions, providers, models, cron, relay, TTS/STT |
 | [Feishu setup](docs/feishu.md) | app creation, permissions, event subscription |
 | [Answer-card contract](docs/feishu-card-contract.md) | the exact card lifecycle and privacy guarantees |
+| [Coming from CC Connect](docs/coming-from-cc-connect.md) | honest comparison, zero-risk trial, switchover and rollback |
 | [Migration guide](docs/migration.md) | full migration, coexistence, and switchover reference |
 | [Migration matrix](docs/migration-compatibility.md) | which official versions and settings migrate |
 | [Bridge protocol](docs/bridge-protocol.md) | build your own platform adapter over WebSocket |

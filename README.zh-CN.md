@@ -161,7 +161,7 @@ done_emoji = "Done"
 
 ## 🆚 对比官方 CC Connect
 
-cc-connect-next 从 CC Connect v1.4.1 分叉，通过逐项审计而非整体合并跟进上游（[审计策略与历史](docs/upstream-v1.5.0-beta.3-audit.md)）。
+cc-connect-next 从 CC Connect v1.4.1 分叉，通过逐项审计而非整体合并跟进上游（[审计策略与历史](docs/upstream-v1.5.0-beta.3-audit.md)）。正在用官方版本？完整的长文——真正的差异、零风险试用、切换与回滚——见 **[写给官方 CC Connect 用户](docs/coming-from-cc-connect.zh-CN.md)**。
 
 | | CC Connect | cc-connect-next |
 |---|---|---|
@@ -180,6 +180,7 @@ cc-connect-next 从 CC Connect v1.4.1 分叉，通过逐项审计而非整体合
 | [使用指南](docs/usage.zh-CN.md) | 会话、排队 vs steer、权限、provider、模型、cron、relay、语音 |
 | [飞书配置](docs/feishu.md) | 应用创建、权限、事件订阅 |
 | [回答卡片契约](docs/feishu-card-contract.md) | 卡片生命周期与隐私保证的精确定义 |
+| [写给官方 CC Connect 用户](docs/coming-from-cc-connect.zh-CN.md) | 诚实对比、零风险试用、切换与回滚 |
 | [迁移指南](docs/migration.zh-CN.md) | 迁移、共存与切换的完整参考 |
 | [迁移兼容矩阵](docs/migration-compatibility.md) | 哪些官方版本与配置可迁移 |
 | [Bridge 协议](docs/bridge-protocol.zh-CN.md) | 通过 WebSocket 编写自定义平台适配器 |
