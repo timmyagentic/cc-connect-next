@@ -28,7 +28,7 @@
 - 🔒 **隐私优先的飞书 Card 2.0 生命周期** —— 一次 Agent 回合始终是同一张引用原始提问的原生卡片：`⏳ 正在思考` → `⏳ 正在调用工具` → `✍️ 正在回答`（CardKit 打字机流式）→ `✅ 已完成`。只渲染匿名进度计数；推理文本、工具名称、参数、结果、模型、token、工作目录在**两层**被丢弃，卡片中不存在可展开面板。
 - 🎛️ **并入正在执行的回合（steer）** —— 忙时消息默认直接并入**正在运行**的任务（Codex 原生 `turn/steer`），进度卡片同步交接到最新消息；不支持该能力的 agent 透明回退到 FIFO 队列，`busy_message_mode = "queue"` 可恢复始终排队。`/ps` 在任何模式下都是显式 steer。
 - 🚚 **可审计的一键迁移** —— `cc-connect-next migrate` 清点官方安装、对每个源文件计算哈希、staging 构建校验后原子启用，附带时间戳备份和完整 SHA-256 manifest；宁可安全失败也绝不启用不完整的目标。
-- 🔔 **自我维护的安装** —— `cc-connect-next update` 只走稳定通道并校验 checksums（npm 与独立二进制都支持）；运行中的 daemon 会在新稳定版发布后向每个项目最近活跃的会话**每版本提醒一次**（`update_notice = false` 可关）。
+- 🔔 **自我维护的安装** —— `cc-connect-next update` 只走稳定通道并校验 checksums（npm 与独立二进制都支持）；运行中的 daemon 会在新稳定版发布后向每个项目最近活跃的会话**每版本提醒一次**（`update_notice = false` 可关）。提醒卡片带**[立即更新]按钮**，回复「更新」这样的自然语言即可完成升级——不需要输入任何指令。
 - 🤖 **14 种 Agent × 15 个平台** —— 单进程承载多个项目，每个项目把一个代码目录绑定到独立的 Agent 与平台，各自拥有权限、provider、模型与展示配置。
 - 🌍 **生产级配套** —— `doctor` 诊断、launchd/systemd/Windows daemon、Web 管理台（Beta）、定时任务与 webhook、机器人间 relay、语音输入/输出（STT/TTS）、多工作区路由，五语言 i18n（en、zh、zh-TW、ja、es）。
 

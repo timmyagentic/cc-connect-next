@@ -568,6 +568,8 @@ const (
 
 	// Proactive update notice (daemon-side)
 	MsgUpdateNoticeAvailable MsgKey = "update_notice_available"
+	MsgUpdateBtnNow          MsgKey = "update_btn_now"
+	MsgUpdateBtnChangelog    MsgKey = "update_btn_changelog"
 
 	// Feedback channel (/feedback and proactive capability-gap prompts)
 	MsgFeedbackUsage         MsgKey = "feedback_usage"
@@ -3154,27 +3156,27 @@ var messages = map[MsgKey]map[Language]string{
 			"Current: **%s**\n" +
 			"Latest:  **%s**\n\n\n" +
 			"%s\n\n\n" +
-			"Run `/upgrade confirm` to install.",
+			"Reply “confirm” to install.",
 		LangChinese: "🆕 发现新版本！\n\n\n" +
 			"当前版本：**%s**\n" +
 			"最新版本：**%s**\n\n\n" +
 			"%s\n\n\n" +
-			"执行 `/upgrade confirm` 进行更新。",
+			"回复「确认」即可安装。",
 		LangTraditionalChinese: "🆕 發現新版本！\n\n\n" +
 			"當前版本：**%s**\n" +
 			"最新版本：**%s**\n\n\n" +
 			"%s\n\n\n" +
-			"執行 `/upgrade confirm` 進行更新。",
+			"回覆「確認」即可安裝。",
 		LangJapanese: "🆕 新しいバージョンがあります！\n\n\n" +
 			"現在: **%s**\n" +
 			"最新: **%s**\n\n\n" +
 			"%s\n\n" +
-			"`/upgrade confirm` でインストール。",
+			"「confirm」と返信するとインストールします。",
 		LangSpanish: "🆕 ¡Nueva versión disponible!\n\n\n" +
 			"Actual: **%s**\n" +
 			"Última: **%s**\n\n\n" +
 			"%s\n\n\n" +
-			"Ejecute `/upgrade confirm` para instalar.",
+			"Responde “confirm” para instalar.",
 	},
 	MsgUpgradeDownloading: {
 		LangEnglish:            "⬇️ Downloading %s ...",
@@ -3558,11 +3560,25 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "↪️ Tu añadido fue aceptado justo cuando la tarea terminó; consulta la respuesta anterior.",
 	},
 	MsgUpdateNoticeAvailable: {
-		LangEnglish:            "📦 cc-connect-next %s has been released (you are on %s). Send `/upgrade` for details, or `/upgrade confirm` to update now.",
-		LangChinese:            "📦 cc-connect-next %s 已发布（当前版本 %s）。发送 `/upgrade` 查看详情，或发送 `/upgrade confirm` 直接升级。",
-		LangTraditionalChinese: "📦 cc-connect-next %s 已發布（目前版本 %s）。傳送 `/upgrade` 查看詳情，或傳送 `/upgrade confirm` 直接升級。",
-		LangJapanese:           "📦 cc-connect-next %s がリリースされました（現在のバージョン %s）。`/upgrade` で詳細を確認、`/upgrade confirm` で今すぐ更新できます。",
-		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s). Envía `/upgrade` para más detalles o `/upgrade confirm` para actualizar ahora.",
+		LangEnglish:            "📦 cc-connect-next %s has been released (you are on %s). Reply “update” to upgrade now.",
+		LangChinese:            "📦 cc-connect-next %s 已发布（当前版本 %s）。回复「更新」即可升级。",
+		LangTraditionalChinese: "📦 cc-connect-next %s 已發布（目前版本 %s）。回覆「更新」即可升級。",
+		LangJapanese:           "📦 cc-connect-next %s がリリースされました（現在のバージョン %s）。「update」と返信すると更新します。",
+		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s). Responde “update” para actualizar ahora.",
+	},
+	MsgUpdateBtnNow: {
+		LangEnglish:            "Update now",
+		LangChinese:            "立即更新",
+		LangTraditionalChinese: "立即更新",
+		LangJapanese:           "今すぐ更新",
+		LangSpanish:            "Actualizar ahora",
+	},
+	MsgUpdateBtnChangelog: {
+		LangEnglish:            "What's new",
+		LangChinese:            "查看变更",
+		LangTraditionalChinese: "查看變更",
+		LangJapanese:           "更新内容",
+		LangSpanish:            "Novedades",
 	},
 	MsgFeedbackUsage: {
 		LangEnglish:            "\U0001F4EE Report any problem or wish straight to the project author:\n`/feedback <describe it>`\nRecent errors and unsupported config keys are attached automatically, everything is redacted, and no GitHub account is needed.",

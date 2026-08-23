@@ -203,12 +203,52 @@ func (n *UpdateNotifier) saveState() {
 // NotifyUpdateAvailable sends a localized update notice to this engine's most
 // recently active session. Returns true only when a message was actually
 // delivered, so callers can retry later instead of losing the notice.
+//
+// The notice is actionable: platforms with cards or inline buttons get an
+// [update now] button, and the delivered session opens a natural-language
+// consent window so a plain "更新" reply installs the update — no command
+// syntax required.
 func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	if release == nil || release.TagName == "" {
 		return false
 	}
 	content := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
-	return e.notifyMostRecentSession(content, "update notice")
+	key, ok := e.notifyMostRecentSessionFn("update notice", func(p Platform, replyCtx any) error {
+		return e.sendUpdateNotice(p, replyCtx, content)
+	})
+	if ok {
+		e.updateIntents.recordNotice(key)
+	}
+	return ok
+}
+
+// sendUpdateNotice delivers the notice with [update now] / [what's new]
+// actions where the platform supports them, plain text elsewhere. Buttons
+// use the cmd:/ scheme so a tap passes the same gates as a typed command.
+func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, content string) error {
+	btnNow := e.i18n.T(MsgUpdateBtnNow)
+	btnLog := e.i18n.T(MsgUpdateBtnChangelog)
+	if cs, ok := p.(CardSender); ok {
+		card := e.renderCardForPlatform(p, NewCard().
+			Markdown(content).
+			Buttons(
+				CardButton{Text: btnNow, Type: "primary", Value: "cmd:/upgrade confirm"},
+				CardButton{Text: btnLog, Value: "cmd:/upgrade"},
+			).Build())
+		if err := cs.SendCard(e.ctx, replyCtx, card); err == nil {
+			return nil
+		}
+	}
+	if bs, ok := p.(InlineButtonSender); ok {
+		buttons := [][]ButtonOption{{
+			{Text: btnNow, Data: "cmd:/upgrade confirm"},
+			{Text: btnLog, Data: "cmd:/upgrade"},
+		}}
+		if err := bs.SendWithButtons(e.ctx, replyCtx, content, buttons); err == nil {
+			return nil
+		}
+	}
+	return e.sendWithError(p, replyCtx, content)
 }
 
 // notifyMostRecentSession delivers a proactive daemon-side message to this
@@ -217,15 +257,17 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 // true only when a message was actually delivered, so callers can retry
 // later instead of losing the notice. logTag labels the slog lines.
 func (e *Engine) notifyMostRecentSession(content, logTag string) bool {
-	return e.notifyMostRecentSessionFn(logTag, func(p Platform, replyCtx any) error {
+	_, ok := e.notifyMostRecentSessionFn(logTag, func(p Platform, replyCtx any) error {
 		return e.sendWithError(p, replyCtx, content)
 	})
+	return ok
 }
 
 // notifyMostRecentSessionFn is the delivery-agnostic core of
 // notifyMostRecentSession: deliver is invoked per candidate (newest first)
-// until one send succeeds.
-func (e *Engine) notifyMostRecentSessionFn(logTag string, deliver func(Platform, any) error) bool {
+// until one send succeeds. Returns the session key that received the
+// message so callers can associate follow-up state with it.
+func (e *Engine) notifyMostRecentSessionFn(logTag string, deliver func(Platform, any) error) (string, bool) {
 	sessions := e.sessions.AllSessions()
 	idToKey, _ := e.sessions.SessionKeyMap()
 	type candidate struct {
@@ -287,7 +329,7 @@ func (e *Engine) notifyMostRecentSessionFn(logTag string, deliver func(Platform,
 			"project", e.name,
 			"session_key", c.key,
 		)
-		return true
+		return c.key, true
 	}
-	return false
+	return "", false
 }

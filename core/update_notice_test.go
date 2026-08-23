@@ -57,8 +57,11 @@ func TestUpdateNotice_DeliversOncePerVersion(t *testing.T) {
 	if !strings.Contains(sent[0], "v0.1.2") || !strings.Contains(sent[0], "v0.1.0") {
 		t.Fatalf("notice must mention both versions, got %q", sent[0])
 	}
-	if !strings.Contains(sent[0], "/upgrade") {
-		t.Fatalf("notice must point at /upgrade, got %q", sent[0])
+	if strings.Contains(sent[0], "/upgrade") {
+		t.Fatalf("notice must not demand command syntax, got %q", sent[0])
+	}
+	if !strings.Contains(strings.ToLower(sent[0]), "update") {
+		t.Fatalf("notice must invite a natural-language reply, got %q", sent[0])
 	}
 
 	// Same version discovered again (restart of the loop): no second notice.

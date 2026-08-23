@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Natural-language updates
+
+The update flow no longer demands command syntax. The release reminder
+carries an **[update now]** button (Feishu cards / inline keyboards, text
+fallback elsewhere) and invites a plain reply; messages like 更新 /
+升级到最新版 / “update” / a post-prompt “确认” drive the same upgrade
+pipeline. Interception is conservative — the whole message must match a
+short phrase list, ambiguous bare verbs count only inside an update
+conversation, and everything else reaches the agent untouched. Matched
+intents are dispatched through the normal command path, so the
+`admin_from` and disabled-command gates still apply. `/upgrade` keeps
+working for those who prefer it.
+
 ### Dual-daemon conflict protection
 
 The "never run both daemons against the same platform credentials" rule is
