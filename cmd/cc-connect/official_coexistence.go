@@ -41,9 +41,9 @@ type officialProbe struct {
 func defaultOfficialProbe() officialProbe {
 	home, _ := os.UserHomeDir()
 	return officialProbe{
-		Home: home,
-		GOOS: runtime.GOOS,
-		UID:  os.Getuid(),
+		Home:     home,
+		GOOS:     runtime.GOOS,
+		UID:      os.Getuid(),
 		LookPath: exec.LookPath,
 		RunCommand: func(name string, args ...string) (string, error) {
 			out, err := exec.Command(name, args...).CombinedOutput()
@@ -133,7 +133,7 @@ func launchdServiceDisabled(p officialProbe) bool {
 	if err != nil {
 		return false // cannot tell → treat as armed; drives warnings only
 	}
-	return regexp.MustCompile(`"`+regexp.QuoteMeta(officialServiceLabel)+`"\s*=>\s*(disabled|true)`).MatchString(out)
+	return regexp.MustCompile(`"` + regexp.QuoteMeta(officialServiceLabel) + `"\s*=>\s*(disabled|true)`).MatchString(out)
 }
 
 func systemdServiceEnabled(p officialProbe, unit string) bool {

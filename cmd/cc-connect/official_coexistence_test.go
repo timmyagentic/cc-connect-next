@@ -43,9 +43,9 @@ func writeOfficialFixture(t *testing.T, home, configTOML, plist string) {
 
 func testProbe(home string) officialProbe {
 	return officialProbe{
-		Home: home,
-		GOOS: "darwin",
-		UID:  501,
+		Home:     home,
+		GOOS:     "darwin",
+		UID:      501,
 		LookPath: func(string) (string, error) { return "", fmt.Errorf("not found") },
 		RunCommand: func(name string, args ...string) (string, error) {
 			return "", fmt.Errorf("no command runner in test")
