@@ -135,6 +135,8 @@ cc-connect-next --config ~/.cc-connect-next/config.toml
 
 The migration never stops, uninstalls, or modifies the official install, and both can stay installed side by side (separate commands, data directories, services, and sockets). Every source file is hashed, staged, and re-verified before an atomic activation; any concurrent change fails the run closed with timestamped backups and a `migration-manifest.json` recording every path and SHA-256.
 
+Dual-daemon conflicts are prevented by the product, not just documented: cc-connect-next **refuses to start** while the official daemon is running with the same Feishu credentials, and a single `cc-connect-next migrate --switch` performs the switchover — stop the official daemon, disarm its autostart (binaries and data untouched, so rollback stays trivial), verify quiescence, final sync. `doctor` reports the coexistence state too.
+
 📖 **[Full migration & coexistence guide](docs/migration.md)** — including custom paths, the compatibility matrix, service switchover, rollback, and a paste-into-your-agent task block.
 
 ## ⚙️ Recommended Feishu configuration

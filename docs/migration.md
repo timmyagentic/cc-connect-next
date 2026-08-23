@@ -52,6 +52,13 @@ Official CC Connect and cc-connect-next can be installed side by side:
 
 Do not run both against the same Feishu app credentials at the same time: two WebSocket consumers can race or duplicate handling. Use a separate test app for parallel runtime testing, or stop the official daemon only when you deliberately switch production traffic. Installation and migration themselves are safe to perform while the official daemon remains installed.
 
+This rule is enforced by the product, not just documented:
+
+- **Startup guard.** `cc-connect-next` refuses to start while an official daemon is running with a platform credential the loaded config also uses, and names the exact stop/disarm commands. A merely *armed* autostart (service registered with `RunAtLoad`/`enabled`, daemon not currently running) logs a prominent warning instead, because the conflict is one reboot away. `CC_NEXT_ALLOW_OFFICIAL_CONFLICT=1` overrides the refusal (not recommended).
+- **Migration guidance.** After a real (non-dry-run) migration, the report inspects the official binary, autostart registration, live daemon, and credential overlap, and prints the exact switchover or trial steps instead of a passive notice.
+- **`doctor`.** A dedicated *official CC Connect coexistence* section reports binary, autostart, daemon, and shared-credential state; a running daemon with shared credentials is a failure, an armed autostart is a warning. Credential values are redacted.
+- **`migrate --switch`.** One command performs the switchover: it stops the official daemon (via the official CLI when available, natively otherwise), disables its autostart, verifies the daemon is really quiet (fail closed otherwise), and then runs the final `--force` sync. Binaries and the official data directory are never touched, so rollback remains: stop cc-connect-next, re-enable and start the official service. `--switch` cannot be combined with `--dry-run`.
+
 When switching the service, keep the migrated config and the original runtime working directory independent. Stop any separately configured test successor first. After stopping official CC Connect, rerun migration before starting production so sessions, bindings, timers, and project state written since the earlier test migration are not lost. The final `--force` run preserves the entire previous target in timestamped backups before refreshing it from the now-quiescent official source:
 
 ```bash

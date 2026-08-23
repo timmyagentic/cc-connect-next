@@ -135,6 +135,8 @@ cc-connect-next --config ~/.cc-connect-next/config.toml
 
 迁移不会停止、卸载或修改官方安装，两者可以并存（命令、数据目录、服务、socket 全部独立）。每个源文件都会计算哈希、staging 构建并反复校验后才原子启用；迁移期间的任何并发变更都会让本次运行安全失败，并留下带时间戳的备份和逐项记录路径与 SHA-256 的 `migration-manifest.json`。
 
+双跑冲突由产品层兜底：官方 daemon 还在用相同飞书凭证运行时，cc-connect-next 会**拒绝启动**而不是重复消费消息；正式割接用一条 `cc-connect-next migrate --switch` 完成——停止官方 daemon、禁用其开机自启（binary 和数据不动，随时可回滚）、确认静止后做最终同步。`doctor` 也会报告共存状态。
+
 📖 **[完整迁移与共存指南](docs/migration.zh-CN.md)** —— 自定义路径、兼容矩阵、服务切换、回滚，以及可直接交给 Agent 执行的任务块。
 
 ## ⚙️ 推荐飞书配置

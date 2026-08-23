@@ -60,8 +60,9 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 	skipProjectData := flags.Bool("skip-project-data", false, "do not copy project-local .cc-connect images and attachments")
 	runtimeWorkDir := flags.String("runtime-work-dir", "", "official runtime working directory for resolving relative config paths (auto-detected)")
 	sourceVersion := flags.String("source-version", "auto", "official CC Connect release (auto, v1.4.1, or v1.5.0-beta.1 through beta.3)")
+	switchOver := flags.Bool("switch", false, "stop the official daemon and disarm its autostart, then run the final --force sync; binaries and data are left untouched")
 	flags.Usage = func() {
-		_, _ = fmt.Fprintln(flags.Output(), "Usage: cc-connect-next migrate [--source DIR] [--target DIR] [--source-version RELEASE] [--runtime-work-dir DIR] [--dry-run] [--force] [--skip-project-data]")
+		_, _ = fmt.Fprintln(flags.Output(), "Usage: cc-connect-next migrate [--source DIR] [--target DIR] [--source-version RELEASE] [--runtime-work-dir DIR] [--dry-run] [--force] [--switch] [--skip-project-data]")
 		_, _ = fmt.Fprintln(flags.Output(), "Copies configuration, the effective data_dir, and project-local state while excluding daemon, logs, locks, and sockets.")
 		flags.PrintDefaults()
 	}
@@ -70,6 +71,28 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 		return 2
+	}
+	if *switchOver && *dryRun {
+		_, _ = fmt.Fprintln(stderr, "migrate: --switch cannot be combined with --dry-run (the switchover stops a live daemon)")
+		return 2
+	}
+
+	writeStdout := func(format string, args ...any) bool {
+		if _, err := fmt.Fprintf(stdout, format, args...); err != nil {
+			_, _ = fmt.Fprintf(stderr, "migrate: write output: %v\n", err)
+			return false
+		}
+		return true
+	}
+	if *switchOver {
+		// The final sync must read a quiet source, so the official daemon is
+		// stopped and disarmed before any migration work starts.
+		probe := defaultOfficialProbe()
+		if err := runOfficialSwitchover(probe, probeOfficialInstall(probe), writeStdout); err != nil {
+			_, _ = fmt.Fprintf(stderr, "migrate: switchover: %v\n", err)
+			return 1
+		}
+		*force = true
 	}
 
 	report, err := migrateLegacyDataWithOptions(migrationOptions{
@@ -162,10 +185,14 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 		if !writeOutput("Verification manifest: %s\n", report.ManifestPath) {
 			return 1
 		}
-		if !writeOutput("The official CC Connect installation was not modified or stopped.\n") {
+		targetConfig := filepath.Join(expandMigrationPath(*target, home), "config.toml")
+		probe := defaultOfficialProbe()
+		coexistState := probeOfficialInstall(probe)
+		overlap := officialCredentialOverlap(coexistState, extractAppIDsFromConfigFile(targetConfig))
+		if !writeOutput("%s", renderOfficialCoexistenceGuidance(coexistState, overlap, probe.GOOS, probe.UID, targetConfig, report.SourceWorkDir)) {
 			return 1
 		}
-		if !writeOutput("Next: cc-connect-next --config %s\n", filepath.Join(expandMigrationPath(*target, home), "config.toml")) {
+		if !writeOutput("Next: cc-connect-next --config %s\n", targetConfig) {
 			return 1
 		}
 		if !writeOutput("Daemon config: %s\n", filepath.Join(expandMigrationPath(*target, home), "config.toml")) {
