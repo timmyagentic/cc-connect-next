@@ -236,13 +236,16 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, actionCopy, textCopy string) error {
 	btnNow := e.i18n.T(MsgUpdateBtnNow)
 	btnLog := e.i18n.T(MsgUpdateBtnChangelog)
+	hint := e.i18n.T(MsgUpdateHintReplyUpdate)
 	if cs, ok := p.(CardSender); ok {
 		card := e.renderCardForPlatform(p, NewCard().
 			Markdown(actionCopy).
 			Buttons(
 				CardButton{Text: btnNow, Type: "primary", Value: "cmd:/upgrade confirm"},
 				CardButton{Text: btnLog, Value: "cmd:/upgrade"},
-			).Build())
+			).
+			Note(hint).
+			Build())
 		if err := cs.SendCard(e.ctx, replyCtx, card); err == nil {
 			return nil
 		}
@@ -252,7 +255,7 @@ func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, actionCopy, textCopy
 			{Text: btnNow, Data: "cmd:/upgrade confirm"},
 			{Text: btnLog, Data: "cmd:/upgrade"},
 		}}
-		if err := bs.SendWithButtons(e.ctx, replyCtx, actionCopy, buttons); err == nil {
+		if err := bs.SendWithButtons(e.ctx, replyCtx, withUpdateHint(actionCopy, hint), buttons); err == nil {
 			return nil
 		}
 	}

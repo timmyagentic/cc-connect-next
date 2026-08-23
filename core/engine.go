@@ -16020,8 +16020,7 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 	e.updateIntents.recordAsk(msg.SessionKey)
 	e.replyUpdateActionable(p, msg.ReplyCtx,
 		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailableAction), cur, release.TagName, body),
-		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, release.TagName, body),
-		false)
+		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, release.TagName, body))
 }
 
 // checkForUpdate and selfUpdate route through the engine's test seams.

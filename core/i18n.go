@@ -574,6 +574,10 @@ const (
 	MsgUpdateNoticeAvailableAction MsgKey = "update_notice_available_action"
 	MsgUpdateBtnNow                MsgKey = "update_btn_now"
 	MsgUpdateBtnChangelog          MsgKey = "update_btn_changelog"
+	// Hint footnotes: shown alongside a button to make the
+	// natural-language route discoverable without competing with it.
+	MsgUpdateHintReplyUpdate  MsgKey = "update_hint_reply_update"
+	MsgUpdateHintReplyConfirm MsgKey = "update_hint_reply_confirm"
 
 	// Feedback channel (/feedback and proactive capability-gap prompts)
 	MsgFeedbackUsage         MsgKey = "feedback_usage"
@@ -3605,6 +3609,20 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "立即更新",
 		LangJapanese:           "今すぐ更新",
 		LangSpanish:            "Actualizar ahora",
+	},
+	MsgUpdateHintReplyUpdate: {
+		LangEnglish:            "or just reply “update”",
+		LangChinese:            "也可以直接回复「更新」",
+		LangTraditionalChinese: "也可以直接回覆「更新」",
+		LangJapanese:           "「update」と返信するだけでも更新できます",
+		LangSpanish:            "o simplemente responde “update”",
+	},
+	MsgUpdateHintReplyConfirm: {
+		LangEnglish:            "or just reply “confirm”",
+		LangChinese:            "也可以直接回复「确认」",
+		LangTraditionalChinese: "也可以直接回覆「確認」",
+		LangJapanese:           "「confirm」と返信するだけでもインストールできます",
+		LangSpanish:            "o simplemente responde “confirm”",
 	},
 	MsgUpdateBtnChangelog: {
 		LangEnglish:            "What's new",

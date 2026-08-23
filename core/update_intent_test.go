@@ -238,6 +238,17 @@ func cardMarkdown(c *Card) string {
 	return b.String()
 }
 
+func cardNotes(c *Card) string {
+	var b strings.Builder
+	for _, el := range c.Elements {
+		if n, ok := el.(CardNote); ok {
+			b.WriteString(n.Text)
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
 func cardButtonLabels(c *Card) []string {
 	var out []string
 	for _, el := range c.Elements {
@@ -282,6 +293,12 @@ func TestUpdateNotice_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
 	}
 	if labels := cardButtonLabels(cards[0]); len(labels) != 2 {
 		t.Fatalf("card buttons = %v, want [立即更新 查看变更]", labels)
+	}
+	// The natural-language route stays discoverable, but as a footnote:
+	// subordinate to the button, never a second competing instruction.
+	note := cardNotes(cards[0])
+	if !strings.Contains(note, "回复") || !strings.Contains(note, "更新") {
+		t.Fatalf("notice card must hint the natural-language reply in a note, got %q", note)
 	}
 }
 
@@ -355,6 +372,10 @@ func TestUpgradePrompt_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
 	}
 	if labels := cardButtonLabels(cards[0]); len(labels) != 1 {
 		t.Fatalf("prompt card buttons = %v, want exactly [立即更新]", labels)
+	}
+	note := cardNotes(cards[0])
+	if !strings.Contains(note, "回复") || !strings.Contains(note, "确认") {
+		t.Fatalf("prompt card must hint the natural-language reply in a note, got %q", note)
 	}
 }
 
