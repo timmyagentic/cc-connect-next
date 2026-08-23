@@ -1,10 +1,13 @@
 package core
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 )
+
+var errCardSendFailed = errors.New("card send failed")
 
 func TestMatchUpdateIntent(t *testing.T) {
 	cases := []struct {
@@ -219,5 +222,150 @@ func TestNotifyUpdateAvailable_RecordsConsentWindow(t *testing.T) {
 	}
 	if strings.Contains(sent, "/upgrade") {
 		t.Fatalf("notice must not demand command syntax, got:\n%s", sent)
+	}
+}
+
+// cardMarkdown concatenates the markdown text of a card, for asserting on
+// what the user actually reads.
+func cardMarkdown(c *Card) string {
+	var b strings.Builder
+	for _, el := range c.Elements {
+		if md, ok := el.(CardMarkdown); ok {
+			b.WriteString(md.Content)
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+func cardButtonLabels(c *Card) []string {
+	var out []string
+	for _, el := range c.Elements {
+		if a, ok := el.(CardActions); ok {
+			for _, btn := range a.Buttons {
+				out = append(out, btn.Text)
+			}
+		}
+	}
+	return out
+}
+
+// A message must carry exactly one call to action: when a button is present
+// the copy must not also instruct the user to type a reply, or they cannot
+// tell which one is expected.
+func TestUpdateNotice_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
+	p := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangChinese)
+	oldVersion := CurrentVersion
+	CurrentVersion = "v1.0.0"
+	t.Cleanup(func() { CurrentVersion = oldVersion })
+	e.sessions.GetOrCreateActive("feishu:user1")
+
+	if !e.NotifyUpdateAvailable(&ReleaseInfo{TagName: "v9.9.9"}) {
+		t.Fatal("notice delivery failed")
+	}
+	p.mu.Lock()
+	cards := append([]*Card(nil), p.sentCards...)
+	p.mu.Unlock()
+	if len(cards) != 1 {
+		t.Fatalf("got %d cards, want 1", len(cards))
+	}
+
+	body := cardMarkdown(cards[0])
+	for _, banned := range []string{"回复", "确认", "/upgrade"} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("card copy must not instruct a typed reply (found %q):\n%s", banned, body)
+		}
+	}
+	if !strings.Contains(body, "v9.9.9") {
+		t.Fatalf("card copy lost the version: %s", body)
+	}
+	if labels := cardButtonLabels(cards[0]); len(labels) != 2 {
+		t.Fatalf("card buttons = %v, want [立即更新 查看变更]", labels)
+	}
+}
+
+func TestUpdateNotice_TextOnlyCopyKeepsReplyInstruction(t *testing.T) {
+	p := &updateIntentStubPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangChinese)
+	oldVersion := CurrentVersion
+	CurrentVersion = "v1.0.0"
+	t.Cleanup(func() { CurrentVersion = oldVersion })
+	e.sessions.GetOrCreateActive("test:user1")
+
+	if !e.NotifyUpdateAvailable(&ReleaseInfo{TagName: "v9.9.9"}) {
+		t.Fatal("notice delivery failed")
+	}
+	sent := strings.Join(p.getSent(), "\n")
+	if !strings.Contains(sent, "回复") {
+		t.Fatalf("a button-less platform must say how to reply:\n%s", sent)
+	}
+}
+
+// A card platform whose send fails must fall back to the copy that explains
+// the typed reply — never to button copy with no button.
+func TestUpdateNotice_CardFailureFallsBackToInstructiveCopy(t *testing.T) {
+	p := &stubCardPlatform{
+		stubPlatformEngine: stubPlatformEngine{n: "feishu"},
+		cardErr:            errCardSendFailed,
+	}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangChinese)
+	oldVersion := CurrentVersion
+	CurrentVersion = "v1.0.0"
+	t.Cleanup(func() { CurrentVersion = oldVersion })
+	e.sessions.GetOrCreateActive("feishu:user1")
+
+	if !e.NotifyUpdateAvailable(&ReleaseInfo{TagName: "v9.9.9"}) {
+		t.Fatal("notice delivery failed")
+	}
+	sent := strings.Join(p.getSent(), "\n")
+	if !strings.Contains(sent, "回复") {
+		t.Fatalf("card-send failure must fall back to instructive copy:\n%s", sent)
+	}
+}
+
+func TestUpgradePrompt_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
+	p := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangChinese)
+	e.SetAdminFrom("user1")
+	oldVersion := CurrentVersion
+	CurrentVersion = "v1.0.0"
+	t.Cleanup(func() { CurrentVersion = oldVersion })
+	e.updateCheckFn = func(string, bool) (*ReleaseInfo, error) {
+		return &ReleaseInfo{TagName: "v9.9.9", Body: "notes"}, nil
+	}
+
+	msg := &Message{SessionKey: "feishu:user1", Platform: "feishu", UserID: "user1", ReplyCtx: "rc"}
+	e.cmdUpgrade(p, msg, nil)
+
+	p.mu.Lock()
+	cards := append([]*Card(nil), p.repliedCards...)
+	p.mu.Unlock()
+	if len(cards) != 1 {
+		t.Fatalf("got %d reply cards, want 1", len(cards))
+	}
+	body := cardMarkdown(cards[0])
+	for _, banned := range []string{"回复", "确认"} {
+		if strings.Contains(body, banned) {
+			t.Fatalf("prompt card must not instruct a typed reply (found %q):\n%s", banned, body)
+		}
+	}
+	if !strings.Contains(body, "v9.9.9") || !strings.Contains(body, "notes") {
+		t.Fatalf("prompt card lost release details:\n%s", body)
+	}
+	if labels := cardButtonLabels(cards[0]); len(labels) != 1 {
+		t.Fatalf("prompt card buttons = %v, want exactly [立即更新]", labels)
+	}
+}
+
+func TestUpgradePrompt_TextOnlyCopyKeepsReplyInstruction(t *testing.T) {
+	e, p := upgradeIntentHarness(t)
+	e.i18n = NewI18n(LangChinese)
+	msg := &Message{SessionKey: "test:user1", Platform: "test", UserID: "user1", ReplyCtx: "rc"}
+	e.cmdUpgrade(p, msg, nil)
+
+	sent := strings.Join(p.getSent(), "\n")
+	if !strings.Contains(sent, "确认") {
+		t.Fatalf("a button-less platform must say what to reply:\n%s", sent)
 	}
 }
