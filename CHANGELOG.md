@@ -14,10 +14,13 @@ reaches the agent untouched. Matched intents are dispatched through the
 normal command path, so the `admin_from` and disabled-command gates still
 apply. `/upgrade` keeps working for those who prefer it.
 
-Each message carries exactly **one** call to action: copy shown with a
-button stops after the release information, while the typed-reply
-instruction appears only where no button can be rendered (including when a
-card or button send fails and delivery falls back to text).
+Each message carries exactly **one primary** call to action. Copy shown
+with a button stops after the release information; the natural-language
+route stays discoverable as a footnote (“也可以直接回复「更新」”, small grey
+on Feishu cards, a trailing line on inline-keyboard platforms). Only
+surfaces that cannot render a button state the typed reply outright as the
+instruction — including when a card or button send fails and delivery falls
+back to text.
 
 ### Dual-daemon conflict protection
 
