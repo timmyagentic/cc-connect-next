@@ -417,6 +417,15 @@ type Engine struct {
 	displaySaveFunc  func(mode *string, thinkingMessages *bool, thinkingMaxLen, toolMaxLen *int, toolMessages *bool) error
 	configReloadFunc func() (*ConfigReloadResult, error)
 
+	// updateIntents tracks per-session update-notice / upgrade-prompt
+	// recency so natural-language consent ("更新", "confirm") can be
+	// honored without hijacking unrelated messages.
+	updateIntents updateIntentState
+	// updateCheckFn / selfUpdateFn are test seams; production uses
+	// CheckForUpdate / SelfUpdate.
+	updateCheckFn func(currentVersion string, useGitee bool) (*ReleaseInfo, error)
+	selfUpdateFn  func(tag string, useGitee bool) error
+
 	hooks              *HookManager
 	cronScheduler      *CronScheduler
 	timerScheduler     *TimerScheduler
@@ -3248,6 +3257,14 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 
 	// Pending provider add (card-driven multi-step flow)
 	if e.handlePendingProviderAdd(p, msg, content, interactiveKey) {
+		return
+	}
+
+	// Natural-language update intent ("更新", "升级到最新版", a post-prompt
+	// "确认") — placed after every pending-flow handler so generic assent
+	// words are consumed by whatever flow actually asked for them, and
+	// routed through handleCommand so the /upgrade gates apply.
+	if e.maybeHandleUpdateIntent(p, msg, content) {
 		return
 	}
 
@@ -15982,7 +15999,7 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 	}
 
 	useGitee := e.i18n.IsZhLike()
-	release, err := CheckForUpdate(cur, useGitee)
+	release, err := e.checkForUpdate(cur, useGitee)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
@@ -15997,7 +16014,26 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 		body = string([]rune(body)[:300]) + "…"
 	}
 
-	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, release.TagName, body))
+	// The prompt opens a short natural-language consent window: a following
+	// "确认" / "yes" (or the button) installs without further syntax.
+	e.updateIntents.recordAsk(msg.SessionKey)
+	e.replyUpdateActionable(p, msg.ReplyCtx,
+		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, release.TagName, body), false)
+}
+
+// checkForUpdate and selfUpdate route through the engine's test seams.
+func (e *Engine) checkForUpdate(cur string, useGitee bool) (*ReleaseInfo, error) {
+	if e.updateCheckFn != nil {
+		return e.updateCheckFn(cur, useGitee)
+	}
+	return CheckForUpdate(cur, useGitee)
+}
+
+func (e *Engine) selfUpdate(tag string, useGitee bool) error {
+	if e.selfUpdateFn != nil {
+		return e.selfUpdateFn(tag, useGitee)
+	}
+	return SelfUpdate(tag, useGitee)
 }
 
 func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message) {
@@ -16008,7 +16044,7 @@ func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message) {
 	}
 
 	useGitee := e.i18n.IsZhLike()
-	release, err := CheckForUpdate(cur, useGitee)
+	release, err := e.checkForUpdate(cur, useGitee)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
@@ -16020,7 +16056,7 @@ func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message) {
 
 	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeDownloading), release.TagName))
 
-	if err := SelfUpdate(release.TagName, useGitee); err != nil {
+	if err := e.selfUpdate(release.TagName, useGitee); err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
 	}

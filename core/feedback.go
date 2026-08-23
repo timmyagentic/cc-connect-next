@@ -269,9 +269,10 @@ func (e *Engine) NotifyCapabilityGap(keys []string) bool {
 	quoted := "`" + strings.Join(keys, "`, `") + "`"
 	body := e.i18n.Tf(MsgFeedbackAskGap, quoted)
 	fallback := e.i18n.Tf(MsgFeedbackCapabilityGap, quoted)
-	return e.notifyMostRecentSessionFn("feedback notice", func(p Platform, replyCtx any) error {
+	_, ok := e.notifyMostRecentSessionFn("feedback notice", func(p Platform, replyCtx any) error {
 		return e.sendFeedbackAsk(p, replyCtx, body, fallback)
 	})
+	return ok
 }
 
 // sendFeedbackAsk delivers the "report this to the author?" ask. On card
