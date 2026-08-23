@@ -6,14 +6,18 @@
 
 The update flow no longer demands command syntax. The release reminder
 carries an **[update now]** button (Feishu cards / inline keyboards, text
-fallback elsewhere) and invites a plain reply; messages like 更新 /
-升级到最新版 / “update” / a post-prompt “确认” drive the same upgrade
-pipeline. Interception is conservative — the whole message must match a
-short phrase list, ambiguous bare verbs count only inside an update
-conversation, and everything else reaches the agent untouched. Matched
-intents are dispatched through the normal command path, so the
-`admin_from` and disabled-command gates still apply. `/upgrade` keeps
-working for those who prefer it.
+fallback elsewhere); messages like 更新 / 升级到最新版 / “update” / a
+post-prompt “确认” drive the same upgrade pipeline. Interception is
+conservative — the whole message must match a short phrase list, ambiguous
+bare verbs count only inside an update conversation, and everything else
+reaches the agent untouched. Matched intents are dispatched through the
+normal command path, so the `admin_from` and disabled-command gates still
+apply. `/upgrade` keeps working for those who prefer it.
+
+Each message carries exactly **one** call to action: copy shown with a
+button stops after the release information, while the typed-reply
+instruction appears only where no button can be rendered (including when a
+card or button send fails and delivery falls back to text).
 
 ### Dual-daemon conflict protection
 

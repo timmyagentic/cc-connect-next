@@ -176,14 +176,20 @@ func (e *Engine) maybeHandleUpdateIntent(p Platform, msg *Message, content strin
 	return false
 }
 
-// replyUpdateActionable delivers update-related text with [update now] /
-// [what's new] actions on platforms that support cards or inline buttons,
-// falling back to plain text elsewhere. The buttons reuse the cmd:/ scheme,
-// so a tap goes through exactly the gates a typed command would.
-func (e *Engine) replyUpdateActionable(p Platform, replyCtx any, content string, includeChangelogButton bool) {
+// replyUpdateActionable delivers update-related text with an [update now]
+// action on platforms that support cards or inline buttons, falling back to
+// plain text elsewhere. The buttons reuse the cmd:/ scheme, so a tap goes
+// through exactly the gates a typed command would.
+//
+// The two copies exist because a message must carry exactly one call to
+// action: with a button, the button is it (actionCopy ends after the release
+// notes); without one, the text has to say what to reply (textCopy). A
+// failed card/button send therefore also falls back to textCopy, never to a
+// button-less message that assumes a button.
+func (e *Engine) replyUpdateActionable(p Platform, replyCtx any, actionCopy, textCopy string, includeChangelogButton bool) {
 	btnNow := e.i18n.T(MsgUpdateBtnNow)
 	if cs, ok := p.(CardSender); ok {
-		builder := NewCard().Markdown(content)
+		builder := NewCard().Markdown(actionCopy)
 		buttons := []CardButton{{Text: btnNow, Type: "primary", Value: "cmd:/upgrade confirm"}}
 		if includeChangelogButton {
 			buttons = append(buttons, CardButton{Text: e.i18n.T(MsgUpdateBtnChangelog), Value: "cmd:/upgrade"})
@@ -198,9 +204,9 @@ func (e *Engine) replyUpdateActionable(p Platform, replyCtx any, content string,
 		if includeChangelogButton {
 			row = append(row, ButtonOption{Text: e.i18n.T(MsgUpdateBtnChangelog), Data: "cmd:/upgrade"})
 		}
-		if err := bs.SendWithButtons(e.ctx, replyCtx, content, [][]ButtonOption{row}); err == nil {
+		if err := bs.SendWithButtons(e.ctx, replyCtx, actionCopy, [][]ButtonOption{row}); err == nil {
 			return
 		}
 	}
-	e.reply(p, replyCtx, content)
+	e.reply(p, replyCtx, textCopy)
 }

@@ -212,9 +212,14 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	if release == nil || release.TagName == "" {
 		return false
 	}
-	content := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
+	// Two copies, one per surface: a card/button message must not also tell
+	// the user to type a reply — the button is the call to action, and two
+	// competing instructions just make people hesitate. Only the text-only
+	// fallback spells out the natural-language route.
+	action := e.i18n.Tf(MsgUpdateNoticeAvailableAction, release.TagName, CurrentVersion)
+	text := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
 	key, ok := e.notifyMostRecentSessionFn("update notice", func(p Platform, replyCtx any) error {
-		return e.sendUpdateNotice(p, replyCtx, content)
+		return e.sendUpdateNotice(p, replyCtx, action, text)
 	})
 	if ok {
 		e.updateIntents.recordNotice(key)
@@ -225,12 +230,15 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 // sendUpdateNotice delivers the notice with [update now] / [what's new]
 // actions where the platform supports them, plain text elsewhere. Buttons
 // use the cmd:/ scheme so a tap passes the same gates as a typed command.
-func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, content string) error {
+// actionCopy accompanies the buttons (no typed-reply instruction);
+// textCopy is used whenever the message ends up without buttons, including
+// when a card or button send fails and delivery falls back to plain text.
+func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, actionCopy, textCopy string) error {
 	btnNow := e.i18n.T(MsgUpdateBtnNow)
 	btnLog := e.i18n.T(MsgUpdateBtnChangelog)
 	if cs, ok := p.(CardSender); ok {
 		card := e.renderCardForPlatform(p, NewCard().
-			Markdown(content).
+			Markdown(actionCopy).
 			Buttons(
 				CardButton{Text: btnNow, Type: "primary", Value: "cmd:/upgrade confirm"},
 				CardButton{Text: btnLog, Value: "cmd:/upgrade"},
@@ -244,11 +252,11 @@ func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, content string) erro
 			{Text: btnNow, Data: "cmd:/upgrade confirm"},
 			{Text: btnLog, Data: "cmd:/upgrade"},
 		}}
-		if err := bs.SendWithButtons(e.ctx, replyCtx, content, buttons); err == nil {
+		if err := bs.SendWithButtons(e.ctx, replyCtx, actionCopy, buttons); err == nil {
 			return nil
 		}
 	}
-	return e.sendWithError(p, replyCtx, content)
+	return e.sendWithError(p, replyCtx, textCopy)
 }
 
 // notifyMostRecentSession delivers a proactive daemon-side message to this

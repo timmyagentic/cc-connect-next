@@ -500,12 +500,13 @@ const (
 	MsgRestarting     MsgKey = "restarting"
 	MsgRestartSuccess MsgKey = "restart_success"
 
-	MsgUpgradeChecking    MsgKey = "upgrade_checking"
-	MsgUpgradeUpToDate    MsgKey = "upgrade_up_to_date"
-	MsgUpgradeAvailable   MsgKey = "upgrade_available"
-	MsgUpgradeDownloading MsgKey = "upgrade_downloading"
-	MsgUpgradeSuccess     MsgKey = "upgrade_success"
-	MsgUpgradeDevBuild    MsgKey = "upgrade_dev_build"
+	MsgUpgradeChecking        MsgKey = "upgrade_checking"
+	MsgUpgradeUpToDate        MsgKey = "upgrade_up_to_date"
+	MsgUpgradeAvailable       MsgKey = "upgrade_available"
+	MsgUpgradeAvailableAction MsgKey = "upgrade_available_action"
+	MsgUpgradeDownloading     MsgKey = "upgrade_downloading"
+	MsgUpgradeSuccess         MsgKey = "upgrade_success"
+	MsgUpgradeDevBuild        MsgKey = "upgrade_dev_build"
 
 	MsgWebNotSupported MsgKey = "web_not_supported"
 	MsgWebNotEnabled   MsgKey = "web_not_enabled"
@@ -568,8 +569,11 @@ const (
 
 	// Proactive update notice (daemon-side)
 	MsgUpdateNoticeAvailable MsgKey = "update_notice_available"
-	MsgUpdateBtnNow          MsgKey = "update_btn_now"
-	MsgUpdateBtnChangelog    MsgKey = "update_btn_changelog"
+	// ...Action variants accompany a tappable button and therefore carry no
+	// "reply X" instruction: one message, one call to action.
+	MsgUpdateNoticeAvailableAction MsgKey = "update_notice_available_action"
+	MsgUpdateBtnNow                MsgKey = "update_btn_now"
+	MsgUpdateBtnChangelog          MsgKey = "update_btn_changelog"
 
 	// Feedback channel (/feedback and proactive capability-gap prompts)
 	MsgFeedbackUsage         MsgKey = "feedback_usage"
@@ -3178,6 +3182,28 @@ var messages = map[MsgKey]map[Language]string{
 			"%s\n\n\n" +
 			"Responde “confirm” para instalar.",
 	},
+	MsgUpgradeAvailableAction: {
+		LangEnglish: "🆕 New version available!\n\n\n" +
+			"Current: **%s**\n" +
+			"Latest:  **%s**\n\n\n" +
+			"%s",
+		LangChinese: "🆕 发现新版本！\n\n\n" +
+			"当前版本：**%s**\n" +
+			"最新版本：**%s**\n\n\n" +
+			"%s",
+		LangTraditionalChinese: "🆕 發現新版本！\n\n\n" +
+			"當前版本：**%s**\n" +
+			"最新版本：**%s**\n\n\n" +
+			"%s",
+		LangJapanese: "🆕 新しいバージョンがあります！\n\n\n" +
+			"現在: **%s**\n" +
+			"最新: **%s**\n\n\n" +
+			"%s",
+		LangSpanish: "🆕 ¡Nueva versión disponible!\n\n\n" +
+			"Actual: **%s**\n" +
+			"Última: **%s**\n\n\n" +
+			"%s",
+	},
 	MsgUpgradeDownloading: {
 		LangEnglish:            "⬇️ Downloading %s ...",
 		LangChinese:            "⬇️ 正在下载 %s ...",
@@ -3565,6 +3591,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📦 cc-connect-next %s 已發布（目前版本 %s）。回覆「更新」即可升級。",
 		LangJapanese:           "📦 cc-connect-next %s がリリースされました（現在のバージョン %s）。「update」と返信すると更新します。",
 		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s). Responde “update” para actualizar ahora.",
+	},
+	MsgUpdateNoticeAvailableAction: {
+		LangEnglish:            "📦 cc-connect-next %s has been released (you are on %s).",
+		LangChinese:            "📦 cc-connect-next %s 已发布（当前版本 %s）。",
+		LangTraditionalChinese: "📦 cc-connect-next %s 已發布（目前版本 %s）。",
+		LangJapanese:           "📦 cc-connect-next %s がリリースされました（現在のバージョン %s）。",
+		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s).",
 	},
 	MsgUpdateBtnNow: {
 		LangEnglish:            "Update now",

@@ -16015,10 +16015,13 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 	}
 
 	// The prompt opens a short natural-language consent window: a following
-	// "确认" / "yes" (or the button) installs without further syntax.
+	// "确认" / "yes" (or the button) installs without further syntax. The
+	// button copy omits the reply instruction so the card carries one CTA.
 	e.updateIntents.recordAsk(msg.SessionKey)
 	e.replyUpdateActionable(p, msg.ReplyCtx,
-		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, release.TagName, body), false)
+		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailableAction), cur, release.TagName, body),
+		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, release.TagName, body),
+		false)
 }
 
 // checkForUpdate and selfUpdate route through the engine's test seams.
