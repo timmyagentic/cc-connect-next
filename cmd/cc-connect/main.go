@@ -385,6 +385,31 @@ func main() {
 
 	setupLogger(cfg.Log.Level, logWriter)
 
+	// Refuse to race a running official CC Connect daemon for the same
+	// platform credentials: two consumers on one credential split the event
+	// stream and produce duplicate or lost replies. Same philosophy as the
+	// placeholder refusal above — never start into a state that is known to
+	// misbehave. A merely armed (not running) official autostart only warns.
+	if ourIDs := collectConfigAppIDs(cfg); len(ourIDs) > 0 {
+		probe := defaultOfficialProbe()
+		coexistState := probeOfficialInstall(probe)
+		if overlap := officialCredentialOverlap(coexistState, ourIDs); len(overlap) > 0 {
+			if refusal := officialConflictRefusal(coexistState, overlap, probe.GOOS, probe.UID); refusal != "" {
+				if os.Getenv("CC_NEXT_ALLOW_OFFICIAL_CONFLICT") == "1" {
+					slog.Warn("official CC Connect daemon is running with shared credentials; continuing because CC_NEXT_ALLOW_OFFICIAL_CONFLICT=1",
+						"running_via", coexistState.RunningVia, "shared_credentials", len(overlap))
+				} else {
+					fmt.Fprint(os.Stderr, refusal)
+					os.Exit(1)
+				}
+			} else if coexistState.AutostartArmed {
+				slog.Warn("official CC Connect autostart is armed with shared credentials; the next login/boot will start a second consumer and duplicate message handling",
+					"service", coexistState.ServicePath, "shared_credentials", len(overlap),
+					"disarm", strings.TrimSpace(disarmOfficialHint(probe.GOOS, probe.UID)))
+			}
+		}
+	}
+
 	// A work_dir that is not there yields per-turn agent failures later. Say
 	// it once at startup instead: unlike a placeholder it can be a mount that
 	// is not up yet, so it warns rather than refuses.

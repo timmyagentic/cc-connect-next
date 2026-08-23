@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Dual-daemon conflict protection
+
+The "never run both daemons against the same platform credentials" rule is
+now enforced by the product instead of documentation:
+
+- startup refuses to race a running official daemon that shares credentials
+  with the loaded config (override: `CC_NEXT_ALLOW_OFFICIAL_CONFLICT=1`),
+  and warns when the official autostart is merely armed for the next boot;
+- `migrate` ends with a status-aware switchover/trial guide instead of the
+  passive "was not modified or stopped" line;
+- `migrate --switch` stops the official daemon, disarms its autostart
+  (binaries and data untouched — rollback stays two commands plus a
+  re-enable), verifies quiescence fail-closed, then runs the final sync;
+- `doctor` gains an "official CC Connect coexistence" section with redacted
+  credential-overlap reporting.
+
 Full-history upstream audit: every one of the 91 official commits between
 v1.4.1 and v1.5.0 is now classified (ported / already present / deferred /
 not applicable) in `docs/upstream-v1.5.0-beta.3-audit.md`. Fixes imported in

@@ -95,6 +95,10 @@ func runDoctorHealthCheck(args []string) int {
 		}
 	}
 
+	if printOfficialCoexistenceSection(os.Stdout, cfg) {
+		failed = true
+	}
+
 	if checked == 0 {
 		fmt.Fprintf(os.Stderr, "doctor: no project named %q in %s\n", *projectFilter, configPath)
 		return 1
