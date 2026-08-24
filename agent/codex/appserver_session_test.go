@@ -464,6 +464,53 @@ func TestAppServerSession_Issue68RejectsSubagentInteractiveRequests(t *testing.T
 	}
 }
 
+func TestAppServerSession_Issue68RejectRequestWriteTimeoutAbortsTransport(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stdin := newBlockingWriteCloser()
+	defer func() { _ = stdin.Close() }()
+	s := &appServerSession{
+		events:           make(chan core.Event, 1),
+		ctx:              ctx,
+		cancel:           cancel,
+		pendingApprovals: make(map[string]chan core.PermissionResult),
+		stdin:            stdin,
+		currentTurn:      "parent-turn",
+	}
+	s.alive.Store(true)
+	s.threadID.Store("parent-thread")
+	request := serverRequestProbe(t, `"blocked-child"`, "item/commandExecution/requestApproval", map[string]any{
+		"threadId": "child-thread",
+		"turnId":   "child-turn",
+		"itemId":   "command-1",
+		"command":  "internal-child-command",
+	})
+
+	done := make(chan struct{})
+	go func() {
+		s.handleServerRequest(request)
+		close(done)
+	}()
+
+	select {
+	case <-stdin.started:
+	case <-time.After(time.Second):
+		t.Fatal("foreign request rejection did not attempt to write")
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("foreign request rejection blocked the app-server read path")
+	}
+	if s.alive.Load() {
+		t.Fatal("blocked rejection write did not mark the session unavailable")
+	}
+	if !stdin.Closed() {
+		t.Fatal("blocked rejection write did not close the transport")
+	}
+	assertNoAppServerEvent(t, s.events, "blocked child rejection")
+}
+
 func TestAppServerSession_Issue68AcceptsLegacyUnscopedRootNotifications(t *testing.T) {
 	s := &appServerSession{events: make(chan core.Event, 2), currentTurn: "parent-turn"}
 	s.threadID.Store("parent-thread")

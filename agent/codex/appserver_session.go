@@ -229,8 +229,9 @@ type appServerSession struct {
 }
 
 const (
-	appServerRequestTimeout      = 120 * time.Second
-	appServerUsageRefreshTimeout = 1500 * time.Millisecond
+	appServerRequestTimeout       = 120 * time.Second
+	appServerResponseWriteTimeout = 1500 * time.Millisecond
+	appServerUsageRefreshTimeout  = 1500 * time.Millisecond
 )
 
 // appServerSessionParams bundles the launch configuration for a Codex
@@ -771,7 +772,10 @@ func (s *appServerSession) rejectUnownedServerRequest(rawID json.RawMessage, met
 	default:
 		return
 	}
-	_ = s.writeJSON(map[string]any{"jsonrpc": "2.0", "id": rawID, "result": result})
+	payload := map[string]any{"jsonrpc": "2.0", "id": rawID, "result": result}
+	if err := s.writeJSONWithTimeout(method, payload, appServerResponseWriteTimeout); err != nil {
+		slog.Warn("codex app-server: failed to reject request for another turn", "method", method, "error", err)
+	}
 }
 
 func (s *appServerSession) handleApprovalRequest(rawID json.RawMessage, method string, paramsRaw json.RawMessage) {
