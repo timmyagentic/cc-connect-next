@@ -318,9 +318,10 @@ type Message struct {
 	// When both keys are present, multi-workspace routing copies the legacy
 	// default into the current scope without deleting or overwriting either.
 	LegacyChannelKey string
-	ReplyCtx         any    // platform-specific context needed for replying
-	FromVoice        bool   // true if message originated from voice transcription
-	ModeOverride     string // if set, temporarily override agent permission mode for this message
+	ReplyCtx         any               // platform-specific context needed for replying
+	FromVoice        bool              // true if message originated from voice transcription
+	ModeOverride     string            // if set, temporarily override agent permission mode for this message
+	AnswerProfile    AnswerProfileName // optional one-shot answer profile for this message
 	// IsPermissionResponse is set by inline-button / card-action paths in
 	// platforms when a synthesized message is forwarded as a permission
 	// decision (e.g. Telegram handleCallbackQuery for perm:allow/deny,

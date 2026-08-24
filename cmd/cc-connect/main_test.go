@@ -382,3 +382,24 @@ func TestCanonicalCronSubcommand_ManualTriggerAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigAnswerProfilesToCore(t *testing.T) {
+	profiles := configAnswerProfilesToCore(config.AnswerProfilesConfig{
+		Fast: &config.AnswerProfileConfig{
+			Model:           "fast-model",
+			ReasoningEffort: "low",
+			ServiceTier:     "fast",
+		},
+		Quality: &config.AnswerProfileConfig{
+			Model:           "quality-model",
+			ReasoningEffort: "max",
+			ServiceTier:     "default",
+		},
+	})
+	if profiles.Fast == nil || profiles.Fast.Model != "fast-model" || profiles.Fast.ReasoningEffort != "low" || profiles.Fast.ServiceTier != "fast" {
+		t.Fatalf("fast profile = %#v", profiles.Fast)
+	}
+	if profiles.Quality == nil || profiles.Quality.Model != "quality-model" || profiles.Quality.ReasoningEffort != "max" || profiles.Quality.ServiceTier != "default" {
+		t.Fatalf("quality profile = %#v", profiles.Quality)
+	}
+}

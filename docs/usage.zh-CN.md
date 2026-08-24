@@ -205,6 +205,43 @@ mode = "default"
 
 ---
 
+## 单条消息回答档位（Codex）
+
+可以为 Codex 配置 `fast` 和 `quality` 两个可选档位。它们只覆盖当前一条消息，不修改项目默认模型，也不会影响下一条普通消息。
+
+```toml
+[projects.agent.options]
+model = "your-balanced-model"
+reasoning_effort = "medium"
+service_tier = "default"
+
+[projects.agent.answer_profiles.fast]
+model = "your-fast-model"
+reasoning_effort = "low"
+service_tier = "fast"
+
+[projects.agent.answer_profiles.quality]
+model = "your-quality-model"
+reasoning_effort = "max"
+service_tier = "default"
+```
+
+档位中的空字段会继承 `[projects.agent.options]` 的普通默认值。配置表至少需要覆盖一个字段。
+
+```text
+/fast 快速检查这个问题
+/quality 深入分析这个问题
+用快速模式完成这个检查
+用高质量模式来完成这个设计
+```
+
+- 普通消息始终使用默认配置；不提供 `/balanced` 或“默认模式”入口。
+- 只识别消息开头的明确表达；否定、比较或正文中提及模式不会触发。
+- 显式档位消息在 Agent 忙时会排队为下一回合，不会 steer 进当前回合。
+- 当前只有 Codex 的 `app_server` 和 `exec` 后端支持；未配置或不支持时会明确报错，不会静默降级。
+
+---
+
 ## API Provider 管理
 
 运行时切换 API Provider，无需重启。

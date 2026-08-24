@@ -432,6 +432,29 @@ type AgentSession interface {
 	Close() error
 }
 
+// TurnOptions are fully resolved settings for one new agent turn. The empty
+// AnswerProfile means the project's ordinary default; named profiles are
+// one-shot overrides and must not mutate the Agent's persistent configuration.
+type TurnOptions struct {
+	AnswerProfile   AnswerProfileName
+	Model           string
+	ReasoningEffort string
+	ServiceTier     string
+}
+
+// TurnOptionsSession is an optional capability for sessions that can apply
+// model/runtime settings to a single new turn. Agents that do not implement it
+// keep the existing Send behavior.
+type TurnOptionsSession interface {
+	SendWithTurnOptions(prompt string, images []ImageAttachment, files []FileAttachment, options TurnOptions) error
+}
+
+// ServiceTierProvider exposes the Agent's ordinary service-tier default so the
+// engine can restore it after a one-shot answer profile.
+type ServiceTierProvider interface {
+	GetServiceTier() string
+}
+
 // SteerableSession is an optional capability for agent sessions that can
 // append user input to the turn that is already in flight ("steering"),
 // as opposed to Send, which starts the next turn.

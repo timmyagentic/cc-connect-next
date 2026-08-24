@@ -1662,6 +1662,24 @@ app_secret = "your-feishu-app-secret"
 # # Active provider / 当前激活的 provider
 # # provider = "openai"
 #
+# Optional: one-shot answer profiles / 可选：单条消息回答档位
+# Ordinary messages keep the options above. `/fast <task>`, `/quality <task>`,
+# `用快速模式……`, and `用高质量模式……` override only that one turn. Empty
+# fields inherit the ordinary defaults. There is intentionally no `/balanced`
+# or default-mode command: sending an ordinary message already selects default.
+# 普通消息继续使用上方默认选项。`/fast <任务>`、`/quality <任务>`、
+# `用快速模式……` 与 `用高质量模式……` 仅覆盖当前一回合；省略字段继承普通默认值。
+# 不提供 `/balanced` 或默认模式命令：直接发送普通消息就是默认模式。
+# [projects.agent.answer_profiles.fast]
+# model = "your-fast-model"
+# reasoning_effort = "low"
+# service_tier = "fast"
+#
+# [projects.agent.answer_profiles.quality]
+# model = "your-quality-model"
+# reasoning_effort = "max"
+# service_tier = "default"
+#
 # [[projects.agent.providers]]
 # name = "openai"
 # api_key = "sk-xxx"

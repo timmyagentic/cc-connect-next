@@ -518,6 +518,7 @@ func main() {
 		lang := configLanguage(cfg.Language)
 
 		engine := core.NewEngine(proj.Name, agent, platforms, sessionFile, lang)
+		engine.SetAnswerProfiles(configAnswerProfilesToCore(proj.Agent.AnswerProfiles))
 		// Global [display] config can be overridden by project-level settings.
 		_, _, _, _, _, _, showFooter, _ := config.EffectiveDisplay(cfg, &proj)
 		engine.SetReplyFooterEnabled(showFooter)
@@ -1987,6 +1988,23 @@ func configProviderToCore(p config.ProviderConfig) core.ProviderConfig {
 		c.CodexHTTPHeaders = p.Codex.HTTPHeaders
 	}
 	return c
+}
+
+func configAnswerProfilesToCore(profiles config.AnswerProfilesConfig) core.AnswerProfiles {
+	convert := func(profile *config.AnswerProfileConfig) *core.AnswerProfileOptions {
+		if profile == nil {
+			return nil
+		}
+		return &core.AnswerProfileOptions{
+			Model:           profile.Model,
+			ReasoningEffort: profile.ReasoningEffort,
+			ServiceTier:     profile.ServiceTier,
+		}
+	}
+	return core.AnswerProfiles{
+		Fast:    convert(profiles.Fast),
+		Quality: convert(profiles.Quality),
+	}
 }
 
 func convertProviderModels(ms []config.ProviderModelConfig) []core.ModelOption {

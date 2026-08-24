@@ -453,6 +453,8 @@ type Engine struct {
 	outgoingRL        *OutgoingRateLimiter
 	streamPreview     StreamPreviewCfg
 	instantReply      InstantReplyCfg
+	answerProfilesMu  sync.RWMutex
+	answerProfiles    AnswerProfiles
 	references        ReferenceRenderCfg
 	relayManager      *RelayManager
 	eventIdleTimeout  time.Duration
@@ -575,7 +577,8 @@ type queuedMessage struct {
 	msgPlatform       string // platform name for sender injection
 	msgSessionKey     string // session key for extracting chat ID
 	channelKey        string // platform-provided channel identifier (preferred over sessionKey extraction)
-	userMessageTimeMs int64  // Feishu create_time ms (optional); see Message.UserMessageTimeMs
+	answerProfile     AnswerProfileName
+	userMessageTimeMs int64 // Feishu create_time ms (optional); see Message.UserMessageTimeMs
 }
 
 // interactiveState tracks a running interactive agent session and its permission state.
@@ -2964,6 +2967,18 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	if content == "" && msg.ExtraContent == "" && len(msg.Images) == 0 && len(msg.Files) == 0 && msg.Location == nil {
 		return
 	}
+	if profile, prompt, matched := parseAnswerProfilePrefix(content); matched {
+		if prompt == "" {
+			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgProfileUsage, msg.Content))
+			return
+		}
+		if _, configured := e.answerProfile(profile); !configured {
+			e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.TForText(MsgProfileNotConfigured, msg.Content), profile))
+			return
+		}
+		msg.AnswerProfile = profile
+		content = prompt
+	}
 
 	// Resolve aliases on user text BEFORE merging ExtraContent, so reply
 	// quotes and platform context survive alias resolution (PR #420 fix).
@@ -3257,6 +3272,12 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 // session lacks the steer capability, or the steer was definitively rejected
 // without delivering anything.
 func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey string, session *Session, sessions *SessionManager) bool {
+	// turn/steer cannot carry model, reasoning-effort, or service-tier
+	// overrides. A profiled message must remain a distinct queued turn or the
+	// user would be told a profile was applied when it was not.
+	if msg.AnswerProfile != "" {
+		return false
+	}
 	e.interactiveMu.Lock()
 	state, hasState := e.interactiveStates[interactiveKey]
 	e.interactiveMu.Unlock()
@@ -3471,6 +3492,12 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 	if state.agentSession != nil && !state.agentSession.Alive() {
 		return false
 	}
+	if msg.AnswerProfile != "" && state.agentSession != nil {
+		if _, ok := state.agentSession.(TurnOptionsSession); !ok {
+			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgProfileNotSupported, msg.Content))
+			return true
+		}
+	}
 
 	// Only queue metadata — do NOT send to agent stdin yet.
 	// The agent CLI may treat a mid-turn stdin message as part of the
@@ -3500,6 +3527,7 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		msgPlatform:       msg.Platform,
 		msgSessionKey:     msg.SessionKey,
 		channelKey:        msg.ChannelKey,
+		answerProfile:     msg.AnswerProfile,
 		userMessageTimeMs: msg.UserMessageTimeMs,
 	})
 	if session != nil {
@@ -4060,6 +4088,12 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFailedToStartAgentSession))
 		return
 	}
+	if msg.AnswerProfile != "" {
+		if _, ok := state.agentSession.(TurnOptionsSession); !ok {
+			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgProfileNotSupported, msg.Content))
+			return
+		}
+	}
 
 	if workspaceDir != "" && e.workspacePool != nil {
 		ws := e.workspacePool.GetOrCreate(workspaceDir)
@@ -4130,7 +4164,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			sendDone <- fmt.Errorf("agent session became nil")
 			return
 		}
-		sendDone <- as.Send(promptContent, msg.Images, scopeFileAttachments(msg.Files, msg.MessageID))
+		sendDone <- e.sendAgentTurn(agent, as, promptContent, msg.Images, scopeFileAttachments(msg.Files, msg.MessageID), msg.AnswerProfile)
 	}()
 
 	e.processInteractiveEvents(state, session, sessions, interactiveKey, msg.MessageID, turnStart, stopTyping, sendDone, msg.ReplyCtx)
@@ -6657,7 +6691,11 @@ func (queue *turnQueue) handle() {
 
 		state.mu.Lock()
 		as := state.agentSession // capture under lock to avoid race with cleanup
+		turnAgent := state.agent
 		state.mu.Unlock()
+		if turnAgent == nil {
+			turnAgent = e.agent
+		}
 
 		nextSend := make(chan error, 1)
 		go func() {
@@ -6665,7 +6703,7 @@ func (queue *turnQueue) handle() {
 				nextSend <- fmt.Errorf("agent session became nil")
 				return
 			}
-			nextSend <- as.Send(queuedPrompt, queued.images, queued.files)
+			nextSend <- e.sendAgentTurn(turnAgent, as, queuedPrompt, queued.images, queued.files, queued.answerProfile)
 		}()
 		pendingSend = nextSend
 
@@ -8180,7 +8218,11 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 
 		state.mu.Lock()
 		as := state.agentSession // capture under lock to avoid race with cleanup (mirrors #1436)
+		turnAgent := state.agent
 		state.mu.Unlock()
+		if turnAgent == nil {
+			turnAgent = e.agent
+		}
 		if as == nil || !as.Alive() {
 			e.send(queued.platform, queued.replyCtx, fmt.Sprintf(e.i18n.TForText(MsgError, queued.content), "agent session ended"))
 			e.notifyDroppedQueuedMessages(state, fmt.Errorf("agent session ended"))
@@ -8197,7 +8239,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 				sendDone <- fmt.Errorf("agent session became nil")
 				return
 			}
-			sendDone <- as.Send(prompt, queued.images, queued.files)
+			sendDone <- e.sendAgentTurn(turnAgent, as, prompt, queued.images, queued.files, queued.answerProfile)
 		}()
 
 		var stopTyping func()
@@ -11810,7 +11852,14 @@ func (e *Engine) runCompress(state *interactiveState, session *Session, sessions
 	}
 
 	cmd := compressor.CompressCommand()
-	if err := state.agentSession.Send(cmd, nil, nil); err != nil {
+	state.mu.Lock()
+	turnAgent := state.agent
+	agentSession := state.agentSession
+	state.mu.Unlock()
+	if turnAgent == nil {
+		turnAgent = e.agent
+	}
+	if err := e.sendAgentTurn(turnAgent, agentSession, cmd, nil, nil, ""); err != nil {
 		if !auto {
 			e.reply(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), err))
 		}
@@ -17383,7 +17432,7 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 
 	saveRelaySessionID(agentSession.CurrentSessionID(), false)
 
-	if err := agentSession.Send(message, nil, nil); err != nil {
+	if err := e.sendAgentTurn(agent, agentSession, message, nil, nil, ""); err != nil {
 		closeRelayAgentSession(agentSession, relaySessionKey)
 		return "", fmt.Errorf("send relay message: %w", err)
 	}
