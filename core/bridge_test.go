@@ -134,6 +134,76 @@ func mustUnmarshalJSON(t *testing.T, data []byte, v any) {
 
 // tests --------------------------------------------------------------------
 
+func TestBridgeAdapterLifecycleUpdatesDynamicPlatformReadiness(t *testing.T) {
+	bs, wsURL := startTestBridge(t, "")
+	bp := bs.NewPlatform("test-proj")
+	e := NewEngine("test-proj", &stubAgent{}, nil, "", LangEnglish)
+	bs.RegisterEngine("test-proj", e, bp)
+	e.AddPlatform(bp)
+
+	statuses := e.PlatformStatuses()
+	if len(statuses) != 1 {
+		t.Fatalf("platform statuses = %+v, want one Bridge platform", statuses)
+	}
+	if statuses[0].Usable() || statuses[0].Err == nil {
+		t.Fatalf("Bridge status before adapter = %+v, want unavailable with reason", statuses[0])
+	}
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	register(t, conn, "localqa", []string{"text"})
+	waitForBridgeStatus(t, e, func(status PlatformStatus) bool { return status.Usable() })
+
+	secondConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial second websocket: %v", err)
+	}
+	register(t, secondConn, "localqa-second", []string{"text"})
+	waitForConnectedAdapterCount(t, bs, 2)
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close first adapter: %v", err)
+	}
+	waitForConnectedAdapterCount(t, bs, 1)
+	if status := e.PlatformStatuses()[0]; !status.Usable() {
+		t.Fatalf("Bridge status after one of two adapters disconnected = %+v, want usable", status)
+	}
+
+	if err := secondConn.Close(); err != nil {
+		t.Fatalf("close last adapter: %v", err)
+	}
+	waitForBridgeStatus(t, e, func(status PlatformStatus) bool {
+		return !status.Usable() && status.Err != nil
+	})
+}
+
+func waitForConnectedAdapterCount(t *testing.T, bs *BridgeServer, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(bs.ConnectedAdapters()) == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("connected adapter count = %d, want %d", len(bs.ConnectedAdapters()), want)
+}
+
+func waitForBridgeStatus(t *testing.T, e *Engine, matches func(PlatformStatus) bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		statuses := e.PlatformStatuses()
+		if len(statuses) == 1 && matches(statuses[0]) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("Bridge status did not converge: %+v", e.PlatformStatuses())
+}
+
 func TestBridge_RegisterAndConnect(t *testing.T) {
 	bs, wsURL := startTestBridge(t, "")
 

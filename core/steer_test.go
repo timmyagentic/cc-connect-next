@@ -287,6 +287,30 @@ func TestTrySteerBusyMessage_DeliveredIntoActiveTurn(t *testing.T) {
 	}
 }
 
+func TestTrySteerBusyMessageTouchesLastUserActivity(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	sess := newSteerableSession("steer-activity")
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	e.SetBusyMessageMode(BusyMessageModeSteer)
+
+	key := "test:steer-activity"
+	unlock := installBusySteerableState(t, e, p, key, sess)
+	defer unlock()
+	session := e.sessions.GetOrCreateActive(key)
+	stale := time.Now().Add(-time.Hour)
+	session.mu.Lock()
+	session.LastUserActivity = stale
+	session.mu.Unlock()
+
+	msg := &Message{SessionKey: key, MessageID: "m2", Content: "steered", ReplyCtx: "ctx2"}
+	if !e.trySteerBusyMessage(p, msg, key, session, e.sessions) {
+		t.Fatal("expected steer to be accepted")
+	}
+	if got := session.GetLastUserActivity(); !got.After(stale) {
+		t.Fatalf("last user activity = %v, want after %v", got, stale)
+	}
+}
+
 func TestTrySteerBusyMessage_DefinitiveFailure_FallsBackToQueue(t *testing.T) {
 	for _, steerErr := range []error{
 		fmt.Errorf("exec: %w", ErrSteerUnsupported),

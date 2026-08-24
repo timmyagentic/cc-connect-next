@@ -40,6 +40,13 @@ type DoctorCheckResult struct {
 	Latency time.Duration
 }
 
+// DoctorCheckOptions carries deployment paths that generic system checks
+// cannot infer reliably. Callers may omit it to retain the default home-based
+// data directory behavior.
+type DoctorCheckOptions struct {
+	DataDir string
+}
+
 // DoctorChecker is an optional interface for agents to provide specific health checks.
 type DoctorChecker interface {
 	DoctorChecks(ctx context.Context) []DoctorCheckResult
@@ -63,8 +70,8 @@ type NativeSteerDoctorInfo interface {
 
 // RunDoctorChecks performs all diagnostic checks for a running instance,
 // whose platforms are live.
-func RunDoctorChecks(ctx context.Context, agent Agent, platforms []Platform) []DoctorCheckResult {
-	return runDoctorChecks(ctx, agent, checkPlatforms(platforms))
+func RunDoctorChecks(ctx context.Context, agent Agent, platforms []Platform, options ...DoctorCheckOptions) []DoctorCheckResult {
+	return runDoctorChecks(ctx, agent, checkPlatforms(platforms), options...)
 }
 
 // RunDoctorChecksWithPlatformResults performs the same checks for a caller
@@ -74,12 +81,16 @@ func RunDoctorChecks(ctx context.Context, agent Agent, platforms []Platform) []D
 // The command line is such a caller: it diagnoses an instance that is not
 // running, most often because the platform cannot connect at all, so it must
 // not inherit the running instance's claim that every platform is connected.
-func RunDoctorChecksWithPlatformResults(ctx context.Context, agent Agent, platformResults []DoctorCheckResult) []DoctorCheckResult {
-	return runDoctorChecks(ctx, agent, platformResults)
+func RunDoctorChecksWithPlatformResults(ctx context.Context, agent Agent, platformResults []DoctorCheckResult, options ...DoctorCheckOptions) []DoctorCheckResult {
+	return runDoctorChecks(ctx, agent, platformResults, options...)
 }
 
-func runDoctorChecks(ctx context.Context, agent Agent, platformResults []DoctorCheckResult) []DoctorCheckResult {
+func runDoctorChecks(ctx context.Context, agent Agent, platformResults []DoctorCheckResult, options ...DoctorCheckOptions) []DoctorCheckResult {
 	var results []DoctorCheckResult
+	var dataDir string
+	if len(options) > 0 {
+		dataDir = options[0].DataDir
+	}
 
 	results = append(results, checkAgentBinary(ctx, agent)...)
 	results = append(results, checkAgentAuth(ctx, agent)...)
@@ -87,6 +98,7 @@ func runDoctorChecks(ctx context.Context, agent Agent, platformResults []DoctorC
 	results = append(results, checkSystem(ctx)...)
 	results = append(results, checkDependencies()...)
 	results = append(results, checkNetwork(ctx)...)
+	results = append(results, checkDataDirectory(dataDir))
 
 	if dc, ok := agent.(DoctorChecker); ok {
 		results = append(results, dc.DoctorChecks(ctx)...)
@@ -418,31 +430,30 @@ func checkNetwork(ctx context.Context) []DoctorCheckResult {
 		}
 	}
 
-	// Check data directory
-	if home, err := os.UserHomeDir(); err == nil {
-		dataDir := filepath.Join(home, ".cc-connect-next")
-		if info, err := os.Stat(dataDir); err != nil {
-			results = append(results, DoctorCheckResult{
-				Name:   "Data Directory",
-				Status: DoctorWarn,
-				Detail: dataDir + " does not exist",
-			})
-		} else if !info.IsDir() {
-			results = append(results, DoctorCheckResult{
-				Name:   "Data Directory",
-				Status: DoctorFail,
-				Detail: dataDir + " is not a directory",
-			})
-		} else {
-			results = append(results, DoctorCheckResult{
-				Name:   "Data Directory",
-				Status: DoctorPass,
-				Detail: dataDir,
-			})
+	return results
+}
+
+func checkDataDirectory(dataDir string) DoctorCheckResult {
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return DoctorCheckResult{Name: "Data Directory", Status: DoctorWarn, Detail: "cannot resolve home directory: " + err.Error()}
 		}
+		dataDir = filepath.Join(home, ".cc-connect-next")
 	}
 
-	return results
+	info, err := os.Stat(dataDir)
+	switch {
+	case os.IsNotExist(err):
+		return DoctorCheckResult{Name: "Data Directory", Status: DoctorWarn, Detail: dataDir + " does not exist"}
+	case err != nil:
+		return DoctorCheckResult{Name: "Data Directory", Status: DoctorFail, Detail: dataDir + " cannot be inspected: " + err.Error()}
+	case !info.IsDir():
+		return DoctorCheckResult{Name: "Data Directory", Status: DoctorFail, Detail: dataDir + " is not a directory"}
+	default:
+		return DoctorCheckResult{Name: "Data Directory", Status: DoctorPass, Detail: dataDir}
+	}
 }
 
 // checkNameZh provides Chinese translations for common check names.

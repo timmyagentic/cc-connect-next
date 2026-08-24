@@ -15,6 +15,7 @@ import {
 import CommandPalette, { type SlashCommand, slashCommands } from './CommandPalette';
 import SessionDrawer from './SessionDrawer';
 import CommandResultPanel, { type CommandResult } from './CommandResultPanel';
+import { selectDefaultWebSession } from './sessionSelection.js';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -325,7 +326,8 @@ export default function ChatView() {
     : webSessionKey;
   sessionKeyRef.current = sessionKey;
 
-  // Load project sessions and auto-select latest
+  // Load the Web transport's own session. Other platform sessions remain in
+  // the drawer and become active only after the user explicitly selects one.
   const fetchData = useCallback(async () => {
     if (!projectName) return;
     setLoading(true);
@@ -340,9 +342,9 @@ export default function ChatView() {
       );
       setSessions(sorted);
 
-      if (sorted.length > 0) {
-        const latest = sorted[0];
-        const detail = await getSession(projectName, latest.id, 200);
+      const webSession = selectDefaultWebSession(sorted, webSessionKey);
+      if (webSession) {
+        const detail = await getSession(projectName, webSession.id, 200);
         setCurrentSession(detail);
         if (detail.history) {
           setMessages(detail.history.map((h, i) => ({
@@ -360,7 +362,7 @@ export default function ChatView() {
     } finally {
       setLoading(false);
     }
-  }, [projectName]);
+  }, [projectName, webSessionKey]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

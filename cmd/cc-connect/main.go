@@ -201,7 +201,45 @@ type providerWiringResult struct {
 	canStartInitialRefresh    bool
 }
 
+// normalizeLeadingConfigDoctorArgs accepts the conventional global-flag form
+// `cc-connect-next --config path doctor ...` without letting the trailing
+// subcommand fall through into runtime startup. Other argv shapes are copied
+// unchanged and validated after flag parsing.
+func normalizeLeadingConfigDoctorArgs(args []string) []string {
+	normalized := append([]string(nil), args...)
+	var configArg []string
+	var rest []string
+
+	switch {
+	case len(args) >= 3 && args[0] == "--config" && args[2] == "doctor":
+		configArg = []string{"--config", args[1]}
+		rest = args[3:]
+	case len(args) >= 2 && strings.HasPrefix(args[0], "--config=") && args[1] == "doctor":
+		configArg = []string{args[0]}
+		rest = args[2:]
+	default:
+		return normalized
+	}
+
+	if len(rest) > 0 && rest[0] == "user-isolation" {
+		out := []string{"doctor", "user-isolation"}
+		out = append(out, configArg...)
+		return append(out, rest[1:]...)
+	}
+	out := []string{"doctor"}
+	out = append(out, configArg...)
+	return append(out, rest...)
+}
+
+func runtimePositionalArgError(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	return fmt.Errorf("unexpected argument %q; subcommands must come before global flags (for example: cc-connect-next doctor --config <path>)", args[0])
+}
+
 func main() {
+	os.Args = append(os.Args[:1], normalizeLeadingConfigDoctorArgs(os.Args[1:])...)
 	checkUpdateAsync()
 
 	// Handle subcommands before flag parsing
@@ -302,6 +340,10 @@ func main() {
 	logMaxBackupsFlag := flag.Int("log-max-backups", 0, "number of rotated log files to retain (.log.1 .. .log.N); overrides CC_LOG_MAX_BACKUPS env var (default: 3)")
 	flag.Usage = printUsage
 	flag.Parse()
+	if err := runtimePositionalArgError(flag.Args()); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(2)
+	}
 
 	// Cross-check: the rotating-writer setup above consumed a pre-scanned
 	// value of --log-max-size, but flag.Parse() may have been called for

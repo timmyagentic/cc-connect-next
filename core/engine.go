@@ -3150,7 +3150,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		}
 		// Try to queue the message for the running turn so the agent
 		// processes it immediately after the current turn ends.
-		if e.queueMessageForBusySession(p, msg, interactiveKey) {
+		if e.queueMessageForBusySession(p, msg, interactiveKey, session) {
 			// Race guard: the drain loop in processInteractiveMessageWith may
 			// have just finished (session unlocked) between our TryLock failure
 			// and the queue append. Re-try TryLock — if it succeeds, no one is
@@ -3293,6 +3293,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	switch {
 	case err == nil:
 		e.noteUserMessageAccepted(interactiveKey, msg.UserMessageTimeMs)
+		session.TouchUserActivity()
 		session.AddHistory("user", msg.Content)
 		sessions.Save()
 		slog.Info("busy message steered into active turn",
@@ -3451,7 +3452,7 @@ func (e *Engine) commitSteerPresentation(interactiveKey string, h steerHandoff) 
 // session is busy. The message is NOT sent to agent stdin at queue time;
 // the event loop sends it after the current turn's EventResult is received.
 // Returns true if the message was successfully queued, false otherwise.
-func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiveKey string) bool {
+func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiveKey string, session *Session) bool {
 	e.interactiveMu.Lock()
 	state, hasState := e.interactiveStates[interactiveKey]
 	if !hasState || state == nil {
@@ -3501,6 +3502,9 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		channelKey:        msg.ChannelKey,
 		userMessageTimeMs: msg.UserMessageTimeMs,
 	})
+	if session != nil {
+		session.TouchUserActivity()
+	}
 	queueDepth := len(state.pendingMessages)
 
 	slog.Debug("user message accepted into queue",
@@ -15235,7 +15239,7 @@ func (e *Engine) renderSkillsCard() *Card {
 }
 
 func (e *Engine) renderDoctorCard() *Card {
-	results := RunDoctorChecks(e.ctx, e.agent, e.platforms)
+	results := RunDoctorChecks(e.ctx, e.agent, e.platforms, DoctorCheckOptions{DataDir: e.dataDir})
 	report := FormatDoctorResults(results, e.i18n)
 	return NewCard().
 		Title(e.i18n.T(MsgCardTitleDoctor), "orange").
@@ -16692,7 +16696,7 @@ func (e *Engine) renderWhoamiCard(msg *Message) *Card {
 // ── /doctor command ─────────────────────────────────────────
 
 func (e *Engine) cmdDoctor(p Platform, msg *Message) {
-	results := RunDoctorChecks(e.ctx, e.agent, e.platforms)
+	results := RunDoctorChecks(e.ctx, e.agent, e.platforms, DoctorCheckOptions{DataDir: e.dataDir})
 	report := FormatDoctorResults(results, e.i18n)
 	e.reply(p, msg.ReplyCtx, report)
 }

@@ -130,7 +130,7 @@ func doctorProjectResults(ctx context.Context, cfg *config.Config, proj config.P
 	defer func() { _ = agent.Stop() }()
 
 	results = append(results, busyMessageSteerCheck(cfg, proj, agent))
-	return append(results, core.RunDoctorChecksWithPlatformResults(ctx, agent, platformResults)...)
+	return append(results, core.RunDoctorChecksWithPlatformResults(ctx, agent, platformResults, core.DoctorCheckOptions{DataDir: cfg.DataDir})...)
 }
 
 func busyMessageSteerCheck(cfg *config.Config, proj config.ProjectConfig, agent core.Agent) core.DoctorCheckResult {

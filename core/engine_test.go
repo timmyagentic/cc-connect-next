@@ -10914,8 +10914,8 @@ func TestQueueMessageForBusySession_FIFODequeue(t *testing.T) {
 	msg1 := &Message{SessionKey: key, Content: "msg1", ReplyCtx: "ctx-msg1"}
 	msg2 := &Message{SessionKey: key, Content: "msg2", ReplyCtx: "ctx-msg2"}
 
-	ok1 := e.queueMessageForBusySession(p, msg1, key)
-	ok2 := e.queueMessageForBusySession(p, msg2, key)
+	ok1 := e.queueMessageForBusySession(p, msg1, key, nil)
+	ok2 := e.queueMessageForBusySession(p, msg2, key, nil)
 
 	if !ok1 || !ok2 {
 		t.Fatal("expected both messages to be queued successfully")
@@ -10939,6 +10939,30 @@ func TestQueueMessageForBusySession_FIFODequeue(t *testing.T) {
 			state.pendingMessages[0].content, state.pendingMessages[1].content)
 	}
 	state.mu.Unlock()
+}
+
+func TestQueueMessageForBusySessionTouchesLastUserActivity(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	sess := newQueuingSession("activity-queue")
+	e := NewEngine("test", &controllableAgent{nextSession: sess}, []Platform{p}, "", LangEnglish)
+	key := "test:activity-queue"
+	state := &interactiveState{agentSession: sess, platform: p, replyCtx: "ctx"}
+	e.interactiveMu.Lock()
+	e.interactiveStates[key] = state
+	e.interactiveMu.Unlock()
+
+	session := e.sessions.GetOrCreateActive(key)
+	stale := time.Now().Add(-time.Hour)
+	session.mu.Lock()
+	session.LastUserActivity = stale
+	session.mu.Unlock()
+
+	if !e.queueMessageForBusySession(p, &Message{SessionKey: key, Content: "queued", ReplyCtx: "ctx"}, key, session) {
+		t.Fatal("expected message to be queued")
+	}
+	if got := session.GetLastUserActivity(); !got.After(stale) {
+		t.Fatalf("last user activity = %v, want after %v", got, stale)
+	}
 }
 
 func TestQueuedUserMessageStaleForDrainIgnoresOtherPendingMessages(t *testing.T) {
@@ -11804,7 +11828,7 @@ func TestQueueMessageOverflow_DropsOldestAndReturnsfalse(t *testing.T) {
 	// Fill the queue to defaultMaxQueuedMessages (5).
 	for i := 0; i < defaultMaxQueuedMessages; i++ {
 		msg := &Message{SessionKey: key, Content: fmt.Sprintf("msg-%d", i), ReplyCtx: fmt.Sprintf("ctx-%d", i)}
-		ok := e.queueMessageForBusySession(p, msg, key)
+		ok := e.queueMessageForBusySession(p, msg, key, nil)
 		if !ok {
 			t.Fatalf("expected msg-%d to be queued, got false", i)
 		}
@@ -11818,7 +11842,7 @@ func TestQueueMessageOverflow_DropsOldestAndReturnsfalse(t *testing.T) {
 
 	// The 6th message should be handled (returns true) but not queued — MsgQueueFull sent.
 	overflow := &Message{SessionKey: key, Content: "msg-overflow", ReplyCtx: "ctx-overflow"}
-	ok := e.queueMessageForBusySession(p, overflow, key)
+	ok := e.queueMessageForBusySession(p, overflow, key, nil)
 	if !ok {
 		t.Fatal("expected 6th message to be handled (queue-full reply), got false")
 	}
@@ -11846,7 +11870,7 @@ func TestQueueMessage_NoState_ReturnsFalse(t *testing.T) {
 	e := newTestEngine()
 
 	msg := &Message{SessionKey: "nonexistent:key", Content: "hello"}
-	ok := e.queueMessageForBusySession(p, msg, "nonexistent:key")
+	ok := e.queueMessageForBusySession(p, msg, "nonexistent:key", nil)
 	if ok {
 		t.Fatal("expected false when no interactive state exists")
 	}
@@ -11869,7 +11893,7 @@ func TestQueueMessage_DeadSession_ReturnsFalse(t *testing.T) {
 	e.interactiveMu.Unlock()
 
 	msg := &Message{SessionKey: key, Content: "hello"}
-	ok := e.queueMessageForBusySession(p, msg, key)
+	ok := e.queueMessageForBusySession(p, msg, key, nil)
 	if ok {
 		t.Fatal("expected false for dead session")
 	}
@@ -11894,7 +11918,7 @@ func TestQueueMessage_NilAgentSession_DuringStartup(t *testing.T) {
 	e.interactiveMu.Unlock()
 
 	msg := &Message{SessionKey: key, Content: "queued during startup", ReplyCtx: "ctx-startup"}
-	ok := e.queueMessageForBusySession(p, msg, key)
+	ok := e.queueMessageForBusySession(p, msg, key, nil)
 	if !ok {
 		t.Fatal("expected true: messages should be queueable during session startup")
 	}
