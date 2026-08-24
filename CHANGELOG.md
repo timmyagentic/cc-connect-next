@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Review hardening
+
+- `migrate --switch` now validates the full migration before stopping the
+  official daemon; credential overlap resolves `${ENV}` app IDs; Linux
+  switchover selects the detected user or system service manager.
+- A temporarily unavailable Claude Code work directory no longer prevents
+  unrelated projects from starting, and Markdown code-fence splitting always
+  stays within the platform message limit.
+- QQ Bot command buttons now route through the normal command entrypoint, and
+  Traditional Chinese `確認` / `確定` are accepted by the update flow.
+- Migration, Feishu privacy, and topic-context documentation now state their
+  real work-dir, skipped-discovery, answer-storage, and bounded-history limits.
+
 ### Natural-language updates
 
 The update flow no longer demands command syntax. The release reminder

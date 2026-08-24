@@ -18,9 +18,9 @@ cc-connect-next is an **independent successor**, not a patch, proxy, or companio
 
 An agent turn lives in **one** Card 2.0 card quoting your question, from start to finish: `⏳ thinking` → `⏳ calling tools` → `✍️ answering` (CardKit typewriter streaming) → `✅ done`. No message flooding, no stitched-together fragments — progress and the final answer evolve in a single place. The exact state machine and verification commands are specified in the [Feishu answer-card contract](feishu-card-contract.md).
 
-### 2. The privacy boundary: only anonymous counts reach the chat
+### 2. The privacy boundary: progress metadata stays minimal
 
-The card renders anonymous progress like "reasoning ×N · tools ×M" — nothing else. Reasoning text, tool names, inputs, results, model names, token counts, and working directories are dropped at **two** layers (event and render), and the card has no expandable detail panel. Your code and the agent's intermediate work never pass through Feishu's message storage.
+During progress, the card renders only anonymous counts like "reasoning ×N · tools ×M". Reasoning text, tool names, inputs, results, model names, token counts, and working directories are dropped at **two** layers (event and render), and the card has no expandable detail panel. The final answer is still sent to and stored by Feishu as the visible answer body; if that answer quotes code or a patch, that content passes through Feishu. The privacy guarantee covers hidden intermediate progress, not the answer you asked the agent to deliver.
 
 ### 3. You can steer a turn that's already running
 
@@ -52,7 +52,7 @@ The one rule: **don't let both processes consume the same Feishu app credentials
 
 ## Why the one-command migration can be trusted
 
-`cc-connect-next migrate` is not a copy-the-directory script. It inventories every persistent source of the official install (`config.toml`, the effective `data_dir`, each project-local `.cc-connect` directory), computes a **SHA-256 for every source file**, builds and verifies the complete result in sibling staging directories, and re-checks the source inventory immediately before activation — any added, deleted, changed, or re-permissioned file **fails the run closed** instead of activating an incomplete target. Activation is an atomic rename; pre-existing targets are preserved in timestamped backups, and the result ships with a `migration-manifest.json` recording every path and hash. If in doubt, start with:
+`cc-connect-next migrate` is not a copy-the-directory script. It inventories every supported and accessible persistent source of the official install (`config.toml`, the effective `data_dir`, each discovered project-local `.cc-connect` directory), computes a **SHA-256 for every inventoried source file**, builds and verifies the result in sibling staging directories, and re-checks the source inventory immediately before activation — any added, deleted, changed, or re-permissioned inventoried file **fails the run closed** instead of activating a stale target. Optional project discovery can still be skipped when state, bindings, or project directories are unreadable; the command prints every `skipped_project_discovery` entry and records it in `migration-manifest.json`. Resolve those skips and rerun before treating project-local data as complete. Activation is an atomic rename and pre-existing targets are preserved in timestamped backups. If in doubt, start with:
 
 ```bash
 cc-connect-next migrate --dry-run
@@ -68,7 +68,9 @@ To move production traffic, stop the official daemon, run a final synchronizing 
 cc-connect daemon stop
 cc-connect-next migrate --dry-run --force
 cc-connect-next migrate --force
-cc-connect-next daemon install --config ~/.cc-connect-next/config.toml
+cc-connect-next daemon install \
+  --config ~/.cc-connect-next/config.toml \
+  --work-dir /absolute/original/cwd
 ```
 
 Rollback is always two commands — the official data directory is never touched:

@@ -380,9 +380,10 @@ func (p *Platform) apiRequestJSON(method, url string, body any, result any) erro
 
 var _ core.ImageSender = (*Platform)(nil)
 
-// buttonDataPrefix is the prefix for QQ Bot keyboard button_data values.
+// buttonDataPrefix is the prefix for QQ Bot permission button_data values.
 // Format: perm:<decision>:<session_key>
 const buttonDataPrefix = "perm:"
+const commandButtonDataPrefix = "cmd:"
 
 // SendFile uploads and sends a file via QQ Bot rich media API.
 // Implements core.FileSender.
@@ -441,10 +442,16 @@ func (p *Platform) SendWithButtons(ctx context.Context, replyCtx any, content st
 	for i, row := range buttons {
 		var btns []map[string]any
 		for j, btn := range row {
-			// Encode decision + session key into button_data so we can route
+			// Encode action + session key into button_data so we can route
 			// the INTERACTION_CREATE event back to the right session.
-			// btn.Data is already "perm:allow", "perm:deny", or "perm:allow_all"
+			// btn.Data is already a "perm:" decision or a "cmd:" command.
 			buttonData := btn.Data + ":" + sessionKey
+			groupID := "action"
+			if strings.HasPrefix(btn.Data, buttonDataPrefix) {
+				groupID = "perm"
+			} else if strings.HasPrefix(btn.Data, commandButtonDataPrefix) {
+				groupID = "cmd"
+			}
 
 			btnID := fmt.Sprintf("b_%d_%d", i, j)
 			visitedLabel := "已操作"
@@ -471,7 +478,7 @@ func (p *Platform) SendWithButtons(ctx context.Context, replyCtx any, content st
 					"permission":  map[string]int{"type": 2},
 					"click_limit": 1,
 				},
-				"group_id": "perm",
+				"group_id": groupID,
 			})
 		}
 		rows = append(rows, map[string]any{"buttons": btns})
@@ -1041,8 +1048,8 @@ func (p *Platform) handleDispatch(eventType string, data json.RawMessage) {
 // handleInteractionCreate handles inline keyboard button click events.
 // When a user clicks a button on a message with keyboard, QQ Bot dispatches
 // an INTERACTION_CREATE event. This method parses the button_data to extract
-// the permission decision and session key, then creates a synthetic message
-// so the engine can process it as a permission response.
+// the permission decision or command and session key, then creates a synthetic
+// message so the engine applies the same permission/command gates as text.
 func (p *Platform) handleInteractionCreate(data json.RawMessage) {
 	var d struct {
 		ID                string `json:"id"`
@@ -1071,38 +1078,10 @@ func (p *Platform) handleInteractionCreate(data json.RawMessage) {
 	// ACK the interaction (required by QQ Bot API to prevent "请求超时" on buttons)
 	_ = p.ackInteraction(d.ID)
 
-	// Parse button_data: perm:<decision>:<session_key>
 	buttonData := d.Data.Resolved.ButtonData
-	if !strings.HasPrefix(buttonData, buttonDataPrefix) {
+	responseText, sessionKey, permissionResponse, ok := parseInteractionButtonData(buttonData)
+	if !ok {
 		slog.Debug("qqbot: unknown interaction button_data format", "data", buttonData)
-		return
-	}
-
-	rest := strings.TrimPrefix(buttonData, buttonDataPrefix)
-	// rest = "<decision>:<session_key>"
-	colonIdx := strings.Index(rest, ":")
-	if colonIdx < 0 {
-		slog.Warn("qqbot: invalid interaction button_data", "data", buttonData)
-		return
-	}
-	decision := rest[:colonIdx]
-	sessionKey := rest[colonIdx+1:]
-	if decision == "" || sessionKey == "" {
-		slog.Warn("qqbot: empty decision or session_key in button_data", "data", buttonData)
-		return
-	}
-
-	// Map decision to response text the engine understands
-	var responseText string
-	switch decision {
-	case "allow":
-		responseText = "allow"
-	case "deny":
-		responseText = "deny"
-	case "allow_all":
-		responseText = "allow all"
-	default:
-		slog.Warn("qqbot: unknown interaction decision", "decision", decision)
 		return
 	}
 
@@ -1130,7 +1109,7 @@ func (p *Platform) handleInteractionCreate(data json.RawMessage) {
 		return
 	}
 
-	// Create synthetic message and forward to engine as a permission response
+	// Create a synthetic message and forward through the regular engine entry.
 	msg := &core.Message{
 		SessionKey:           sessionKey,
 		Platform:             "qqbot",
@@ -1138,12 +1117,55 @@ func (p *Platform) handleInteractionCreate(data json.RawMessage) {
 		UserID:               userID,
 		Content:              responseText,
 		ReplyCtx:             rctx,
-		IsPermissionResponse: true,
+		IsPermissionResponse: permissionResponse,
 	}
 
-	slog.Debug("qqbot: forwarding button click as permission response",
-		"decision", decision, "session_key", sessionKey, "chat_type", d.ChatType)
+	slog.Debug("qqbot: forwarding button click",
+		"content", responseText, "permission_response", permissionResponse,
+		"session_key", sessionKey, "chat_type", d.ChatType)
 	p.handler(p, msg)
+}
+
+func parseInteractionButtonData(buttonData string) (content, sessionKey string, permissionResponse, ok bool) {
+	prefix := ""
+	switch {
+	case strings.HasPrefix(buttonData, buttonDataPrefix):
+		prefix = buttonDataPrefix
+		permissionResponse = true
+	case strings.HasPrefix(buttonData, commandButtonDataPrefix):
+		prefix = commandButtonDataPrefix
+	default:
+		return "", "", false, false
+	}
+
+	rest := strings.TrimPrefix(buttonData, prefix)
+	separator := strings.Index(rest, ":qqbot:")
+	if separator < 0 {
+		return "", "", false, false
+	}
+	payload := strings.TrimSpace(rest[:separator])
+	sessionKey = rest[separator+1:]
+	if payload == "" || sessionKey == "" {
+		return "", "", false, false
+	}
+
+	if !permissionResponse {
+		if !strings.HasPrefix(payload, "/") {
+			return "", "", false, false
+		}
+		return payload, sessionKey, false, true
+	}
+
+	switch payload {
+	case "allow":
+		return "allow", sessionKey, true, true
+	case "deny":
+		return "deny", sessionKey, true, true
+	case "allow_all":
+		return "allow all", sessionKey, true, true
+	default:
+		return "", "", false, false
+	}
 }
 
 // ackInteraction acknowledges an INTERACTION_CREATE event.

@@ -140,10 +140,7 @@ func systemdServiceEnabled(p officialProbe, unit string) bool {
 	if p.RunCommand == nil {
 		return true
 	}
-	args := []string{"is-enabled", "cc-connect.service"}
-	if strings.Contains(unit, "/.config/systemd/user/") {
-		args = append([]string{"--user"}, args...)
-	}
+	args := officialSystemctlArgs(unit, "is-enabled")
 	out, err := p.RunCommand("systemctl", args...)
 	if err != nil {
 		return true // cannot tell → treat as armed; drives warnings only
@@ -152,6 +149,7 @@ func systemdServiceEnabled(p officialProbe, unit string) bool {
 }
 
 var appIDRe = regexp.MustCompile(`(?m)^\s*app_id\s*=\s*"([^"]+)"`)
+var officialEnvPlaceholderRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // readOfficialAppIDs collects platform credential IDs from the official
 // config. Values are compared, hashed, or redacted — never echoed whole.
@@ -166,11 +164,34 @@ func readOfficialAppIDs(home string) []string {
 func extractAppIDs(configTOML string) []string {
 	var ids []string
 	for _, m := range appIDRe.FindAllStringSubmatch(configTOML, -1) {
-		if m[1] != "" {
-			ids = append(ids, m[1])
+		if resolved, ok := resolveOfficialConfigEnv(m[1]); ok {
+			ids = append(ids, resolved)
 		}
 	}
 	return ids
+}
+
+func resolveOfficialConfigEnv(raw string) (string, bool) {
+	missing := false
+	resolved := officialEnvPlaceholderRe.ReplaceAllStringFunc(raw, func(token string) string {
+		match := officialEnvPlaceholderRe.FindStringSubmatch(token)
+		value, ok := os.LookupEnv(match[1])
+		if !ok || value == "" {
+			missing = true
+			return ""
+		}
+		return value
+	})
+	resolved = strings.TrimSpace(resolved)
+	return resolved, !missing && resolved != ""
+}
+
+func officialSystemctlArgs(servicePath, action string) []string {
+	manager := "--system"
+	if strings.Contains(servicePath, "/.config/systemd/user/") {
+		manager = "--user"
+	}
+	return []string{manager, action, "cc-connect.service"}
 }
 
 // extractAppIDsFromConfigFile reads credential IDs from a config file on
@@ -376,7 +397,7 @@ func runOfficialSwitchover(p officialProbe, st officialInstallState, out func(fo
 				_, _ = p.RunCommand("launchctl", "bootout", fmt.Sprintf("gui/%d/%s", p.UID, officialServiceLabel))
 			case "linux":
 				out("Stopping the official daemon via systemctl…\n")
-				_, _ = p.RunCommand("systemctl", "--user", "stop", "cc-connect.service")
+				_, _ = p.RunCommand("systemctl", officialSystemctlArgs(st.ServicePath, "stop")...)
 			}
 		}
 	}
@@ -390,7 +411,7 @@ func runOfficialSwitchover(p officialProbe, st officialInstallState, out func(fo
 			}
 		case "linux":
 			out("Disabling the official service autostart (systemctl disable)…\n")
-			if _, err := p.RunCommand("systemctl", "--user", "disable", "cc-connect.service"); err != nil {
+			if _, err := p.RunCommand("systemctl", officialSystemctlArgs(st.ServicePath, "disable")...); err != nil {
 				return fmt.Errorf("disable official systemd service: %w (disable it manually, then rerun)", err)
 			}
 		default:

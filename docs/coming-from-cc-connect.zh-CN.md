@@ -18,9 +18,9 @@ cc-connect-next 是一个**独立后继**，不是补丁、代理或伴生插件
 
 一次 Agent 回合从头到尾停留在**同一张**引用你提问的 Card 2.0 卡片里：`⏳ 正在思考` → `⏳ 正在调用工具` → `✍️ 正在回答`（CardKit 打字机流式）→ `✅ 已完成`。不刷屏、不拼接多条消息，最终答案和中间进度在同一个位置演进。精确的状态机和验证命令写在[飞书回答卡片契约](feishu-card-contract.md)里。
 
-### 2. 隐私边界：聊天里只有匿名计数
+### 2. 隐私边界：进度元数据保持最小化
 
-卡片上只渲染"推理 N 次 · 工具 M 次"这样的匿名进度。推理文本、工具名称、参数、结果、模型名、token 数、工作目录，在事件层和渲染层**两层**被丢弃，卡片也没有可展开的详情面板。你的代码和 Agent 的中间过程不会经过飞书的消息存储。
+处理中，卡片只渲染“推理 N 次 · 工具 M 次”这样的匿名进度。推理文本、工具名称、参数、结果、模型名、token 数、工作目录，在事件层和渲染层**两层**被丢弃，卡片也没有可展开的详情面板。最终回答仍会作为可见正文发送并存储在飞书；如果回答引用了代码或 patch，这些内容也会经过飞书。这里的隐私保证针对隐藏的中间过程，不包括你要求 Agent 交付的最终答案。
 
 ### 3. 任务跑着的时候，可以直接补一句
 
@@ -52,7 +52,7 @@ cc-connect-next 是一个**独立后继**，不是补丁、代理或伴生插件
 
 ## 一键迁移为什么敢用
 
-`cc-connect-next migrate` 不是"复制目录"脚本。它先清点官方安装的全部持久化来源（`config.toml`、生效的 `data_dir`、每个项目本地的 `.cc-connect` 目录），对**每个源文件计算 SHA-256**，在旁路暂存目录构建并验证完整结果，激活前重新核对源清单——任何新增、删除、内容或权限变化都会**拒绝激活**而不是产出半成品。激活是原子重命名，已存在的目标先做带时间戳的备份，结果附带记录每个路径与哈希的 `migration-manifest.json`。担心的话，先跑：
+`cc-connect-next migrate` 不是“复制目录”脚本。它先清点官方安装中受支持且当前可访问的持久化来源（`config.toml`、生效的 `data_dir`、已发现的项目本地 `.cc-connect` 目录），对**清点到的每个源文件计算 SHA-256**，在旁路暂存目录构建并验证结果，激活前重新核对源清单——清单内任何新增、删除、内容或权限变化都会**拒绝激活**。如果项目状态、binding 或项目目录不可读，可选项目发现仍可能被跳过；命令会打印每条 `skipped_project_discovery` 并写入 `migration-manifest.json`。必须先解决这些跳过项并重跑，才能把项目本地数据视为完整。激活采用原子重命名，已有目标会先做带时间戳的备份。担心的话，先跑：
 
 ```bash
 cc-connect-next migrate --dry-run
@@ -68,7 +68,9 @@ cc-connect-next migrate --dry-run
 cc-connect daemon stop
 cc-connect-next migrate --dry-run --force
 cc-connect-next migrate --force
-cc-connect-next daemon install --config ~/.cc-connect-next/config.toml
+cc-connect-next daemon install \
+  --config ~/.cc-connect-next/config.toml \
+  --work-dir /原运行目录的绝对路径
 ```
 
 回滚永远只有两条命令，官方数据目录从头到尾没有被动过：

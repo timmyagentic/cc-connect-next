@@ -84,18 +84,7 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 		}
 		return true
 	}
-	if *switchOver {
-		// The final sync must read a quiet source, so the official daemon is
-		// stopped and disarmed before any migration work starts.
-		probe := defaultOfficialProbe()
-		if err := runOfficialSwitchover(probe, probeOfficialInstall(probe), writeStdout); err != nil {
-			_, _ = fmt.Fprintf(stderr, "migrate: switchover: %v\n", err)
-			return 1
-		}
-		*force = true
-	}
-
-	report, err := migrateLegacyDataWithOptions(migrationOptions{
+	migrationOpts := migrationOptions{
 		Source:             expandMigrationPath(*source, home),
 		Target:             expandMigrationPath(*target, home),
 		Home:               home,
@@ -104,7 +93,17 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 		Force:              *force,
 		DryRun:             *dryRun,
 		IncludeProjectData: !*skipProjectData,
-	})
+	}
+	if *switchOver {
+		probe := defaultOfficialProbe()
+		migrationOpts, err = prepareAndRunOfficialSwitchover(migrationOpts, probe, writeStdout)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "migrate: switchover: %v\n", err)
+			return 1
+		}
+	}
+
+	report, err := migrateLegacyDataWithOptions(migrationOpts)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "migrate: %v\n", err)
 		return 1
@@ -203,6 +202,21 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return 0
+}
+
+// prepareAndRunOfficialSwitchover validates the entire final migration before
+// touching the official service. The real migration prepares again after the
+// daemon is quiet, so source changes between preflight and cutover still fail
+// closed instead of being activated from a stale plan.
+func prepareAndRunOfficialSwitchover(opts migrationOptions, probe officialProbe, out func(format string, args ...any) bool) (migrationOptions, error) {
+	opts.Force = true
+	if _, err := prepareLegacyMigration(opts); err != nil {
+		return opts, fmt.Errorf("migration preflight: %w", err)
+	}
+	if err := runOfficialSwitchover(probe, probeOfficialInstall(probe), out); err != nil {
+		return opts, err
+	}
+	return opts, nil
 }
 
 func migrateLegacyData(source, target string, force, dryRun bool) (migrationReport, error) {

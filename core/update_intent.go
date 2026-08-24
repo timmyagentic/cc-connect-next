@@ -68,7 +68,7 @@ var (
 		`|^(?:请|麻烦|帮我|给我)?(?:更新|升级)(?:一下)? ?(?:你自己|机器人|bot|cc-?connect(?:-?next)?)(?:吧|呗)?$` +
 		`|^(?:update|upgrade) ?(?:yourself|cc-?connect(?:-?next)?|the bot)$`)
 
-	updateConfirmRe = regexp.MustCompile(`^(?:确认|确定|是的|是|好的|好|嗯|可以|行|安装|开始吧|yes|y|ok|okay|confirm|sure|do it|go ahead)$`)
+	updateConfirmRe = regexp.MustCompile(`^(?:确认|确定|確認|確定|是的|是|好的|好|嗯|可以|行|安装|开始吧|yes|y|ok|okay|confirm|sure|do it|go ahead)$`)
 )
 
 // matchUpdateIntent classifies a message. It requires the whole (normalized)

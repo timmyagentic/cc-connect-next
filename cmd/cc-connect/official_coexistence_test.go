@@ -319,3 +319,84 @@ other = "app_id = \"cli_not_a_key\""
 		t.Fatalf("extractAppIDs = %v, want [cli_a cli_b]", got)
 	}
 }
+
+func TestExtractAppIDs_ResolvesEnvironmentPlaceholders(t *testing.T) {
+	t.Setenv("FEISHU_APP_ID", "cli_from_environment")
+	ids := extractAppIDs(`
+app_id = "${FEISHU_APP_ID}"
+app_id = "cli_literal"
+`)
+	got := dedupeSorted(ids)
+	if len(got) != 2 || got[0] != "cli_from_environment" || got[1] != "cli_literal" {
+		t.Fatalf("extractAppIDs = %v, want resolved environment ID plus literal", got)
+	}
+}
+
+func TestExtractAppIDs_OmitsUnsetEnvironmentPlaceholders(t *testing.T) {
+	const envName = "CC_NEXT_TEST_UNSET_OFFICIAL_APP_ID"
+	t.Setenv(envName, "")
+	ids := extractAppIDs(`app_id = "${` + envName + `}"`)
+	if len(ids) != 0 {
+		t.Fatalf("extractAppIDs = %v, want unresolved/empty ID omitted", ids)
+	}
+}
+
+func TestPrepareAndRunOfficialSwitchover_PreflightsBeforeCommands(t *testing.T) {
+	root := t.TempDir()
+	var commands []string
+	p := testProbe(root)
+	p.RunCommand = func(name string, args ...string) (string, error) {
+		commands = append(commands, name+" "+strings.Join(args, " "))
+		return "", nil
+	}
+
+	_, err := prepareAndRunOfficialSwitchover(migrationOptions{
+		Source:             filepath.Join(root, "missing-source"),
+		Target:             filepath.Join(root, "target"),
+		Home:               root,
+		IncludeProjectData: true,
+	}, p, func(string, ...any) bool { return true })
+	if err == nil || !strings.Contains(err.Error(), "preflight") {
+		t.Fatalf("prepareAndRunOfficialSwitchover() error = %v, want preflight failure", err)
+	}
+	if len(commands) != 0 {
+		t.Fatalf("preflight failure ran service commands: %v", commands)
+	}
+}
+
+func TestRunOfficialSwitchover_SelectsSystemdManager(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		servicePath string
+		managerFlag string
+	}{
+		{name: "user unit", servicePath: "/home/demo/.config/systemd/user/cc-connect.service", managerFlag: "--user"},
+		{name: "system unit", servicePath: "/etc/systemd/system/cc-connect.service", managerFlag: "--system"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			var commands []string
+			p := testProbe(root)
+			p.GOOS = "linux"
+			p.RunCommand = func(name string, args ...string) (string, error) {
+				commands = append(commands, name+" "+strings.Join(args, " "))
+				return "", nil
+			}
+			st := officialInstallState{
+				Running:           true,
+				ServiceRegistered: true,
+				ServicePath:       tt.servicePath,
+			}
+			if err := runOfficialSwitchover(p, st, func(string, ...any) bool { return true }); err != nil {
+				t.Fatalf("runOfficialSwitchover() error: %v", err)
+			}
+			joined := strings.Join(commands, "\n")
+			for _, action := range []string{"stop", "disable"} {
+				want := "systemctl " + tt.managerFlag + " " + action + " cc-connect.service"
+				if !strings.Contains(joined, want) {
+					t.Fatalf("commands missing %q:\n%s", want, joined)
+				}
+			}
+		})
+	}
+}

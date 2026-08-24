@@ -492,7 +492,18 @@ func SplitMessageCodeFenceAware(text string, maxLen int) []string {
 
 	for _, line := range lines {
 		lineRunes := []rune(line)
-		limit := effectiveLimit()
+		trimmed := strings.TrimSpace(line)
+		isFenceLine := strings.HasPrefix(trimmed, "```")
+		lineLimit := func() int {
+			limit := effectiveLimit()
+			// An opening fence changes the state only after this line is added.
+			// Reserve its synthetic closing fence now, before the fit decision.
+			if openFence == "" && isFenceLine {
+				limit -= closingFenceLen
+			}
+			return limit
+		}
+		limit := lineLimit()
 
 		// Fast path: line fits in the current chunk.
 		if currentLen+len(lineRunes)+1 <= limit {
@@ -501,7 +512,7 @@ func SplitMessageCodeFenceAware(text string, maxLen int) []string {
 		} else {
 			// Line doesn't fit; flush and try again with a fresh chunk.
 			flush()
-			limit = effectiveLimit()
+			limit = lineLimit()
 
 			if currentLen+len(lineRunes)+1 <= limit {
 				// Fits after flush.
@@ -512,7 +523,7 @@ func SplitMessageCodeFenceAware(text string, maxLen int) []string {
 				// rune boundaries, flushing between parts as needed.
 				remaining := lineRunes
 				for len(remaining) > 0 {
-					limit = effectiveLimit()
+					limit = lineLimit()
 					// avail = how many runes we can add to current.
 					// Since currentLen = actual_runes + 1, actual_runes = currentLen - 1,
 					// and a new part adds 1 joining \n plus its own runes:
@@ -522,7 +533,7 @@ func SplitMessageCodeFenceAware(text string, maxLen int) []string {
 					if avail <= 0 {
 						// Shouldn't happen after flush, but guard against it.
 						flush()
-						limit = effectiveLimit()
+						limit = lineLimit()
 						avail = limit - currentLen
 					}
 					if avail > len(remaining) {
@@ -539,7 +550,6 @@ func SplitMessageCodeFenceAware(text string, maxLen int) []string {
 		}
 
 		// Track code fence state after processing the line.
-		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "```") {
 			if openFence != "" {
 				openFence = ""
