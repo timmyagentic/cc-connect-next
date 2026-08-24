@@ -170,7 +170,9 @@ func (p *Platform) handleEvent(evt socketmode.Event) {
 		}
 		slog.Debug("slack: EventsAPI event", "outer_type", data.Type, "inner_type", data.InnerEvent.Type)
 		if evt.Request != nil {
-			p.socket.Ack(*evt.Request)
+			if err := p.socket.Ack(*evt.Request); err != nil {
+				slog.Warn("slack: acknowledge Events API request", "error", err)
+			}
 		}
 
 		if data.Type == slackevents.CallbackEvent {
@@ -268,7 +270,11 @@ func (p *Platform) handleEvent(evt socketmode.Event) {
 				sessionKey := p.buildSessionKey(ev.Channel, ev.User, threadTS)
 				ts := ev.TimeStamp
 
-				images, audio, docFiles := p.processSlackFileShares(ev.Files)
+				var shareFiles []slackevents.File
+				if cb, ok := data.Data.(*slackevents.EventsAPICallbackEvent); ok {
+					shareFiles = parseSlackInnerEventFiles(cb.InnerEvent)
+				}
+				images, audio, docFiles := p.processSlackFileShares(shareFiles)
 
 				if ev.Text == "" && len(images) == 0 && audio == nil && len(docFiles) == 0 {
 					return
@@ -293,7 +299,9 @@ func (p *Platform) handleEvent(evt socketmode.Event) {
 			return
 		}
 		if evt.Request != nil {
-			p.socket.Ack(*evt.Request)
+			if err := p.socket.Ack(*evt.Request); err != nil {
+				slog.Warn("slack: acknowledge slash command", "error", err)
+			}
 		}
 
 		if !core.AllowList(p.allowFrom, cmd.UserID) {
@@ -337,8 +345,8 @@ func stripAppMentionText(text string) string {
 }
 
 // parseSlackInnerEventFiles extracts the files array from a raw Events API inner
-// event. AppMentionEvent is unmarshaled without a Files field in slack-go, but
-// Slack still includes "files" in the JSON when a mention is sent with uploads.
+// event. This keeps app mentions and messages on one representation even when
+// slack-go normalizes a message's files under Message rather than MessageEvent.
 func parseSlackInnerEventFiles(raw *json.RawMessage) []slackevents.File {
 	if raw == nil || len(*raw) == 0 {
 		return nil
@@ -504,7 +512,7 @@ func (p *Platform) SendImage(ctx context.Context, rctx any, img core.ImageAttach
 		name = "image.png"
 	}
 
-	_, err := p.client.UploadFileV2Context(ctx, slack.UploadFileV2Parameters{
+	_, err := p.client.UploadFileContext(ctx, slack.UploadFileParameters{
 		Reader:          bytes.NewReader(img.Data),
 		FileSize:        len(img.Data),
 		Filename:        name,
@@ -545,7 +553,7 @@ func (p *Platform) SendFile(ctx context.Context, rctx any, file core.FileAttachm
 		name = "attachment"
 	}
 
-	_, err := p.client.UploadFileV2Context(ctx, slack.UploadFileV2Parameters{
+	_, err := p.client.UploadFileContext(ctx, slack.UploadFileParameters{
 		Reader:          bytes.NewReader(file.Data),
 		FileSize:        len(file.Data),
 		Filename:        name,
@@ -570,7 +578,7 @@ func (p *Platform) downloadSlackFile(url string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s", core.RedactToken(err.Error(), p.botToken))
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Check if we got an unexpected status code (e.g., redirect to login page)
 	if resp.StatusCode != http.StatusOK {

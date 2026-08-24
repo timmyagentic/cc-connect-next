@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+## v0.1.6 (2026-08-24)
+
+Stable release focused on Codex app-server isolation, safer migration and
+update flows, session/runtime correctness, and a clean security and quality
+baseline for both Go and Web dependencies.
+
+See `changelogs/v0.1.6.md` for the bilingual release notes.
+
+### Codex app-server correctness
+
+- Native subagent thread, turn, item, error, token-usage, approval, and
+  request-user-input traffic is isolated from the parent turn, preventing
+  child work from leaking into or prematurely completing the parent reply.
+- Interactive requests owned by another turn are rejected with a bounded
+  write; a blocked rejection aborts the transport instead of wedging the
+  app-server read loop.
+- `model_context_window` is now a first-class Codex option and reaches both
+  exec and app-server backends.
+
+### Session and runtime correctness
+
+- All declared session state, including the active provider and last user
+  activity, survives persistence and restart.
+- Provider selection and attachment staging now use shared implementations
+  across agents, reducing divergent edge cases.
+- Cron and timer jobs share one shell-execution path, including the documented
+  `timeout = 0` no-timeout behavior.
+- Turn handling is split into a dedicated processor without changing the
+  public engine contract, and superseded Web/session surfaces were removed.
+
+### Security and release quality
+
+- The build baseline is Go 1.25.13, with `golang.org/x/crypto`, `x/net`,
+  `x/sys`, `x/term`, `x/text`, `gorilla/websocket`, and `slack-go` upgraded;
+  Slack file events and uploads now use the current SDK contracts.
+- Vite, PostCSS, React Router, and transitive Web dependencies were upgraded;
+  the production audit has no known advisories and the full audit has no
+  high or critical findings.
+- The pnpm workspace build-script allowlist now uses valid YAML and permits
+  the required esbuild install step without mutating project configuration.
+- The full golangci-lint configuration passes with zero findings; no linter
+  was disabled or excluded to create the baseline.
+
 ### Review hardening
 
 - `migrate --switch` now validates the full migration before stopping the

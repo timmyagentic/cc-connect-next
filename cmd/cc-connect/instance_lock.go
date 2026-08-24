@@ -12,8 +12,8 @@ import (
 // InstanceLock provides a file-based exclusive lock to prevent multiple
 // cc-connect-next instances with the same config from running simultaneously.
 type InstanceLock struct {
-	file    *os.File
-	path    string
+	file     *os.File
+	path     string
 	acquired bool
 }
 
@@ -47,7 +47,7 @@ func AcquireInstanceLock(configPath string) (*InstanceLock, error) {
 	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if err != nil {
 		// Lock is held by another process
-		f.Close()
+		_ = f.Close()
 
 		// Try to read PID from lock file for better error message
 		pid := readPIDFromLockFile(lockPath)
@@ -61,7 +61,11 @@ func AcquireInstanceLock(configPath string) (*InstanceLock, error) {
 	pid := os.Getpid()
 	_ = f.Truncate(0)
 	_, _ = f.Seek(0, 0)
-	fmt.Fprintf(f, "%d\n", pid)
+	if _, err := fmt.Fprintf(f, "%d\n", pid); err != nil {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+		return nil, fmt.Errorf("write instance lock PID: %w", err)
+	}
 
 	return &InstanceLock{
 		file:     f,
@@ -80,7 +84,7 @@ func (l *InstanceLock) Release() {
 	if l.file != nil {
 		_ = l.file.Truncate(0)
 		_ = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
-		l.file.Close()
+		_ = l.file.Close()
 		l.file = nil
 	}
 

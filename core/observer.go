@@ -202,7 +202,11 @@ func (o *sessionObserver) tailFile(ctx context.Context, path string, offset int6
 	if err != nil {
 		return offset
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("observer: close session file failed", "path", path, "error", err)
+		}
+	}()
 
 	info, err := f.Stat()
 	if err != nil || info.Size() <= offset {

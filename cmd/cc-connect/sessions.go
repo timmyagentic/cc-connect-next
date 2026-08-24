@@ -17,12 +17,12 @@ import (
 // sessionFileData mirrors the unexported sessionSnapshot in core/session.go
 // for JSON deserialization of session files.
 type sessionFileData struct {
-	Sessions      map[string]*sessionData    `json:"sessions"`
-	ActiveSession map[string]string          `json:"active_session"`
-	UserSessions  map[string][]string        `json:"user_sessions"`
-	Counter       int64                      `json:"counter"`
-	SessionNames  map[string]string          `json:"session_names,omitempty"`
-	UserMeta      map[string]*userMetaData   `json:"user_meta,omitempty"`
+	Sessions      map[string]*sessionData  `json:"sessions"`
+	ActiveSession map[string]string        `json:"active_session"`
+	UserSessions  map[string][]string      `json:"user_sessions"`
+	Counter       int64                    `json:"counter"`
+	SessionNames  map[string]string        `json:"session_names,omitempty"`
+	UserMeta      map[string]*userMetaData `json:"user_meta,omitempty"`
 }
 
 type userMetaData struct {
@@ -248,9 +248,12 @@ func runSessionsList(dataDir string) {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "#\tProject\tPlatform\tUser\tGroup/Chat\tMsgs\tLast Activity")
+	if _, err := fmt.Fprintln(w, "#\tProject\tPlatform\tUser\tGroup/Chat\tMsgs\tLast Activity"); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: write session header: %v\n", err)
+		return
+	}
 	for i, r := range records {
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%d\t%s\n",
+		if _, err := fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%d\t%s\n",
 			i+1,
 			r.Project,
 			r.Platform,
@@ -258,9 +261,14 @@ func runSessionsList(dataDir string) {
 			displayGroupTrunc(r, 30),
 			r.Messages,
 			r.LastActive.Format("2006-01-02 15:04"),
-		)
+		); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: write session row: %v\n", err)
+			return
+		}
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: flush sessions: %v\n", err)
+	}
 }
 
 func runSessionsShow(dataDir, id string, limit int) {

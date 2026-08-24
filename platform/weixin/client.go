@@ -103,7 +103,7 @@ func (c *apiClient) post(ctx context.Context, endpoint string, body []byte, time
 	if err != nil {
 		return nil, fmt.Errorf("weixin: %s: %w", label, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxIlinkHTTPResponseBody+1))
 	if err != nil {
 		return nil, fmt.Errorf("weixin: %s: read body: %w", label, err)

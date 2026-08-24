@@ -200,11 +200,11 @@ func (m sessionsModel) buildTable() table.Model {
 func (m sessionsModel) calcColumns() []table.Column {
 	// Fixed-width columns
 	const (
-		colNum       = 4
-		colMsgs      = 6
-		colLastTime  = 19
-		fixedTotal   = colNum + colMsgs + colLastTime // 29
-		separators   = 7                               // padding between 7 columns
+		colNum      = 4
+		colMsgs     = 6
+		colLastTime = 19
+		fixedTotal  = colNum + colMsgs + colLastTime // 29
+		separators  = 7                              // padding between 7 columns
 	)
 
 	remaining := m.width - fixedTotal - separators
@@ -305,7 +305,7 @@ func renderDetailContent(record sessionRecord) string {
 			}
 		}
 
-		b.WriteString(fmt.Sprintf("%s  %s  %s\n", timeStr, roleTag, strings.Join(contentParts, "\n")))
+		fmt.Fprintf(&b, "%s  %s  %s\n", timeStr, roleTag, strings.Join(contentParts, "\n"))
 	}
 
 	return b.String()

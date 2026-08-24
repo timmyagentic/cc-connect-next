@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/gorilla/websocket"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 // ============================================================================
@@ -923,7 +923,7 @@ func TestSendWPSMessage_Success(t *testing.T) {
 	var gotBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth2/token" {
-			json.NewEncoder(w).Encode(tokenResponse{AccessToken: "test-token-123", ExpiresIn: 7200})
+			_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "test-token-123", ExpiresIn: 7200})
 			return
 		}
 		if r.URL.Path == "/v7/messages/create" {
@@ -932,7 +932,7 @@ func TestSendWPSMessage_Success(t *testing.T) {
 				t.Errorf("expected Bearer token, got %s", r.Header.Get("Authorization"))
 			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"code": "0"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"code": "0"})
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -1058,7 +1058,7 @@ func TestSendWPSMessage_CleanReply(t *testing.T) {
 	var gotBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth2/token" {
-			json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
+			_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
 			return
 		}
 		if r.URL.Path == "/v7/messages/create" {
@@ -1084,7 +1084,9 @@ func TestSendWPSMessage_CleanReply(t *testing.T) {
 	}
 
 	var req sendMessageRequest
-	json.Unmarshal(gotBody, &req)
+	if err := json.Unmarshal(gotBody, &req); err != nil {
+		t.Fatalf("decode send request: %v", err)
+	}
 	if req.Content.Text.Content != "ok" {
 		t.Fatalf("expected cleaned content 'ok', got %q", req.Content.Text.Content)
 	}
@@ -1102,12 +1104,12 @@ func TestSendWPSMessage_EmptyContent(t *testing.T) {
 func TestSendWPSMessage_ApiError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth2/token" {
-			json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
+			_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
 			return
 		}
 		if r.URL.Path == "/v7/messages/create" {
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte(`{"code":"403"}`))
+			_, _ = w.Write([]byte(`{"code":"403"}`))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -1138,7 +1140,7 @@ func TestGetToken_PrimaryEndpoint(t *testing.T) {
 	var hitPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hitPath = r.URL.Path
-		json.NewEncoder(w).Encode(tokenResponse{AccessToken: "primary-tok", ExpiresIn: 3600})
+		_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "primary-tok", ExpiresIn: 3600})
 	}))
 	defer srv.Close()
 
@@ -1169,7 +1171,7 @@ func TestGetToken_FallbackEndpoint(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		json.NewEncoder(w).Encode(tokenResponse{AccessToken: "fallback-tok", ExpiresIn: 7200})
+		_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "fallback-tok", ExpiresIn: 7200})
 	}))
 	defer srv.Close()
 
@@ -1196,7 +1198,7 @@ func TestGetToken_Cached(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		json.NewEncoder(w).Encode(tokenResponse{AccessToken: "cached-tok", ExpiresIn: 7200})
+		_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "cached-tok", ExpiresIn: 7200})
 	}))
 	defer srv.Close()
 
@@ -1259,7 +1261,7 @@ func TestAddReaction(t *testing.T) {
 	var gotBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth2/token" {
-			json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
+			_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
 			return
 		}
 		gotPath = r.URL.Path
@@ -1289,7 +1291,9 @@ func TestAddReaction(t *testing.T) {
 	}
 
 	var req reactionRequest
-	json.Unmarshal(gotBody, &req)
+	if err := json.Unmarshal(gotBody, &req); err != nil {
+		t.Fatalf("decode reaction request: %v", err)
+	}
 	if req.ReactionType != "emoji_busy" {
 		t.Fatalf("expected emoji_busy, got %s", req.ReactionType)
 	}
@@ -1299,7 +1303,7 @@ func TestDeleteReaction(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth2/token" {
-			json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
+			_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
 			return
 		}
 		gotPath = r.URL.Path
@@ -1331,7 +1335,7 @@ func TestDeleteReaction(t *testing.T) {
 func TestAddReaction_Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth2/token" {
-			json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
+			_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
 			return
 		}
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -1362,7 +1366,7 @@ func TestStartTyping(t *testing.T) {
 	var addCalled atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth2/token" {
-			json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
+			_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
 			return
 		}
 		if strings.Contains(r.URL.Path, "reactions/create") {
@@ -1419,7 +1423,7 @@ func TestAddDoneReaction(t *testing.T) {
 	var delCalled atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/oauth2/token" {
-			json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
+			_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "tok", ExpiresIn: 7200})
 			return
 		}
 		if strings.Contains(r.URL.Path, "reactions/delete") {
@@ -1486,7 +1490,7 @@ func TestWebSocketIntegration_ReceiveEvent(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// Build encrypted event
 		payload := map[string]any{
@@ -1497,10 +1501,16 @@ func TestWebSocketIntegration_ReceiveEvent(t *testing.T) {
 		}
 		event := encryptEventForTest(appID, appSecret, "kso.app_chat.message", "create", payload)
 		frameData, _ := json.Marshal(event)
-		conn.WriteMessage(websocket.TextMessage, frameData)
+		if err := conn.WriteMessage(websocket.TextMessage, frameData); err != nil {
+			t.Errorf("write websocket event: %v", err)
+			return
+		}
 
 		// Wait for ACK
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Errorf("set websocket deadline: %v", err)
+			return
+		}
 		_, _, _ = conn.ReadMessage()
 	}))
 	defer wsSrv.Close()

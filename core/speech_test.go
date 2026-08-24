@@ -55,7 +55,7 @@ func TestGeminiSTT_Transcribe_Success(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"candidates": []map[string]any{
 				{
 					"content": map[string]any{
@@ -65,7 +65,9 @@ func TestGeminiSTT_Transcribe_Success(t *testing.T) {
 					},
 				},
 			},
-		})
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -88,13 +90,18 @@ func TestGeminiSTT_Transcribe_Success(t *testing.T) {
 func TestGeminiSTT_Transcribe_WithLanguage(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&gotBody)
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"candidates": []map[string]any{
 				{"content": map[string]any{"parts": []map[string]any{{"text": "hello"}}}},
 			},
-		})
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -116,7 +123,9 @@ func TestGeminiSTT_Transcribe_WithLanguage(t *testing.T) {
 func TestGeminiSTT_Transcribe_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"error":{"message":"API key invalid","code":403}}`))
+		if _, err := w.Write([]byte(`{"error":{"message":"API key invalid","code":403}}`)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -133,7 +142,9 @@ func TestGeminiSTT_Transcribe_APIError(t *testing.T) {
 func TestGeminiSTT_Transcribe_EmptyResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"candidates": []map[string]any{}})
+		if err := json.NewEncoder(w).Encode(map[string]any{"candidates": []map[string]any{}}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -150,7 +161,7 @@ func TestGeminiSTT_Transcribe_EmptyResponse(t *testing.T) {
 func TestGeminiSTT_Transcribe_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`not json`))
+		_, _ = w.Write([]byte(`not json`))
 	}))
 	defer server.Close()
 

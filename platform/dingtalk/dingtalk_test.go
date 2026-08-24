@@ -1063,7 +1063,7 @@ func TestOnRawMessage_PictureMsgTypeNotDroppedAsEmptyText(t *testing.T) {
 	var handlerCalledWithEmptyContent bool
 
 	func() {
-		defer func() { recover() }() // handleImageMessage panics on nil httpClient — that's OK
+		defer func() { _ = recover() }() // handleImageMessage panics on nil httpClient — that's OK
 		p := &Platform{
 			handler: func(_ core.Platform, msg *core.Message) {
 				if msg.Content == "" && len(msg.Images) == 0 {

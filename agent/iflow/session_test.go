@@ -308,7 +308,11 @@ func TestIFlowSessionCustomToolTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newIFlowSession: %v", err)
 	}
-	defer sess.Close()
+	t.Cleanup(func() {
+		if err := sess.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 	if got := sess.pendingToolTimeout(); got != 300*time.Second {
 		t.Fatalf("pendingToolTimeout = %v, want 300s", got)
 	}
@@ -319,7 +323,11 @@ func TestIFlowSessionDefaultToolTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newIFlowSession: %v", err)
 	}
-	defer sess.Close()
+	t.Cleanup(func() {
+		if err := sess.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 	if got := sess.pendingToolTimeout(); got != iflowPendingToolTimeout {
 		t.Fatalf("pendingToolTimeout = %v, want %v", got, iflowPendingToolTimeout)
 	}
@@ -365,7 +373,7 @@ while :; do sleep 1; done
 	if err != nil {
 		t.Fatalf("newIFlowSession: %v", err)
 	}
-	defer sess.Close()
+	defer func() { _ = sess.Close() }()
 
 	if err := sess.Send("执行ls", nil, nil); err != nil {
 		t.Fatalf("Send #1: %v", err)
@@ -401,7 +409,7 @@ func TestIFlowSession_ContinueSessionTreatedAsFresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newIFlowSession: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	if got := s.CurrentSessionID(); got != "" {
 		t.Errorf("ContinueSession should be treated as fresh: sessionID = %q, want empty", got)

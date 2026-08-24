@@ -272,7 +272,22 @@ access_token = "${UNSET_PLACEHOLDER_THAT_DOES_NOT_EXIST}"
 `), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	os.Unsetenv("UNSET_PLACEHOLDER_THAT_DOES_NOT_EXIST")
+	const envName = "UNSET_PLACEHOLDER_THAT_DOES_NOT_EXIST"
+	previous, existed := os.LookupEnv(envName)
+	if err := os.Unsetenv(envName); err != nil {
+		t.Fatalf("unset test environment: %v", err)
+	}
+	t.Cleanup(func() {
+		var err error
+		if existed {
+			err = os.Setenv(envName, previous)
+		} else {
+			err = os.Unsetenv(envName)
+		}
+		if err != nil {
+			t.Errorf("restore test environment: %v", err)
+		}
+	})
 
 	cfg := Config{BinaryPath: "/bin/true", WorkDir: workDir}
 	if err := Resolve(&cfg); err != nil {

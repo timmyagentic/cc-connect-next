@@ -59,7 +59,11 @@ func TestQoderSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	defer sess.Close()
+	t.Cleanup(func() {
+		if err := sess.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 
 	if err := sess.Send("say hello in one word", nil, nil); err != nil {
 		t.Fatalf("Send: %v", err)

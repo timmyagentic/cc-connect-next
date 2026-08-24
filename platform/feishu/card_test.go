@@ -211,7 +211,7 @@ func TestRenderCardMap_DeleteModeUsesCheckerForm(t *testing.T) {
 	if activeIdx < 0 || firstIdx < 0 || thirdIdx < 0 {
 		t.Fatalf("missing expected order markers in rendered card: %s", s)
 	}
-	if !(firstIdx < activeIdx && activeIdx < thirdIdx) {
+	if firstIdx >= activeIdx || activeIdx >= thirdIdx {
 		t.Fatalf("row order changed unexpectedly, got %s", s)
 	}
 	if !strings.Contains(s, `"name":"delete_mode_form"`) {

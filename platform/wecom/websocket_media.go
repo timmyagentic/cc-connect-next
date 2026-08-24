@@ -307,7 +307,7 @@ func downloadWeComWSMedia(ctx context.Context, urlStr, aesKey string) (data []by
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, "", fmt.Errorf("wecom-ws: download HTTP %s", resp.Status)
 	}

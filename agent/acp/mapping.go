@@ -170,8 +170,8 @@ func mapToolCallUpdate(sessionID string, update json.RawMessage) []core.Event {
 	body := extractToolCallContentText(u.Content)
 	st := strings.ToLower(strings.TrimSpace(u.Status))
 
-	switch {
-	case st == "completed" || st == "failed":
+	switch st {
+	case "completed", "failed":
 		if body == "" && st == "completed" {
 			return nil
 		}
@@ -184,7 +184,7 @@ func mapToolCallUpdate(sessionID string, update json.RawMessage) []core.Event {
 			Content:   truncateRunes(body, 800),
 			SessionID: sessionID,
 		}}
-	case st == "in_progress" || st == "pending":
+	case "in_progress", "pending":
 		// Stream intermediate tool output to IM (ACP allows content while not terminal).
 		if body == "" {
 			return nil

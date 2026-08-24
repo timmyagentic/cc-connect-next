@@ -112,7 +112,9 @@ func LoadMeta() (*Meta, error) {
 }
 
 func RemoveMeta() {
-	os.Remove(metaPath())
+	if err := os.Remove(metaPath()); err != nil && !os.IsNotExist(err) {
+		slog.Debug("daemon: remove metadata failed", "error", err)
+	}
 }
 
 func NowISO() string {

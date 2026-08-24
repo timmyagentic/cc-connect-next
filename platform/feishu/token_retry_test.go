@@ -100,8 +100,8 @@ func TestSendNewMessageToChatRefreshesTenantTokenAfterInvalidCachedToken(t *test
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
 			authCalls++
 			token := "stale-token"
 			if authCalls >= 2 {
@@ -113,7 +113,7 @@ func TestSendNewMessageToChatRefreshesTenantTokenAfterInvalidCachedToken(t *test
 				"expire":              7200,
 				"tenant_access_token": token,
 			})
-		case r.URL.Path == "/open-apis/im/v1/messages":
+		case "/open-apis/im/v1/messages":
 			createCalls++
 			authz := r.Header.Get("Authorization")
 			switch createCalls {

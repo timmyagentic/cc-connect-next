@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -31,13 +30,10 @@ func runDoctorUserIsolation(args []string) {
 	_ = fs.Parse(args)
 
 	if *printScript {
-		os.Stdout.Write(core.ProbeScript())
+		if _, err := os.Stdout.Write(core.ProbeScript()); err != nil {
+			fmt.Fprintf(os.Stderr, "write probe script: %v\n", err)
+		}
 		return
-	}
-
-	if runtime.GOOS == "windows" {
-		fmt.Fprintln(os.Stderr, "doctor user-isolation: run_as_user is not supported on Windows")
-		os.Exit(1)
 	}
 
 	cfgPath := resolveConfigPath(*configPath)
@@ -116,7 +112,10 @@ func runDoctorUserIsolation(args []string) {
 	exitCode := 0
 	for _, r := range results {
 		fmt.Printf("=== %s (run_as_user = %s) ===\n", r.project, r.runAsUser)
-		os.Stdout.WriteString(r.output.String())
+		if _, err := os.Stdout.WriteString(r.output.String()); err != nil {
+			fmt.Fprintf(os.Stderr, "write audit output: %v\n", err)
+			exitCode = 1
+		}
 		fmt.Println()
 		if r.exitFailed {
 			exitCode = 1

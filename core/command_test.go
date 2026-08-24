@@ -65,7 +65,9 @@ func TestCommandRegistry_ClearSource(t *testing.T) {
 
 func TestCommandRegistry_AgentDirResolve(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "deploy.md"), []byte("Deploy to production"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "deploy.md"), []byte("Deploy to production"), 0o644); err != nil {
+		t.Fatalf("write command file: %v", err)
+	}
 
 	r := NewCommandRegistry()
 	r.SetAgentDirs([]string{dir})
@@ -84,7 +86,9 @@ func TestCommandRegistry_AgentDirResolve(t *testing.T) {
 
 func TestCommandRegistry_ConfigOverridesAgent(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "deploy.md"), []byte("agent prompt"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "deploy.md"), []byte("agent prompt"), 0o644); err != nil {
+		t.Fatalf("write agent command: %v", err)
+	}
 
 	r := NewCommandRegistry()
 	r.SetAgentDirs([]string{dir})
@@ -102,7 +106,9 @@ func TestCommandRegistry_ConfigOverridesAgent(t *testing.T) {
 func TestCommandRegistry_PathTraversal(t *testing.T) {
 	dir := t.TempDir()
 	parent := filepath.Dir(dir)
-	os.WriteFile(filepath.Join(parent, "secret.md"), []byte("secret"), 0644)
+	if err := os.WriteFile(filepath.Join(parent, "secret.md"), []byte("secret"), 0o644); err != nil {
+		t.Fatalf("write traversal fixture: %v", err)
+	}
 
 	r := NewCommandRegistry()
 	r.SetAgentDirs([]string{dir})
@@ -115,7 +121,9 @@ func TestCommandRegistry_PathTraversal(t *testing.T) {
 
 func TestCommandRegistry_ListAll(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "build.md"), []byte("Build project"), 0644)
+	if err := os.WriteFile(filepath.Join(dir, "build.md"), []byte("Build project"), 0o644); err != nil {
+		t.Fatalf("write build command: %v", err)
+	}
 
 	r := NewCommandRegistry()
 	r.Add("test", "Run tests", "go test ./...", "", "", "config")

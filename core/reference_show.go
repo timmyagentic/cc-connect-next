@@ -157,7 +157,7 @@ func renderReferenceDir(path string, req *referenceViewRequest) (string, error) 
 		sb.WriteString("\n")
 	}
 	if truncated {
-		sb.WriteString(fmt.Sprintf("\nOnly showing the first %d entries.", req.MaxEntries))
+		fmt.Fprintf(&sb, "\nOnly showing the first %d entries.", req.MaxEntries)
 	}
 	return strings.TrimRight(sb.String(), "\n"), nil
 }
@@ -178,7 +178,7 @@ func readFileHead(path string, maxLines int) ([]string, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 64*1024)
@@ -214,7 +214,7 @@ func readFileRange(path string, start, end, maxLines int) ([]string, bool, error
 	if err != nil {
 		return nil, false, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 64*1024)

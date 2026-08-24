@@ -46,7 +46,11 @@ func dialWS(t *testing.T, url string, headers http.Header) *websocket.Conn {
 	if err != nil {
 		t.Fatalf("dial websocket: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close websocket: %v", err)
+		}
+	})
 	return conn
 }
 
@@ -689,7 +693,7 @@ func bridgeGet(t *testing.T, url, token string) bridgeAPIResponse {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r bridgeAPIResponse
 	mustDecodeJSON(t, resp.Body, &r)
 	return r
@@ -710,7 +714,7 @@ func bridgePost(t *testing.T, url, token string, body any) bridgeAPIResponse {
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r bridgeAPIResponse
 	mustDecodeJSON(t, resp.Body, &r)
 	return r
@@ -726,7 +730,7 @@ func bridgeDel(t *testing.T, url, token string) bridgeAPIResponse {
 	if err != nil {
 		t.Fatalf("DELETE %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r bridgeAPIResponse
 	mustDecodeJSON(t, resp.Body, &r)
 	return r

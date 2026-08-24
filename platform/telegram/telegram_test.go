@@ -622,7 +622,7 @@ func TestSendAudioMP3PrefersVoice(t *testing.T) {
 	var paths []string
 	p := newTelegramTestPlatform(t, func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
-		fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
+		_, _ = fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
 	})
 
 	if err := p.SendAudio(context.Background(), replyContext{chatID: 123}, []byte("mp3-data"), "mp3"); err != nil {
@@ -656,7 +656,7 @@ func TestSendAudioWAVConvertsToVoice(t *testing.T) {
 
 	p := newTelegramTestPlatform(t, func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
-		fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
+		_, _ = fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
 	})
 
 	if err := p.SendAudio(context.Background(), replyContext{chatID: 123}, []byte("wav-data"), "wav"); err != nil {
@@ -682,10 +682,10 @@ func TestSendAudioFallsBackToSendAudioForMP3(t *testing.T) {
 	p := newTelegramTestPlatform(t, func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
 		if strings.HasSuffix(r.URL.Path, "/sendVoice") {
-			fmt.Fprint(w, `{"ok":false,"error_code":400,"description":"voice rejected"}`)
+			_, _ = fmt.Fprint(w, `{"ok":false,"error_code":400,"description":"voice rejected"}`)
 			return
 		}
-		fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
+		_, _ = fmt.Fprint(w, `{"ok":true,"result":{"message_id":1}}`)
 	})
 
 	if err := p.SendAudio(context.Background(), replyContext{chatID: 123}, []byte("mp3-data"), "mp3"); err != nil {
@@ -943,7 +943,7 @@ func newTelegramTestPlatform(t *testing.T, handler func(http.ResponseWriter, *ht
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/getMe") {
-			fmt.Fprint(w, `{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"Test","username":"testbot"}}`)
+			_, _ = fmt.Fprint(w, `{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"Test","username":"testbot"}}`)
 			return
 		}
 		handler(w, r)
@@ -1035,4 +1035,3 @@ func TestProgressStyleProviderInterface(t *testing.T) {
 		t.Fatalf("ProgressStyle() = %q, want compact", got)
 	}
 }
-

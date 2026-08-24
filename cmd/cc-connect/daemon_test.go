@@ -37,7 +37,22 @@ func TestParseDaemonInstallArgs_ConfigEqualsFormSetsWorkDir(t *testing.T) {
 }
 
 func TestParseDaemonInstallArgs_NoCaptureSecretsFlag(t *testing.T) {
-	os.Unsetenv("CC_DAEMON_NO_CAPTURE_SECRETS")
+	const envName = "CC_DAEMON_NO_CAPTURE_SECRETS"
+	previous, existed := os.LookupEnv(envName)
+	if err := os.Unsetenv(envName); err != nil {
+		t.Fatalf("unset test environment: %v", err)
+	}
+	t.Cleanup(func() {
+		var err error
+		if existed {
+			err = os.Setenv(envName, previous)
+		} else {
+			err = os.Unsetenv(envName)
+		}
+		if err != nil {
+			t.Errorf("restore test environment: %v", err)
+		}
+	})
 
 	cfg, _, err := parseDaemonInstallArgs([]string{"--no-capture-secrets"})
 	if err != nil {

@@ -190,7 +190,9 @@ func newMatrixEngine(t *testing.T) (*core.Engine, *matrixAgent, *matrixPlatform)
 	platform := &matrixPlatform{}
 	engine := core.NewEngine("release-core", agent, []core.Platform{platform}, t.TempDir()+"/sessions.json", core.LangEnglish)
 	t.Cleanup(func() {
-		engine.Stop()
+		if err := engine.Stop(); err != nil {
+			t.Errorf("stop engine: %v", err)
+		}
 		_ = agent.Stop()
 	})
 	return engine, agent, platform

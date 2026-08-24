@@ -341,7 +341,7 @@ func (a *Agent) GetModel() string {
 	a.mu.RLock()
 	model := a.model
 	a.mu.RUnlock()
-	return a.Store.Model(model)
+	return a.Model(model)
 }
 
 func (a *Agent) SetReasoningEffort(effort string) {
@@ -362,7 +362,7 @@ func (a *Agent) AvailableReasoningEfforts() []string {
 }
 
 func (a *Agent) configuredModels() []core.ModelOption {
-	return a.Store.Models()
+	return a.Models()
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
@@ -384,7 +384,7 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
 	apiKey := ""
 	baseURL := ""
-	if provider := a.Store.GetActiveProvider(); provider != nil {
+	if provider := a.GetActiveProvider(); provider != nil {
 		apiKey = provider.APIKey
 		baseURL = provider.BaseURL
 	}
@@ -415,7 +415,7 @@ func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
 		slog.Debug("claudecode: failed to fetch models", "error", err)
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil
 	}
@@ -509,17 +509,17 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	copy(pluginDirs, a.pluginDirs)
 	extraEnv := a.runtimeEnvLocked()
 
-	activeProvider := a.Store.GetActiveProvider()
+	activeProvider := a.GetActiveProvider()
 	activeProviderName := ""
 	if activeProvider != nil {
 		activeProviderName = activeProvider.Name
-		model = a.Store.Model(model)
+		model = a.Model(model)
 	}
 	slog.Debug("claudecode: StartSession provider state",
 		"activeProvider", activeProviderName,
 		"model", model,
 		"sessionID", sessionID,
-		"providerCount", len(a.Store.ListProviders()))
+		"providerCount", len(a.ListProviders()))
 	platformPrompt := a.platformPrompt
 	systemPrompt := a.systemPrompt
 	appendSystemPrompt := a.appendSystemPrompt
@@ -629,7 +629,7 @@ func scanSessionMeta(path string) (string, int) {
 	if err != nil {
 		return "", 0
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 256*1024), 256*1024)
@@ -714,7 +714,7 @@ func (a *Agent) GetSessionHistory(_ context.Context, sessionID string, limit int
 	if err != nil {
 		return nil, fmt.Errorf("claudecode: open session file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var entries []core.HistoryEntry
 	scanner := bufio.NewScanner(f)
@@ -1037,10 +1037,8 @@ func walkUpClaudeSkillDirs(workDir, home string) []string {
 	stopAt := findGitRoot(current)
 
 	var dirs []string
-	for {
-		if home != "" && samePath(current, home) {
-			break
-		}
+	for home == "" || !samePath(current, home) {
+
 		dirs = append(dirs, filepath.Join(current, ".claude", "skills"))
 		if stopAt != "" && samePath(current, stopAt) {
 			break
@@ -1143,7 +1141,7 @@ func (a *Agent) SetActiveProvider(name string) bool {
 // but use CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY env vars, the thinking
 // rewrite proxy routes via ANTHROPIC_*_BASE_URL override env vars.
 func (a *Agent) providerEnvLocked() []string {
-	provider := a.Store.GetActiveProvider()
+	provider := a.GetActiveProvider()
 	if provider == nil {
 		a.stopProviderProxyLocked()
 		return nil

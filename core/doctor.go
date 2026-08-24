@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -359,7 +360,9 @@ func checkNetwork(ctx context.Context) []DoctorCheckResult {
 			})
 			continue
 		}
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			slog.Debug("doctor: close network probe failed", "endpoint", ep.host, "error", err)
+		}
 
 		status := DoctorPass
 		if latency > 3*time.Second {
@@ -389,7 +392,9 @@ func checkNetwork(ctx context.Context) []DoctorCheckResult {
 			Latency: latency,
 		})
 	} else {
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			slog.Debug("doctor: close HTTPS probe response failed", "error", err)
+		}
 		status := DoctorPass
 		if latency > 5*time.Second {
 			status = DoctorWarn
@@ -526,7 +531,7 @@ func FormatDoctorResults(results []DoctorCheckResult, i18n *I18n) string {
 		if r.Latency > 0 {
 			latStr = fmt.Sprintf(" (%s)", r.Latency.Round(time.Millisecond))
 		}
-		sb.WriteString(fmt.Sprintf("%s %s%s\n   %s\n\n", r.Status.Icon(), displayName, latStr, r.Detail))
+		fmt.Fprintf(&sb, "%s %s%s\n   %s\n\n", r.Status.Icon(), displayName, latStr, r.Detail)
 	}
 
 	sb.WriteString(i18n.Tf(MsgDoctorSummary, passCount, warnCount, failCount))

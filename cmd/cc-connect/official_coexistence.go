@@ -334,29 +334,29 @@ func printOfficialCoexistenceSection(w io.Writer, cfg *config.Config) bool {
 		return false // no official install detected; keep doctor output quiet
 	}
 
-	fmt.Fprintf(w, "\n=== official CC Connect coexistence ===\n")
+	_, _ = fmt.Fprintf(w, "\n=== official CC Connect coexistence ===\n")
 	if st.BinaryPath != "" {
-		fmt.Fprintf(w, "✅ binary: %s\n", st.BinaryPath)
+		_, _ = fmt.Fprintf(w, "✅ binary: %s\n", st.BinaryPath)
 	} else {
-		fmt.Fprintf(w, "✅ binary: not on PATH\n")
+		_, _ = fmt.Fprintf(w, "✅ binary: not on PATH\n")
 	}
 	switch {
 	case !st.ServiceRegistered:
-		fmt.Fprintf(w, "✅ autostart: not registered\n")
+		_, _ = fmt.Fprintf(w, "✅ autostart: not registered\n")
 	case st.AutostartArmed:
-		fmt.Fprintf(w, "⚠️ autostart: ARMED (%s) — next login/boot starts the official daemon\n   disarm: %s\n", st.ServicePath, strings.TrimSpace(disarmOfficialHint(probe.GOOS, probe.UID)))
+		_, _ = fmt.Fprintf(w, "⚠️ autostart: ARMED (%s) — next login/boot starts the official daemon\n   disarm: %s\n", st.ServicePath, strings.TrimSpace(disarmOfficialHint(probe.GOOS, probe.UID)))
 	default:
-		fmt.Fprintf(w, "✅ autostart: registered but disabled (%s)\n", st.ServicePath)
+		_, _ = fmt.Fprintf(w, "✅ autostart: registered but disabled (%s)\n", st.ServicePath)
 	}
 	if st.Running {
-		fmt.Fprintf(w, "⚠️ daemon: RUNNING (%s)\n", st.RunningVia)
+		_, _ = fmt.Fprintf(w, "⚠️ daemon: RUNNING (%s)\n", st.RunningVia)
 	} else {
-		fmt.Fprintf(w, "✅ daemon: not running\n")
+		_, _ = fmt.Fprintf(w, "✅ daemon: not running\n")
 	}
 
 	overlap := officialCredentialOverlap(st, collectConfigAppIDs(cfg))
 	if len(overlap) == 0 {
-		fmt.Fprintf(w, "✅ shared credentials: none\n")
+		_, _ = fmt.Fprintf(w, "✅ shared credentials: none\n")
 		return false
 	}
 	redacted := make([]string, len(overlap))
@@ -364,10 +364,10 @@ func printOfficialCoexistenceSection(w io.Writer, cfg *config.Config) bool {
 		redacted[i] = redactCredentialID(id)
 	}
 	if st.Running {
-		fmt.Fprintf(w, "❌ shared credentials: %d (%s) — both daemons consume the same event stream; stop and disarm the official daemon or use test-app credentials\n", len(overlap), strings.Join(redacted, ", "))
+		_, _ = fmt.Fprintf(w, "❌ shared credentials: %d (%s) — both daemons consume the same event stream; stop and disarm the official daemon or use test-app credentials\n", len(overlap), strings.Join(redacted, ", "))
 		return true
 	}
-	fmt.Fprintf(w, "⚠️ shared credentials: %d (%s) — safe only while the official daemon stays stopped and disarmed\n", len(overlap), strings.Join(redacted, ", "))
+	_, _ = fmt.Fprintf(w, "⚠️ shared credentials: %d (%s) — safe only while the official daemon stays stopped and disarmed\n", len(overlap), strings.Join(redacted, ", "))
 	return false
 }
 

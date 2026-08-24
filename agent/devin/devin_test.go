@@ -3,8 +3,6 @@ package devin
 import (
 	"os/exec"
 	"testing"
-
-	"github.com/timmyagentic/cc-connect-next/agent/acp"
 )
 
 // TestApplyDevinDefaults_FillsUnsetFields verifies the three Devin-
@@ -116,7 +114,9 @@ func TestNew_ReturnsDevinWrapper(t *testing.T) {
 		t.Fatalf("New() returned %T, want *devin.Agent", a)
 	}
 	// Sanity: the embedded acp.Agent is the backing implementation.
-	var _ *acp.Agent = wrapper.Agent
+	if wrapper.Agent == nil {
+		t.Fatal("embedded ACP agent is nil")
+	}
 	// Display name still reflects the Devin default even when command
 	// was overridden to "true".
 	if got := wrapper.CLIDisplayName(); got != "Devin" {

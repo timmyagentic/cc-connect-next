@@ -186,7 +186,7 @@ func TestProbeListSessions_softFailsOnMethodNotFound(t *testing.T) {
 
 	// Mock server: respond -32601 for session/list.
 	go func() {
-		defer wResp.Close()
+		defer func() { _ = wResp.Close() }()
 		sc := bufio.NewScanner(rReq)
 		for sc.Scan() {
 			var req map[string]any
@@ -218,7 +218,7 @@ func TestProbeListSessions_propagatesHardError(t *testing.T) {
 	go tr.readLoop(ctx)
 
 	go func() {
-		defer wResp.Close()
+		defer func() { _ = wResp.Close() }()
 		sc := bufio.NewScanner(rReq)
 		for sc.Scan() {
 			var req map[string]any
@@ -250,7 +250,7 @@ func TestProbeListSessions_parsesSessions(t *testing.T) {
 	go tr.readLoop(ctx)
 
 	go func() {
-		defer wResp.Close()
+		defer func() { _ = wResp.Close() }()
 		sc := bufio.NewScanner(rReq)
 		for sc.Scan() {
 			var req map[string]any
@@ -277,13 +277,21 @@ func TestProbeListSessions_parsesSessions(t *testing.T) {
 // fakeCallbacks captures reportModes / reportListSupported invocations
 // so tests can assert on them deterministically.
 type fakeCallbacks struct {
-	mu         sync.Mutex
-	modes      []acpModesBlock
-	listCalls  []bool
+	mu        sync.Mutex
+	modes     []acpModesBlock
+	listCalls []bool
 }
 
-func (f *fakeCallbacks) reportModes(b acpModesBlock)       { f.mu.Lock(); f.modes = append(f.modes, b); f.mu.Unlock() }
-func (f *fakeCallbacks) reportListSupported(supported bool) { f.mu.Lock(); f.listCalls = append(f.listCalls, supported); f.mu.Unlock() }
+func (f *fakeCallbacks) reportModes(b acpModesBlock) {
+	f.mu.Lock()
+	f.modes = append(f.modes, b)
+	f.mu.Unlock()
+}
+func (f *fakeCallbacks) reportListSupported(supported bool) {
+	f.mu.Lock()
+	f.listCalls = append(f.listCalls, supported)
+	f.mu.Unlock()
+}
 func (f *fakeCallbacks) lastModes() (acpModesBlock, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -316,8 +324,8 @@ func newTestSession(t *testing.T, cb sessionCallbacks) (*acpSession, *io.PipeWri
 
 	t.Cleanup(func() {
 		s.cancel()
-		wResp.Close()
-		rReq.Close()
+		_ = wResp.Close()
+		_ = rReq.Close()
 	})
 	return s, wResp, rReq
 }

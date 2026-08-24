@@ -409,7 +409,7 @@ func followFile(path string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	_, _ = f.Seek(0, io.SeekEnd)
 	reader := bufio.NewReader(f)

@@ -167,7 +167,11 @@ func TestIntegration_ProviderSwitch_SessionStartModel(t *testing.T) {
 			if err != nil {
 				t.Fatalf("StartSession failed: %v", err)
 			}
-			defer sess.Close()
+			t.Cleanup(func() {
+				if err := sess.Close(); err != nil {
+					t.Errorf("close session: %v", err)
+				}
+			})
 
 			cs := sess.(*claudeSession)
 			envMap := envSliceToMap(cs.cmd.Env)

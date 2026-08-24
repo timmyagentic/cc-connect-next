@@ -19,7 +19,7 @@ func TestTransportCallRoundTrip(t *testing.T) {
 	go tr.readLoop(ctx)
 
 	go func() {
-		defer wMockResp.Close()
+		defer func() { _ = wMockResp.Close() }()
 		sc := bufio.NewScanner(rReq)
 		for sc.Scan() {
 			var req map[string]any

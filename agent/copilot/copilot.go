@@ -101,7 +101,7 @@ func (a *Agent) GetModel() string {
 	a.mu.RLock()
 	model := a.model
 	a.mu.RUnlock()
-	return a.Store.Model(model)
+	return a.Model(model)
 }
 
 func (a *Agent) AvailableModels(_ context.Context) []core.ModelOption {
@@ -116,7 +116,7 @@ func (a *Agent) AvailableModels(_ context.Context) []core.ModelOption {
 }
 
 func (a *Agent) configuredModels() []core.ModelOption {
-	return a.Store.Models()
+	return a.Models()
 }
 
 func (a *Agent) SetSessionEnv(env []string) {
@@ -157,7 +157,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	extraEnv = append(extraEnv, a.providerEnvLocked()...)
 	extraEnv = append(extraEnv, a.sessionEnv...)
 	provider := a.providerConfigLocked()
-	model = a.Store.Model(model)
+	model = a.Model(model)
 	a.mu.RUnlock()
 
 	return newCopilotSession(ctx, workDir, cmd, extraArgs, model, mode, sessionID, extraEnv, provider)
@@ -422,7 +422,7 @@ func (a *Agent) SetActiveProvider(name string) bool {
 }
 
 func (a *Agent) providerEnvLocked() []string {
-	provider := a.Store.GetActiveProvider()
+	provider := a.GetActiveProvider()
 	if provider == nil {
 		return nil
 	}
@@ -458,7 +458,7 @@ func (a *Agent) probeSnapshotLocked() probeSnapshot {
 }
 
 func (a *Agent) providerConfigLocked() *copilotWireProviderConfig {
-	activeProvider := a.Store.GetActiveProvider()
+	activeProvider := a.GetActiveProvider()
 	if activeProvider == nil {
 		return nil
 	}

@@ -182,7 +182,7 @@ func fetchLatestStableRelease() (*githubRelease, error) {
 
 	resp, err := client.Do(req)
 	if err == nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode == 200 {
 			var release githubRelease
 			if err := json.NewDecoder(resp.Body).Decode(&release); err == nil {
@@ -203,7 +203,7 @@ func fetchLatestStableRelease() (*githubRelease, error) {
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 
 	loc := resp2.Header.Get("Location")
 	if loc == "" {
@@ -375,7 +375,7 @@ func updateStandaloneInstallation(installation updateInstallation, tag string) e
 	if err != nil {
 		return fmt.Errorf("download release archive: %w", err)
 	}
-	defer os.Remove(archivePath)
+	defer func() { _ = os.Remove(archivePath) }()
 
 	if err := verifyReleaseChecksum(archivePath, expectedChecksum); err != nil {
 		return err
@@ -386,7 +386,7 @@ func updateStandaloneInstallation(installation updateInstallation, tag string) e
 	if err != nil {
 		return fmt.Errorf("extract release archive: %w", err)
 	}
-	defer os.Remove(extractedPath)
+	defer func() { _ = os.Remove(extractedPath) }()
 
 	verifyVersion := func(path string) error {
 		return verifyInstalledVersion(path, tag)
@@ -444,13 +444,13 @@ func extractFromTarGz(archivePath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return "", fmt.Errorf("gzip: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	for {
@@ -470,11 +470,14 @@ func extractFromTarGz(archivePath string) (string, error) {
 				return "", err
 			}
 			if _, err := io.Copy(tmp, tr); err != nil {
-				tmp.Close()
-				os.Remove(tmp.Name())
+				_ = tmp.Close()
+				_ = os.Remove(tmp.Name())
 				return "", fmt.Errorf("extract: %w", err)
 			}
-			tmp.Close()
+			if err := tmp.Close(); err != nil {
+				_ = os.Remove(tmp.Name())
+				return "", fmt.Errorf("close extracted binary: %w", err)
+			}
 			return tmp.Name(), nil
 		}
 	}
@@ -486,7 +489,7 @@ func extractFromZip(archivePath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("zip: %w", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	for _, f := range r.File {
 		if !strings.HasPrefix(f.Name, "cc-connect-next") {
@@ -498,17 +501,24 @@ func extractFromZip(archivePath string) (string, error) {
 		}
 		tmp, err := os.CreateTemp("", "cc-connect-next-update-*")
 		if err != nil {
-			rc.Close()
+			_ = rc.Close()
 			return "", err
 		}
 		if _, err := io.Copy(tmp, rc); err != nil {
-			tmp.Close()
-			rc.Close()
-			os.Remove(tmp.Name())
+			_ = tmp.Close()
+			_ = rc.Close()
+			_ = os.Remove(tmp.Name())
 			return "", fmt.Errorf("extract: %w", err)
 		}
-		rc.Close()
-		tmp.Close()
+		if err := rc.Close(); err != nil {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+			return "", fmt.Errorf("close zip entry: %w", err)
+		}
+		if err := tmp.Close(); err != nil {
+			_ = os.Remove(tmp.Name())
+			return "", fmt.Errorf("close extracted binary: %w", err)
+		}
 		return tmp.Name(), nil
 	}
 	return "", fmt.Errorf("binary not found in archive")
@@ -533,7 +543,7 @@ func downloadSmallFile(url string, maxBytes int64) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
@@ -582,7 +592,7 @@ func verifyReleaseChecksum(path, expected string) error {
 	if err != nil {
 		return fmt.Errorf("open downloaded archive: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	hash := sha256.New()
 	if _, err := io.Copy(hash, f); err != nil {
@@ -615,7 +625,7 @@ func downloadToTemp(url string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return "", fmt.Errorf("download returned HTTP %d", resp.StatusCode)
@@ -628,11 +638,14 @@ func downloadToTemp(url string) (string, error) {
 
 	size, err := io.Copy(tmp, resp.Body)
 	if err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
 		return "", fmt.Errorf("write: %w", err)
 	}
-	tmp.Close()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", fmt.Errorf("close download: %w", err)
+	}
 
 	fmt.Printf("Downloaded %.1f MB\n", float64(size)/1024/1024)
 	return tmp.Name(), nil
@@ -697,15 +710,14 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-
 	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
 		return err
 	}
 	return out.Close()

@@ -133,7 +133,7 @@ func (p *Platform) createAICard(ctx context.Context, rc replyContext) (*aiCard, 
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(resp.Body)
 
@@ -356,7 +356,7 @@ func (c *aiCard) doStream(ctx context.Context, content string, isFinalize bool) 
 	if err != nil {
 		return fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, _ := io.ReadAll(resp.Body)
 

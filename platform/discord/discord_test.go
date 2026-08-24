@@ -701,11 +701,11 @@ func TestDispatchMessage_UsesWrappedProgressPlatformForHandler(t *testing.T) {
 	}
 
 	var got core.Platform
-	pp.Platform.handler = func(p core.Platform, msg *core.Message) {
+	pp.handler = func(p core.Platform, msg *core.Message) {
 		got = p
 	}
 
-	pp.Platform.dispatchMessage(&core.Message{SessionKey: "discord:ch-1"})
+	pp.dispatchMessage(&core.Message{SessionKey: "discord:ch-1"})
 
 	if got == nil {
 		t.Fatal("handler platform = nil, want wrapped platform")
@@ -1570,9 +1570,9 @@ func TestDispatchMessage_SetsChannelKeyForThreadIsolation(t *testing.T) {
 		ChannelKey: parentChannelID,
 		Platform:   "discord",
 		ChannelID:  m.ChannelID,
-		MessageID:  m.Message.ID,
+		MessageID:  m.ID,
 		UserID:     m.Author.ID,
-		Content:    m.Message.Content,
+		Content:    m.Content,
 		ReplyCtx:   rctx,
 	}
 	p.dispatchMessage(msg)
@@ -1696,4 +1696,3 @@ func basePlatformFor(t *testing.T, pAny core.Platform) *Platform {
 		return nil
 	}
 }
-

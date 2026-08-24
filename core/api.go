@@ -71,7 +71,9 @@ func NewAPIServer(dataDir string) (*APIServer, error) {
 	sockPath := filepath.Join(sockDir, "api.sock")
 
 	// Remove stale socket
-	os.Remove(sockPath)
+	if err := os.Remove(sockPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("remove stale socket: %w", err)
+	}
 
 	listener, err := net.Listen("unix", sockPath)
 	if err != nil {

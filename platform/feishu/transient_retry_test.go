@@ -187,7 +187,7 @@ func TestReplyRetriesOnTransientNetworkError(t *testing.T) {
 				if err != nil {
 					t.Fatalf("hijack failed: %v", err)
 				}
-				conn.Close()
+				_ = conn.Close()
 				return
 			}
 			// 3rd call succeeds
@@ -235,15 +235,15 @@ func TestCreateMessageRetriesOnTransientNetworkError(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+		switch r.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
 			writeJSON(t, w, map[string]any{
 				"code":                0,
 				"msg":                 "success",
 				"expire":              7200,
 				"tenant_access_token": "valid-token",
 			})
-		case r.URL.Path == "/open-apis/im/v1/messages":
+		case "/open-apis/im/v1/messages":
 			call := createCalls.Add(1)
 			if call == 1 {
 				hj, ok := w.(http.Hijacker)
@@ -254,7 +254,7 @@ func TestCreateMessageRetriesOnTransientNetworkError(t *testing.T) {
 				if err != nil {
 					t.Fatalf("hijack failed: %v", err)
 				}
-				conn.Close()
+				_ = conn.Close()
 				return
 			}
 			writeJSON(t, w, map[string]any{
@@ -378,7 +378,7 @@ func TestPatchMessageRetriesOnTransientError(t *testing.T) {
 				if err != nil {
 					t.Fatalf("hijack failed: %v", err)
 				}
-				conn.Close()
+				_ = conn.Close()
 				return
 			}
 			writeJSON(t, w, map[string]any{
@@ -387,7 +387,7 @@ func TestPatchMessageRetriesOnTransientError(t *testing.T) {
 			})
 		default:
 			// Allow other paths (e.g. token fetch)
-			json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "ok"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "msg": "ok"})
 		}
 	}))
 	defer srv.Close()
@@ -449,7 +449,7 @@ func TestReplyTransientRetryThenTokenRefresh(t *testing.T) {
 					t.Fatalf("hijack not supported")
 				}
 				conn, _, _ := hj.Hijack()
-				conn.Close()
+				_ = conn.Close()
 				return
 			case 2:
 				// Second attempt (after transient retry): invalid token

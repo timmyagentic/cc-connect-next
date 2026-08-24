@@ -67,7 +67,7 @@ type progressPlatform struct {
 type Platform struct {
 	token                      string
 	allowFrom                  string
-	guildID                    string   // optional: per-guild registration (instant) vs global (up to 1h propagation)
+	guildID                    string // optional: per-guild registration (instant) vs global (up to 1h propagation)
 	progressStyle              string
 	groupReplyAllGuilds        []string // guild IDs where groupReplyAll is active; "*" = all guilds
 	shareSessionInChannel      bool
@@ -413,8 +413,8 @@ func resolveThreadReplyContext(m *discordgo.MessageCreate, botID string, ops dis
 		rc := replyContext{channelID: m.ChannelID, messageID: m.ID, threadID: m.ChannelID}
 		return buildThreadSessionKey(m.ChannelID), rc, parentChannelID, nil
 	}
-	if m.Message != nil && m.Message.Thread != nil && m.Message.Thread.ID != "" {
-		threadID := m.Message.Thread.ID
+	if m.Message != nil && m.Thread != nil && m.Thread.ID != "" {
+		threadID := m.Thread.ID
 		if err := ops.JoinThread(threadID); err != nil {
 			slog.Debug("discord: join attached thread failed", "thread", threadID, "error", err)
 		}
@@ -868,7 +868,7 @@ func (p *Platform) handleInteraction(s *discordgo.Session, i *discordgo.Interact
 		MessageID: i.ID,
 		ChannelID: i.ChannelID,
 		UserID:    userID, UserName: userName,
-		Content:  cmdText, ReplyCtx: rctx,
+		Content: cmdText, ReplyCtx: rctx,
 	}
 	msg.ChatName, _ = p.ResolveChannelName(channelID)
 	p.dispatchMessage(msg)
@@ -1515,7 +1515,7 @@ func downloadURL(u string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download %s: status %d", u, resp.StatusCode)
 	}

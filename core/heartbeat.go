@@ -301,7 +301,9 @@ func (hs *HeartbeatScheduler) persistLocked() {
 		}
 	}
 	if !needSave {
-		os.Remove(hs.stateFile)
+		if err := os.Remove(hs.stateFile); err != nil && !os.IsNotExist(err) {
+			slog.Error("heartbeat: remove empty state file failed", "error", err)
+		}
 		return
 	}
 	data, err := json.MarshalIndent(states, "", "  ")

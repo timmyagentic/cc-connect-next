@@ -395,7 +395,7 @@ func weixinHTTPGet(ctx context.Context, fullURL, routeTag string, debug bool) ([
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, err
@@ -476,7 +476,7 @@ func weixinPollQRStatus(ctx context.Context, apiBase, qrKey, routeTag string, de
 		}
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, err
@@ -519,7 +519,7 @@ func verifyWeixinToken(ctx context.Context, apiBase, token, routeTag string, deb
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return err

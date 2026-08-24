@@ -321,7 +321,7 @@ func drainPendingUpdates(token string, httpClient *http.Client) {
 		slog.Debug("telegram: drain updates request failed", "error", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read and discard response body to ensure connection is properly closed
 	_, _ = io.Copy(io.Discard, resp.Body)
@@ -1381,7 +1381,7 @@ func (p *Platform) downloadFile(fileID string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("download file %s: %w", fileID, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download file %s: status %d", fileID, resp.StatusCode)
 	}

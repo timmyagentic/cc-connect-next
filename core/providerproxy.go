@@ -86,7 +86,9 @@ func NewProviderProxy(targetURL, thinkingOverride string) (*ProviderProxy, strin
 // Close shuts down the proxy.
 func (pp *ProviderProxy) Close() {
 	pp.once.Do(func() {
-		pp.server.Close()
+		if err := pp.server.Close(); err != nil && err != http.ErrServerClosed {
+			slog.Debug("providerproxy: close server failed", "error", err)
+		}
 	})
 }
 
@@ -97,7 +99,9 @@ func rewriteThinkingInRequest(r *http.Request, override string) {
 		return
 	}
 	body, err := io.ReadAll(r.Body)
-	r.Body.Close()
+	if closeErr := r.Body.Close(); closeErr != nil {
+		slog.Debug("providerproxy: close request body failed", "error", closeErr)
+	}
 	if err != nil {
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		return

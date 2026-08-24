@@ -182,13 +182,13 @@ func (ks *kimiSession) readLoop(ctx context.Context, cmd *exec.Cmd, stdout io.Re
 	defer ks.wg.Done()
 	defer func() {
 		for _, f := range tempFiles {
-			os.Remove(f)
+			_ = os.Remove(f)
 		}
 	}()
 
 	go func() {
 		<-ctx.Done()
-		stdout.Close()
+		_ = stdout.Close()
 	}()
 
 	scanner := bufio.NewScanner(stdout)

@@ -312,7 +312,7 @@ func (p *Platform) handleVerify(w http.ResponseWriter, msgSig, timestamp, nonce,
 	slog.Info("wecom: URL verification succeeded")
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, plain)
+	_, _ = fmt.Fprint(w, plain)
 }
 
 // wecomLogXMLPreview returns a short prefix of XML for debug only (may contain user content).
@@ -566,7 +566,7 @@ func (p *Platform) SendImage(ctx context.Context, rctx any, img core.ImageAttach
 	if err != nil {
 		return fmt.Errorf("wecom: send image: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		ErrCode int    `json:"errcode"`
@@ -610,7 +610,7 @@ func (p *Platform) uploadImageMedia(accessToken string, img core.ImageAttachment
 	if err != nil {
 		return "", fmt.Errorf("wecom: upload image: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		ErrCode int    `json:"errcode"`
@@ -648,7 +648,7 @@ func (p *Platform) sendMarkdown(accessToken, toUser, content string) error {
 	if err != nil {
 		return fmt.Errorf("wecom: send markdown: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		ErrCode int    `json:"errcode"`
@@ -681,7 +681,7 @@ func (p *Platform) sendText(accessToken, toUser, text string) error {
 	if err != nil {
 		return fmt.Errorf("wecom: send message: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		ErrCode int    `json:"errcode"`
@@ -713,7 +713,7 @@ func (p *Platform) getAccessToken() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("wecom: request access_token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		ErrCode     int    `json:"errcode"`
@@ -859,7 +859,7 @@ func (p *Platform) resolveUserName(userID string) string {
 		slog.Debug("wecom: resolve user name failed", "user", userID, "error", err)
 		return userID
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var result struct {
 		ErrCode int    `json:"errcode"`
 		Name    string `json:"name"`
@@ -931,6 +931,6 @@ func (p *Platform) downloadMedia(mediaID string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return io.ReadAll(resp.Body)
 }

@@ -15,8 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/gorilla/websocket"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 func init() {
@@ -40,7 +40,7 @@ type Platform struct {
 	selfID                int64
 	dedup                 core.MessageDedup
 	groupNameCache        sync.Map // groupID -> group name
-	httpURL            string   // OneBot HTTP API URL, e.g. "http://127.0.0.1:3000"
+	httpURL               string   // OneBot HTTP API URL, e.g. "http://127.0.0.1:3000"
 }
 
 func New(opts map[string]any) (core.Platform, error) {
@@ -62,7 +62,7 @@ func New(opts map[string]any) (core.Platform, error) {
 		token:                 token,
 		allowFrom:             allowFrom,
 		shareSessionInChannel: shareSessionInChannel,
-		httpURL:            httpURL,
+		httpURL:               httpURL,
 	}, nil
 }
 
@@ -609,7 +609,7 @@ func (p *Platform) callHTTPAPI(action string, params map[string]any) (map[string
 	if err != nil {
 		return nil, fmt.Errorf("qq: HTTP %s failed: %w", action, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -709,7 +709,7 @@ func downloadLargeFile(url string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("HTTP %d", resp.StatusCode)
@@ -733,7 +733,7 @@ func downloadFile(url string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -244,10 +244,10 @@ func TestReadAttachment_SizeLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := f.Truncate(limit + 1); err != nil {
-		f.Close()
+		_ = f.Close()
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 	if _, _, _, err := readAttachment(big, limit); err == nil {
 		t.Fatal("oversized file should be rejected")
 	}

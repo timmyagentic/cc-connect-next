@@ -56,7 +56,9 @@ func TestPatchSessionSource_Idempotent(t *testing.T) {
 	tmpDir := t.TempDir()
 	sessionID := "test-idempotent-xyz"
 	sessionsDir := filepath.Join(tmpDir, ".codex", "sessions")
-	os.MkdirAll(sessionsDir, 0o755)
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatalf("create sessions directory: %v", err)
+	}
 
 	fname := filepath.Join(sessionsDir, "rollout-"+sessionID+".jsonl")
 	line1 := `{"type":"session_meta","payload":{"id":"` + sessionID + `","source":"cli","originator":"codex_cli_rs"}}`

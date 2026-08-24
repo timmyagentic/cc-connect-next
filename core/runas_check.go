@@ -126,7 +126,7 @@ func PreflightRunAsUser(ctx context.Context, cfg PreflightConfig) PreflightResul
 		}
 		if _, err := cfg.Runner.Run(ctx, "-n", "-iu", cfg.RunAsUser, "--", "test", "-r", absWorkDir, "-a", "-w", absWorkDir); err != nil {
 			result.Fatal = append(result.Fatal, fmt.Errorf(
-				"project %q: target user %q cannot read AND write work_dir %q. Agents will fail with EACCES at runtime. Fix ownership/permissions on this directory (chown/chmod or an ACL granting the target user rwx) before starting cc-connect-next.",
+				"project %q: target user %q cannot read AND write work_dir %q; agents will fail with EACCES at runtime; fix ownership/permissions on this directory (chown/chmod or an ACL granting the target user rwx) before starting cc-connect-next",
 				cfg.Project, cfg.RunAsUser, absWorkDir))
 		} else {
 			warn := scanDescendants(ctx, cfg.Runner, cfg.RunAsUser, absWorkDir, cfg.ScanConfig)
