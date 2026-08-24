@@ -98,6 +98,15 @@ backend = "app_server"   # default; native turn/steer
 app_server_url = "stdio" # default; local subprocess transport
 ```
 
+To override Codex's context window for this CC Connect project, set a positive
+integer in the same table. CC Connect emits it as a structured `-c` override on
+both Codex backends; when omitted, Codex keeps its own model/config default:
+
+```toml
+[projects.agent.options]
+model_context_window = 872000
+```
+
 The steer is sent as `turn/steer` with the active turn pinned via `expectedTurnId`, so it can never race a completing turn. When steering is definitively unavailable (unsupported backend, the turn just ended), the message safely falls back to the queue.
 
 **`queue`.** Set `busy_message_mode = "queue"` to always use the per-session FIFO: busy messages are processed as new turns after the current one completes (the pre-v0.1.3 behavior). If the steer outcome is *unknown* (RPC timeout), the message is deliberately **not** re-queued — that could deliver it twice — and you get an explicit warning instead.

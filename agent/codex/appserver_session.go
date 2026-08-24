@@ -167,6 +167,7 @@ type appServerSession struct {
 	cliExtraArgs   []string // extra args from cmd, placed before the app-server subcommand
 	workDir        string
 	model          string
+	contextWindow  int64
 	effort         string
 	serviceTier    string // Codex service tier, e.g. "fast"; catalog-driven, passed through verbatim
 	mode           string
@@ -225,6 +226,7 @@ type appServerSessionParams struct {
 	cliExtraArgs  []string // extra args from cmd, placed before the app-server subcommand
 	workDir       string
 	model         string
+	contextWindow int64
 	effort        string
 	serviceTier   string
 	mode          string
@@ -249,6 +251,7 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 		cliExtraArgs:     append([]string(nil), p.cliExtraArgs...),
 		workDir:          p.workDir,
 		model:            p.model,
+		contextWindow:    p.contextWindow,
 		effort:           p.effort,
 		serviceTier:      p.serviceTier,
 		mode:             p.mode,
@@ -300,6 +303,9 @@ func (s *appServerSession) launchArgs() []string {
 	}
 	if model := strings.TrimSpace(s.model); model != "" {
 		args = append(args, "-c", fmt.Sprintf("model=%q", model))
+	}
+	if s.contextWindow > 0 {
+		args = append(args, "-c", fmt.Sprintf("model_context_window=%d", s.contextWindow))
 	}
 	if effort := strings.TrimSpace(s.effort); effort != "" {
 		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", effort))

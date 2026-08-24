@@ -26,6 +26,7 @@ import (
 type codexSession struct {
 	workDir        string
 	model          string
+	contextWindow  int64
 	effort         string
 	serviceTier    string // Codex service tier, e.g. "fast"; catalog-driven, passed through verbatim
 	mode           string
@@ -96,6 +97,7 @@ type codexSessionParams struct {
 	cliExtraArgs  []string
 	workDir       string
 	model         string
+	contextWindow int64
 	effort        string
 	serviceTier   string
 	mode          string
@@ -113,6 +115,7 @@ func newCodexSession(ctx context.Context, p codexSessionParams) (*codexSession, 
 	cs := &codexSession{
 		workDir:        p.workDir,
 		model:          p.model,
+		contextWindow:  p.contextWindow,
 		effort:         p.effort,
 		serviceTier:    p.serviceTier,
 		mode:           p.mode,
@@ -293,6 +296,9 @@ func (cs *codexSession) buildExecArgs(prompt string, imagePaths []string) []stri
 
 	if cs.model != "" {
 		args = append(args, "--model", cs.model)
+	}
+	if cs.contextWindow > 0 {
+		args = append(args, "-c", fmt.Sprintf("model_context_window=%d", cs.contextWindow))
 	}
 	if cs.modelProvider != "" {
 		args = append(args, "-c", fmt.Sprintf("model_provider=%q", cs.modelProvider))

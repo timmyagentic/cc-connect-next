@@ -1593,6 +1593,13 @@ app_secret = "your-feishu-app-secret"
 # Optional: specify a model / 可选：指定模型
 # model = "o3"
 #
+# Optional: override the Codex model context window with a positive integer.
+# Emitted as `-c model_context_window=...` on both backends. When omitted or
+# non-positive, Codex keeps its own model/config default.
+# 可选：用正整数覆盖 Codex 模型上下文窗口。两种后端均下发为
+# `-c model_context_window=...`；省略或设为非正数时保留 Codex 自身默认值。
+# model_context_window = 872000
+#
 # Optional: specify Codex reasoning effort / 可选：指定 Codex 推理强度
 # Unsupported values fall back to the Codex CLI default (with a warning).
 # 不支持的值会回退到 Codex CLI 默认强度（并记录警告）。
@@ -1608,12 +1615,14 @@ app_secret = "your-feishu-app-secret"
 #
 # Optional: CLI binary and extra global args / 可选：CLI 二进制与额外全局参数
 # Extra args are passed on both backends, placed before the subcommand
-# (`app-server` / `exec`). Structured options above (model, reasoning_effort,
-# service_tier, provider) are emitted after them, so they win when both set
+# (`app-server` / `exec`). Structured options above (model,
+# model_context_window, reasoning_effort, service_tier, provider) are emitted
+# after them, so they win when both set
 # the same `-c` key (codex resolves duplicate `-c` last-wins).
 # 额外参数在两种后端下都会透传，置于子命令（`app-server` / `exec`）之前。
-# 上方的结构化选项（model、reasoning_effort、service_tier、provider）在其后
-# 输出，因此与同名 `-c` 键冲突时以结构化选项为准（codex 对重复 `-c` 后者生效）。
+# 上方的结构化选项（model、model_context_window、reasoning_effort、
+# service_tier、provider）在其后输出，因此与同名 `-c` 键冲突时以结构化选项为准
+# （codex 对重复 `-c` 后者生效）。
 # Any `-c` override (from cmd or structured options) beats Codex's own
 # ~/.codex/config.toml, per standard codex CLI semantics.
 # 任何 `-c` 覆盖（无论来自 cmd 还是结构化选项）都优先于 Codex 自身的

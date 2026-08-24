@@ -35,6 +35,7 @@ func init() {
 type Agent struct {
 	workDir         string
 	model           string
+	contextWindow   int64 // optional positive Codex model_context_window override
 	reasoningEffort string
 	serviceTier     string // Codex service tier (e.g. "fast"); catalog-driven, passed through verbatim
 	mode            string // "suggest" | "auto-edit" | "full-auto" | "yolo"
@@ -58,6 +59,11 @@ func New(opts map[string]any) (core.Agent, error) {
 		workDir = "."
 	}
 	model, _ := opts["model"].(string)
+	contextWindow, validContextWindow := parseModelContextWindow(opts["model_context_window"])
+	if raw, configured := opts["model_context_window"]; configured && !validContextWindow {
+		slog.Warn("codex: model_context_window must be a positive integer, using Codex default",
+			"type", fmt.Sprintf("%T", raw))
+	}
 	reasoningEffort, _ := opts["reasoning_effort"].(string)
 	serviceTier, _ := opts["service_tier"].(string)
 	mode, _ := opts["mode"].(string)
@@ -96,6 +102,7 @@ func New(opts map[string]any) (core.Agent, error) {
 	return &Agent{
 		workDir:         workDir,
 		model:           model,
+		contextWindow:   contextWindow,
 		reasoningEffort: normalizeReasoningEffort(reasoningEffort),
 		serviceTier:     strings.TrimSpace(serviceTier),
 		mode:            mode,
@@ -109,6 +116,20 @@ func New(opts map[string]any) (core.Agent, error) {
 		configEnv:       configEnv,
 		activeIdx:       -1,
 	}, nil
+}
+
+func parseModelContextWindow(raw any) (int64, bool) {
+	switch value := raw.(type) {
+	case int64:
+		if value > 0 {
+			return value, true
+		}
+	case int:
+		if value > 0 {
+			return int64(value), true
+		}
+	}
+	return 0, false
 }
 
 func normalizeBackend(raw string) string {
@@ -477,6 +498,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	a.mu.Lock()
 	mode := a.mode
 	model := a.model
+	contextWindow := a.contextWindow
 	reasoningEffort := a.reasoningEffort
 	serviceTier := a.serviceTier
 	backend := a.backend
@@ -520,6 +542,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 			cliExtraArgs:  cliExtraArgs,
 			workDir:       workDir,
 			model:         model,
+			contextWindow: contextWindow,
 			effort:        reasoningEffort,
 			serviceTier:   serviceTier,
 			mode:          mode,
@@ -541,6 +564,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		cliExtraArgs:  cliExtraArgs,
 		workDir:       workDir,
 		model:         model,
+		contextWindow: contextWindow,
 		effort:        reasoningEffort,
 		serviceTier:   serviceTier,
 		mode:          mode,
@@ -605,6 +629,9 @@ func (a *Agent) WorkspaceAgentOptions() map[string]any {
 	}
 	if a.model != "" {
 		opts["model"] = a.model
+	}
+	if a.contextWindow > 0 {
+		opts["model_context_window"] = a.contextWindow
 	}
 	if a.reasoningEffort != "" {
 		opts["reasoning_effort"] = a.reasoningEffort
