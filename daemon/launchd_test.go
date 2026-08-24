@@ -335,12 +335,7 @@ func TestBuildPlist_EscapesXMLSpecialCharsInPaths(t *testing.T) {
 			continue
 		}
 		rest := out[i:]
-		if !(strings.HasPrefix(rest, "&amp;") ||
-			strings.HasPrefix(rest, "&lt;") ||
-			strings.HasPrefix(rest, "&gt;") ||
-			strings.HasPrefix(rest, "&quot;") ||
-			strings.HasPrefix(rest, "&apos;") ||
-			strings.HasPrefix(rest, "&#")) {
+		if !strings.HasPrefix(rest, "&amp;") && !strings.HasPrefix(rest, "&lt;") && !strings.HasPrefix(rest, "&gt;") && !strings.HasPrefix(rest, "&quot;") && !strings.HasPrefix(rest, "&apos;") && !strings.HasPrefix(rest, "&#") {
 			t.Fatalf("bare '&' at offset %d (not a valid entity ref): %q", i, rest[:min(len(rest), 30)])
 		}
 	}

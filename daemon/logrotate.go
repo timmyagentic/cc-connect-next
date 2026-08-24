@@ -42,7 +42,7 @@ func NewRotatingWriter(path string, maxSize int64, maxBackups int) (*RotatingWri
 	}
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	if maxBackups < 1 {
@@ -109,7 +109,9 @@ func (w *RotatingWriter) backupPath(i int) string {
 //
 // Caller must hold w.mu.
 func (w *RotatingWriter) rotateLocked() {
-	w.file.Close()
+	if err := w.file.Close(); err != nil {
+		slog.Warn("logrotate: close before rotation failed", "error", err, "path", w.path)
+	}
 
 	// 1. Delete the oldest, if it exists. If this fails it is not fatal —
 	//    the next rename below will overwrite an empty slot.

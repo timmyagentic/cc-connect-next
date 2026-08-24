@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/gorilla/websocket"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 var (
@@ -203,7 +203,9 @@ func (p *Platform) Stop() error {
 		}
 		p.mu.Lock()
 		if p.conn != nil {
-			p.conn.Close()
+			if err := p.conn.Close(); err != nil {
+				slog.Debug("wps-xiezuo: close connection failed", "error", err)
+			}
 			p.conn = nil
 		}
 		p.mu.Unlock()
@@ -273,7 +275,9 @@ func (p *Platform) runConnection(ctx context.Context) error {
 		p.writeCh = nil
 		p.mu.Unlock()
 		close(writeCh)
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			slog.Debug("wps-xiezuo: close websocket failed", "error", err)
+		}
 	}()
 
 	slog.Info("wps-xiezuo: connected")
@@ -857,7 +861,7 @@ func (p *Platform) sendWPSMessage(ctx context.Context, rctx any, content string)
 	if err != nil {
 		return fmt.Errorf("wps-xiezuo: send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -901,7 +905,7 @@ func (p *Platform) getToken(ctx context.Context) (string, error) {
 			lastErr = err
 			continue
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -961,7 +965,7 @@ func (p *Platform) addReaction(ctx context.Context, rctx replyContext, reactionT
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
@@ -990,7 +994,7 @@ func (p *Platform) deleteReaction(ctx context.Context, rctx replyContext, reacti
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)

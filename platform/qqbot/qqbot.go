@@ -17,8 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/gorilla/websocket"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 func init() {
@@ -328,7 +328,7 @@ func (p *Platform) apiRequestJSON(method, url string, body any, result any) erro
 	if err != nil {
 		return fmt.Errorf("qqbot: api request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Retry once on 401
 	if resp.StatusCode == http.StatusUnauthorized {
@@ -352,7 +352,7 @@ func (p *Platform) apiRequestJSON(method, url string, body any, result any) erro
 		if err != nil {
 			return fmt.Errorf("qqbot: api retry failed: %w", err)
 		}
-		defer resp2.Body.Close()
+		defer func() { _ = resp2.Body.Close() }()
 
 		if resp2.StatusCode >= 300 {
 			raw, _ := io.ReadAll(resp2.Body)
@@ -583,7 +583,7 @@ func (p *Platform) refreshToken() error {
 	if err != nil {
 		return fmt.Errorf("token request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(resp.Body)
@@ -664,19 +664,19 @@ func (p *Platform) connectGateway(ctx context.Context) error {
 
 	// Wait for Hello (op 10)
 	if err := p.waitForHello(conn); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return err
 	}
 
 	// Send Identify (op 2)
 	if err := p.sendIdentify(conn, token); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return err
 	}
 
 	// Wait for READY event
 	if err := p.waitForReady(conn); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return err
 	}
 
@@ -701,7 +701,7 @@ func (p *Platform) getGatewayURL(token string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("gateway request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		URL string `json:"url"`
@@ -911,7 +911,9 @@ func (p *Platform) reconnectLoop(ctx context.Context) {
 	// Close existing connection
 	p.wsMu.Lock()
 	if p.wsConn != nil {
-		p.wsConn.Close()
+		if err := p.wsConn.Close(); err != nil {
+			slog.Debug("qqbot: close websocket before reconnect failed", "error", err)
+		}
 		p.wsConn = nil
 	}
 	p.wsMu.Unlock()
@@ -958,7 +960,7 @@ func (p *Platform) reconnectLoop(ctx context.Context) {
 			p.wsMu.Lock()
 			p.wsConn = nil
 			p.wsMu.Unlock()
-			conn.Close()
+			_ = conn.Close()
 			backoff = min(backoff*2, maxReconnectBackoff)
 			continue
 		}
@@ -969,7 +971,7 @@ func (p *Platform) reconnectLoop(ctx context.Context) {
 			p.wsMu.Lock()
 			p.wsConn = nil
 			p.wsMu.Unlock()
-			conn.Close()
+			_ = conn.Close()
 		}
 
 		// Try Resume if we have a session_id, otherwise Identify
@@ -1462,7 +1464,7 @@ func (p *Platform) apiRequest(method, url string, body any) error {
 	if err != nil {
 		return fmt.Errorf("qqbot: api request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Retry once on 401 (token may have expired)
 	if resp.StatusCode == http.StatusUnauthorized {
@@ -1487,7 +1489,7 @@ func (p *Platform) apiRequest(method, url string, body any) error {
 		if err != nil {
 			return fmt.Errorf("qqbot: api retry failed: %w", err)
 		}
-		defer resp2.Body.Close()
+		defer func() { _ = resp2.Body.Close() }()
 
 		if resp2.StatusCode >= 300 {
 			raw, _ := io.ReadAll(resp2.Body)
@@ -1532,11 +1534,11 @@ func downloadAttachmentImages(attachments []attachment) []core.ImageAttachment {
 		}
 		if resp.StatusCode != http.StatusOK {
 			slog.Warn("qqbot: download image returned non-200 status", "url", url, "status", resp.StatusCode)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			continue
 		}
 		data, err := io.ReadAll(io.LimitReader(resp.Body, maxAttachmentSize))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			slog.Warn("qqbot: read image body failed", "error", err)
 			continue
@@ -1575,11 +1577,11 @@ func downloadAttachmentFiles(attachments []attachment) []core.FileAttachment {
 		}
 		if resp.StatusCode != http.StatusOK {
 			slog.Warn("qqbot: download file returned non-200 status", "url", url, "status", resp.StatusCode)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			continue
 		}
 		data, err := io.ReadAll(io.LimitReader(resp.Body, maxAttachmentSize))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			slog.Warn("qqbot: read file body failed", "error", err)
 			continue

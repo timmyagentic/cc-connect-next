@@ -122,7 +122,9 @@ func ConsumeRestartNotify(dataDir string) *RestartRequest {
 	if err != nil {
 		return nil
 	}
-	os.Remove(p)
+	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+		slog.Debug("ConsumeRestartNotify: remove notification failed", "path", p, "error", err)
+	}
 	var req RestartRequest
 	if json.Unmarshal(data, &req) != nil {
 		return nil
@@ -2440,7 +2442,9 @@ func (e *Engine) Stop() error {
 	for key, state := range states {
 		if state.agentSession != nil {
 			slog.Debug("engine.Stop: closing agent session", "session", key)
-			state.agentSession.Close()
+			if err := state.agentSession.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("close agent session %s: %w", key, err))
+			}
 		}
 	}
 
@@ -4327,7 +4331,6 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 		// continues outputting while new agent starts (issue #327).
 		e.closeAgentSessionWithTimeout(sessionKey, state.agentSession)
 		delete(e.interactiveStates, sessionKey)
-		ok = false // prevent reading stale settings below
 	}
 
 	// Select the agent to use for this session
@@ -4596,7 +4599,9 @@ func (e *Engine) closeAgentSessionWithTimeout(sessionKey string, agentSession Ag
 
 	done := make(chan struct{})
 	go func() {
-		agentSession.Close()
+		if err := agentSession.Close(); err != nil {
+			slog.Warn("agent session close failed", "session", sessionKey, "error", err)
+		}
 		close(done)
 	}()
 
@@ -4629,7 +4634,7 @@ func buildCardContent(thinking string, tools []cardToolEntry, answer string) str
 		sb.WriteString("\n\n---\n\n")
 	}
 	for _, t := range tools {
-		sb.WriteString(fmt.Sprintf("🔧 **Tool #%d**: `%s`\n", t.Index, t.Name))
+		fmt.Fprintf(&sb, "🔧 **Tool #%d**: `%s`\n", t.Index, t.Name)
 		if t.Input != "" {
 			sb.WriteString(t.Input)
 			sb.WriteString("\n")
@@ -6198,7 +6203,6 @@ turnDeadlineExceeded:
 
 channelClosed:
 	terminal.handleChannelClosed()
-	return
 
 }
 
@@ -6779,7 +6783,6 @@ func (queue *turnQueue) handle() {
 	}
 
 	queue.control = turnReadStop
-	return
 }
 
 type turnTerminalHandler struct {
@@ -6836,7 +6839,6 @@ func (terminal *turnTerminalHandler) handleIdleTimeout() {
 	e.recordFeedbackError(sessionKey, fmt.Sprintf("agent session idle timeout: no events for %v, session killed", e.eventIdleTimeout))
 	e.maybeSendFeedbackErrorHint(timedOutPlatform, replyCtx, sessionKey)
 	e.cleanupInteractiveState(sessionKey, state)
-	return
 }
 
 func (terminal *turnTerminalHandler) handleDeadline() {
@@ -6910,7 +6912,6 @@ graceLoop:
 	// Graceful exit path: cleanupInteractiveState closes the session,
 	// but eventsNeedResync=false so the next --resume works correctly.
 	e.cleanupInteractiveState(sessionKey, state)
-	return
 }
 
 func (terminal *turnTerminalHandler) handleChannelClosed() {
@@ -7116,7 +7117,6 @@ func (failure *turnFailure) handle() {
 	if state.agentSession == nil || !state.agentSession.Alive() {
 		e.notifyDroppedQueuedMessages(state, event.Error)
 	}
-	return
 }
 
 type turnPermission struct {
@@ -8740,7 +8740,7 @@ func (e *Engine) handleWorkspaceCommand(p Platform, msg *Message, args []string)
 			if name == "" {
 				name = chID
 			}
-			sb.WriteString(fmt.Sprintf("• #%s → `%s`\n", name, b.Workspace))
+			fmt.Fprintf(&sb, "• #%s → `%s`\n", name, b.Workspace)
 		}
 		e.reply(p, msg.ReplyCtx, sb.String())
 	}
@@ -8956,9 +8956,9 @@ func (e *Engine) cmdList(p Platform, msg *Message, args []string) {
 
 		var sb strings.Builder
 		if totalPages > 1 {
-			sb.WriteString(fmt.Sprintf(e.i18n.T(MsgListTitlePaged), agentName, total, page, totalPages))
+			fmt.Fprintf(&sb, e.i18n.T(MsgListTitlePaged), agentName, total, page, totalPages)
 		} else {
-			sb.WriteString(fmt.Sprintf(e.i18n.T(MsgListTitle), agentName, total))
+			fmt.Fprintf(&sb, e.i18n.T(MsgListTitle), agentName, total)
 		}
 		for i := start; i < end; i++ {
 			s := agentSessions[i]
@@ -8979,11 +8979,11 @@ func (e *Engine) cmdList(p Platform, msg *Message, args []string) {
 					displayName = string([]rune(displayName)[:40]) + "…"
 				}
 			}
-			sb.WriteString(fmt.Sprintf("%s **%d.** %s · **%d** msgs · %s\n",
-				marker, i+1, displayName, s.MessageCount, s.ModifiedAt.Format("01-02 15:04")))
+			fmt.Fprintf(&sb, "%s **%d.** %s · **%d** msgs · %s\n",
+				marker, i+1, displayName, s.MessageCount, s.ModifiedAt.Format("01-02 15:04"))
 		}
 		if totalPages > 1 {
-			sb.WriteString(fmt.Sprintf(e.i18n.T(MsgListPageHint), page, totalPages))
+			fmt.Fprintf(&sb, e.i18n.T(MsgListPageHint), page, totalPages)
 		}
 		sb.WriteString(e.i18n.T(MsgListSwitchHint))
 		e.reply(p, msg.ReplyCtx, sb.String())
@@ -9848,7 +9848,7 @@ func (e *Engine) cmdDir(p Platform, msg *Message, args []string) {
 					if dir == currentDir {
 						marker = "▶"
 					}
-					sb.WriteString(fmt.Sprintf("\n  %s %d. %s", marker, i+1, dir))
+					fmt.Fprintf(&sb, "\n  %s %d. %s", marker, i+1, dir)
 				}
 				sb.WriteString("\n\n")
 				sb.WriteString(e.i18n.T(MsgDirHistoryHint))
@@ -9951,14 +9951,14 @@ func (e *Engine) cmdSearch(p Platform, msg *Message, args []string) {
 
 	// Build result message
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(e.i18n.T(MsgSearchResult), len(results), keyword))
+	fmt.Fprintf(&sb, e.i18n.T(MsgSearchResult), len(results), keyword)
 
 	for i, r := range results {
 		shortID := r.id
 		if len(shortID) > 12 {
 			shortID = shortID[:12]
 		}
-		sb.WriteString(fmt.Sprintf("\n%d. [%s] %s", i+1, shortID, r.name))
+		fmt.Fprintf(&sb, "\n%d. [%s] %s", i+1, shortID, r.name)
 	}
 
 	sb.WriteString("\n\n" + e.i18n.T(MsgSearchHint))
@@ -10261,7 +10261,7 @@ func formatUsageBlock(lang Language, window *UsageWindow) string {
 	sb.WriteString("\n")
 	sb.WriteString(usageRemainingLabel(lang))
 	sb.WriteString(usageColon(lang))
-	sb.WriteString(fmt.Sprintf("%d%%", remaining))
+	fmt.Fprintf(&sb, "%d%%", remaining)
 	sb.WriteString("\n")
 	sb.WriteString(usageResetLabel(lang))
 	sb.WriteString(usageColon(lang))
@@ -10654,7 +10654,7 @@ func (e *Engine) cmdHistory(p Platform, msg *Message, args []string) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📜 History (last %d):\n\n", len(entries)))
+	fmt.Fprintf(&sb, "📜 History (last %d):\n\n", len(entries))
 	maxLen := e.historyEntryMaxLen()
 	for _, h := range entries {
 		icon := "👤"
@@ -10662,7 +10662,7 @@ func (e *Engine) cmdHistory(p Platform, msg *Message, args []string) {
 			icon = "🤖"
 		}
 		content := truncateHistoryEntry(h.Content, maxLen)
-		sb.WriteString(fmt.Sprintf("%s [%s]\n%s\n\n", icon, h.Timestamp.Format("15:04:05"), content))
+		fmt.Fprintf(&sb, "%s [%s]\n%s\n\n", icon, h.Timestamp.Format("15:04:05"), content)
 	}
 	e.reply(p, msg.ReplyCtx, sb.String())
 }
@@ -11330,7 +11330,7 @@ func (e *Engine) cmdReasoning(p Platform, msg *Message, args []string) {
 				if effort == current {
 					marker = "> "
 				}
-				sb.WriteString(fmt.Sprintf("%s%d. %s\n", marker, i+1, effort))
+				fmt.Fprintf(&sb, "%s%d. %s\n", marker, i+1, effort)
 
 				label := effort
 				if effort == current {
@@ -11412,9 +11412,9 @@ func (e *Engine) cmdMode(p Platform, msg *Message, args []string) {
 					}
 				}
 				if zhLike {
-					sb.WriteString(fmt.Sprintf("**%s**%s — %s\n", m.NameZh, suffix, m.DescZh))
+					fmt.Fprintf(&sb, "**%s**%s — %s\n", m.NameZh, suffix, m.DescZh)
 				} else {
-					sb.WriteString(fmt.Sprintf("**%s**%s — %s\n", m.Name, suffix, m.Desc))
+					fmt.Fprintf(&sb, "**%s**%s — %s\n", m.Name, suffix, m.Desc)
 				}
 			}
 			sb.WriteString(e.modeUsageText(modes))
@@ -12013,7 +12013,7 @@ func (e *Engine) cmdProvider(p Platform, msg *Message, args []string) {
 
 		var sb strings.Builder
 		if current != nil {
-			sb.WriteString(fmt.Sprintf(e.i18n.T(MsgProviderCurrent), current.Name))
+			fmt.Fprintf(&sb, e.i18n.T(MsgProviderCurrent), current.Name)
 			sb.WriteString("\n\n")
 		}
 		sb.WriteString(e.i18n.T(MsgProviderListTitle))
@@ -12029,7 +12029,7 @@ func (e *Engine) cmdProvider(p Platform, msg *Message, args []string) {
 			if prov.Model != "" {
 				detail += " [" + prov.Model + "]"
 			}
-			sb.WriteString(fmt.Sprintf("%s%s\n", marker, detail))
+			fmt.Fprintf(&sb, "%s%s\n", marker, detail)
 		}
 		sb.WriteString("\n" + e.i18n.T(MsgProviderSwitchHint))
 		e.reply(p, msg.ReplyCtx, sb.String())
@@ -12061,7 +12061,7 @@ func (e *Engine) cmdProvider(p Platform, msg *Message, args []string) {
 			if prov.Model != "" {
 				detail += " [" + prov.Model + "]"
 			}
-			sb.WriteString(fmt.Sprintf("%s%s\n", marker, detail))
+			fmt.Fprintf(&sb, "%s%s\n", marker, detail)
 		}
 		sb.WriteString("\n" + e.i18n.T(MsgProviderSwitchHint))
 		e.reply(p, msg.ReplyCtx, sb.String())
@@ -13170,7 +13170,7 @@ func (e *Engine) sendAskQuestionPrompt(p Platform, replyCtx any, questions []Use
 		if hasDesc {
 			textBuf.WriteString("\n")
 			for i, opt := range q.Options {
-				textBuf.WriteString(fmt.Sprintf("\n*%d. %s*", i+1, opt.Label))
+				fmt.Fprintf(&textBuf, "\n*%d. %s*", i+1, opt.Label)
 				if opt.Description != "" {
 					textBuf.WriteString(" — ")
 					textBuf.WriteString(opt.Description)
@@ -13202,14 +13202,14 @@ func (e *Engine) sendAskQuestionPrompt(p Platform, replyCtx any, questions []Use
 	}
 	sb.WriteString("\n\n")
 	for i, opt := range q.Options {
-		sb.WriteString(fmt.Sprintf("%d. **%s**", i+1, opt.Label))
+		fmt.Fprintf(&sb, "%d. **%s**", i+1, opt.Label)
 		if opt.Description != "" {
 			sb.WriteString(" — ")
 			sb.WriteString(opt.Description)
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString(fmt.Sprintf("\n%s", e.i18n.T(MsgAskQuestionNote)))
+	fmt.Fprintf(&sb, "\n%s", e.i18n.T(MsgAskQuestionNote))
 	e.send(p, replyCtx, sb.String())
 }
 
@@ -14536,9 +14536,9 @@ func (e *Engine) renderModeCard() *Card {
 			marker = "▶"
 		}
 		if zhLike {
-			sb.WriteString(fmt.Sprintf("%s **%s** — %s\n", marker, m.NameZh, m.DescZh))
+			fmt.Fprintf(&sb, "%s **%s** — %s\n", marker, m.NameZh, m.DescZh)
 		} else {
-			sb.WriteString(fmt.Sprintf("%s **%s** — %s\n", marker, m.Name, m.Desc))
+			fmt.Fprintf(&sb, "%s **%s** — %s\n", marker, m.Name, m.Desc)
 		}
 	}
 
@@ -14809,7 +14809,7 @@ func (e *Engine) renderHistoryCard(sessionKey string) *Card {
 			icon = "🤖"
 		}
 		content := truncateHistoryEntry(h.Content, maxLen)
-		sb.WriteString(fmt.Sprintf("%s [%s]\n%s\n\n", icon, h.Timestamp.Format("15:04:05"), content))
+		fmt.Fprintf(&sb, "%s [%s]\n%s\n\n", icon, h.Timestamp.Format("15:04:05"), content)
 	}
 
 	return NewCard().
@@ -14837,7 +14837,7 @@ func (e *Engine) renderProviderCard() *Card {
 
 	var body strings.Builder
 	if current != nil {
-		body.WriteString(fmt.Sprintf(e.i18n.T(MsgProviderCurrent), current.Name))
+		fmt.Fprintf(&body, e.i18n.T(MsgProviderCurrent), current.Name)
 		body.WriteString("\n\n")
 	}
 
@@ -15039,7 +15039,7 @@ func (e *Engine) renderCronCard(sessionKey string, userID string) *Card {
 		human := CronExprToHuman(j.CronExpr, lang)
 
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("%s %s\n", status, desc))
+		fmt.Fprintf(&sb, "%s %s\n", status, desc)
 		sb.WriteString(e.i18n.Tf(MsgCronIDLabel, j.ID))
 		sb.WriteString(e.i18n.Tf(MsgCronScheduleLabel, human, j.CronExpr))
 		nextRun := e.cronScheduler.NextRun(j.ID)
@@ -15161,7 +15161,7 @@ func (e *Engine) renderCommandsCard() *Card {
 				desc = truncateStr(c.Prompt, 60)
 			}
 		}
-		sb.WriteString(fmt.Sprintf("/%s%s — %s\n", c.Name, tag, desc))
+		fmt.Fprintf(&sb, "/%s%s — %s\n", c.Name, tag, desc)
 	}
 
 	return NewCard().Title(e.i18n.T(MsgCardTitleCommands), "purple").
@@ -15186,10 +15186,10 @@ func (e *Engine) renderAliasCard() *Card {
 	sort.Strings(names)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(e.i18n.T(MsgAliasListHeader), len(e.aliases)))
+	fmt.Fprintf(&sb, e.i18n.T(MsgAliasListHeader), len(e.aliases))
 	sb.WriteString("\n")
 	for _, n := range names {
-		sb.WriteString(fmt.Sprintf("`%s` → `%s`\n", n, e.aliases[n]))
+		fmt.Fprintf(&sb, "`%s` → `%s`\n", n, e.aliases[n])
 	}
 
 	return NewCard().Title(e.i18n.T(MsgCardTitleAlias), "purple").
@@ -15205,7 +15205,7 @@ func (e *Engine) renderConfigCard() *Card {
 	var sb strings.Builder
 	sb.WriteString(e.i18n.T(MsgConfigTitle))
 	for _, item := range items {
-		sb.WriteString(fmt.Sprintf("`%s` = `%s`\n  %s\n\n", item.key, item.getFunc(), item.description(isZh)))
+		fmt.Fprintf(&sb, "`%s` = `%s`\n  %s\n\n", item.key, item.getFunc(), item.description(isZh))
 	}
 
 	return NewCard().Title(e.i18n.T(MsgCardTitleConfig), "grey").
@@ -15224,7 +15224,7 @@ func (e *Engine) renderSkillsCard() *Card {
 	var sb strings.Builder
 	sb.WriteString(e.i18n.Tf(MsgSkillsTitle, e.agent.Name(), len(skills)))
 	for _, s := range skills {
-		sb.WriteString(fmt.Sprintf("  /%s — %s\n", s.Name, s.Description))
+		fmt.Fprintf(&sb, "  /%s — %s\n", s.Name, s.Description)
 	}
 
 	return NewCard().Title(e.i18n.T(MsgCardTitleSkills), "purple").
@@ -15397,10 +15397,13 @@ func (e *Engine) appendMemoryFile(p Platform, msg *Message, filePath, text strin
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgMemoryAddFailed), err))
 		return
 	}
-	defer f.Close()
-
 	entry := "\n- " + text + "\n"
 	if _, err := f.WriteString(entry); err != nil {
+		_ = f.Close()
+		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgMemoryAddFailed), err))
+		return
+	}
+	if err := f.Close(); err != nil {
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgMemoryAddFailed), err))
 		return
 	}
@@ -15527,7 +15530,7 @@ func (e *Engine) cmdCronList(p Platform, msg *Message) {
 	lang := e.i18n.CurrentLang()
 	now := time.Now()
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(e.i18n.T(MsgCronListTitle), len(jobs)))
+	fmt.Fprintf(&sb, e.i18n.T(MsgCronListTitle), len(jobs))
 	sb.WriteString("\n")
 	sb.WriteString("\n")
 
@@ -15551,9 +15554,9 @@ func (e *Engine) cmdCronList(p Platform, msg *Message) {
 		if j.Mute {
 			desc += " [mute]"
 		}
-		sb.WriteString(fmt.Sprintf("%s %s\n", status, desc))
+		fmt.Fprintf(&sb, "%s %s\n", status, desc)
 
-		sb.WriteString(fmt.Sprintf("ID: %s\n", j.ID))
+		fmt.Fprintf(&sb, "ID: %s\n", j.ID)
 
 		human := CronExprToHuman(j.CronExpr, lang)
 		sb.WriteString(e.i18n.Tf(MsgCronScheduleLabel, human, j.CronExpr))
@@ -15568,13 +15571,13 @@ func (e *Engine) cmdCronList(p Platform, msg *Message) {
 			fmtStr := cronTimeFormat(j.LastRun, now)
 			sb.WriteString(e.i18n.Tf(MsgCronLastRunLabel, j.LastRun.Format(fmtStr)))
 			if j.LastError != "" {
-				sb.WriteString(fmt.Sprintf(" (failed: %s)", truncateStr(j.LastError, 40)))
+				fmt.Fprintf(&sb, " (failed: %s)", truncateStr(j.LastError, 40))
 			}
 			sb.WriteString("\n")
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("\n%s", e.i18n.T(MsgCronListFooter)))
+	fmt.Fprintf(&sb, "\n%s", e.i18n.T(MsgCronListFooter))
 	e.reply(p, msg.ReplyCtx, sb.String())
 }
 
@@ -16176,7 +16179,7 @@ func (e *Engine) cmdCommandsList(p Platform, msg *Message) {
 		} else if c.Exec != "" {
 			tag = " [shell]"
 		}
-		sb.WriteString(fmt.Sprintf("/%s%s\n", c.Name, tag))
+		fmt.Fprintf(&sb, "/%s%s\n", c.Name, tag)
 
 		// Description or fallback
 		desc := c.Description
@@ -16187,7 +16190,7 @@ func (e *Engine) cmdCommandsList(p Platform, msg *Message) {
 				desc = truncateStr(c.Prompt, 60)
 			}
 		}
-		sb.WriteString(fmt.Sprintf("  %s\n\n", desc))
+		fmt.Fprintf(&sb, "  %s\n\n", desc)
 	}
 
 	sb.WriteString(e.i18n.T(MsgCommandsHint))
@@ -16343,7 +16346,7 @@ func (e *Engine) cmdSkills(p Platform, msg *Message) {
 		sb.WriteString(e.i18n.Tf(MsgSkillsTitle, e.agent.Name(), len(skills)))
 
 		for _, s := range skills {
-			sb.WriteString(fmt.Sprintf("  /%s — %s\n", displayCommandForPlatform(p.Name(), s.Name), s.Description))
+			fmt.Fprintf(&sb, "  /%s — %s\n", displayCommandForPlatform(p.Name(), s.Name), s.Description)
 		}
 
 		sb.WriteString("\n" + e.i18n.T(MsgSkillsHint))
@@ -16547,7 +16550,7 @@ func (e *Engine) cmdConfig(p Platform, msg *Message, args []string) {
 			var sb strings.Builder
 			sb.WriteString(e.i18n.T(MsgConfigTitle))
 			for _, item := range items {
-				sb.WriteString(fmt.Sprintf("`%s` = `%s`\n  %s\n\n", item.key, item.getFunc(), item.description(isZh)))
+				fmt.Fprintf(&sb, "`%s` = `%s`\n  %s\n\n", item.key, item.getFunc(), item.description(isZh))
 			}
 			sb.WriteString(e.i18n.T(MsgConfigHint))
 			e.reply(p, msg.ReplyCtx, sb.String())
@@ -16635,22 +16638,22 @@ func (e *Engine) formatWhoamiText(msg *Message) string {
 	sb.WriteString("\n")
 
 	if msg.UserID != "" {
-		sb.WriteString(fmt.Sprintf("User ID: `%s`\n", msg.UserID))
+		fmt.Fprintf(&sb, "User ID: `%s`\n", msg.UserID)
 	} else {
 		sb.WriteString("User ID: (unknown)\n")
 	}
 	if msg.UserName != "" {
-		sb.WriteString(fmt.Sprintf("Name: %s\n", msg.UserName))
+		fmt.Fprintf(&sb, "Name: %s\n", msg.UserName)
 	}
 	if msg.Platform != "" {
-		sb.WriteString(fmt.Sprintf("Platform: %s\n", msg.Platform))
+		fmt.Fprintf(&sb, "Platform: %s\n", msg.Platform)
 	}
 
 	chatID := effectiveChannelID(msg)
 	if chatID != "" {
-		sb.WriteString(fmt.Sprintf("Chat ID: `%s`\n", chatID))
+		fmt.Fprintf(&sb, "Chat ID: `%s`\n", chatID)
 	}
-	sb.WriteString(fmt.Sprintf("Session Key: `%s`\n", msg.SessionKey))
+	fmt.Fprintf(&sb, "Session Key: `%s`\n", msg.SessionKey)
 
 	sb.WriteString("\n")
 	sb.WriteString(e.i18n.T(MsgWhoamiUsage))
@@ -16664,18 +16667,18 @@ func (e *Engine) renderWhoamiCard(msg *Message) *Card {
 	}
 
 	var body strings.Builder
-	body.WriteString(fmt.Sprintf("**User ID:**  `%s`\n", userID))
+	fmt.Fprintf(&body, "**User ID:**  `%s`\n", userID)
 	if msg.UserName != "" {
-		body.WriteString(fmt.Sprintf("**%s:**  %s\n", e.i18n.T(MsgWhoamiName), msg.UserName))
+		fmt.Fprintf(&body, "**%s:**  %s\n", e.i18n.T(MsgWhoamiName), msg.UserName)
 	}
 	if msg.Platform != "" {
-		body.WriteString(fmt.Sprintf("**%s:**  %s\n", e.i18n.T(MsgWhoamiPlatform), msg.Platform))
+		fmt.Fprintf(&body, "**%s:**  %s\n", e.i18n.T(MsgWhoamiPlatform), msg.Platform)
 	}
 	chatID := effectiveChannelID(msg)
 	if chatID != "" {
-		body.WriteString(fmt.Sprintf("**Chat ID:**  `%s`\n", chatID))
+		fmt.Fprintf(&body, "**Chat ID:**  `%s`\n", chatID)
 	}
-	body.WriteString(fmt.Sprintf("**Session Key:**  `%s`\n", msg.SessionKey))
+	fmt.Fprintf(&body, "**Session Key:**  `%s`\n", msg.SessionKey)
 
 	return NewCard().
 		Title(e.i18n.T(MsgWhoamiCardTitle), "blue").
@@ -16849,7 +16852,7 @@ func (e *Engine) cmdAliasList(p Platform, msg *Message) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(e.i18n.T(MsgAliasListHeader), len(e.aliases)))
+	fmt.Fprintf(&sb, e.i18n.T(MsgAliasListHeader), len(e.aliases))
 	sb.WriteString("\n")
 
 	names := make([]string, 0, len(e.aliases))
@@ -16859,7 +16862,7 @@ func (e *Engine) cmdAliasList(p Platform, msg *Message) {
 	sort.Strings(names)
 
 	for _, n := range names {
-		sb.WriteString(fmt.Sprintf("  %s → %s\n", n, e.aliases[n]))
+		fmt.Fprintf(&sb, "  %s → %s\n", n, e.aliases[n])
 	}
 	e.reply(p, msg.ReplyCtx, strings.TrimRight(sb.String(), "\n"))
 }
@@ -17353,7 +17356,6 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 			return "", fmt.Errorf("start relay session: %w", err)
 		}
 	}
-
 	saveRelaySessionID := func(id string, force bool) {
 		if id == "" {
 			return
@@ -17378,7 +17380,7 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 	saveRelaySessionID(agentSession.CurrentSessionID(), false)
 
 	if err := agentSession.Send(message, nil, nil); err != nil {
-		agentSession.Close()
+		closeRelayAgentSession(agentSession, relaySessionKey)
 		return "", fmt.Errorf("send relay message: %w", err)
 	}
 
@@ -17417,10 +17419,10 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 				resp = "(empty response)"
 			}
 			slog.Info("relay: turn complete", "from", fromProject, "to", e.name, "response_len", len(resp))
-			agentSession.Close()
+			closeRelayAgentSession(agentSession, relaySessionKey)
 			return resp, nil
 		case EventError:
-			agentSession.Close()
+			closeRelayAgentSession(agentSession, relaySessionKey)
 			if event.Error != nil {
 				return "", event.Error
 			}
@@ -17442,7 +17444,7 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 	}
 
 	// Event channel closed without EventResult.
-	agentSession.Close()
+	closeRelayAgentSession(agentSession, relaySessionKey)
 
 	if ctx.Err() != nil {
 		return relayPartialResponseOrError(ctx.Err(), textParts, fromProject, e.name)
@@ -17452,6 +17454,12 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 		return strings.Join(textParts, ""), nil
 	}
 	return "", fmt.Errorf("relay: agent process exited without response")
+}
+
+func closeRelayAgentSession(agentSession AgentSession, relaySessionKey string) {
+	if err := agentSession.Close(); err != nil {
+		slog.Warn("relay: close agent session failed", "relay_key", relaySessionKey, "error", err)
+	}
 }
 
 func relayPartialResponseOrError(ctxErr error, textParts []string, fromProject, toProject string) (string, error) {
@@ -17482,7 +17490,7 @@ func (e *Engine) drainRelaySession(agentSession AgentSession, session *Session, 
 		case ev, ok := <-agentSession.Events():
 			if !ok {
 				// Event channel closed — session ended naturally.
-				agentSession.Close()
+				closeRelayAgentSession(agentSession, relaySessionKey)
 				return
 			}
 			if ev.SessionID != "" {
@@ -17493,12 +17501,12 @@ func (e *Engine) drainRelaySession(agentSession AgentSession, session *Session, 
 			case EventResult:
 				slog.Info("relay: background drain completed (agent finished turn)",
 					"relay_key", relaySessionKey)
-				agentSession.Close()
+				closeRelayAgentSession(agentSession, relaySessionKey)
 				return
 			case EventError:
 				slog.Warn("relay: background drain got error",
 					"relay_key", relaySessionKey, "error", ev.Error)
-				agentSession.Close()
+				closeRelayAgentSession(agentSession, relaySessionKey)
 				return
 			case EventPermissionRequest:
 				_ = agentSession.RespondPermission(ev.RequestID, PermissionResult{
@@ -17509,10 +17517,10 @@ func (e *Engine) drainRelaySession(agentSession AgentSession, session *Session, 
 		case <-timer.C:
 			slog.Warn("relay: background drain timed out, closing session",
 				"relay_key", relaySessionKey)
-			agentSession.Close()
+			closeRelayAgentSession(agentSession, relaySessionKey)
 			return
 		case <-e.ctx.Done():
-			agentSession.Close()
+			closeRelayAgentSession(agentSession, relaySessionKey)
 			return
 		}
 	}
@@ -17694,9 +17702,11 @@ func (e *Engine) setupMemoryFile() (setupResult, string, error) {
 	if err != nil {
 		return setupError, baseName, err
 	}
-	defer f.Close()
-
 	if _, err := f.WriteString(block); err != nil {
+		_ = f.Close()
+		return setupError, baseName, err
+	}
+	if err := f.Close(); err != nil {
 		return setupError, baseName, err
 	}
 

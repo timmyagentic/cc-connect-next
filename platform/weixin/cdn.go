@@ -134,7 +134,7 @@ func fetchCdnBytes(ctx context.Context, client *http.Client, fullURL, label stri
 	if err != nil {
 		return nil, fmt.Errorf("%s: get: %w", label, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxWeixinMediaBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("%s: read: %w", label, err)

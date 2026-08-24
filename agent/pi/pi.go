@@ -382,9 +382,9 @@ func settingsPath() string {
 
 // piSettings represents the structure of pi's settings.json relevant fields.
 type piSettings struct {
-	EnabledModels  []string `json:"enabledModels"`
-	DefaultModel   string   `json:"defaultModel"`
-	DefaultProvider string  `json:"defaultProvider"`
+	EnabledModels   []string `json:"enabledModels"`
+	DefaultModel    string   `json:"defaultModel"`
+	DefaultProvider string   `json:"defaultProvider"`
 }
 
 // readSettings reads and parses pi's settings.json.
@@ -534,7 +534,11 @@ func scanPiSession(path string) (sessionID, summary string, msgCount int) {
 	if err != nil {
 		return "", "", 0
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("pi: close session file failed", "path", path, "error", err)
+		}
+	}()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1*1024*1024)
@@ -589,7 +593,11 @@ func readPiHistory(path string, limit int) ([]core.HistoryEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.Debug("pi: close history file failed", "path", path, "error", err)
+		}
+	}()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1*1024*1024)

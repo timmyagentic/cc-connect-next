@@ -16,8 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/creack/pty"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 const (
@@ -66,7 +66,7 @@ func (a *Agent) runClaudeUsageProbe(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("claudecode: create usage temp dir: %w", err)
 	}
-	defer os.RemoveAll(workDir)
+	defer func() { _ = os.RemoveAll(workDir) }()
 
 	args := []string{
 		"--tools", "",

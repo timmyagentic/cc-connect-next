@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os/user"
-	"runtime"
 	"sync"
 	"time"
 
@@ -27,10 +26,6 @@ import (
 // run_as_user at parse time. We still call it so the wiring is in place
 // for future platforms.
 func runRunAsUserStartupChecks(ctx context.Context, cfg *config.Config) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-
 	// Collect projects that have run_as_user set + their work_dirs.
 	type pending struct {
 		project    string

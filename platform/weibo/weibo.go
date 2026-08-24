@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/gorilla/websocket"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 const (
@@ -131,7 +131,9 @@ func (p *Platform) Stop() error {
 	p.wsMu.Lock()
 	defer p.wsMu.Unlock()
 	if p.ws != nil {
-		p.ws.Close()
+		err := p.ws.Close()
+		p.ws = nil
+		return err
 	}
 	return nil
 }
@@ -167,7 +169,7 @@ func (p *Platform) refreshToken() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("weibo: token request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -265,7 +267,9 @@ func (p *Platform) connect() error {
 
 	p.wsMu.Lock()
 	if p.ws != nil {
-		p.ws.Close()
+		if err := p.ws.Close(); err != nil {
+			slog.Debug(p.tag()+": close replaced websocket failed", "error", err)
+		}
 	}
 	p.ws = ws
 	p.wsMu.Unlock()
@@ -306,11 +310,11 @@ type wsMessage struct {
 }
 
 type messagePayload struct {
-	MessageID  string              `json:"messageId"`
-	FromUserID string              `json:"fromUserId"`
-	Text       string              `json:"text"`
-	Timestamp  int64               `json:"timestamp"`
-	Input      []messageInputItem  `json:"input,omitempty"`
+	MessageID  string             `json:"messageId"`
+	FromUserID string             `json:"fromUserId"`
+	Text       string             `json:"text"`
+	Timestamp  int64              `json:"timestamp"`
+	Input      []messageInputItem `json:"input,omitempty"`
 }
 
 type messageInputItem struct {
@@ -346,10 +350,12 @@ const (
 
 func (p *Platform) readLoop(ws *websocket.Conn) {
 	ws.SetPongHandler(func(string) error {
-		ws.SetReadDeadline(time.Now().Add(pongTimeout))
-		return nil
+		return ws.SetReadDeadline(time.Now().Add(pongTimeout))
 	})
-	ws.SetReadDeadline(time.Now().Add(pongTimeout))
+	if err := ws.SetReadDeadline(time.Now().Add(pongTimeout)); err != nil {
+		slog.Debug(p.tag()+": set initial read deadline failed", "error", err)
+		return
+	}
 
 	for {
 		_, raw, err := ws.ReadMessage()
@@ -365,7 +371,10 @@ func (p *Platform) readLoop(ws *websocket.Conn) {
 			return
 		}
 
-		ws.SetReadDeadline(time.Now().Add(pongTimeout))
+		if err := ws.SetReadDeadline(time.Now().Add(pongTimeout)); err != nil {
+			slog.Debug(p.tag()+": refresh read deadline failed", "error", err)
+			return
+		}
 
 		var msg wsMessage
 		if err := json.Unmarshal(raw, &msg); err != nil {

@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/config"
 	qrterminal "github.com/mdp/qrterminal/v3"
+	"github.com/timmyagentic/cc-connect-next/config"
 	"rsc.io/qr"
 )
 
@@ -402,7 +402,7 @@ func fetchBotOpenIDForSetup(appID, appSecret, platformType string) string {
 	if err != nil {
 		return ""
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 
 	var tokenResp tenantTokenResponse
@@ -420,7 +420,7 @@ func fetchBotOpenIDForSetup(appID, appSecret, platformType string) string {
 	if err != nil {
 		return ""
 	}
-	defer botResp.Body.Close()
+	defer func() { _ = botResp.Body.Close() }()
 	botData, _ := io.ReadAll(io.LimitReader(botResp.Body, 1<<20))
 
 	var result struct {
@@ -651,7 +651,7 @@ func validateAppCredentialsAgainstBase(baseURL, appID, appSecret string) (bool, 
 	if err != nil {
 		return false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -798,7 +798,7 @@ func (c *registrationClient) registrationCall(action string, params map[string]s
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {

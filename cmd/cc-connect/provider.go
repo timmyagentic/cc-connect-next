@@ -318,7 +318,7 @@ func queryCCSwitchDB(dbPath, appTypeFilter string) ([]ccSwitchRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open cc-switch db: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	query := "SELECT id, app_type, name, settings_config, is_current FROM providers"
 	var args []any
@@ -331,7 +331,7 @@ func queryCCSwitchDB(dbPath, appTypeFilter string) ([]ccSwitchRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query cc-switch db: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []ccSwitchRow
 	for rows.Next() {

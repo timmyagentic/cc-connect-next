@@ -227,7 +227,7 @@ func (a *Agent) GetModel() string {
 	a.mu.RLock()
 	model := a.model
 	a.mu.RUnlock()
-	return a.Store.Model(model)
+	return a.Model(model)
 }
 
 func (a *Agent) SetReasoningEffort(effort string) {
@@ -248,7 +248,7 @@ func (a *Agent) AvailableReasoningEfforts() []string {
 }
 
 func (a *Agent) configuredModels() []core.ModelOption {
-	return a.Store.Models()
+	return a.Models()
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
@@ -318,7 +318,7 @@ func isCodexChatModel(id string) bool {
 func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
 	apiKey := ""
 	baseURL := ""
-	if provider := a.Store.GetActiveProvider(); provider != nil {
+	if provider := a.GetActiveProvider(); provider != nil {
 		apiKey = provider.APIKey
 		baseURL = provider.BaseURL
 	}
@@ -348,7 +348,7 @@ func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
 		slog.Debug("codex: failed to fetch models", "error", err)
 		return nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil
 	}
@@ -514,8 +514,8 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	extraEnv = append(extraEnv, a.providerEnvLocked()...)
 	extraEnv = append(extraEnv, a.sessionEnv...)
 	var baseURL string
-	if provider := a.Store.GetActiveProvider(); provider != nil {
-		model = a.Store.Model(model)
+	if provider := a.GetActiveProvider(); provider != nil {
+		model = a.Model(model)
 		baseURL = provider.BaseURL
 	}
 	provName, provAPIKey, provWireAPI, provHeaders := a.activeProviderCodexConfig()
@@ -684,10 +684,8 @@ func walkUpCodexProjectSkillDirs(workDir, homeDir string) []string {
 	stopAt := findCodexProjectRoot(current)
 
 	var dirs []string
-	for {
-		if homeDir != "" && sameCodexPath(current, homeDir) {
-			break
-		}
+	for homeDir == "" || !sameCodexPath(current, homeDir) {
+
 		dirs = append(dirs,
 			filepath.Join(current, ".agents", "skills"),
 			filepath.Join(current, ".codex", "skills"),
@@ -779,7 +777,7 @@ func (a *Agent) SetActiveProvider(name string) bool {
 }
 
 func (a *Agent) providerEnvLocked() []string {
-	provider := a.Store.GetActiveProvider()
+	provider := a.GetActiveProvider()
 	if provider == nil {
 		return nil
 	}
@@ -801,7 +799,7 @@ func (a *Agent) providerEnvLocked() []string {
 // Returns non-empty name when the provider has codex config (wire_api, headers)
 // OR when it has a BaseURL (third-party provider needing auth.json).
 func (a *Agent) activeProviderCodexConfig() (name string, apiKey string, wireAPI string, headers map[string]string) {
-	provider := a.Store.GetActiveProvider()
+	provider := a.GetActiveProvider()
 	if provider == nil {
 		return
 	}

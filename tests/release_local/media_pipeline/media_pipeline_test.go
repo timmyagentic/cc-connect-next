@@ -78,7 +78,7 @@ func (s *recordingSession) Send(prompt string, images []core.ImageAttachment, fi
 		files:  append([]core.FileAttachment(nil), files...),
 	}
 	s.records = append(s.records, rec)
-	if !(s.blockFirst && len(s.records) == 1) {
+	if !s.blockFirst || len(s.records) != 1 {
 		s.events <- core.Event{Type: core.EventResult, Content: "media ok", Done: true}
 	} else {
 		s.blocked = true
@@ -240,7 +240,9 @@ func newMediaEngine(t *testing.T) (*core.Engine, *recordingAgent, *mediaPlatform
 	platform := &mediaPlatform{}
 	engine := core.NewEngine("release-media", agent, []core.Platform{platform}, t.TempDir()+"/sessions.json", core.LangEnglish)
 	t.Cleanup(func() {
-		engine.Stop()
+		if err := engine.Stop(); err != nil {
+			t.Errorf("stop engine: %v", err)
+		}
 		_ = agent.Stop()
 	})
 	return engine, agent, platform

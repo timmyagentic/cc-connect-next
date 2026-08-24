@@ -114,7 +114,7 @@ func TestSessionObserverPoll(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := f.WriteString(line); err != nil {
-			f.Close()
+			_ = f.Close()
 			t.Fatal(err)
 		}
 		if err := f.Close(); err != nil {
@@ -170,7 +170,7 @@ func TestSessionObserverNewFileSkipsPreExistingLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.WriteString(`{"type":"user","message":{"role":"user","content":"stale"},"entrypoint":"cli"}` + "\n"); err != nil {
-		f.Close()
+		_ = f.Close()
 		t.Fatal(err)
 	}
 	if err := f.Close(); err != nil {
@@ -191,7 +191,7 @@ func TestSessionObserverNewFileSkipsPreExistingLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.WriteString(`{"type":"user","message":{"role":"user","content":"fresh"},"entrypoint":"cli"}` + "\n"); err != nil {
-		f.Close()
+		_ = f.Close()
 		t.Fatal(err)
 	}
 	if err := f.Close(); err != nil {
@@ -215,9 +215,17 @@ func TestSessionObserverInitOffsetsSkipsExisting(t *testing.T) {
 
 	// Write a JSONL file BEFORE creating the observer
 	sessionFile := filepath.Join(dir, "existing.jsonl")
-	f, _ := os.Create(sessionFile)
-	f.WriteString(`{"type":"user","message":{"role":"user","content":"old message"},"entrypoint":"cli"}` + "\n")
-	f.Close()
+	f, err := os.Create(sessionFile)
+	if err != nil {
+		t.Fatalf("create session file: %v", err)
+	}
+	if _, err := f.WriteString(`{"type":"user","message":{"role":"user","content":"old message"},"entrypoint":"cli"}` + "\n"); err != nil {
+		_ = f.Close()
+		t.Fatalf("write session file: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close session file: %v", err)
+	}
 
 	var received []string
 	var mu sync.Mutex
@@ -274,7 +282,7 @@ func TestSessionObserverTruncation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.WriteString(fmt.Sprintf(`{"type":"user","message":{"role":"user","content":"%s"},"entrypoint":"cli"}`, longText) + "\n"); err != nil {
-		f.Close()
+		_ = f.Close()
 		t.Fatal(err)
 	}
 	if err := f.Close(); err != nil {

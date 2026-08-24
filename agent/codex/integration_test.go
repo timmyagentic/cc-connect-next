@@ -77,7 +77,9 @@ func TestIntegration_CodexProviderFlow(t *testing.T) {
 
 	// Step 3: run codex exec with the generated config
 	workDir := filepath.Join(t.TempDir(), "repo")
-	os.MkdirAll(workDir, 0o755)
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("create test repository: %v", err)
+	}
 	gitInit := exec.Command("git", "init", "-q")
 	gitInit.Dir = workDir
 	if err := gitInit.Run(); err != nil {

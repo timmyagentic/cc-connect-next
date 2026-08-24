@@ -171,7 +171,7 @@ func (gs *geminiSession) readLoop(ctx context.Context, cmd *exec.Cmd, stdout io.
 	defer func() {
 		// Clean up temp image files
 		for _, f := range tempImages {
-			os.Remove(f)
+			_ = os.Remove(f)
 		}
 		if err := cmd.Wait(); err != nil {
 			stderrMsg := strings.TrimSpace(stderrBuf.String())
@@ -190,7 +190,7 @@ func (gs *geminiSession) readLoop(ctx context.Context, cmd *exec.Cmd, stdout io.
 	// Unblock scanner if context is canceled
 	go func() {
 		<-ctx.Done()
-		stdout.Close()
+		_ = stdout.Close()
 	}()
 
 	scanner := bufio.NewScanner(stdout)

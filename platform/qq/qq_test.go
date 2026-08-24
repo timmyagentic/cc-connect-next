@@ -100,7 +100,7 @@ func TestStart_FetchesSelfIDWithoutTimeout(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer c.Close()
+		defer func() { _ = c.Close() }()
 		for {
 			_, msg, err := c.ReadMessage()
 			if err != nil {
@@ -143,7 +143,11 @@ func TestStart_FetchesSelfIDWithoutTimeout(t *testing.T) {
 		_ = p.Stop()
 		t.Fatal("Start did not complete within 5s; readLoop likely starts after callAPI, so get_login_info never gets a response")
 	}
-	defer p.Stop()
+	t.Cleanup(func() {
+		if err := p.Stop(); err != nil {
+			t.Errorf("stop platform: %v", err)
+		}
+	})
 
 	if p.selfID != botUserID {
 		t.Errorf("selfID = %d, want %d (self-message filter would be disabled)", p.selfID, botUserID)

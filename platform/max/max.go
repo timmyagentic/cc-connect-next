@@ -44,7 +44,7 @@ const (
 	// pollTimeout, otherwise transient MAX backend lag pushes header arrival
 	// past the deadline and the client cancels the long-poll, triggering a
 	// retry storm.
-	httpTimeout = 90 * time.Second
+	httpTimeout             = 90 * time.Second
 	initialReconnectBackoff = time.Second
 	maxReconnectBackoff     = 30 * time.Second
 	stableConnectionWindow  = 10 * time.Second
@@ -316,7 +316,7 @@ func (p *Platform) webhookHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	defer r.Body.Close()
+	defer func() { _ = r.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4*1024*1024))
 	if err != nil {
 		slog.Warn("max: webhook read body", "err", err)
@@ -362,7 +362,7 @@ func (p *Platform) subscribe(ctx context.Context, url string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, respBody)
@@ -384,7 +384,7 @@ func (p *Platform) unsubscribe(ctx context.Context, url string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, respBody)
@@ -531,7 +531,7 @@ func (p *Platform) UpdateMessage(ctx context.Context, replyCtx any, content stri
 	if err != nil {
 		return fmt.Errorf("max: edit message: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("max: edit message: HTTP %d: %s", resp.StatusCode, respBody)
@@ -565,7 +565,7 @@ func (p *Platform) uploadAttachment(ctx context.Context, kind string, data []byt
 	if err != nil {
 		return "", fmt.Errorf("request upload url: %w", err)
 	}
-	defer urlResp.Body.Close()
+	defer func() { _ = urlResp.Body.Close() }()
 	if urlResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(urlResp.Body, 512))
 		return "", fmt.Errorf("upload url: HTTP %d: %s", urlResp.StatusCode, body)
@@ -608,7 +608,7 @@ func (p *Platform) uploadAttachment(ctx context.Context, kind string, data []byt
 	if err != nil {
 		return "", fmt.Errorf("cdn upload: %w", err)
 	}
-	defer cdnResp.Body.Close()
+	defer func() { _ = cdnResp.Body.Close() }()
 	if cdnResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(cdnResp.Body, 512))
 		return "", fmt.Errorf("cdn upload: HTTP %d: %s", cdnResp.StatusCode, body)
@@ -721,7 +721,7 @@ func (p *Platform) sendChatAction(ctx context.Context, chatID, action string) er
 		slog.Debug("max: chat action failed", "chat", chatID, "action", action, "err", err)
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		slog.Debug("max: chat action non-2xx",
@@ -929,7 +929,7 @@ func (p *Platform) poll(ctx context.Context, marker *int64) (*int64, error) {
 	if err != nil {
 		return nil, fmt.Errorf("poll request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -1206,7 +1206,7 @@ func (p *Platform) downloadAttachment(ctx context.Context, url string) ([]byte, 
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
@@ -1241,7 +1241,7 @@ func (p *Platform) resolveMediaURL(ctx context.Context, kind, token string) (str
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return "", "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
@@ -1410,7 +1410,7 @@ func (p *Platform) postMessage(ctx context.Context, chatID string, body *maxSend
 			return fmt.Errorf("max: send message: %w", err)
 		}
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
 			return nil
@@ -1447,7 +1447,7 @@ func (p *Platform) getMe(ctx context.Context) (name string, id int64, err error)
 	if err != nil {
 		return "", 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var info struct {
 		Name   string `json:"name"`
@@ -1539,13 +1539,13 @@ func splitMessage(text string, maxLen int) []string {
 
 // Compile-time interface compliance assertions.
 var (
-	_ core.Platform                    = (*Platform)(nil)
-	_ core.ImageSender                 = (*Platform)(nil)
-	_ core.FileSender                  = (*Platform)(nil)
-	_ core.AudioSender                 = (*Platform)(nil)
-	_ core.InlineButtonSender          = (*Platform)(nil)
-	_ core.MessageUpdater              = (*Platform)(nil)
-	_ core.TypingIndicator             = (*Platform)(nil)
+	_ core.Platform                      = (*Platform)(nil)
+	_ core.ImageSender                   = (*Platform)(nil)
+	_ core.FileSender                    = (*Platform)(nil)
+	_ core.AudioSender                   = (*Platform)(nil)
+	_ core.InlineButtonSender            = (*Platform)(nil)
+	_ core.MessageUpdater                = (*Platform)(nil)
+	_ core.TypingIndicator               = (*Platform)(nil)
 	_ core.FormattingInstructionProvider = (*Platform)(nil)
-	_ core.ReplyContextReconstructor   = (*Platform)(nil)
+	_ core.ReplyContextReconstructor     = (*Platform)(nil)
 )

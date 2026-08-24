@@ -71,7 +71,9 @@ func (w *OpenAIWhisper) Transcribe(ctx context.Context, audio []byte, format str
 	if lang != "" {
 		_ = writer.WriteField("language", lang)
 	}
-	writer.Close()
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("close multipart body: %w", err)
+	}
 
 	url := w.BaseURL + "/audio/transcriptions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &buf)
@@ -85,7 +87,7 @@ func (w *OpenAIWhisper) Transcribe(ctx context.Context, audio []byte, format str
 	if err != nil {
 		return "", fmt.Errorf("whisper request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -172,7 +174,7 @@ func (q *QwenASR) Transcribe(ctx context.Context, audio []byte, format string, l
 	if err != nil {
 		return "", fmt.Errorf("qwen asr request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -266,7 +268,7 @@ func (g *GeminiSTT) Transcribe(ctx context.Context, audio []byte, format string,
 	if err != nil {
 		return "", fmt.Errorf("gemini stt: request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -375,8 +377,8 @@ func ConvertAudioToAMR(ctx context.Context, audio []byte, srcFormat string) ([]b
 	args := []string{
 		"-i", "pipe:0",
 		"-c:a", "amr_nb",
-		"-ar", "8000",   // 8kHz sample rate (AMR-NB standard)
-		"-ac", "1",      // mono
+		"-ar", "8000", // 8kHz sample rate (AMR-NB standard)
+		"-ac", "1", // mono
 		"-b:a", "12.2k", // 12.2 kbps bitrate (AMR-NB max)
 		"-f", "amr",
 		"-y",
@@ -408,9 +410,9 @@ func ConvertMP3ToOGG(ctx context.Context, mp3Data []byte) ([]byte, error) {
 	args := []string{
 		"-i", "pipe:0",
 		"-c:a", "libopus",
-		"-ar", "16000",       // 16kHz sample rate for voice
-		"-ac", "1",           // mono
-		"-b:a", "32k",        // 32 kbps bitrate (voice quality)
+		"-ar", "16000", // 16kHz sample rate for voice
+		"-ac", "1", // mono
+		"-b:a", "32k", // 32 kbps bitrate (voice quality)
 		"-application", "voip", // optimize for voice
 		"-f", "ogg",
 		"-y",
@@ -439,9 +441,9 @@ func ConvertMP3ToAMR(ctx context.Context, mp3Data []byte) ([]byte, error) {
 	args := []string{
 		"-i", "pipe:0",
 		"-c:a", "amr_nb",
-		"-ar", "8000",     // 8kHz sample rate (AMR-NB standard)
-		"-ac", "1",        // mono
-		"-b:a", "12.2k",   // 12.2 kbps bitrate (AMR-NB max)
+		"-ar", "8000", // 8kHz sample rate (AMR-NB standard)
+		"-ac", "1", // mono
+		"-b:a", "12.2k", // 12.2 kbps bitrate (AMR-NB max)
 		"-f", "amr",
 		"-y",
 		"pipe:1",

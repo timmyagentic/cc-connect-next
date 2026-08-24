@@ -252,7 +252,9 @@ func newTurnEngine(t *testing.T) (*core.Engine, *turnAgent, *turnPlatform) {
 	platform := &turnPlatform{}
 	engine := core.NewEngine("release-turn", agent, []core.Platform{platform}, t.TempDir()+"/sessions.json", core.LangEnglish)
 	t.Cleanup(func() {
-		engine.Stop()
+		if err := engine.Stop(); err != nil {
+			t.Errorf("stop engine: %v", err)
+		}
 		_ = agent.Stop()
 	})
 	return engine, agent, platform
@@ -529,7 +531,9 @@ func TestStreamingPreviewFinalizationContractExposesDuplicateFinalSend(t *testin
 	platform := &previewLifecyclePlatform{}
 	engine := core.NewEngine("release-preview", agent, []core.Platform{platform}, t.TempDir()+"/sessions.json", core.LangEnglish)
 	t.Cleanup(func() {
-		engine.Stop()
+		if err := engine.Stop(); err != nil {
+			t.Errorf("stop engine: %v", err)
+		}
 		_ = agent.Stop()
 	})
 	agent.session.blockFirstResult()
@@ -605,7 +609,9 @@ func TestStreamingPreviewConfigurationMatrix(t *testing.T) {
 			engine.SetReplyFooterEnabled(true)
 			engine.SetStreamPreviewCfg(tt.cfg)
 			t.Cleanup(func() {
-				engine.Stop()
+				if err := engine.Stop(); err != nil {
+					t.Errorf("stop engine: %v", err)
+				}
 				_ = agent.Stop()
 			})
 			agent.session.blockFirstResult()
@@ -655,7 +661,9 @@ func TestStreamingPreviewMaxCharsOnlyTruncatesIntermediatePreview(t *testing.T) 
 		MaxChars:      20,
 	})
 	t.Cleanup(func() {
-		engine.Stop()
+		if err := engine.Stop(); err != nil {
+			t.Errorf("stop engine: %v", err)
+		}
 		_ = agent.Stop()
 	})
 	agent.session.blockFirstResult()
@@ -850,7 +858,9 @@ func TestRichCardModeKeepsAnonymousProgressAndFinalAnswerInOneCard(t *testing.T)
 		ToolMaxLen:       500,
 	})
 	t.Cleanup(func() {
-		engine.Stop()
+		if err := engine.Stop(); err != nil {
+			t.Errorf("stop engine: %v", err)
+		}
 		_ = agent.Stop()
 	})
 	agent.session.blockFirstResult()
@@ -966,7 +976,7 @@ func (p *previewLifecyclePlatform) waitPreviewUpdates(t *testing.T, n int) {
 }
 
 func (p *previewLifecyclePlatform) snapshotPreviewLifecycle() (texts []string, starts []string, updates []string, deletes []any) {
-	texts, _, _, _ = p.turnPlatform.snapshot()
+	texts, _, _, _ = p.snapshot()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return texts,

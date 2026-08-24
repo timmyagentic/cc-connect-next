@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 func TestNewKimiSession(t *testing.T) {
@@ -42,7 +42,7 @@ func TestExtractResumeSessionID(t *testing.T) {
 func TestHandleAssistantWithText(t *testing.T) {
 	ctx := context.Background()
 	ks, _ := newKimiSession(ctx, "kimi", nil, "/tmp", "", "default", "", nil, 0, kimiFlagSupport{})
-	defer ks.Close()
+	defer func() { _ = ks.Close() }()
 
 	ks.handleEvent(map[string]any{
 		"role": "assistant",
@@ -59,7 +59,7 @@ func TestHandleAssistantWithText(t *testing.T) {
 func TestHandleAssistantWithThink(t *testing.T) {
 	ctx := context.Background()
 	ks, _ := newKimiSession(ctx, "kimi", nil, "/tmp", "", "default", "", nil, 0, kimiFlagSupport{})
-	defer ks.Close()
+	defer func() { _ = ks.Close() }()
 
 	ks.handleEvent(map[string]any{
 		"role": "assistant",
@@ -79,7 +79,7 @@ func TestHandleAssistantWithThink(t *testing.T) {
 func TestHandleAssistantWithToolCalls(t *testing.T) {
 	ctx := context.Background()
 	ks, _ := newKimiSession(ctx, "kimi", nil, "/tmp", "", "default", "", nil, 0, kimiFlagSupport{})
-	defer ks.Close()
+	defer func() { _ = ks.Close() }()
 
 	ks.handleEvent(map[string]any{
 		"role": "assistant",
@@ -110,7 +110,7 @@ func TestHandleAssistantWithToolCalls(t *testing.T) {
 func TestHandleTool(t *testing.T) {
 	ctx := context.Background()
 	ks, _ := newKimiSession(ctx, "kimi", nil, "/tmp", "", "default", "", nil, 0, kimiFlagSupport{})
-	defer ks.Close()
+	defer func() { _ = ks.Close() }()
 
 	ks.handleEvent(map[string]any{
 		"role":         "tool",
@@ -130,7 +130,7 @@ func TestHandleTool(t *testing.T) {
 func TestFlushPendingAsText(t *testing.T) {
 	ctx := context.Background()
 	ks, _ := newKimiSession(ctx, "kimi", nil, "/tmp", "", "default", "", nil, 0, kimiFlagSupport{})
-	defer ks.Close()
+	defer func() { _ = ks.Close() }()
 
 	ks.pendingMsgs = []string{"Hello", " ", "world"}
 	ks.flushPendingAsText()
@@ -145,7 +145,7 @@ func TestFlushPendingAsText(t *testing.T) {
 func TestFlushPendingAsThinking(t *testing.T) {
 	ctx := context.Background()
 	ks, _ := newKimiSession(ctx, "kimi", nil, "/tmp", "", "default", "", nil, 0, kimiFlagSupport{})
-	defer ks.Close()
+	defer func() { _ = ks.Close() }()
 
 	ks.pendingMsgs = []string{"Thinking..."}
 	ks.flushPendingAsThinking()

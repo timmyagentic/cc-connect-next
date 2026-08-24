@@ -27,7 +27,11 @@ func TestCronAndTimerShellShareSuccessContract(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			platform := &stubPlatformEngine{n: "test"}
 			engine := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangEnglish)
-			defer engine.Stop()
+			t.Cleanup(func() {
+				if err := engine.Stop(); err != nil {
+					t.Errorf("stop engine: %v", err)
+				}
+			})
 			if err := tt.run(engine, platform, t.TempDir()); err != nil {
 				t.Fatalf("scheduled shell error = %v", err)
 			}

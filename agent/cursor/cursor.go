@@ -108,11 +108,11 @@ func (a *Agent) GetModel() string {
 	a.mu.RLock()
 	model := a.model
 	a.mu.RUnlock()
-	return a.Store.Model(model)
+	return a.Model(model)
 }
 
 func (a *Agent) configuredModels() []core.ModelOption {
-	return a.Store.Models()
+	return a.Models()
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
@@ -198,7 +198,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	extraEnv := append([]string(nil), a.configEnv...)
 	extraEnv = append(extraEnv, a.providerEnvLocked()...)
 	extraEnv = append(extraEnv, a.sessionEnv...)
-	model = a.Store.Model(model)
+	model = a.Model(model)
 	a.mu.RUnlock()
 
 	return newCursorSession(ctx, cmd, extraArgs, workDir, model, mode, sessionID, extraEnv)
@@ -285,7 +285,7 @@ func (a *Agent) SetActiveProvider(name string) bool {
 }
 
 func (a *Agent) providerEnvLocked() []string {
-	provider := a.Store.GetActiveProvider()
+	provider := a.GetActiveProvider()
 	if provider == nil {
 		return nil
 	}

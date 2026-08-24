@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/gorilla/websocket"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 func TestNew_RequiredFields(t *testing.T) {
@@ -482,7 +482,7 @@ func TestRefreshToken(t *testing.T) {
 		if r.Method != "POST" {
 			t.Errorf("method = %s, want POST", r.Method)
 		}
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": map[string]any{
 				"token":     "test-token-abc",
 				"expire_in": 3600,
@@ -520,14 +520,16 @@ func TestSendMessage(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer c.Close()
+		defer func() { _ = c.Close() }()
 		for {
 			_, msg, err := c.ReadMessage()
 			if err != nil {
 				return
 			}
 			var m map[string]any
-			json.Unmarshal(msg, &m)
+			if err := json.Unmarshal(msg, &m); err != nil {
+				continue
+			}
 			gotMsg <- m
 		}
 	}))
@@ -538,7 +540,7 @@ func TestSendMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ws.Close()
+	t.Cleanup(func() { _ = ws.Close() })
 
 	p := &Platform{
 		name: "weibo",
@@ -582,14 +584,16 @@ func newWSTestPlatform(t *testing.T) (*Platform, chan map[string]any) {
 		if err != nil {
 			return
 		}
-		defer c.Close()
+		defer func() { _ = c.Close() }()
 		for {
 			_, msg, err := c.ReadMessage()
 			if err != nil {
 				return
 			}
 			var m map[string]any
-			json.Unmarshal(msg, &m)
+			if err := json.Unmarshal(msg, &m); err != nil {
+				continue
+			}
 			gotMsg <- m
 		}
 	}))
@@ -600,7 +604,7 @@ func newWSTestPlatform(t *testing.T) (*Platform, chan map[string]any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ws.Close() })
+	t.Cleanup(func() { _ = ws.Close() })
 
 	p := &Platform{name: "weibo", ws: ws, seen: make(map[string]struct{})}
 	return p, gotMsg
@@ -744,7 +748,7 @@ func TestWriteWS_ConcurrentSendsSerialized(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer c.Close()
+		defer func() { _ = c.Close() }()
 		for {
 			_, msg, err := c.ReadMessage()
 			if err != nil {
@@ -765,7 +769,7 @@ func TestWriteWS_ConcurrentSendsSerialized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ws.Close()
+	t.Cleanup(func() { _ = ws.Close() })
 
 	p := &Platform{name: "weibo", ws: ws, seen: make(map[string]struct{})}
 

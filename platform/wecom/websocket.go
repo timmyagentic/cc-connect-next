@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/gorilla/websocket"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 const (
@@ -201,7 +201,7 @@ func (p *WSPlatform) runConnection() error {
 		p.mu.Lock()
 		p.conn = nil
 		p.mu.Unlock()
-		conn.Close()
+		_ = conn.Close()
 
 		// Drain pending ACK channels so waiting goroutines are unblocked
 		// and stale entries do not accumulate across reconnections.
@@ -339,7 +339,7 @@ func (p *WSPlatform) heartbeat(ctx context.Context, conn *websocket.Conn) {
 			if missed >= wsMaxMissedPong {
 				slog.Warn("wecom-ws: no heartbeat ack for consecutive pings, connection considered dead",
 					"missed", missed)
-				conn.Close()
+				_ = conn.Close()
 				return
 			}
 

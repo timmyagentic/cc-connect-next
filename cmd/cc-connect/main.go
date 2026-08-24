@@ -1457,7 +1457,9 @@ func main() {
 		}
 	}
 	if logCloser != nil {
-		logCloser.Close()
+		if err := logCloser.Close(); err != nil {
+			slog.Error("close log writer failed", "error", err)
+		}
 	}
 	instanceLock.Release()
 

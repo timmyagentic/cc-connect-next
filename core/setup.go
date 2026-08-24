@@ -232,7 +232,7 @@ func feishuRegistrationCall(client *http.Client, baseURL, action string, params 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
@@ -289,7 +289,7 @@ func (m *ManagementServer) handleSetupWeixinBegin(w http.ResponseWriter, r *http
 		mgmtError(w, http.StatusBadGateway, "weixin get_bot_qrcode: "+err.Error())
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
@@ -381,7 +381,7 @@ func (m *ManagementServer) handleSetupWeixinPoll(w http.ResponseWriter, r *http.
 		mgmtJSON(w, http.StatusOK, map[string]any{"status": "wait"})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	slog.Info("weixin poll: ilink raw response",

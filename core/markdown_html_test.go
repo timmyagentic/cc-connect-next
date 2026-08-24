@@ -496,7 +496,7 @@ func TestSplitMessageCodeFenceAware_ChunkDoesNotExceedMaxLen(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("```go\n")
 	for i := 0; i < 30; i++ {
-		sb.WriteString(fmt.Sprintf("line %d: some code content here\n", i))
+		fmt.Fprintf(&sb, "line %d: some code content here\n", i)
 	}
 	sb.WriteString("```\n")
 	text := sb.String()
@@ -594,7 +594,7 @@ func TestMarkdownToSimpleHTML_Wikilink(t *testing.T) {
 	}{
 		{"simple wikilink", "see [[MyPage]]", "MyPage"},
 		{"wikilink with display text", "see [[MyPage|Display Text]]", "Display Text"},
-		{"wikilink escapes html", "see [[Page<script>]]", "Page&lt;script&gt;"},  // escapeHTML in step 3 handles this
+		{"wikilink escapes html", "see [[Page<script>]]", "Page&lt;script&gt;"}, // escapeHTML in step 3 handles this
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

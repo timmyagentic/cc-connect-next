@@ -3081,7 +3081,9 @@ func TestFormatConfigFile(t *testing.T) {
 	path := filepath.Join(dir, "config.toml")
 
 	messy := "language = \"en\"   \n\n\n\n[[projects]]\nname = \"test\"\n\n\n[projects.agent]\ntype = \"codex\"\n\n[projects.agent.options]\n\n[[projects.platforms]]\ntype = \"telegram\"\n\n[projects.platforms.options]\ntoken = \"abc\"\n"
-	os.WriteFile(path, []byte(messy), 0o644)
+	if err := os.WriteFile(path, []byte(messy), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 
 	if err := FormatConfigFile(path); err != nil {
 		t.Fatalf("FormatConfigFile: %v", err)
@@ -3118,7 +3120,9 @@ func TestFormatConfigFile(t *testing.T) {
 
 	t.Run("rejects invalid TOML", func(t *testing.T) {
 		badPath := filepath.Join(dir, "bad.toml")
-		os.WriteFile(badPath, []byte("[invalid\n"), 0o644)
+		if err := os.WriteFile(badPath, []byte("[invalid\n"), 0o644); err != nil {
+			t.Fatalf("write invalid config: %v", err)
+		}
 		if err := FormatConfigFile(badPath); err == nil {
 			t.Error("expected error for invalid TOML")
 		}

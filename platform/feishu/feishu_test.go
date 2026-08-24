@@ -117,8 +117,8 @@ func TestDispatchMessageIncludesQuotedImage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := make(chan *core.Message, 1)
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch {
-				case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+				switch r.URL.Path {
+				case "/open-apis/auth/v3/tenant_access_token/internal":
 					w.Header().Set("Content-Type", "application/json")
 					writeJSON(t, w, map[string]any{
 						"code":                0,
@@ -126,7 +126,7 @@ func TestDispatchMessageIncludesQuotedImage(t *testing.T) {
 						"expire":              7200,
 						"tenant_access_token": "tenant-token",
 					})
-				case r.URL.Path == "/open-apis/im/v1/messages/"+parentMessageID:
+				case "/open-apis/im/v1/messages/" + parentMessageID:
 					w.Header().Set("Content-Type", "application/json")
 					writeJSON(t, w, map[string]any{
 						"code": 0,
@@ -147,7 +147,7 @@ func TestDispatchMessageIncludesQuotedImage(t *testing.T) {
 							},
 						},
 					})
-				case r.URL.Path == "/open-apis/im/v1/messages/"+parentMessageID+"/resources/"+imageKey:
+				case "/open-apis/im/v1/messages/" + parentMessageID + "/resources/" + imageKey:
 					if r.URL.Query().Get("type") != "image" {
 						t.Fatalf("resource type = %q, want image", r.URL.Query().Get("type"))
 					}

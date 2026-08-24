@@ -122,7 +122,7 @@ func fetchSkillPresetsFromURL(url string, timeout time.Duration) (*SkillPresetsR
 	if err != nil {
 		return nil, fmt.Errorf("HTTP GET %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP GET %s: status %d", url, resp.StatusCode)

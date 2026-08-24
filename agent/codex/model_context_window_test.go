@@ -121,7 +121,11 @@ func TestStartSession_ExecCarriesModelContextWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error: %v", err)
 	}
-	defer session.Close()
+	t.Cleanup(func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 
 	got := session.(*codexSession).contextWindow
 	if got != testModelContextWindow {
@@ -156,7 +160,11 @@ func TestIntegration_AppServerHonorsModelContextWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error: %v", err)
 	}
-	defer session.Close()
+	t.Cleanup(func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 	appServer := session.(*appServerSession)
 
 	var response struct {

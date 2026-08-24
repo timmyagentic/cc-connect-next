@@ -65,7 +65,11 @@ func TestNewOpencodeSession_ContinueSessionTreatedAsFresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newOpencodeSession: %v", err)
 	}
-	defer s.Close()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 
 	if got := s.CurrentSessionID(); got != "" {
 		t.Errorf("ContinueSession should be treated as fresh: chatID = %q, want empty", got)

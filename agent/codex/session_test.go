@@ -14,6 +14,15 @@ import (
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
+func cleanupCodexTestSession(t *testing.T, session core.AgentSession) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close Codex session: %v", err)
+		}
+	})
+}
+
 func TestNormalizeReasoningEffort_RejectsMinimal(t *testing.T) {
 	if got := normalizeReasoningEffort("minimal"); got != "" {
 		t.Fatalf("normalizeReasoningEffort(minimal) = %q, want empty", got)
@@ -320,7 +329,7 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
 	if err != nil {
 		t.Fatalf("newCodexSession: %v", err)
 	}
-	defer cs.Close()
+	cleanupCodexTestSession(t, cs)
 
 	if got := cs.GetModel(); got != "gpt-5.4" {
 		t.Fatalf("GetModel() = %q, want gpt-5.4", got)
@@ -354,7 +363,7 @@ func TestRefreshContextUsageFromRollout_UsesLastTokenCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newCodexSession: %v", err)
 	}
-	defer cs.Close()
+	cleanupCodexTestSession(t, cs)
 
 	cs.refreshContextUsageFromRollout()
 
@@ -405,7 +414,7 @@ func TestSend_WithImages_PassesImageArgsAndDefaultPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newCodexSession: %v", err)
 	}
-	defer cs.Close()
+	cleanupCodexTestSession(t, cs)
 
 	img := core.ImageAttachment{
 		MimeType: "image/png",
@@ -466,7 +475,7 @@ func TestSend_ResumeWithImages_PlacesSessionBeforeImageFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newCodexSession: %v", err)
 	}
-	defer cs.Close()
+	cleanupCodexTestSession(t, cs)
 
 	if err := cs.Send("describe this", []core.ImageAttachment{{MimeType: "image/jpeg", Data: []byte("jpg")}}, nil); err != nil {
 		t.Fatalf("Send: %v", err)
@@ -484,7 +493,7 @@ func TestSend_ResumeWithImages_PlacesSessionBeforeImageFlags(t *testing.T) {
 		t.Fatalf("missing resume/image/json/stdin args: %v", args)
 	}
 	// Verify order: thread-id -> --image -> --json -> --cd -> prompt
-	if !(tidIndex < imageIndex && imageIndex < jsonIndex && jsonIndex < promptIndex) {
+	if tidIndex >= imageIndex || imageIndex >= jsonIndex || jsonIndex >= promptIndex {
 		t.Fatalf("unexpected arg order: %v", args)
 	}
 }
@@ -519,7 +528,7 @@ func TestSend_UsesStdinForMultilinePrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newCodexSession: %v", err)
 	}
-	defer cs.Close()
+	cleanupCodexTestSession(t, cs)
 
 	prompt := "line1\nline2"
 	if err := cs.Send(prompt, nil, nil); err != nil {
@@ -614,7 +623,7 @@ func TestSend_HandlesLargeJSONLines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newCodexSession: %v", err)
 	}
-	defer cs.Close()
+	cleanupCodexTestSession(t, cs)
 
 	if err := cs.Send("hello", nil, nil); err != nil {
 		t.Fatalf("Send: %v", err)
@@ -834,7 +843,7 @@ func TestCodexSession_ContinueSessionTreatedAsFresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newCodexSession: %v", err)
 	}
-	defer s.Close()
+	cleanupCodexTestSession(t, s)
 
 	if got := s.CurrentSessionID(); got != "" {
 		t.Errorf("ContinueSession should be treated as fresh: threadID = %q, want empty", got)

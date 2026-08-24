@@ -29,7 +29,11 @@ func TestIFlowSessionIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	defer sess.Close()
+	t.Cleanup(func() {
+		if err := sess.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 
 	if err := sess.Send("Reply exactly READY", nil, nil); err != nil {
 		t.Fatalf("Send #1: %v", err)
@@ -58,7 +62,11 @@ func TestIFlowSessionIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession resume: %v", err)
 	}
-	defer resumed.Close()
+	t.Cleanup(func() {
+		if err := resumed.Close(); err != nil {
+			t.Errorf("close resumed session: %v", err)
+		}
+	})
 	if err := resumed.Send("Reply exactly CONTINUED", nil, nil); err != nil {
 		t.Fatalf("Send resume: %v", err)
 	}

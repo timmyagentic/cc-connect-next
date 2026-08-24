@@ -30,15 +30,15 @@ type replyContext struct {
 }
 
 type Platform struct {
-	channelSecret string
-	channelToken  string
-	allowFrom     string
-	port          string
-	callbackPath  string
-	bot           *messaging_api.MessagingApiAPI
-	server        *http.Server
-	handler       core.MessageHandler
-	userNameCache sync.Map // userID -> display name
+	channelSecret  string
+	channelToken   string
+	allowFrom      string
+	port           string
+	callbackPath   string
+	bot            *messaging_api.MessagingApiAPI
+	server         *http.Server
+	handler        core.MessageHandler
+	userNameCache  sync.Map // userID -> display name
 	groupNameCache sync.Map // groupID -> group name
 }
 
@@ -141,9 +141,9 @@ func (p *Platform) webhookHandler(w http.ResponseWriter, r *http.Request) {
 			p.handler(p, &core.Message{
 				SessionKey: sessionKey, Platform: "line",
 				MessageID: m.Id,
-				UserID: userID, UserName: p.resolveUserName(userID),
+				UserID:    userID, UserName: p.resolveUserName(userID),
 				ChatName: chatName,
-				Content: m.Text, ReplyCtx: rctx,
+				Content:  m.Text, ReplyCtx: rctx,
 			})
 
 		case webhook.ImageMessageContent:
@@ -156,9 +156,9 @@ func (p *Platform) webhookHandler(w http.ResponseWriter, r *http.Request) {
 			p.handler(p, &core.Message{
 				SessionKey: sessionKey, Platform: "line",
 				MessageID: m.Id,
-				UserID: userID, UserName: p.resolveUserName(userID),
+				UserID:    userID, UserName: p.resolveUserName(userID),
 				ChatName: chatName,
-				Images:  []core.ImageAttachment{{MimeType: "image/jpeg", Data: imgData}},
+				Images:   []core.ImageAttachment{{MimeType: "image/jpeg", Data: imgData}},
 				ReplyCtx: rctx,
 			})
 
@@ -176,7 +176,7 @@ func (p *Platform) webhookHandler(w http.ResponseWriter, r *http.Request) {
 			p.handler(p, &core.Message{
 				SessionKey: sessionKey, Platform: "line",
 				MessageID: m.Id,
-				UserID: userID, UserName: p.resolveUserName(userID),
+				UserID:    userID, UserName: p.resolveUserName(userID),
 				ChatName: chatName,
 				Audio: &core.AudioAttachment{
 					MimeType: "audio/m4a",
@@ -248,7 +248,7 @@ func (p *Platform) downloadContent(messageID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return io.ReadAll(resp.Body)
 }
 

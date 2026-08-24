@@ -1978,7 +1978,7 @@ func TestCardAction_NavSlow_ReturnsToastThenRefreshes(t *testing.T) {
 	ip := platformAny.(*interactivePlatform)
 
 	mock := newMockRefreshPlatform(ip.Platform)
-	ip.Platform.self = mock
+	ip.self = mock
 
 	handlerDone := make(chan struct{})
 	ip.cardNavHandler = func(action string, sessionKey string) *core.Card {
@@ -2029,7 +2029,7 @@ func TestCardAction_NavSlow_NilCard_NoRefresh(t *testing.T) {
 	ip := platformAny.(*interactivePlatform)
 
 	mock := newMockRefreshPlatform(ip.Platform)
-	ip.Platform.self = mock
+	ip.self = mock
 
 	ip.cardNavHandler = func(action string, sessionKey string) *core.Card {
 		time.Sleep(cardNavTimeout + 200*time.Millisecond)

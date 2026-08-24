@@ -255,7 +255,7 @@ func TestDownloadAttachmentImages_ChecksStatusCode(t *testing.T) {
 func TestDownloadAttachmentImages_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/png")
-		w.Write([]byte("fake-png-data"))
+		_, _ = w.Write([]byte("fake-png-data"))
 	}))
 	defer server.Close()
 
@@ -301,7 +301,7 @@ func TestDownloadAttachmentFiles_ChecksStatusCode(t *testing.T) {
 func TestDownloadAttachmentFiles_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/pdf")
-		w.Write([]byte("fake-pdf-data"))
+		_, _ = w.Write([]byte("fake-pdf-data"))
 	}))
 	defer server.Close()
 
@@ -326,7 +326,7 @@ func TestDownloadAttachmentFiles_Success(t *testing.T) {
 
 func TestDownloadAttachmentFiles_SkipsImages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("data"))
+		_, _ = w.Write([]byte("data"))
 	}))
 	defer server.Close()
 

@@ -172,7 +172,7 @@ func TestIntegration_Codex_ProviderSwitch_SessionArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("StartSession failed: %v", err)
 			}
-			defer sess.Close()
+			cleanupCodexTestSession(t, sess)
 
 			cs := sess.(*codexSession)
 
@@ -304,7 +304,7 @@ func TestIntegration_Codex_ProviderSwitch_SendMessage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("StartSession failed: %v", err)
 			}
-			defer sess.Close()
+			cleanupCodexTestSession(t, sess)
 
 			err = sess.Send("reply with exactly 'codex-provider-ok' and nothing else", nil, nil)
 			if err != nil {

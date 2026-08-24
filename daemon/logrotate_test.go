@@ -16,7 +16,11 @@ func TestRotatingWriter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRotatingWriter: %v", err)
 	}
-	defer w.Close()
+	t.Cleanup(func() {
+		if err := w.Close(); err != nil {
+			t.Errorf("close rotating writer: %v", err)
+		}
+	})
 
 	line := strings.Repeat("A", 100) + "\n" // 101 bytes
 
@@ -44,10 +48,8 @@ func TestRotatingWriter(t *testing.T) {
 }
 
 func TestMetaSaveLoad(t *testing.T) {
-	origHome := os.Getenv("HOME")
 	dir := t.TempDir()
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", dir)
 
 	m := &Meta{
 		LogFile:       "/tmp/test.log",
@@ -55,7 +57,7 @@ func TestMetaSaveLoad(t *testing.T) {
 		LogMaxBackups: 3,
 		WorkDir:       "/tmp",
 		BinaryPath:    "/usr/local/bin/cc-connect-next",
-		InstalledAt:  NowISO(),
+		InstalledAt:   NowISO(),
 	}
 
 	if err := SaveMeta(m); err != nil {

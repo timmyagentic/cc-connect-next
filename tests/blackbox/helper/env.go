@@ -16,7 +16,6 @@ import (
 
 	"github.com/timmyagentic/cc-connect-next/core"
 	bbplatform "github.com/timmyagentic/cc-connect-next/tests/blackbox/platform"
-
 )
 
 const (
@@ -108,8 +107,12 @@ func NewEnvWithSetup(t *testing.T, agentType string, setup func(*core.Engine)) *
 	}
 
 	t.Cleanup(func() {
-		engine.Stop()
-		agent.Stop()
+		if err := engine.Stop(); err != nil {
+			t.Errorf("blackbox: engine.Stop failed: %v", err)
+		}
+		if err := agent.Stop(); err != nil {
+			t.Errorf("blackbox: agent.Stop failed: %v", err)
+		}
 	})
 
 	return &Env{

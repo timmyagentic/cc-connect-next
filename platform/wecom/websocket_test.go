@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/gorilla/websocket"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 // ---------------------------------------------------------------------------
@@ -642,7 +642,7 @@ func TestWSPlatformSendImage_UploadsAndSendsMedia(t *testing.T) {
 			serverDone <- err
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		serverDone <- assertWeComWSSendImageFrames(conn, imageData)
 	}))
 	defer server.Close()
@@ -652,7 +652,7 @@ func TestWSPlatformSendImage_UploadsAndSendsMedia(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial test websocket: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	p := &WSPlatform{conn: conn}
 	go func() {

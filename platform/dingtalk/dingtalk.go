@@ -1226,13 +1226,14 @@ func (p *Platform) SendAudio(ctx context.Context, rctx any, audio []byte, format
 	// NOTE: This is an approximation. For accurate duration, consider using ffprobe or go-audio library.
 	// OGG (Opus 64kbps): ~8KB/sec, AMR-NB (12.2kbps): ~4KB/sec, MP3 (128kbps): ~16KB/sec
 	var duration int
-	if format == "ogg" {
+	switch format {
+	case "ogg":
 		duration = len(audio) / 8000
-	} else if format == "amr" {
+	case "amr":
 		duration = len(audio) / 4000
-	} else if format == "mp3" {
+	case "mp3":
 		duration = len(audio) / 16000
-	} else {
+	default:
 		duration = len(audio) / 32000
 	}
 	if duration == 0 {

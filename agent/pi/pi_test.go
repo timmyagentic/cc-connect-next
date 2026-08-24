@@ -404,7 +404,11 @@ func TestAgent_StartSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	defer sess.Close()
+	t.Cleanup(func() {
+		if err := sess.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 
 	ps := sess.(*piSession)
 	if ps.cmd != "echo" {
@@ -599,11 +603,17 @@ func TestSaveImagesToDisk_RejectsPathTraversal(t *testing.T) {
 func TestCleanAttachments(t *testing.T) {
 	tmpDir := t.TempDir()
 	attachDir := filepath.Join(tmpDir, ".cc-connect-next", "attachments")
-	os.MkdirAll(attachDir, 0o755)
+	if err := os.MkdirAll(attachDir, 0o755); err != nil {
+		t.Fatalf("create attachments directory: %v", err)
+	}
 
 	// Create some files.
-	os.WriteFile(filepath.Join(attachDir, "old1.png"), []byte("data"), 0o644)
-	os.WriteFile(filepath.Join(attachDir, "old2.jpg"), []byte("data"), 0o644)
+	if err := os.WriteFile(filepath.Join(attachDir, "old1.png"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("write old1 attachment: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(attachDir, "old2.jpg"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("write old2 attachment: %v", err)
+	}
 
 	// Verify files exist.
 	entries, _ := os.ReadDir(attachDir)
@@ -1259,7 +1269,11 @@ func TestPiSession_NewWithResumeID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPiSession: %v", err)
 	}
-	defer s.Close()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 
 	if s.CurrentSessionID() != "resume-id" {
 		t.Errorf("sessionID = %q", s.CurrentSessionID())
@@ -1275,7 +1289,11 @@ func TestPiSession_ContinueSessionTreatedAsFresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPiSession: %v", err)
 	}
-	defer s.Close()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 
 	if got := s.CurrentSessionID(); got != "" {
 		t.Errorf("ContinueSession should be treated as fresh: sessionID = %q, want empty", got)
@@ -1287,7 +1305,11 @@ func TestPiSession_NewWithoutResumeID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPiSession: %v", err)
 	}
-	defer s.Close()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 
 	if s.CurrentSessionID() != "" {
 		t.Errorf("sessionID = %q, want empty", s.CurrentSessionID())
@@ -1296,7 +1318,9 @@ func TestPiSession_NewWithoutResumeID(t *testing.T) {
 
 func TestPiSession_SendWhenClosed(t *testing.T) {
 	s, _ := newPiSession(context.Background(), "echo", nil, "/tmp", "", "default", "", "", nil)
-	s.Close()
+	if err := s.Close(); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
 
 	err := s.Send("hello", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "closed") {
@@ -1486,7 +1510,9 @@ loop:
 		}
 	}
 
-	s.Close()
+	if err := s.Close(); err != nil {
+		t.Fatalf("close session: %v", err)
+	}
 
 	// Should have at least a text event and a result event.
 	hasText := false

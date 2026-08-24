@@ -3520,9 +3520,9 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 			}
 			if err := json.Unmarshal([]byte(content), &textBody); err == nil && textBody.Text != "" {
 				msgText := replaceMentions(textBody.Text, item.Mentions)
-				sb.WriteString(fmt.Sprintf("%s[%s] %s:\n", indent, ts, senderName))
+				fmt.Fprintf(sb, "%s[%s] %s:\n", indent, ts, senderName)
 				for _, line := range strings.Split(msgText, "\n") {
-					sb.WriteString(fmt.Sprintf("%s    %s\n", indent, line))
+					fmt.Fprintf(sb, "%s    %s\n", indent, line)
 				}
 			}
 
@@ -3531,9 +3531,9 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 			*images = append(*images, postImages...)
 			text := replaceMentions(strings.Join(textParts, "\n"), item.Mentions)
 			if text != "" {
-				sb.WriteString(fmt.Sprintf("%s[%s] %s:\n", indent, ts, senderName))
+				fmt.Fprintf(sb, "%s[%s] %s:\n", indent, ts, senderName)
 				for _, line := range strings.Split(text, "\n") {
-					sb.WriteString(fmt.Sprintf("%s    %s\n", indent, line))
+					fmt.Fprintf(sb, "%s    %s\n", indent, line)
 				}
 			}
 
@@ -3545,10 +3545,10 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 				imgData, mimeType, err := p.downloadImage(msgID, imgBody.ImageKey)
 				if err != nil {
 					slog.Error(p.tag()+": download merge_forward image failed", "error", err)
-					sb.WriteString(fmt.Sprintf("%s[%s] %s: [image - download failed]\n", indent, ts, senderName))
+					fmt.Fprintf(sb, "%s[%s] %s: [image - download failed]\n", indent, ts, senderName)
 				} else {
 					*images = append(*images, core.ImageAttachment{MimeType: mimeType, Data: imgData})
-					sb.WriteString(fmt.Sprintf("%s[%s] %s: [image]\n", indent, ts, senderName))
+					fmt.Fprintf(sb, "%s[%s] %s: [image]\n", indent, ts, senderName)
 				}
 			}
 
@@ -3561,20 +3561,20 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 				fileData, err := p.downloadResource(msgID, fileBody.FileKey, "file")
 				if err != nil {
 					slog.Error(p.tag()+": download merge_forward file failed", "error", err)
-					sb.WriteString(fmt.Sprintf("%s[%s] %s: [file: %s - download failed]\n", indent, ts, senderName, fileBody.FileName))
+					fmt.Fprintf(sb, "%s[%s] %s: [file: %s - download failed]\n", indent, ts, senderName, fileBody.FileName)
 				} else {
 					mt := detectMimeType(fileData)
 					*files = append(*files, core.FileAttachment{MimeType: mt, Data: fileData, FileName: fileBody.FileName})
-					sb.WriteString(fmt.Sprintf("%s[%s] %s: [file: %s]\n", indent, ts, senderName, fileBody.FileName))
+					fmt.Fprintf(sb, "%s[%s] %s: [file: %s]\n", indent, ts, senderName, fileBody.FileName)
 				}
 			}
 
 		case "merge_forward":
-			sb.WriteString(fmt.Sprintf("%s[%s] %s: [forwarded messages]\n", indent, ts, senderName))
+			fmt.Fprintf(sb, "%s[%s] %s: [forwarded messages]\n", indent, ts, senderName)
 			p.formatMergeForwardTree(msgID, childrenMap, nameMap, sb, images, files, depth+1)
 
 		default:
-			sb.WriteString(fmt.Sprintf("%s[%s] %s: [%s message]\n", indent, ts, senderName, msgType))
+			fmt.Fprintf(sb, "%s[%s] %s: [%s message]\n", indent, ts, senderName, msgType)
 		}
 	}
 }

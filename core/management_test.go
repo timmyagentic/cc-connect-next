@@ -88,7 +88,7 @@ func mgmtGet(t *testing.T, url, token string) mgmtResponse {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		t.Fatalf("decode GET response: %v", err)
@@ -113,7 +113,7 @@ func mgmtPost(t *testing.T, url, token string, body any) mgmtResponse {
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		t.Fatalf("decode POST response: %v", err)
@@ -138,7 +138,7 @@ func mgmtPatch(t *testing.T, url, token string, body any) mgmtResponse {
 	if err != nil {
 		t.Fatalf("PATCH %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		t.Fatalf("decode PATCH response: %v", err)
@@ -156,7 +156,7 @@ func mgmtDelete(t *testing.T, url, token string) mgmtResponse {
 	if err != nil {
 		t.Fatalf("DELETE %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		t.Fatalf("decode DELETE response: %v", err)
@@ -420,7 +420,7 @@ func TestMgmt_Config(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
@@ -724,7 +724,7 @@ func TestMgmt_CORS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("expected 204 for OPTIONS, got %d", resp.StatusCode)
@@ -752,7 +752,7 @@ func TestMgmt_BridgeWebSocketPathProxiesToBridgeServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("expected websocket upgrade, got %d", resp.StatusCode)
@@ -778,7 +778,7 @@ func TestMgmt_BridgeWebSocketPathWorksWhenBridgeServerSetAfterHandlerBuild(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("expected websocket upgrade after late bridge setup, got %d", resp.StatusCode)
@@ -799,7 +799,7 @@ func TestMgmt_MethodNotAllowed(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		t.Fatalf("decode method not allowed response: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 func TestMgmt_ProjectModel_UsesSwitchModelWithActiveProvider(t *testing.T) {
@@ -976,7 +976,7 @@ func TestMgmt_RemoveGlobalProvider_PurgesFromEngines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if removed != "prov-a" {
 		t.Fatalf("removeGlobalProvider called with %q, want prov-a", removed)
@@ -1092,7 +1092,7 @@ func mgmtPut(t *testing.T, url, token string, body any) mgmtResponse {
 	if err != nil {
 		t.Fatalf("PUT %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		t.Fatalf("decode PUT response: %v", err)
@@ -1474,9 +1474,11 @@ func TestMgmt_ProjectUsers_PatchInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -1725,7 +1727,9 @@ func TestMgmt_CronPatch(t *testing.T) {
 		t.Fatalf("cron add failed: %s", r.Error)
 	}
 	var job CronJob
-	json.Unmarshal(r.Data, &job)
+	if err := json.Unmarshal(r.Data, &job); err != nil {
+		t.Fatalf("decode cron job: %v", err)
+	}
 
 	// Patch it
 	r = mgmtPatch(t, ts.URL+"/api/v1/cron/"+job.ID, "tok", map[string]any{
@@ -1736,7 +1740,9 @@ func TestMgmt_CronPatch(t *testing.T) {
 	}
 
 	var updated CronJob
-	json.Unmarshal(r.Data, &updated)
+	if err := json.Unmarshal(r.Data, &updated); err != nil {
+		t.Fatalf("decode updated cron job: %v", err)
+	}
 	if updated.Enabled {
 		t.Fatal("expected enabled=false after patch")
 	}
@@ -1803,7 +1809,9 @@ func TestMgmt_Config_Save(t *testing.T) {
 
 	tmp := t.TempDir()
 	cfgPath := tmp + "/config.toml"
-	os.WriteFile(cfgPath, []byte("[display]\ntitle = \"old\"\n"), 0644)
+	if err := os.WriteFile(cfgPath, []byte("[display]\ntitle = \"old\"\n"), 0o644); err != nil {
+		t.Fatalf("write config fixture: %v", err)
+	}
 
 	req, _ := http.NewRequest("PUT", ts.URL+"/api/v1/config", strings.NewReader("# new config\n"))
 	req.Header.Set("Authorization", "Bearer tok")
@@ -1811,7 +1819,7 @@ func TestMgmt_Config_Save(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	// Without SetConfigFilePath, save should fail
 	if resp.StatusCode == 200 {
 		t.Fatal("expected error without config file path set")
@@ -1827,7 +1835,9 @@ func TestMgmt_CCSwitchProviders_NotConfigured(t *testing.T) {
 		t.Fatalf("cc-switch get failed: %s", r.Error)
 	}
 	var data map[string]any
-	json.Unmarshal(r.Data, &data)
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		t.Fatalf("decode cc-switch response: %v", err)
+	}
 	if data["available"] != false {
 		t.Fatalf("expected available=false, got %v", data["available"])
 	}
@@ -1917,9 +1927,11 @@ func TestMgmt_GlobalSettings_PatchInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON body")
 	}
@@ -1955,9 +1967,11 @@ func TestMgmt_ProjectSend_InvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -1984,9 +1998,11 @@ func TestMgmt_ProjectPatch_InvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON body")
 	}
@@ -2077,7 +2093,9 @@ func TestMgmt_ProjectDelete_Success(t *testing.T) {
 		t.Fatalf("removed = %q, want test-project", removed)
 	}
 	var data map[string]any
-	json.Unmarshal(r.Data, &data)
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
 	if data["restart_required"] != true {
 		t.Fatal("expected restart_required=true")
 	}
@@ -2162,9 +2180,11 @@ func TestMgmt_SessionSwitch_InvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -2206,9 +2226,11 @@ func TestMgmt_SessionCreate_InvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -2241,9 +2263,11 @@ func TestMgmt_ProjectProviders_PostInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -2304,9 +2328,11 @@ func TestMgmt_ProjectProviderRefs_PutInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -2451,9 +2477,11 @@ func TestMgmt_GlobalProviders_PostInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -2489,9 +2517,11 @@ func TestMgmt_GlobalProviders_UpdateInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -2574,9 +2604,11 @@ func TestMgmt_Heartbeat_IntervalInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -2676,9 +2708,11 @@ func TestMgmt_Cron_PostInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -2724,9 +2758,11 @@ func TestMgmt_CronPatch_InvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var r mgmtResponse
-	json.NewDecoder(resp.Body).Decode(&r)
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if r.OK {
 		t.Fatal("expected error for invalid JSON")
 	}

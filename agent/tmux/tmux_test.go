@@ -155,7 +155,11 @@ func TestNewTmuxSessionWorkDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	})
 
 	if s.workDir != "/tmp/workspace" {
 		t.Errorf("workDir = %q, want /tmp/workspace", s.workDir)
