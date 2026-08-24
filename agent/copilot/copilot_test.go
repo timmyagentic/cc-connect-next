@@ -106,7 +106,7 @@ func TestAgent_AvailableModels(t *testing.T) {
 }
 
 func TestAgent_ProviderSwitcher(t *testing.T) {
-	a := &Agent{activeIdx: -1}
+	a := &Agent{}
 	if p := a.GetActiveProvider(); p != nil {
 		t.Fatalf("GetActiveProvider() = %v, want nil", p)
 	}
@@ -116,7 +116,7 @@ func TestAgent_ProviderSwitcher(t *testing.T) {
 }
 
 func TestAgent_ProviderConfigLocked(t *testing.T) {
-	a := &Agent{activeIdx: -1}
+	a := &Agent{}
 	a.SetProviders([]core.ProviderConfig{
 		{
 			Name:             "byok",
@@ -167,7 +167,7 @@ func TestAgent_ProviderConfigLocked(t *testing.T) {
 }
 
 func TestAgent_ProviderEnvLocked(t *testing.T) {
-	a := &Agent{activeIdx: -1}
+	a := &Agent{}
 	a.SetProviders([]core.ProviderConfig{
 		{
 			Name:         "byok",

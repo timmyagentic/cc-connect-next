@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/timmyagentic/cc-connect-next/agent/internal/providerstate"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
@@ -45,13 +46,12 @@ type Agent struct {
 	allowedTools     []string
 	disallowedTools  []string
 	maxContextTokens int // optional: passed as --max-context-tokens when > 0
-	providers        []core.ProviderConfig
-	activeIdx        int // -1 = no provider set
-	sessionEnv       []string
-	routerURL        string // Claude Code Router URL (e.g., "http://127.0.0.1:3456")
-	routerAPIKey     string // Claude Code Router API key (optional)
-	systemPrompt     string // Custom system prompt to pass to Claude CLI
-	pluginDirs       []string // Plugin directories to load via --plugin-dir (repeatable)
+	providerstate.Store
+	sessionEnv   []string
+	routerURL    string   // Claude Code Router URL (e.g., "http://127.0.0.1:3456")
+	routerAPIKey string   // Claude Code Router API key (optional)
+	systemPrompt string   // Custom system prompt to pass to Claude CLI
+	pluginDirs   []string // Plugin directories to load via --plugin-dir (repeatable)
 
 	appendSystemPrompt string // Custom text appended to the system prompt (keeps Claude's default)
 
@@ -76,41 +76,41 @@ type Agent struct {
 }
 
 var claudeProviderManagedEnvVars = map[string]struct{}{
-	"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST":                  {},
-	"CLAUDE_CODE_USE_BEDROCK":                               {},
-	"CLAUDE_CODE_USE_VERTEX":                                {},
-	"CLAUDE_CODE_USE_FOUNDRY":                               {},
-	"ANTHROPIC_BASE_URL":                                    {},
-	"ANTHROPIC_BEDROCK_BASE_URL":                            {},
-	"ANTHROPIC_VERTEX_BASE_URL":                             {},
-	"ANTHROPIC_FOUNDRY_BASE_URL":                            {},
-	"ANTHROPIC_FOUNDRY_RESOURCE":                            {},
-	"ANTHROPIC_VERTEX_PROJECT_ID":                           {},
-	"CLOUD_ML_REGION":                                       {},
-	"ANTHROPIC_API_KEY":                                     {},
-	"ANTHROPIC_AUTH_TOKEN":                                  {},
-	"CLAUDE_CODE_OAUTH_TOKEN":                               {},
-	"AWS_BEARER_TOKEN_BEDROCK":                              {},
-	"ANTHROPIC_FOUNDRY_API_KEY":                             {},
-	"CLAUDE_CODE_SKIP_BEDROCK_AUTH":                         {},
-	"CLAUDE_CODE_SKIP_VERTEX_AUTH":                          {},
-	"CLAUDE_CODE_SKIP_FOUNDRY_AUTH":                         {},
-	"ANTHROPIC_MODEL":                                       {},
-	"ANTHROPIC_DEFAULT_HAIKU_MODEL":                         {},
-	"ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION":             {},
-	"ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME":                    {},
-	"ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES":  {},
-	"ANTHROPIC_DEFAULT_OPUS_MODEL":                          {},
-	"ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION":              {},
-	"ANTHROPIC_DEFAULT_OPUS_MODEL_NAME":                     {},
-	"ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES":   {},
+	"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST":                 {},
+	"CLAUDE_CODE_USE_BEDROCK":                              {},
+	"CLAUDE_CODE_USE_VERTEX":                               {},
+	"CLAUDE_CODE_USE_FOUNDRY":                              {},
+	"ANTHROPIC_BASE_URL":                                   {},
+	"ANTHROPIC_BEDROCK_BASE_URL":                           {},
+	"ANTHROPIC_VERTEX_BASE_URL":                            {},
+	"ANTHROPIC_FOUNDRY_BASE_URL":                           {},
+	"ANTHROPIC_FOUNDRY_RESOURCE":                           {},
+	"ANTHROPIC_VERTEX_PROJECT_ID":                          {},
+	"CLOUD_ML_REGION":                                      {},
+	"ANTHROPIC_API_KEY":                                    {},
+	"ANTHROPIC_AUTH_TOKEN":                                 {},
+	"CLAUDE_CODE_OAUTH_TOKEN":                              {},
+	"AWS_BEARER_TOKEN_BEDROCK":                             {},
+	"ANTHROPIC_FOUNDRY_API_KEY":                            {},
+	"CLAUDE_CODE_SKIP_BEDROCK_AUTH":                        {},
+	"CLAUDE_CODE_SKIP_VERTEX_AUTH":                         {},
+	"CLAUDE_CODE_SKIP_FOUNDRY_AUTH":                        {},
+	"ANTHROPIC_MODEL":                                      {},
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL":                        {},
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL_DESCRIPTION":            {},
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME":                   {},
+	"ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES": {},
+	"ANTHROPIC_DEFAULT_OPUS_MODEL":                         {},
+	"ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION":             {},
+	"ANTHROPIC_DEFAULT_OPUS_MODEL_NAME":                    {},
+	"ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES":  {},
 
 	// Provider-specific base URL env vars for thinking rewrite proxy routing.
 	// These are set by cc-connect-next when thinking override is needed for
 	// Bedrock/Vertex/Foundry providers that don't use base_url config.
-	"ANTHROPIC_BEDROCK_PROXY_BASE_URL": {},
-	"ANTHROPIC_VERTEX_PROXY_BASE_URL":  {},
-	"ANTHROPIC_FOUNDRY_PROXY_BASE_URL": {},
+	"ANTHROPIC_BEDROCK_PROXY_BASE_URL":                      {},
+	"ANTHROPIC_VERTEX_PROXY_BASE_URL":                       {},
+	"ANTHROPIC_FOUNDRY_PROXY_BASE_URL":                      {},
 	"ANTHROPIC_DEFAULT_SONNET_MODEL":                        {},
 	"ANTHROPIC_DEFAULT_SONNET_MODEL_DESCRIPTION":            {},
 	"ANTHROPIC_DEFAULT_SONNET_MODEL_NAME":                   {},
@@ -266,7 +266,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		disallowedTools:  disallowedTools,
 		maxContextTokens: maxContextTokens,
 		configEnv:        configEnv,
-		activeIdx:        -1,
+		Store:            providerstate.New("claudecode"),
 		routerURL:        routerURL,
 		routerAPIKey:     routerAPIKey,
 		spawnOpts:        spawnOpts,
@@ -338,9 +338,10 @@ func (a *Agent) SetModel(model string) {
 }
 
 func (a *Agent) GetModel() string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return core.GetProviderModel(a.providers, a.activeIdx, a.model)
+	a.mu.RLock()
+	model := a.model
+	a.mu.RUnlock()
+	return a.Store.Model(model)
 }
 
 func (a *Agent) SetReasoningEffort(effort string) {
@@ -361,9 +362,7 @@ func (a *Agent) AvailableReasoningEfforts() []string {
 }
 
 func (a *Agent) configuredModels() []core.ModelOption {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return core.GetProviderModels(a.providers, a.activeIdx)
+	return a.Store.Models()
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
@@ -383,14 +382,12 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 }
 
 func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
-	a.mu.Lock()
 	apiKey := ""
 	baseURL := ""
-	if a.activeIdx >= 0 && a.activeIdx < len(a.providers) {
-		apiKey = a.providers[a.activeIdx].APIKey
-		baseURL = a.providers[a.activeIdx].BaseURL
+	if provider := a.Store.GetActiveProvider(); provider != nil {
+		apiKey = provider.APIKey
+		baseURL = provider.BaseURL
 	}
-	a.mu.Unlock()
 
 	if apiKey == "" {
 		apiKey = os.Getenv("ANTHROPIC_API_KEY")
@@ -512,20 +509,17 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	copy(pluginDirs, a.pluginDirs)
 	extraEnv := a.runtimeEnvLocked()
 
-	activeIdx := a.activeIdx
-	var activeProviderName string
-	if activeIdx >= 0 && activeIdx < len(a.providers) {
-		activeProviderName = a.providers[activeIdx].Name
-		if m := a.providers[activeIdx].Model; m != "" {
-			model = m
-		}
+	activeProvider := a.Store.GetActiveProvider()
+	activeProviderName := ""
+	if activeProvider != nil {
+		activeProviderName = activeProvider.Name
+		model = a.Store.Model(model)
 	}
 	slog.Debug("claudecode: StartSession provider state",
-		"activeIdx", activeIdx,
 		"activeProvider", activeProviderName,
 		"model", model,
 		"sessionID", sessionID,
-		"providerCount", len(a.providers))
+		"providerCount", len(a.Store.ListProviders()))
 	platformPrompt := a.platformPrompt
 	systemPrompt := a.systemPrompt
 	appendSystemPrompt := a.appendSystemPrompt
@@ -1122,49 +1116,17 @@ func (a *Agent) GlobalMemoryFile() string {
 
 func (a *Agent) HasSystemPromptSupport() bool { return true }
 
-// ── ProviderSwitcher implementation ──────────────────────────
-
 func (a *Agent) SetProviders(providers []core.ProviderConfig) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.providers = providers
+	a.Store.SetProviders(providers)
 }
 
 func (a *Agent) SetActiveProvider(name string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopProviderProxyLocked()
-	if name == "" {
-		a.activeIdx = -1
-		slog.Info("claudecode: provider cleared")
-		return true
-	}
-	for i, p := range a.providers {
-		if p.Name == name {
-			a.activeIdx = i
-			slog.Info("claudecode: provider switched", "provider", name)
-			return true
-		}
-	}
-	return false
-}
-
-func (a *Agent) GetActiveProvider() *core.ProviderConfig {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
-		return nil
-	}
-	p := a.providers[a.activeIdx]
-	return &p
-}
-
-func (a *Agent) ListProviders() []core.ProviderConfig {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	result := make([]core.ProviderConfig, len(a.providers))
-	copy(result, a.providers)
-	return result
+	return a.Store.SetActiveProvider(name)
 }
 
 // providerEnvLocked returns env vars for the active provider. Caller must hold mu.
@@ -1181,11 +1143,12 @@ func (a *Agent) ListProviders() []core.ProviderConfig {
 // but use CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY env vars, the thinking
 // rewrite proxy routes via ANTHROPIC_*_BASE_URL override env vars.
 func (a *Agent) providerEnvLocked() []string {
-	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
+	provider := a.Store.GetActiveProvider()
+	if provider == nil {
 		a.stopProviderProxyLocked()
 		return nil
 	}
-	p := a.providers[a.activeIdx]
+	p := *provider
 	var env []string
 
 	if p.BaseURL != "" {

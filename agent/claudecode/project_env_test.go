@@ -111,15 +111,15 @@ func TestNew_ProjectEnvOverridesProviderEnv(t *testing.T) {
 
 	agent := a.(*Agent)
 	// Set providers to simulate a provider being configured
-	agent.providers = []core.ProviderConfig{
+	agent.SetProviders([]core.ProviderConfig{
 		{
 			Name:    "deepseek",
 			BaseURL: "https://api.deepseek.com/v1",
 			APIKey:  "sk-deepseek-test",
 			Model:   "deepseek-chat",
 		},
-	}
-	agent.activeIdx = 0
+	})
+	agent.SetActiveProvider("deepseek")
 
 	// runtimeEnvLocked merges configEnv + providerEnv + sessionEnv
 	// configEnv (from opts["env"]) should be present

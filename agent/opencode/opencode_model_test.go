@@ -238,39 +238,27 @@ func providerCacheKeyOf(t *testing.T, a *Agent) string {
 	return key
 }
 
+func opencodeTestAgent(a *Agent, providers []core.ProviderConfig, active string) *Agent {
+	a.SetProviders(providers)
+	if active != "" && !a.SetActiveProvider(active) {
+		panic("test provider not found: " + active)
+	}
+	return a
+}
+
 func TestConfiguredModels_BoundaryConditions(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{Models: []core.ModelOption{{Name: "first"}}},
-			{Models: []core.ModelOption{{Name: "second"}}},
-		},
+	a := opencodeTestAgent(&Agent{}, []core.ProviderConfig{
+		{Name: "first", Models: []core.ModelOption{{Name: "first"}}},
+		{Name: "second", Models: []core.ModelOption{{Name: "second"}}},
+	}, "")
+	if got := a.configuredModels(); got != nil {
+		t.Fatalf("configuredModels() without active provider = %v, want nil", got)
 	}
-
-	tests := []struct {
-		name      string
-		activeIdx int
-		wantNil   bool
-		wantName  string
-	}{
-		{name: "negative index", activeIdx: -1, wantNil: true},
-		{name: "out of range", activeIdx: 2, wantNil: true},
-		{name: "valid index", activeIdx: 1, wantName: "second"},
+	if !a.SetActiveProvider("second") {
+		t.Fatal("SetActiveProvider(second) = false")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			a.activeIdx = tt.activeIdx
-			got := a.configuredModels()
-			if tt.wantNil {
-				if got != nil {
-					t.Fatalf("configuredModels() = %v, want nil", got)
-				}
-				return
-			}
-			if len(got) != 1 || got[0].Name != tt.wantName {
-				t.Fatalf("configuredModels() = %v, want %q", got, tt.wantName)
-			}
-		})
+	if got := a.configuredModels(); len(got) != 1 || got[0].Name != "second" {
+		t.Fatalf("configuredModels() = %v, want second", got)
 	}
 }
 
@@ -326,13 +314,7 @@ func TestAgent_SetMode(t *testing.T) {
 }
 
 func TestAgent_GetActiveProvider(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{Name: "openai"},
-			{Name: "anthropic"},
-		},
-		activeIdx: 1,
-	}
+	a := opencodeTestAgent(&Agent{}, []core.ProviderConfig{{Name: "openai"}, {Name: "anthropic"}}, "anthropic")
 	got := a.GetActiveProvider()
 	if got == nil {
 		t.Fatal("GetActiveProvider() returned nil")
@@ -343,12 +325,7 @@ func TestAgent_GetActiveProvider(t *testing.T) {
 }
 
 func TestAgent_GetActiveProvider_NoActive(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{Name: "openai"},
-		},
-		activeIdx: -1,
-	}
+	a := opencodeTestAgent(&Agent{}, []core.ProviderConfig{{Name: "openai"}}, "")
 	if got := a.GetActiveProvider(); got != nil {
 		t.Errorf("GetActiveProvider() = %v, want nil", got)
 	}
@@ -359,7 +336,7 @@ func TestAgent_ListProviders(t *testing.T) {
 		{Name: "openai"},
 		{Name: "anthropic"},
 	}
-	a := &Agent{providers: providers}
+	a := opencodeTestAgent(&Agent{}, providers, "")
 	got := a.ListProviders()
 	if len(got) != 2 {
 		t.Errorf("ListProviders() returned %d providers, want 2", len(got))
@@ -367,12 +344,7 @@ func TestAgent_ListProviders(t *testing.T) {
 }
 
 func TestAgent_SetActiveProvider(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{Name: "openai"},
-			{Name: "anthropic"},
-		},
-	}
+	a := opencodeTestAgent(&Agent{}, []core.ProviderConfig{{Name: "openai"}, {Name: "anthropic"}}, "")
 	if !a.SetActiveProvider("anthropic") {
 		t.Error("SetActiveProvider(\"anthropic\") returned false")
 	}
@@ -382,11 +354,7 @@ func TestAgent_SetActiveProvider(t *testing.T) {
 }
 
 func TestAgent_SetActiveProvider_Invalid(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{Name: "openai"},
-		},
-	}
+	a := opencodeTestAgent(&Agent{}, []core.ProviderConfig{{Name: "openai"}}, "")
 	if a.SetActiveProvider("nonexistent") {
 		t.Error("SetActiveProvider(\"nonexistent\") returned true, want false")
 	}
@@ -398,7 +366,7 @@ func TestAgent_SetActiveProvider_Invalid(t *testing.T) {
 // the model list produced by `opencode models` when it succeeds.
 func TestAvailableModels_UsesDynamicDiscovery(t *testing.T) {
 	bin := writeFakeModelsBin(t, []string{"anthropic/claude-3-5-sonnet", "openai/gpt-4o"}, 0)
-	a := &Agent{cmd: bin, activeIdx: -1}
+	a := &Agent{cmd: bin}
 
 	got := a.AvailableModels(context.Background())
 	if len(got) != 2 {
@@ -417,13 +385,9 @@ func TestAvailableModels_UsesDynamicDiscovery(t *testing.T) {
 // provider-configured models.
 func TestAvailableModels_DynamicTakesPriorityOverConfigured(t *testing.T) {
 	bin := writeFakeModelsBin(t, []string{"discovered/model"}, 0)
-	a := &Agent{
-		cmd: bin,
-		providers: []core.ProviderConfig{
-			{Models: []core.ModelOption{{Name: "configured/model"}}},
-		},
-		activeIdx: 0,
-	}
+	a := opencodeTestAgent(&Agent{cmd: bin}, []core.ProviderConfig{
+		{Name: "configured", Models: []core.ModelOption{{Name: "configured/model"}}},
+	}, "configured")
 
 	got := a.AvailableModels(context.Background())
 	if len(got) != 1 || got[0].Name != "discovered/model" {
@@ -435,13 +399,9 @@ func TestAvailableModels_DynamicTakesPriorityOverConfigured(t *testing.T) {
 // provider-configured models when `opencode models` exits non-zero.
 func TestAvailableModels_FallsBackToConfiguredOnDiscoveryFail(t *testing.T) {
 	bin := writeFakeModelsBin(t, nil, 1) // exits with error
-	a := &Agent{
-		cmd: bin,
-		providers: []core.ProviderConfig{
-			{Models: []core.ModelOption{{Name: "configured-model"}}},
-		},
-		activeIdx: 0,
-	}
+	a := opencodeTestAgent(&Agent{cmd: bin}, []core.ProviderConfig{
+		{Name: "configured", Models: []core.ModelOption{{Name: "configured-model"}}},
+	}, "configured")
 
 	got := a.AvailableModels(context.Background())
 	if len(got) != 1 || got[0].Name != "configured-model" {
@@ -453,7 +413,7 @@ func TestAvailableModels_FallsBackToConfiguredOnDiscoveryFail(t *testing.T) {
 // fallback to the hardcoded built-in model list.
 func TestAvailableModels_FallsBackToBuiltinWhenBothUnavailable(t *testing.T) {
 	bin := writeFakeModelsBin(t, nil, 1)
-	a := &Agent{cmd: bin, activeIdx: -1}
+	a := &Agent{cmd: bin}
 
 	got := a.AvailableModels(context.Background())
 	if len(got) == 0 {
@@ -475,7 +435,7 @@ func TestAvailableModels_FallsBackToBuiltinWhenBothUnavailable(t *testing.T) {
 // names from the CLI output appear only once.
 func TestAvailableModels_DeduplicatesDiscoveredModels(t *testing.T) {
 	bin := writeFakeModelsBin(t, []string{"openai/gpt-4o", "openai/gpt-4o", "anthropic/claude"}, 0)
-	a := &Agent{cmd: bin, activeIdx: -1}
+	a := &Agent{cmd: bin}
 
 	got := a.AvailableModels(context.Background())
 	if len(got) != 2 {
@@ -486,7 +446,7 @@ func TestAvailableModels_DeduplicatesDiscoveredModels(t *testing.T) {
 // TestAvailableModels_SortsDiscoveredModels verifies lexicographic sort order.
 func TestAvailableModels_SortsDiscoveredModels(t *testing.T) {
 	bin := writeFakeModelsBin(t, []string{"z-model", "a-model", "m-model"}, 0)
-	a := &Agent{cmd: bin, activeIdx: -1}
+	a := &Agent{cmd: bin}
 
 	got := a.AvailableModels(context.Background())
 	if len(got) != 3 {
@@ -510,13 +470,9 @@ func TestAvailableModels_SortsDiscoveredModels(t *testing.T) {
 // exit-0 but empty-output binary still triggers the fallback chain.
 func TestAvailableModels_EmptyDiscoveryOutputFallsBackToConfigured(t *testing.T) {
 	bin := writeFakeModelsBin(t, []string{}, 0) // exits 0 but no output
-	a := &Agent{
-		cmd: bin,
-		providers: []core.ProviderConfig{
-			{Models: []core.ModelOption{{Name: "fallback-model"}}},
-		},
-		activeIdx: 0,
-	}
+	a := opencodeTestAgent(&Agent{cmd: bin}, []core.ProviderConfig{
+		{Name: "configured", Models: []core.ModelOption{{Name: "fallback-model"}}},
+	}, "configured")
 
 	got := a.AvailableModels(context.Background())
 	if len(got) != 1 || got[0].Name != "fallback-model" {
@@ -525,13 +481,10 @@ func TestAvailableModels_EmptyDiscoveryOutputFallsBackToConfigured(t *testing.T)
 }
 
 func TestAvailableModels_ConfiguredFallbackUsesSnapshot(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{Name: "provider-a", Models: []core.ModelOption{{Name: "configured-a"}}},
-			{Name: "provider-b", Models: []core.ModelOption{{Name: "configured-b"}}},
-		},
-		activeIdx: 0,
-	}
+	a := opencodeTestAgent(&Agent{}, []core.ProviderConfig{
+		{Name: "provider-a", Models: []core.ModelOption{{Name: "configured-a"}}},
+		{Name: "provider-b", Models: []core.ModelOption{{Name: "configured-b"}}},
+	}, "provider-a")
 
 	snapshot := a.modelDiscoverySnapshot()
 	if !a.SetActiveProvider("provider-b") {
@@ -554,7 +507,7 @@ func TestAvailableModels_CustomCmdUsedForDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a := &Agent{cmd: customBin, activeIdx: -1}
+	a := &Agent{cmd: customBin}
 	got := a.AvailableModels(context.Background())
 	if len(got) != 1 || got[0].Name != "custom/model-a" {
 		t.Errorf("AvailableModels() with custom cmd = %v, want [custom/model-a]", got)
@@ -934,16 +887,14 @@ func TestStartInitialModelRefresh_PrewarmsColdStartCacheAfterProviderWiring(t *t
 func TestAvailableModels_DiscoveryUsesProviderEnv(t *testing.T) {
 	countPath := filepath.Join(t.TempDir(), "refresh-count")
 	bin := writeCountingModelsBin(t, countPath, "", []string{"provider/model"}, "MODEL_DISCOVERY_TOKEN", 0)
-	a := &Agent{
+	a := opencodeTestAgent(&Agent{
 		cmd:     bin,
 		workDir: t.TempDir(),
-		providers: []core.ProviderConfig{{
-			Name:  "provider-a",
-			Model: "provider/model",
-			Env:   map[string]string{"MODEL_DISCOVERY_TOKEN": "present"},
-		}},
-		activeIdx: 0,
-	}
+	}, []core.ProviderConfig{{
+		Name:  "provider-a",
+		Model: "provider/model",
+		Env:   map[string]string{"MODEL_DISCOVERY_TOKEN": "present"},
+	}}, "provider-a")
 
 	got := a.AvailableModels(context.Background())
 	if len(got) != 1 || got[0].Name != "provider/model" {
@@ -955,16 +906,14 @@ func TestAvailableModels_PersistsProviderKeyOnColdStartDiscovery(t *testing.T) {
 	dataDir := t.TempDir()
 	cachePath := opencodeProjectModelCachePath(dataDir, "demo")
 	bin := writeCountingModelsBin(t, "", "", []string{"provider/model"}, "MODEL_DISCOVERY_TOKEN", 0)
-	a := &Agent{
+	a := opencodeTestAgent(&Agent{
 		cmd:            bin,
 		workDir:        t.TempDir(),
 		modelCachePath: cachePath,
-		providers: []core.ProviderConfig{{
-			Name: "provider-a",
-			Env:  map[string]string{"MODEL_DISCOVERY_TOKEN": "present"},
-		}},
-		activeIdx: 0,
-	}
+	}, []core.ProviderConfig{{
+		Name: "provider-a",
+		Env:  map[string]string{"MODEL_DISCOVERY_TOKEN": "present"},
+	}}, "provider-a")
 
 	got := a.AvailableModels(context.Background())
 	if len(got) != 1 || got[0].Name != "provider/model" {
@@ -993,7 +942,7 @@ func TestAvailableModels_IgnoresPersistentCacheForProviderMismatch(t *testing.T)
 	a := agent.(*Agent)
 	a.SetProviders([]core.ProviderConfig{{Name: "provider-a"}, {Name: "provider-b"}})
 	providerASnapshot := func() opencodeModelDiscoverySnapshot {
-		a.activeIdx = 0
+		a.SetActiveProvider("provider-a")
 		providerCacheKeyOf(t, a)
 		return a.modelDiscoverySnapshot()
 	}()
@@ -1022,16 +971,14 @@ func TestAvailableModels_BackgroundRefreshPersistsProviderKey(t *testing.T) {
 	gatePath := filepath.Join(t.TempDir(), "refresh-ready")
 	bin := writeCountingModelsBin(t, "", gatePath, []string{"fresh/model"}, "MODEL_DISCOVERY_TOKEN", 0)
 
-	a := &Agent{
+	a := opencodeTestAgent(&Agent{
 		cmd:            bin,
 		workDir:        t.TempDir(),
 		modelCachePath: cachePath,
-		providers: []core.ProviderConfig{{
-			Name: "provider-a",
-			Env:  map[string]string{"MODEL_DISCOVERY_TOKEN": "present"},
-		}},
-		activeIdx: 0,
-	}
+	}, []core.ProviderConfig{{
+		Name: "provider-a",
+		Env:  map[string]string{"MODEL_DISCOVERY_TOKEN": "present"},
+	}}, "provider-a")
 	providerAKey := providerCacheKeyOf(t, a)
 	providerASnapshot := a.modelDiscoverySnapshot()
 	writePersistentModelCacheWithSnapshot(t, cachePath, providerASnapshot, []core.ModelOption{{Name: "cached/model"}}, time.Now())
@@ -1057,16 +1004,14 @@ func TestAvailableModels_BackgroundRefreshUsesProviderSnapshot(t *testing.T) {
 	countPath := filepath.Join(t.TempDir(), "refresh-count")
 	gatePath := filepath.Join(t.TempDir(), "refresh-ready")
 	bin := writeCountingModelsBin(t, countPath, gatePath, []string{"provider-a/model"}, "MODEL_DISCOVERY_TOKEN", 0)
-	a := &Agent{
+	a := opencodeTestAgent(&Agent{
 		cmd:            bin,
 		workDir:        t.TempDir(),
 		modelCachePath: cachePath,
-		providers: []core.ProviderConfig{
-			{Name: "provider-a", Env: map[string]string{"MODEL_DISCOVERY_TOKEN": "present"}},
-			{Name: "provider-b", Env: map[string]string{}},
-		},
-		activeIdx: 0,
-	}
+	}, []core.ProviderConfig{
+		{Name: "provider-a", Env: map[string]string{"MODEL_DISCOVERY_TOKEN": "present"}},
+		{Name: "provider-b", Env: map[string]string{}},
+	}, "provider-a")
 	providerAKey := providerCacheKeyOf(t, a)
 	providerASnapshot := a.modelDiscoverySnapshot()
 	writePersistentModelCacheWithSnapshot(t, cachePath, providerASnapshot, []core.ModelOption{{Name: "cached/model"}}, time.Now())
@@ -1094,19 +1039,17 @@ func TestAvailableModels_IgnoresPersistentCacheForSameProviderNameDifferentConfi
 	dataDir := t.TempDir()
 	cachePath := opencodeProjectModelCachePath(dataDir, "demo")
 	bin := writeCountingModelsBin(t, "", "", []string{"fresh/provider-a"}, "MODEL_DISCOVERY_TOKEN", 0)
-	a := &Agent{
+	a := opencodeTestAgent(&Agent{
 		cmd:            bin,
 		workDir:        t.TempDir(),
 		modelCachePath: cachePath,
-		providers: []core.ProviderConfig{{
-			Name:    "provider-a",
-			APIKey:  "new-secret",
-			BaseURL: "https://new.example",
-			Env:     map[string]string{"MODEL_DISCOVERY_TOKEN": "present", "EXTRA": "new"},
-		}},
-		activeIdx: 0,
-	}
-	stale := &Agent{providers: []core.ProviderConfig{{Name: "provider-a", APIKey: "old-secret", BaseURL: "https://old.example", Env: map[string]string{"MODEL_DISCOVERY_TOKEN": "old", "EXTRA": "old"}}}, activeIdx: 0}
+	}, []core.ProviderConfig{{
+		Name:    "provider-a",
+		APIKey:  "new-secret",
+		BaseURL: "https://new.example",
+		Env:     map[string]string{"MODEL_DISCOVERY_TOKEN": "present", "EXTRA": "new"},
+	}}, "provider-a")
+	stale := opencodeTestAgent(&Agent{}, []core.ProviderConfig{{Name: "provider-a", APIKey: "old-secret", BaseURL: "https://old.example", Env: map[string]string{"MODEL_DISCOVERY_TOKEN": "old", "EXTRA": "old"}}}, "provider-a")
 	staleKey := providerCacheKeyOf(t, stale)
 	staleSnapshot := stale.modelDiscoverySnapshot()
 	writePersistentModelCacheWithSnapshot(t, cachePath, staleSnapshot, []core.ModelOption{{Name: "cached/stale"}}, time.Now())
@@ -1136,24 +1079,20 @@ func TestAvailableModels_IgnoresPersistentCacheForWorkDirMismatch(t *testing.T) 
 		t.Fatalf("os.MkdirAll(%q) error = %v", workDirB, err)
 	}
 	bin := writeCountingModelsBin(t, countPath, "", []string{"fresh/workspace-b"}, "MODEL_DISCOVERY_TOKEN", 0)
-	a := &Agent{
+	a := opencodeTestAgent(&Agent{
 		cmd:            bin,
 		workDir:        workDirB,
 		modelCachePath: cachePath,
-		providers: []core.ProviderConfig{{
-			Name: "provider-a",
-			Env:  map[string]string{"MODEL_DISCOVERY_TOKEN": "present"},
-		}},
-		activeIdx: 0,
-	}
-	stale := &Agent{
+	}, []core.ProviderConfig{{
+		Name: "provider-a",
+		Env:  map[string]string{"MODEL_DISCOVERY_TOKEN": "present"},
+	}}, "provider-a")
+	stale := opencodeTestAgent(&Agent{
 		workDir: workDirA,
-		providers: []core.ProviderConfig{{
-			Name: "provider-a",
-			Env:  map[string]string{"MODEL_DISCOVERY_TOKEN": "present"},
-		}},
-		activeIdx: 0,
-	}
+	}, []core.ProviderConfig{{
+		Name: "provider-a",
+		Env:  map[string]string{"MODEL_DISCOVERY_TOKEN": "present"},
+	}}, "provider-a")
 	staleSnapshot := stale.modelDiscoverySnapshot()
 	writePersistentModelCacheWithSnapshot(t, cachePath, staleSnapshot, []core.ModelOption{{Name: "cached/workspace-a"}}, time.Now())
 	a.persistentModelCache = &opencodePersistentModelCache{

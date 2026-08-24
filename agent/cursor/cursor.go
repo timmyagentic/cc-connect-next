@@ -16,6 +16,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/timmyagentic/cc-connect-next/agent/internal/providerstate"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
@@ -37,10 +38,9 @@ type Agent struct {
 	cmd          string   // CLI binary name, default "agent"
 	cliExtraArgs []string // extra args from cmd after the binary name
 	configEnv    []string // env vars from [projects.agent.options.env]
-	providers    []core.ProviderConfig
-	activeIdx    int
-	sessionEnv   []string
-	mu           sync.RWMutex
+	providerstate.Store
+	sessionEnv []string
+	mu         sync.RWMutex
 }
 
 func New(opts map[string]any) (core.Agent, error) {
@@ -63,7 +63,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		cmd:          cmd,
 		cliExtraArgs: extraArgs,
 		configEnv:    core.ParseConfigEnv(opts),
-		activeIdx:    -1,
+		Store:        providerstate.New("cursor"),
 	}, nil
 }
 
@@ -106,14 +106,13 @@ func (a *Agent) SetModel(model string) {
 
 func (a *Agent) GetModel() string {
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return core.GetProviderModel(a.providers, a.activeIdx, a.model)
+	model := a.model
+	a.mu.RUnlock()
+	return a.Store.Model(model)
 }
 
 func (a *Agent) configuredModels() []core.ModelOption {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return core.GetProviderModels(a.providers, a.activeIdx)
+	return a.Store.Models()
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
@@ -199,11 +198,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	extraEnv := append([]string(nil), a.configEnv...)
 	extraEnv = append(extraEnv, a.providerEnvLocked()...)
 	extraEnv = append(extraEnv, a.sessionEnv...)
-	if a.activeIdx >= 0 && a.activeIdx < len(a.providers) {
-		if m := a.providers[a.activeIdx].Model; m != "" {
-			model = m
-		}
-	}
+	model = a.Store.Model(model)
 	a.mu.RUnlock()
 
 	return newCursorSession(ctx, cmd, extraArgs, workDir, model, mode, sessionID, extraEnv)
@@ -277,55 +272,24 @@ func (a *Agent) PermissionModes() []core.PermissionModeInfo {
 	}
 }
 
-// ── ProviderSwitcher ────────────────────────────────────────────
-
 func (a *Agent) SetProviders(providers []core.ProviderConfig) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.providers = providers
+	a.Store.SetProviders(providers)
 }
 
 func (a *Agent) SetActiveProvider(name string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if name == "" {
-		a.activeIdx = -1
-		slog.Info("cursor: provider cleared")
-		return true
-	}
-	for i, p := range a.providers {
-		if p.Name == name {
-			a.activeIdx = i
-			slog.Info("cursor: provider switched", "provider", name)
-			return true
-		}
-	}
-	return false
-}
-
-func (a *Agent) GetActiveProvider() *core.ProviderConfig {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
-		return nil
-	}
-	p := a.providers[a.activeIdx]
-	return &p
-}
-
-func (a *Agent) ListProviders() []core.ProviderConfig {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	result := make([]core.ProviderConfig, len(a.providers))
-	copy(result, a.providers)
-	return result
+	return a.Store.SetActiveProvider(name)
 }
 
 func (a *Agent) providerEnvLocked() []string {
-	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
+	provider := a.Store.GetActiveProvider()
+	if provider == nil {
 		return nil
 	}
-	p := a.providers[a.activeIdx]
+	p := *provider
 	var env []string
 	if p.APIKey != "" {
 		env = append(env, "CURSOR_API_KEY="+p.APIKey)

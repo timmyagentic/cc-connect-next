@@ -40,7 +40,8 @@ func TestKimi_SessionResume_PreservesActiveProvider(t *testing.T) {
 	}
 
 	// Step 1: simulate `/provider switch alt-provider`.
-	a1 := &Agent{providers: providers, activeIdx: -1}
+	a1 := &Agent{}
+	a1.SetProviders(providers)
 	if !a1.SetActiveProvider("alt-provider") {
 		t.Fatal("SetActiveProvider(alt-provider) returned false")
 	}
@@ -56,7 +57,8 @@ func TestKimi_SessionResume_PreservesActiveProvider(t *testing.T) {
 	}
 
 	// Step 2: simulate restart — activeIdx is back to -1.
-	a2 := &Agent{providers: providers, activeIdx: -1}
+	a2 := &Agent{}
+	a2.SetProviders(providers)
 	a2.mu.Lock()
 	gotBefore := a2.providerEnvLocked()
 	a2.mu.Unlock()
@@ -88,18 +90,11 @@ func TestKimi_SessionResume_ModelFollowsProvider(t *testing.T) {
 		{Name: "p2", Model: "model-from-p2"},
 	}
 
-	a := &Agent{model: "default-model", providers: providers, activeIdx: -1}
+	a := &Agent{model: "default-model"}
+	a.SetProviders(providers)
 
 	// Before restore: model should be "default-model"
-	a.mu.Lock()
-	idx := a.activeIdx
-	m := a.model
-	if idx >= 0 && idx < len(a.providers) {
-		if pm := a.providers[idx].Model; pm != "" {
-			m = pm
-		}
-	}
-	a.mu.Unlock()
+	m := a.GetModel()
 	if m != "default-model" {
 		t.Fatalf("pre-restore model = %q, want default-model", m)
 	}
@@ -107,15 +102,7 @@ func TestKimi_SessionResume_ModelFollowsProvider(t *testing.T) {
 	// Restore: engine sets active provider to "p2"
 	a.SetActiveProvider("p2")
 
-	a.mu.Lock()
-	idx = a.activeIdx
-	m = a.model
-	if idx >= 0 && idx < len(a.providers) {
-		if pm := a.providers[idx].Model; pm != "" {
-			m = pm
-		}
-	}
-	a.mu.Unlock()
+	m = a.GetModel()
 	if m != "model-from-p2" {
 		t.Fatalf("post-restore model = %q, want model-from-p2", m)
 	}

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/timmyagentic/cc-connect-next/agent/internal/providerstate"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
@@ -32,9 +33,8 @@ type Agent struct {
 	configEnv    []string // env vars from [projects.agent.options.env]
 	model        string
 	mode         string // "default" | "bypassPermissions"
-	providers    []core.ProviderConfig
-	activeIdx    int // -1 = no provider set
-	sessionEnv   []string
+	providerstate.Store
+	sessionEnv []string
 
 	mu sync.RWMutex
 }
@@ -60,7 +60,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		configEnv:    core.ParseConfigEnv(opts),
 		model:        model,
 		mode:         mode,
-		activeIdx:    -1,
+		Store:        providerstate.New("copilot"),
 	}, nil
 }
 
@@ -99,8 +99,9 @@ func (a *Agent) SetModel(model string) {
 
 func (a *Agent) GetModel() string {
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return core.GetProviderModel(a.providers, a.activeIdx, a.model)
+	model := a.model
+	a.mu.RUnlock()
+	return a.Store.Model(model)
 }
 
 func (a *Agent) AvailableModels(_ context.Context) []core.ModelOption {
@@ -115,9 +116,7 @@ func (a *Agent) AvailableModels(_ context.Context) []core.ModelOption {
 }
 
 func (a *Agent) configuredModels() []core.ModelOption {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return core.GetProviderModels(a.providers, a.activeIdx)
+	return a.Store.Models()
 }
 
 func (a *Agent) SetSessionEnv(env []string) {
@@ -158,11 +157,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	extraEnv = append(extraEnv, a.providerEnvLocked()...)
 	extraEnv = append(extraEnv, a.sessionEnv...)
 	provider := a.providerConfigLocked()
-	if a.activeIdx >= 0 && a.activeIdx < len(a.providers) {
-		if m := a.providers[a.activeIdx].Model; m != "" {
-			model = m
-		}
-	}
+	model = a.Store.Model(model)
 	a.mu.RUnlock()
 
 	return newCopilotSession(ctx, workDir, cmd, extraArgs, model, mode, sessionID, extraEnv, provider)
@@ -414,55 +409,24 @@ func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// ── ProviderSwitcher implementation ──────────────────────────
-
 func (a *Agent) SetProviders(providers []core.ProviderConfig) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.providers = providers
+	a.Store.SetProviders(providers)
 }
 
 func (a *Agent) SetActiveProvider(name string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if name == "" {
-		a.activeIdx = -1
-		slog.Info("copilot: provider cleared")
-		return true
-	}
-	for i, p := range a.providers {
-		if p.Name == name {
-			a.activeIdx = i
-			slog.Info("copilot: provider switched", "provider", name)
-			return true
-		}
-	}
-	return false
-}
-
-func (a *Agent) GetActiveProvider() *core.ProviderConfig {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
-		return nil
-	}
-	p := a.providers[a.activeIdx]
-	return &p
-}
-
-func (a *Agent) ListProviders() []core.ProviderConfig {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	result := make([]core.ProviderConfig, len(a.providers))
-	copy(result, a.providers)
-	return result
+	return a.Store.SetActiveProvider(name)
 }
 
 func (a *Agent) providerEnvLocked() []string {
-	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
+	provider := a.Store.GetActiveProvider()
+	if provider == nil {
 		return nil
 	}
-	p := a.providers[a.activeIdx]
+	p := *provider
 	var env []string
 	if p.BaseURL != "" {
 		env = append(env, "COPILOT_PROVIDER_BASE_URL="+p.BaseURL)
@@ -494,10 +458,11 @@ func (a *Agent) probeSnapshotLocked() probeSnapshot {
 }
 
 func (a *Agent) providerConfigLocked() *copilotWireProviderConfig {
-	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
+	activeProvider := a.Store.GetActiveProvider()
+	if activeProvider == nil {
 		return nil
 	}
-	p := a.providers[a.activeIdx]
+	p := *activeProvider
 	if p.BaseURL == "" {
 		return nil
 	}
