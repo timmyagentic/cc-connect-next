@@ -129,10 +129,12 @@ func New(opts map[string]any) (core.Agent, error) {
 	if workDir == "" {
 		workDir = "."
 	}
-	// Fail at startup with a clear message instead of letting the first turn
-	// die on the CLI's own confusing chdir error (#1425).
-	if _, err := os.Stat(workDir); os.IsNotExist(err) {
-		return nil, fmt.Errorf("claudecode: work_dir %q does not exist", workDir)
+	// A project may live on a temporarily unavailable external/network mount.
+	// Keep the agent registered so unrelated projects can start and this one can
+	// recover without a daemon restart when the directory returns.
+	if _, err := os.Stat(workDir); err != nil {
+		slog.Warn("claudecode: work_dir is currently unavailable; sessions will retry when used",
+			"work_dir", workDir, "error", err)
 	}
 	cmd, cliExtraArgs := core.ParseCmdOpts(opts, "claude")
 	cmdArgsFlag, _ := opts["cmd_args_flag"].(string)

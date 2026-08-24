@@ -39,6 +39,8 @@ func TestMatchUpdateIntent(t *testing.T) {
 
 		// Confirm words — only after an upgrade prompt.
 		{"确认", updateIntentConfirm},
+		{"確認", updateIntentConfirm},
+		{"確定", updateIntentConfirm},
 		{"好的", updateIntentConfirm},
 		{"yes", updateIntentConfirm},
 		{"ok", updateIntentConfirm},

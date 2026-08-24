@@ -513,6 +513,15 @@ func TestSplitMessageCodeFenceAware_ChunkDoesNotExceedMaxLen(t *testing.T) {
 	}
 }
 
+func TestSplitMessageCodeFenceAware_OpeningFenceNearBoundaryReservesClosingFence(t *testing.T) {
+	chunks := SplitMessageCodeFenceAware("aaaaa\n```\nx", 10)
+	for i, chunk := range chunks {
+		if got := len([]rune(chunk)); got > 10 {
+			t.Fatalf("chunk %d exceeds maxLen: got %d runes, content=%q", i, got, chunk)
+		}
+	}
+}
+
 func TestSplitMessageCodeFenceAware_LongSingleLine(t *testing.T) {
 	// A single line that exceeds maxLen must be split within the line.
 	line := strings.Repeat("x", 250)

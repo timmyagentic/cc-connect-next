@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/timmyagentic/cc-connect-next/core"
@@ -920,14 +919,16 @@ func TestScanSessionMeta_TitlePriority(t *testing.T) {
 	}
 }
 
-func TestNew_WorkDirDoesNotExist(t *testing.T) {
-	_, err := New(map[string]any{
-		"work_dir": filepath.Join(t.TempDir(), "does-not-exist"),
+func TestNew_WorkDirDoesNotExistDoesNotAbortStartup(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	agent, err := New(map[string]any{
+		"work_dir":    missing,
+		"run_as_user": "target-user-skips-supervisor-lookpath",
 	})
-	if err == nil {
-		t.Fatal("expected error for non-existent work_dir, got nil")
+	if err != nil {
+		t.Fatalf("New() error = %v, want temporarily unavailable work_dir to remain retryable", err)
 	}
-	if !strings.Contains(err.Error(), "work_dir") {
-		t.Fatalf("error should name work_dir, got: %v", err)
+	if got := agent.(*Agent).GetWorkDir(); got != missing {
+		t.Fatalf("GetWorkDir() = %q, want %q", got, missing)
 	}
 }

@@ -633,6 +633,9 @@ func TestSendWithButtons_GroupMessage(t *testing.T) {
 		{
 			{Text: "允许所有", Data: "perm:allow_all"},
 		},
+		{
+			{Text: "立即更新", Data: "cmd:/upgrade confirm"},
+		},
 	}
 
 	err := p.SendWithButtons(ctx, rctx, "权限请求", buttons)
@@ -671,8 +674,8 @@ func TestSendWithButtons_GroupMessage(t *testing.T) {
 	if !ok {
 		t.Fatal("keyboard.content.rows is missing or not a slice")
 	}
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 rows, got %d", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
 	}
 
 	// Row 0: two buttons (allow, deny)
@@ -736,6 +739,18 @@ func TestSendWithButtons_GroupMessage(t *testing.T) {
 	act2, _ := btn2["action"].(map[string]any)
 	if data, ok := act2["data"].(string); !ok || !strings.HasPrefix(data, "perm:allow_all:qqbot:group-1:user-1") {
 		t.Errorf("allow_all button_data = %v", act2["data"])
+	}
+
+	// Row 2: command button keeps cmd payload and uses a non-permission group.
+	row2, _ := rows[2].(map[string]any)
+	btns2, _ := row2["buttons"].([]any)
+	btn3, _ := btns2[0].(map[string]any)
+	act3, _ := btn3["action"].(map[string]any)
+	if data, ok := act3["data"].(string); !ok || data != "cmd:/upgrade confirm:qqbot:group-1:user-1" {
+		t.Errorf("command button_data = %v", act3["data"])
+	}
+	if btn3["group_id"] != "cmd" {
+		t.Errorf("command group_id = %v, want cmd", btn3["group_id"])
 	}
 }
 
@@ -931,6 +946,24 @@ func TestHandleInteractionCreate_RouterPermission(t *testing.T) {
 			wantCall:    true,
 		},
 		{
+			name:        "group command",
+			buttonData:  "cmd:/upgrade confirm:qqbot:group-4:user-4",
+			chatType:    1,
+			wantContent: "/upgrade confirm",
+			wantSession: "qqbot:group-4:user-4",
+			wantMsgType: "group",
+			wantCall:    true,
+		},
+		{
+			name:        "c2c command",
+			buttonData:  "cmd:/upgrade:qqbot:user-4",
+			chatType:    2,
+			wantContent: "/upgrade",
+			wantSession: "qqbot:user-4",
+			wantMsgType: "c2c",
+			wantCall:    true,
+		},
+		{
 			name:       "unknown button_data prefix",
 			buttonData: "something_else:data",
 			chatType:   2,
@@ -995,6 +1028,10 @@ func TestHandleInteractionCreate_RouterPermission(t *testing.T) {
 			}
 			if got.Platform != "qqbot" {
 				t.Errorf("platform = %q, want qqbot", got.Platform)
+			}
+			wantPermissionResponse := strings.HasPrefix(tt.buttonData, "perm:")
+			if got.IsPermissionResponse != wantPermissionResponse {
+				t.Errorf("IsPermissionResponse = %v, want %v", got.IsPermissionResponse, wantPermissionResponse)
 			}
 
 			rctx, ok := got.ReplyCtx.(*replyContext)
