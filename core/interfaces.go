@@ -594,10 +594,9 @@ type ContextUsage struct {
 	ContextWindow            int
 }
 
-// ContextCompressor is an optional interface for agents that support
-// compressing/compacting the conversation context within a running session.
-// CompressCommand returns the native slash command (e.g. "/compact", "/compress")
-// that will be forwarded to the agent process. Return "" if not supported.
+// ContextCompressor is implemented only by agents that support compacting the
+// conversation context within a running session. CompressCommand returns the
+// non-empty native slash command forwarded to the agent process.
 type ContextCompressor interface {
 	CompressCommand() string
 }
@@ -645,17 +644,6 @@ type SessionTitleProvider interface {
 type WorkDirSwitcher interface {
 	SetWorkDir(dir string)
 	GetWorkDir() string
-}
-
-// AgentOptsProvider is an optional interface for agents that need to carry
-// their full configuration options when the engine clones a per-workspace
-// agent instance in multi-workspace mode. The engine merges the returned map
-// into the workspace opts before calling the agent factory, giving workspace
-// agents access to agent-specific options (e.g. "session" for the tmux agent)
-// that are not covered by the standard GetModel / GetMode accessors.
-// work_dir is always overridden by the engine and must not be returned here.
-type AgentOptsProvider interface {
-	BaseOpts() map[string]any
 }
 
 // ModeSwitcher is an optional interface for agents that support runtime permission mode switching.

@@ -97,24 +97,6 @@ func TestAgent_DeleteSession(t *testing.T) {
 	}
 }
 
-func TestAgent_GetSessionHistory(t *testing.T) {
-	a := &Agent{}
-	entries, err := a.GetSessionHistory(context.Background(), "some-session-id", 10)
-	if err != nil {
-		t.Fatalf("GetSessionHistory() error = %v", err)
-	}
-	if entries != nil {
-		t.Fatalf("GetSessionHistory() = %v, want nil", entries)
-	}
-}
-
-func TestAgent_CompressCommand(t *testing.T) {
-	a := &Agent{}
-	if got := a.CompressCommand(); got != "" {
-		t.Fatalf("CompressCommand() = %q, want empty", got)
-	}
-}
-
 func TestAgent_AvailableModels(t *testing.T) {
 	a := &Agent{}
 	models := a.AvailableModels(context.Background())
@@ -124,7 +106,7 @@ func TestAgent_AvailableModels(t *testing.T) {
 }
 
 func TestAgent_ProviderSwitcher(t *testing.T) {
-	a := &Agent{activeIdx: -1}
+	a := &Agent{}
 	if p := a.GetActiveProvider(); p != nil {
 		t.Fatalf("GetActiveProvider() = %v, want nil", p)
 	}
@@ -134,7 +116,7 @@ func TestAgent_ProviderSwitcher(t *testing.T) {
 }
 
 func TestAgent_ProviderConfigLocked(t *testing.T) {
-	a := &Agent{activeIdx: -1}
+	a := &Agent{}
 	a.SetProviders([]core.ProviderConfig{
 		{
 			Name:             "byok",
@@ -185,7 +167,7 @@ func TestAgent_ProviderConfigLocked(t *testing.T) {
 }
 
 func TestAgent_ProviderEnvLocked(t *testing.T) {
-	a := &Agent{activeIdx: -1}
+	a := &Agent{}
 	a.SetProviders([]core.ProviderConfig{
 		{
 			Name:         "byok",
@@ -309,7 +291,7 @@ func TestAgent_ListSessions_RPC(t *testing.T) {
 
 	// Point agent at the test binary itself acting as a mock copilot
 	a := &Agent{
-		cmd:  bin,
+		cmd:     bin,
 		workDir: ".",
 	}
 
@@ -341,7 +323,7 @@ func TestAgent_DeleteSession_RPC(t *testing.T) {
 	}
 
 	a := &Agent{
-		cmd:  bin,
+		cmd:     bin,
 		workDir: ".",
 	}
 

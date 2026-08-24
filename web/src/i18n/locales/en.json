@@ -6,7 +6,6 @@
     "sessions": "Sessions",
     "chat": "Chat",
     "cron": "Cron",
-    "bridge": "Bridge",
     "skills": "Skills",
     "system": "System"
   },
@@ -16,7 +15,6 @@
     "uptime": "Uptime",
     "platforms": "Platforms",
     "projects": "Projects",
-    "bridgeAdapters": "Bridge adapters",
     "noData": "No data available",
     "recentSessions": "Recent sessions"
   },
@@ -41,8 +39,6 @@
     "agentMode": "Permission mode",
     "agentSettings": "Agent",
     "generalSettings": "General",
-    "showCtxIndicator": "Context indicator",
-    "showCtxIndicatorHint": "Show [ctx: ~N%] suffix on replies",
     "replyFooter": "Reply footer",
     "replyFooterHint": "Append model/usage metadata to replies",
     "injectSender": "Inject sender",
@@ -146,13 +142,6 @@
     "skippedBusy": "Skipped (busy)",
     "lastRun": "Last run",
     "notEnabled": "Heartbeat is not configured for this project. Add [heartbeat] section in config.toml to enable."
-  },
-  "bridge": {
-    "title": "Bridge",
-    "platform": "Platform",
-    "capabilities": "Capabilities",
-    "connectedAt": "Connected at",
-    "noAdapters": "No bridge adapters"
   },
   "system": {
     "title": "System",

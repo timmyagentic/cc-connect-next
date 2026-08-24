@@ -6,7 +6,6 @@
     "sessions": "Sesiones",
     "chat": "Chat",
     "cron": "Tareas programadas",
-    "bridge": "Puente",
     "skills": "Habilidades",
     "system": "Sistema"
   },
@@ -16,7 +15,6 @@
     "uptime": "Tiempo activo",
     "platforms": "Plataformas",
     "projects": "Proyectos",
-    "bridgeAdapters": "Adaptadores de puente",
     "noData": "No hay datos disponibles",
     "recentSessions": "Sesiones recientes"
   },
@@ -41,8 +39,6 @@
     "agentMode": "Modo de permisos",
     "agentSettings": "Agente",
     "generalSettings": "General",
-    "showCtxIndicator": "Indicador de contexto",
-    "showCtxIndicatorHint": "Mostrar el sufijo [ctx: ~N%] al final de las respuestas",
     "replyFooter": "Pie de respuesta",
     "replyFooterHint": "Añadir metadatos de modelo/uso al final de las respuestas",
     "injectSender": "Inyectar remitente",
@@ -146,13 +142,6 @@
     "skippedBusy": "Omitida (ocupado)",
     "lastRun": "Última ejecución",
     "notEnabled": "El heartbeat no está configurado para este proyecto. Agregue la sección [heartbeat] en config.toml para habilitarlo."
-  },
-  "bridge": {
-    "title": "Puente",
-    "platform": "Plataforma",
-    "capabilities": "Capacidades",
-    "connectedAt": "Conectada el",
-    "noAdapters": "No hay adaptadores de puente"
   },
   "system": {
     "title": "Sistema",

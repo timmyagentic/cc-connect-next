@@ -15,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/timmyagentic/cc-connect-next/agent/internal/providerstate"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
@@ -46,11 +47,10 @@ type Agent struct {
 	appendPrompt    string
 	cmd             string   // CLI binary name, default "codex"
 	cliExtraArgs    []string // extra args parsed from cmd after the binary
-	providers       []core.ProviderConfig
-	activeIdx       int      // -1 = no provider set
-	configEnv       []string // env vars from [projects.agent.options.env] — persists across SetSessionEnv calls
-	sessionEnv      []string
-	mu              sync.RWMutex
+	providerstate.Store
+	configEnv  []string // env vars from [projects.agent.options.env] — persists across SetSessionEnv calls
+	sessionEnv []string
+	mu         sync.RWMutex
 }
 
 func New(opts map[string]any) (core.Agent, error) {
@@ -114,7 +114,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		cmd:             cmd,
 		cliExtraArgs:    cliExtraArgs,
 		configEnv:       configEnv,
-		activeIdx:       -1,
+		Store:           providerstate.New("codex"),
 	}, nil
 }
 
@@ -224,9 +224,10 @@ func (a *Agent) SetModel(model string) {
 }
 
 func (a *Agent) GetModel() string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return core.GetProviderModel(a.providers, a.activeIdx, a.model)
+	a.mu.RLock()
+	model := a.model
+	a.mu.RUnlock()
+	return a.Store.Model(model)
 }
 
 func (a *Agent) SetReasoningEffort(effort string) {
@@ -247,9 +248,7 @@ func (a *Agent) AvailableReasoningEfforts() []string {
 }
 
 func (a *Agent) configuredModels() []core.ModelOption {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return core.GetProviderModels(a.providers, a.activeIdx)
+	return a.Store.Models()
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
@@ -317,14 +316,12 @@ func isCodexChatModel(id string) bool {
 }
 
 func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
-	a.mu.Lock()
 	apiKey := ""
 	baseURL := ""
-	if a.activeIdx >= 0 && a.activeIdx < len(a.providers) {
-		apiKey = a.providers[a.activeIdx].APIKey
-		baseURL = a.providers[a.activeIdx].BaseURL
+	if provider := a.Store.GetActiveProvider(); provider != nil {
+		apiKey = provider.APIKey
+		baseURL = provider.BaseURL
 	}
-	a.mu.Unlock()
 
 	if apiKey == "" {
 		apiKey = os.Getenv("OPENAI_API_KEY")
@@ -517,11 +514,9 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	extraEnv = append(extraEnv, a.providerEnvLocked()...)
 	extraEnv = append(extraEnv, a.sessionEnv...)
 	var baseURL string
-	if a.activeIdx >= 0 && a.activeIdx < len(a.providers) {
-		if m := a.providers[a.activeIdx].Model; m != "" {
-			model = m
-		}
-		baseURL = a.providers[a.activeIdx].BaseURL
+	if provider := a.Store.GetActiveProvider(); provider != nil {
+		model = a.Store.Model(model)
+		baseURL = provider.BaseURL
 	}
 	provName, provAPIKey, provWireAPI, provHeaders := a.activeProviderCodexConfig()
 	a.mu.Unlock()
@@ -662,13 +657,6 @@ func (a *Agent) SkillDirs() []string {
 	return codexSkillDirs(absDir, codexHome)
 }
 
-// ── ContextCompressor implementation ──────────────────────────
-
-// CompressCommand returns "" because Codex native slash commands (/compact, /clear)
-// are not reliably executed in exec/resume mode — they may be treated as plain text.
-// See: https://github.com/chenhg5/cc-connect/issues/378
-func (a *Agent) CompressCommand() string { return "" }
-
 func codexSkillDirs(workDir, explicitCodexHome string) []string {
 	homeDir, _ := os.UserHomeDir()
 	codexHome := strings.TrimSpace(explicitCodexHome)
@@ -778,55 +766,24 @@ func (a *Agent) GlobalMemoryFile() string {
 	return filepath.Join(codexHome, "AGENTS.md")
 }
 
-// ── ProviderSwitcher implementation ──────────────────────────
-
 func (a *Agent) SetProviders(providers []core.ProviderConfig) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.providers = providers
+	a.Store.SetProviders(providers)
 }
 
 func (a *Agent) SetActiveProvider(name string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if name == "" {
-		a.activeIdx = -1
-		slog.Info("codex: provider cleared")
-		return true
-	}
-	for i, p := range a.providers {
-		if p.Name == name {
-			a.activeIdx = i
-			slog.Info("codex: provider switched", "provider", name)
-			return true
-		}
-	}
-	return false
-}
-
-func (a *Agent) GetActiveProvider() *core.ProviderConfig {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
-		return nil
-	}
-	p := a.providers[a.activeIdx]
-	return &p
-}
-
-func (a *Agent) ListProviders() []core.ProviderConfig {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	result := make([]core.ProviderConfig, len(a.providers))
-	copy(result, a.providers)
-	return result
+	return a.Store.SetActiveProvider(name)
 }
 
 func (a *Agent) providerEnvLocked() []string {
-	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
+	provider := a.Store.GetActiveProvider()
+	if provider == nil {
 		return nil
 	}
-	p := a.providers[a.activeIdx]
+	p := *provider
 	var env []string
 	if p.APIKey != "" {
 		env = append(env, "OPENAI_API_KEY="+p.APIKey)
@@ -844,10 +801,11 @@ func (a *Agent) providerEnvLocked() []string {
 // Returns non-empty name when the provider has codex config (wire_api, headers)
 // OR when it has a BaseURL (third-party provider needing auth.json).
 func (a *Agent) activeProviderCodexConfig() (name string, apiKey string, wireAPI string, headers map[string]string) {
-	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
+	provider := a.Store.GetActiveProvider()
+	if provider == nil {
 		return
 	}
-	p := a.providers[a.activeIdx]
+	p := *provider
 	hasCodexConfig := p.CodexWireAPI != "" || len(p.CodexHTTPHeaders) > 0
 	isThirdParty := p.BaseURL != "" && p.APIKey != ""
 	if !hasCodexConfig && !isThirdParty {

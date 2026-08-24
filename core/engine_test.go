@@ -15221,12 +15221,12 @@ func TestEngine_AddAlias(t *testing.T) {
 
 func TestEstimateTokens(t *testing.T) {
 	// Test with empty entries
-	if got := estimateTokens(nil); got != 0 {
-		t.Errorf("estimateTokens(nil) = %d, want 0", got)
+	if got := estimateTokensWithPendingAssistant(nil, ""); got != 0 {
+		t.Errorf("estimateTokensWithPendingAssistant(nil, empty) = %d, want 0", got)
 	}
 
-	if got := estimateTokens([]HistoryEntry{}); got != 0 {
-		t.Errorf("estimateTokens([]) = %d, want 0", got)
+	if got := estimateTokensWithPendingAssistant([]HistoryEntry{}, ""); got != 0 {
+		t.Errorf("estimateTokensWithPendingAssistant([], empty) = %d, want 0", got)
 	}
 
 	// Test with entries
@@ -15234,19 +15234,19 @@ func TestEstimateTokens(t *testing.T) {
 		{Role: "user", Content: "Hello"},
 		{Role: "assistant", Content: "Hi there!"},
 	}
-	got := estimateTokens(entries)
+	got := estimateTokensWithPendingAssistant(entries, "")
 	if got <= 0 {
-		t.Errorf("estimateTokens([Hello, Hi there!]) = %d, want > 0", got)
+		t.Errorf("estimateTokensWithPendingAssistant([Hello, Hi there!], empty) = %d, want > 0", got)
 	}
 
 	// Test with Chinese characters (should count as 1 token per character)
 	entriesChinese := []HistoryEntry{
 		{Role: "user", Content: "你好世界"}, // 4 characters
 	}
-	gotChinese := estimateTokens(entriesChinese)
+	gotChinese := estimateTokensWithPendingAssistant(entriesChinese, "")
 	// 4 characters / 4 = 1 token, but minimum should account for the formula
 	if gotChinese < 1 {
-		t.Errorf("estimateTokens([你好世界]) = %d, want >= 1", gotChinese)
+		t.Errorf("estimateTokensWithPendingAssistant([你好世界], empty) = %d, want >= 1", gotChinese)
 	}
 }
 

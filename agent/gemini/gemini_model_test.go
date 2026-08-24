@@ -7,49 +7,29 @@ import (
 )
 
 func TestConfiguredModels_BoundaryConditions(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{Models: []core.ModelOption{{Name: "first"}}},
-			{Models: []core.ModelOption{{Name: "second"}}},
-		},
+	a := &Agent{}
+	a.SetProviders([]core.ProviderConfig{
+		{Name: "first", Models: []core.ModelOption{{Name: "first"}}},
+		{Name: "second", Models: []core.ModelOption{{Name: "second"}}},
+	})
+	if got := a.configuredModels(); got != nil {
+		t.Fatalf("configuredModels() without active provider = %v, want nil", got)
 	}
-
-	tests := []struct {
-		name      string
-		activeIdx int
-		wantNil   bool
-		wantName  string
-	}{
-		{name: "negative index", activeIdx: -1, wantNil: true},
-		{name: "out of range", activeIdx: 2, wantNil: true},
-		{name: "valid index", activeIdx: 1, wantName: "second"},
+	if a.SetActiveProvider("missing") {
+		t.Fatal("SetActiveProvider(missing) = true")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			a.activeIdx = tt.activeIdx
-			got := a.configuredModels()
-			if tt.wantNil {
-				if got != nil {
-					t.Fatalf("configuredModels() = %v, want nil", got)
-				}
-				return
-			}
-			if len(got) != 1 || got[0].Name != tt.wantName {
-				t.Fatalf("configuredModels() = %v, want %q", got, tt.wantName)
-			}
-		})
+	if !a.SetActiveProvider("second") {
+		t.Fatal("SetActiveProvider(second) = false")
+	}
+	if got := a.configuredModels(); len(got) != 1 || got[0].Name != "second" {
+		t.Fatalf("configuredModels() = %v, want second", got)
 	}
 }
 
 func TestGetModel_PrefersActiveProviderModel(t *testing.T) {
-	a := &Agent{
-		model: "gemini-2.5-flash",
-		providers: []core.ProviderConfig{
-			{Name: "google", Model: "gemini-2.5-pro"},
-		},
-		activeIdx: 0,
-	}
+	a := &Agent{model: "gemini-2.5-flash"}
+	a.SetProviders([]core.ProviderConfig{{Name: "google", Model: "gemini-2.5-pro"}})
+	a.SetActiveProvider("google")
 
 	if got := a.GetModel(); got != "gemini-2.5-pro" {
 		t.Fatalf("GetModel() = %q, want gemini-2.5-pro", got)

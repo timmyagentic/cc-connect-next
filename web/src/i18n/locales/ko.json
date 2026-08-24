@@ -6,7 +6,6 @@
     "sessions": "세션",
     "chat": "채팅",
     "cron": "예약 작업",
-    "bridge": "브리지",
     "skills": "스킬",
     "system": "시스템"
   },
@@ -16,7 +15,6 @@
     "uptime": "가동 시간",
     "platforms": "플랫폼",
     "projects": "프로젝트",
-    "bridgeAdapters": "브리지 어댑터",
     "noData": "데이터가 없습니다",
     "recentSessions": "최근 세션"
   },
@@ -41,8 +39,6 @@
     "agentMode": "권한 모드",
     "agentSettings": "에이전트",
     "generalSettings": "일반",
-    "showCtxIndicator": "컨텍스트 표시기",
-    "showCtxIndicatorHint": "답변에 [ctx: ~N%] 접미사를 표시합니다",
     "replyFooter": "답변 푸터",
     "replyFooterHint": "답변에 모델/사용량 메타데이터를 추가합니다",
     "injectSender": "발신자 삽입",
@@ -146,13 +142,6 @@
     "skippedBusy": "건너뜀 (사용 중)",
     "lastRun": "마지막 실행",
     "notEnabled": "이 프로젝트에는 하트비트가 구성되어 있지 않습니다. 사용하려면 config.toml에 [heartbeat] 섹션을 추가하세요."
-  },
-  "bridge": {
-    "title": "브리지",
-    "platform": "플랫폼",
-    "capabilities": "기능",
-    "connectedAt": "연결 일시",
-    "noAdapters": "브리지 어댑터가 없습니다"
   },
   "system": {
     "title": "시스템",

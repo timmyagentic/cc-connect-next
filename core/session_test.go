@@ -157,6 +157,30 @@ func TestSessionManager_Persistence(t *testing.T) {
 	}
 }
 
+func TestSessionManager_PersistencePreservesProviderAndUserActivity(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sessions.json")
+	lastUserActivity := time.Date(2026, time.August, 24, 12, 34, 56, 0, time.UTC)
+
+	sm1 := NewSessionManager(path)
+	s := sm1.GetOrCreateActive("user1")
+	s.SetAgentInfo("agent-session-1", "codex", "persisted")
+	s.SetActiveProvider("provider-a")
+	s.mu.Lock()
+	s.LastUserActivity = lastUserActivity
+	s.mu.Unlock()
+	sm1.Save()
+
+	sm2 := NewSessionManager(path)
+	reloaded := sm2.GetOrCreateActive("user1")
+	if got := reloaded.GetActiveProvider(); got != "provider-a" {
+		t.Fatalf("active provider after reload = %q, want provider-a", got)
+	}
+	if got := reloaded.GetLastUserActivity(); !got.Equal(lastUserActivity) {
+		t.Fatalf("last user activity after reload = %s, want %s", got, lastUserActivity)
+	}
+}
+
 func TestSessionManager_GetOrCreateActive_Persists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sessions.json")
@@ -1117,4 +1141,3 @@ func TestKnownAgentSessionIDs_ResetAllSessionsBug(t *testing.T) {
 		t.Fatalf("filterOwnedSessions returned %d, want 3", len(filtered))
 	}
 }
-

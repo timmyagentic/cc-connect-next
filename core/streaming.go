@@ -47,8 +47,7 @@ type streamPreview struct {
 	previewMsgID      any  // platform-specific ID for the preview message (returned by SendPreviewStart)
 	degraded          bool // if true, stop trying (platform doesn't support it or permanent error)
 
-	timer     *time.Timer
-	timerStop chan struct{} // closed when preview ends
+	timer *time.Timer
 
 	pendingStatus CardStatus // last status set via setStatus(); applied on recovery
 }
@@ -259,7 +258,6 @@ func newStreamPreview(cfg StreamPreviewCfg, p Platform, replyCtx any, ctx contex
 		replyCtx:  replyCtx,
 		ctx:       ctx,
 		transform: transform,
-		timerStop: make(chan struct{}),
 	}
 }
 
@@ -457,12 +455,6 @@ func (sp *streamPreview) discard() {
 
 	sp.cancelTimerLocked()
 
-	select {
-	case <-sp.timerStop:
-	default:
-		close(sp.timerStop)
-	}
-
 	if sp.previewMsgID != nil {
 		if cleaner, ok := sp.platform.(PreviewCleaner); ok {
 			slog.Debug("stream preview discard: deleting preview")
@@ -489,12 +481,6 @@ func (sp *streamPreview) finish(finalText, statusFooter string) bool {
 	defer sp.mu.Unlock()
 
 	sp.cancelTimerLocked()
-
-	select {
-	case <-sp.timerStop:
-	default:
-		close(sp.timerStop)
-	}
 
 	if sp.transform != nil {
 		finalText = sp.transform(finalText)

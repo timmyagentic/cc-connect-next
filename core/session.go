@@ -18,11 +18,11 @@ const ContinueSession = "__continue__"
 
 // Session tracks one conversation between a user and the agent.
 type Session struct {
-	ID                  string         `json:"id"`
-	Name                string         `json:"name"`
-	AgentSessionID      string         `json:"agent_session_id"`
-	AgentType           string         `json:"agent_type,omitempty"`
-	PastAgentSessionIDs []string       `json:"past_agent_session_ids,omitempty"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	AgentSessionID      string   `json:"agent_session_id"`
+	AgentType           string   `json:"agent_type,omitempty"`
+	PastAgentSessionIDs []string `json:"past_agent_session_ids,omitempty"`
 	// ActiveProvider is the agent provider name that was active when this
 	// session last took a turn. It is restored before --resume so that a
 	// cc-connect-next process restart does not silently drop a user's
@@ -42,6 +42,34 @@ type Session struct {
 
 	mu   sync.Mutex `json:"-"`
 	busy bool       `json:"-"`
+}
+
+// MarshalJSON serializes the declared persistence fields while holding the
+// session lock. Using an alias keeps the struct tags on Session authoritative:
+// newly added fields are persisted automatically instead of requiring a second
+// hand-maintained copy in SessionManager.saveLocked.
+func (s *Session) MarshalJSON() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	type sessionJSON Session
+	agentSessionID := s.AgentSessionID
+	if agentSessionID == ContinueSession {
+		agentSessionID = ""
+	}
+	return json.Marshal(struct {
+		*sessionJSON
+		AgentSessionID string `json:"agent_session_id"`
+	}{
+		sessionJSON:    (*sessionJSON)(s),
+		AgentSessionID: agentSessionID,
+	})
+}
+
+func (s *Session) hasTrackedAgentSessionID() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return (s.AgentSessionID != "" && s.AgentSessionID != ContinueSession) || len(s.PastAgentSessionIDs) > 0
 }
 
 func (s *Session) TryLock() bool {
@@ -627,33 +655,11 @@ func (sm *SessionManager) saveLocked() {
 		return
 	}
 
-	// Build a deep-copy snapshot to avoid racing with concurrent Session mutations.
-	snapSessions := make(map[string]*Session, len(sm.sessions))
-	for id, s := range sm.sessions {
-		s.mu.Lock()
-		agentSID := s.AgentSessionID
-		if agentSID == ContinueSession {
-			agentSID = ""
-			s.AgentSessionID = ""
-		}
-		snapSessions[id] = &Session{
-			ID:                  s.ID,
-			Name:                s.Name,
-			AgentSessionID:      agentSID,
-			AgentType:           s.AgentType,
-			PastAgentSessionIDs: append([]string(nil), s.PastAgentSessionIDs...),
-			History:             append([]HistoryEntry(nil), s.History...),
-			CreatedAt:           s.CreatedAt,
-			UpdatedAt:           s.UpdatedAt,
-		}
-		s.mu.Unlock()
-	}
-
 	// Auto-clear legacyData once every session has at least one tracked ID.
 	if sm.legacyData {
 		allTracked := true
-		for _, s := range snapSessions {
-			if s.AgentSessionID == "" && len(s.PastAgentSessionIDs) == 0 {
+		for _, s := range sm.sessions {
+			if !s.hasTrackedAgentSessionID() {
 				allTracked = false
 				break
 			}
@@ -665,7 +671,7 @@ func (sm *SessionManager) saveLocked() {
 	}
 
 	snap := sessionSnapshot{
-		Sessions:       snapSessions,
+		Sessions:       sm.sessions,
 		ActiveSession:  sm.activeSession,
 		UserSessions:   sm.userSessions,
 		Counter:        sm.counter,
@@ -828,7 +834,7 @@ func (sm *SessionManager) PruneDuplicateSessions(mergeHistory bool) PruneResult 
 	defer sm.mu.Unlock()
 
 	// Group sessions by baseChat
-	chatSessions := make(map[string][]*Session) // baseChat -> sessions
+	chatSessions := make(map[string][]*Session)  // baseChat -> sessions
 	sessionToBaseChat := make(map[string]string) // session.ID -> baseChat
 
 	for userKey, sessionIDs := range sm.userSessions {

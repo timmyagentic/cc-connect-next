@@ -471,14 +471,8 @@ type Engine struct {
 	autoCompressMinGap    time.Duration
 	resetOnIdle           time.Duration
 
-	// Reply footer composition flags. The footer renders up to two lines:
-	//   line 1 — model · [effort ·] out/in/cw/cr · ctx%   (gated by showContextIndicator)
-	//   line 2 — workspace directory                       (gated by showWorkdirIndicator)
-	// replyFooterEnabled is the master toggle: when false, no footer is emitted
-	// regardless of the per-line flags.
-	showContextIndicator bool
-	showWorkdirIndicator bool
-	replyFooterEnabled   bool
+	// The reply footer contains model and reasoning effort only.
+	replyFooterEnabled bool
 
 	// Feedback channel state (see core/feedback.go). feedbackPostFn is a
 	// test seam; production uses postFeedback.
@@ -918,8 +912,6 @@ func NewEngine(name string, ag Agent, platforms []Platform, sessionStorePath str
 		eventIdleTimeout:      defaultEventIdleTimeout,
 		maxQueuedMessages:     defaultMaxQueuedMessages,
 		busyMessageMode:       BusyMessageModeSteer,
-		showContextIndicator:  true,
-		showWorkdirIndicator:  true,
 		shell:                 defaultShell(),
 		shellFlag:             defaultShellFlag(),
 		pendingRestartTimeout: defaultPendingRestartTimeout,
@@ -1094,11 +1086,6 @@ func (e *Engine) SetReferenceConfig(cfg ReferenceRenderCfg) {
 	e.references = normalizeReferenceRenderCfg(cfg)
 }
 
-// estimateTokens provides a rough token estimate for a set of history entries.
-func estimateTokens(entries []HistoryEntry) int {
-	return estimateTokensWithPendingAssistant(entries, "")
-}
-
 // estimateTokensWithPendingAssistant is like estimateTokens but includes an assistant
 // message not yet written to history (used at EventResult before AddHistory).
 func estimateTokensWithPendingAssistant(entries []HistoryEntry, pendingAssistant string) int {
@@ -1136,24 +1123,16 @@ func (e *Engine) SetResetOnIdle(d time.Duration) {
 	e.resetOnIdle = d
 }
 
-// SetShowContextIndicator controls whether the reply footer's first line
-// (model / reasoning effort / token counts / context %) is rendered.
-// Subordinate to SetReplyFooterEnabled — when the footer is disabled overall,
-// this flag has no effect.
-func (e *Engine) SetShowContextIndicator(show bool) {
-	e.showContextIndicator = show
-}
+// SetShowContextIndicator is retained for source compatibility.
+// Deprecated: context details are no longer rendered in reply footers.
+func (*Engine) SetShowContextIndicator(bool) {}
 
-// SetShowWorkdirIndicator controls whether the reply footer's second line
-// (workspace directory) is rendered. Subordinate to SetReplyFooterEnabled.
-func (e *Engine) SetShowWorkdirIndicator(show bool) {
-	e.showWorkdirIndicator = show
-}
+// SetShowWorkdirIndicator is retained for source compatibility.
+// Deprecated: work directories are no longer rendered in reply footers.
+func (*Engine) SetShowWorkdirIndicator(bool) {}
 
 // SetReplyFooterEnabled is the master toggle for the per-turn reply footer.
-// When false, no footer (statusline-style or single-line) is emitted, and the
-// per-line flags (SetShowContextIndicator / SetShowWorkdirIndicator) become
-// no-ops.
+// When false, no footer is emitted.
 func (e *Engine) SetReplyFooterEnabled(show bool) {
 	e.replyFooterEnabled = show
 }
@@ -2045,163 +2024,23 @@ func timerRunTitle(job *TimerJob) string {
 	return truncateStr(job.Prompt, 40)
 }
 
-// executeTimerShell runs a shell command for a timer job and sends the output.
+type scheduledShellSpec struct {
+	command      string
+	workDir      string
+	timeout      time.Duration
+	shell        string
+	shellFlag    string
+	shellProfile string
+}
+
 func (e *Engine) executeTimerShell(p Platform, replyCtx any, job *TimerJob) error {
-	workDir := job.WorkDir
-	if workDir == "" {
-		if wd, ok := e.agent.(interface{ GetWorkDir() string }); ok {
-			workDir = wd.GetWorkDir()
-		}
-	}
-	if workDir == "" {
-		workDir, _ = os.Getwd()
-	}
-
-	timeout := job.ExecutionTimeout()
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
-
-	cmdLabel := truncateStr(job.Exec, 60)
-
-	ctx, cancel := context.WithTimeout(e.ctx, timeout)
-	defer cancel()
-
-	var shellCmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		shellCmd = exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", job.Exec)
-	} else {
-		shellCmd = exec.CommandContext(ctx, "sh", "-c", job.Exec)
-	}
-	shellCmd.Dir = workDir
-
-	stdout, err := shellCmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("shell: stdout pipe: %w", err)
-	}
-	stderr, err := shellCmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("shell: stderr pipe: %w", err)
-	}
-
-	if err := shellCmd.Start(); err != nil {
-		e.send(p, replyCtx, fmt.Sprintf("⏰ ❌ `%s`\nerror: failed to start: %v", cmdLabel, err))
-		return fmt.Errorf("shell: start: %w", err)
-	}
-
-	var mu sync.Mutex
-	var buf bytes.Buffer
-	doneCh := make(chan struct{})
-
-	readPipe := func(r io.Reader) {
-		scanner := bufio.NewScanner(r)
-		scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
-		for scanner.Scan() {
-			mu.Lock()
-			if buf.Len() > 0 {
-				buf.WriteByte('\n')
-			}
-			buf.WriteString(scanner.Text())
-			mu.Unlock()
-		}
-	}
-	var pipeWg sync.WaitGroup
-	pipeWg.Add(2)
-	go func() { defer pipeWg.Done(); readPipe(stdout) }()
-	go func() { defer pipeWg.Done(); readPipe(stderr) }()
-
-	go func() {
-		pipeWg.Wait()
-		_ = shellCmd.Wait()
-		close(doneCh)
-	}()
-
-	select {
-	case <-doneCh:
-		return e.finishCronShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel)
-	case <-ctx.Done():
-		killAndWait(shellCmd, doneCh)
-		mu.Lock()
-		output := buf.String()
-		mu.Unlock()
-		msg := fmt.Sprintf("⏰ ⚠️ timeout: `%s`", cmdLabel)
-		if output != "" {
-			msg = fmt.Sprintf("⏰ ⚠️ timeout: `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-		}
-		e.send(p, replyCtx, msg)
-		return fmt.Errorf("shell command timed out")
-	case <-time.After(quickFinishTimeout):
-	}
-
-	// Long-running command — try in-place updates
-	var previewHandle any
-	var useUpdate bool
-	if _, ok := p.(MessageUpdater); ok {
-		if starter, ok := p.(PreviewStarter); ok {
-			mu.Lock()
-			output := buf.String()
-			mu.Unlock()
-			progressMsg := fmt.Sprintf("⏰ ⏳ `%s`", cmdLabel)
-			if output != "" {
-				progressMsg = fmt.Sprintf("⏰ ⏳ `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-			}
-			handle, err := starter.SendPreviewStart(e.ctx, replyCtx, progressMsg)
-			if err == nil && handle != nil {
-				previewHandle = handle
-				useUpdate = true
-			}
-		}
-	}
-	if !useUpdate {
-		e.send(p, replyCtx, fmt.Sprintf("⏰ ⏳ `%s`", cmdLabel))
-	}
-
-	updateDone := make(chan struct{})
-	if useUpdate {
-		go func() {
-			ticker := time.NewTicker(2 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					mu.Lock()
-					output := buf.String()
-					mu.Unlock()
-					msg := fmt.Sprintf("⏰ ⏳ `%s`", cmdLabel)
-					if output != "" {
-						msg = fmt.Sprintf("⏰ ⏳ `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-					}
-					_ = updaterFor(p).UpdateMessage(e.ctx, previewHandle, msg)
-				case <-updateDone:
-					return
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-
-	select {
-	case <-doneCh:
-		close(updateDone)
-		return e.finishCronShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, useUpdate, previewHandle)
-	case <-ctx.Done():
-		close(updateDone)
-		killAndWait(shellCmd, doneCh)
-		mu.Lock()
-		output := buf.String()
-		mu.Unlock()
-		msg := fmt.Sprintf("⏰ ⚠️ timeout: `%s`", cmdLabel)
-		if output != "" {
-			msg = fmt.Sprintf("⏰ ⚠️ timeout: `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-		}
-		if useUpdate {
-			_ = updaterFor(p).UpdateMessage(e.ctx, previewHandle, msg)
-		} else {
-			e.send(p, replyCtx, msg)
-		}
-		return fmt.Errorf("shell command timed out")
-	}
+	return e.executeScheduledShell(p, replyCtx, scheduledShellSpec{
+		command:   job.Exec,
+		workDir:   job.WorkDir,
+		timeout:   job.ExecutionTimeout(),
+		shell:     defaultShell(),
+		shellFlag: defaultShellFlag(),
+	})
 }
 
 func cronRunTitle(job *CronJob) string {
@@ -2223,9 +2062,22 @@ func cronRunTitle(job *CronJob) string {
 	return "cron"
 }
 
-// executeCronShell runs a shell command for a cron job and sends the output.
 func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error {
-	workDir := job.WorkDir
+	return e.executeScheduledShell(p, replyCtx, scheduledShellSpec{
+		command:      job.Exec,
+		workDir:      job.WorkDir,
+		timeout:      job.ExecutionTimeout(),
+		shell:        e.shell,
+		shellFlag:    e.shellFlag,
+		shellProfile: e.shellProfile,
+	})
+}
+
+// executeScheduledShell owns the shared Cron/Timer process, progress, timeout,
+// and terminal-delivery lifecycle. Job-specific wrappers only select the shell
+// and resolve their command settings.
+func (e *Engine) executeScheduledShell(p Platform, replyCtx any, spec scheduledShellSpec) error {
+	workDir := spec.workDir
 	if workDir == "" {
 		if wd, ok := e.agent.(interface{ GetWorkDir() string }); ok {
 			workDir = wd.GetWorkDir()
@@ -2235,17 +2087,12 @@ func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error 
 		workDir, _ = os.Getwd()
 	}
 
-	timeout := job.ExecutionTimeout()
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
+	cmdLabel := truncateStr(spec.command, 60)
 
-	cmdLabel := truncateStr(job.Exec, 60)
-
-	ctx, cancel := context.WithTimeout(e.ctx, timeout)
+	ctx, cancel := scheduledShellContext(e.ctx, spec.timeout)
 	defer cancel()
 
-	shellCmd := shellExecCommand(ctx, e.shell, e.shellFlag, e.shellProfile, job.Exec)
+	shellCmd := shellExecCommand(ctx, spec.shell, spec.shellFlag, spec.shellProfile, spec.command)
 	shellCmd.Dir = workDir
 
 	stdout, err := shellCmd.StdoutPipe()
@@ -2281,7 +2128,7 @@ func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error 
 	// Use a WaitGroup so both pipe-reader goroutines drain completely before
 	// doneCh is closed. Without this, shellCmd.Wait() can return (closing the
 	// pipe write-ends) while the scanners still have unread data in the OS
-	// buffer, causing finishCronShell to read a truncated output.
+	// buffer, causing finishScheduledShell to read a truncated output.
 	var pipeWg sync.WaitGroup
 	pipeWg.Add(2)
 	go func() { defer pipeWg.Done(); readPipe(stdout) }()
@@ -2296,7 +2143,7 @@ func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error 
 	// Wait briefly to see if the command finishes quickly
 	select {
 	case <-doneCh:
-		return e.finishCronShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel)
+		return e.finishScheduledShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, false, nil)
 	case <-ctx.Done():
 		killAndWait(shellCmd, doneCh)
 		mu.Lock()
@@ -2363,7 +2210,7 @@ func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error 
 	select {
 	case <-doneCh:
 		close(updateDone)
-		return e.finishCronShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, useUpdate, previewHandle)
+		return e.finishScheduledShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, useUpdate, previewHandle)
 	case <-ctx.Done():
 		close(updateDone)
 		killAndWait(shellCmd, doneCh)
@@ -2383,7 +2230,14 @@ func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error 
 	}
 }
 
-func (e *Engine) finishCronShell(p Platform, replyCtx any, cmd *exec.Cmd, mu *sync.Mutex, buf *bytes.Buffer, cmdLabel string, opts ...any) error {
+func scheduledShellContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, timeout)
+}
+
+func (e *Engine) finishScheduledShell(p Platform, replyCtx any, cmd *exec.Cmd, mu *sync.Mutex, buf *bytes.Buffer, cmdLabel string, useUpdate bool, previewHandle any) error {
 	mu.Lock()
 	output := buf.String()
 	mu.Unlock()
@@ -2406,16 +2260,12 @@ func (e *Engine) finishCronShell(p Platform, replyCtx any, cmd *exec.Cmd, mu *sy
 		}
 	}
 
-	if len(opts) >= 2 {
-		if useUpdate, ok := opts[0].(bool); ok && useUpdate {
-			if handle := opts[1]; handle != nil {
-				_ = updaterFor(p).UpdateMessage(e.ctx, handle, finalMsg)
-				if !exitOK {
-					return fmt.Errorf("shell: exit code %d", cmd.ProcessState.ExitCode())
-				}
-				return nil
-			}
+	if useUpdate && previewHandle != nil {
+		_ = updaterFor(p).UpdateMessage(e.ctx, previewHandle, finalMsg)
+		if !exitOK {
+			return fmt.Errorf("shell: exit code %d", cmd.ProcessState.ExitCode())
 		}
+		return nil
 	}
 
 	e.send(p, replyCtx, finalMsg)
@@ -5114,7 +4964,250 @@ func richCardFailureBody(copy RichCardCopy, phase, partial string) string {
 	return partial + "\n\n" + message
 }
 
+type turnProcessor struct {
+	engine       *Engine
+	state        *interactiveState
+	session      *Session
+	sessions     *SessionManager
+	sessionKey   string
+	msgID        string
+	turnStart    time.Time
+	stopTypingFn func()
+	sendDone     <-chan error
+	replyCtx     any
+}
+
+type turnTerminalReason uint8
+
+const (
+	turnTerminalNone turnTerminalReason = iota
+	turnTerminalChannelClosed
+	turnTerminalIdleTimeout
+	turnTerminalDeadline
+)
+
+type turnReadControl uint8
+
+const (
+	turnReadDispatch turnReadControl = iota
+	turnReadContinue
+	turnReadStop
+)
+
+type turnEventRead struct {
+	event               Event
+	textAlreadyFiltered bool
+	control             turnReadControl
+}
+
+// turnEventReader owns the channel arbitration at the boundary between one
+// agent turn and its presentation lifecycle. Callbacks keep delivery policy in
+// turnProcessor while this type owns exactly one concern: selecting the next
+// event or terminal transition.
+type turnEventReader struct {
+	silentCancel func() <-chan struct{}
+	stop         <-chan struct{}
+	handoff      <-chan struct{}
+	events       <-chan Event
+	pendingSend  *<-chan error
+	idle         <-chan time.Time
+	deadline     <-chan time.Time
+	engineDone   <-chan struct{}
+	terminal     *turnTerminalReason
+	flushFooter  func() string
+	onSilent     func()
+	onStop       func()
+	onHandoff    func()
+	onSendError  func(error)
+	onEngineDone func()
+}
+
+func (r *turnEventReader) read() turnEventRead {
+	select {
+	case <-r.silentCancel():
+		r.onSilent()
+		return turnEventRead{control: turnReadStop}
+	case <-r.stop:
+		r.onStop()
+		return turnEventRead{control: turnReadStop}
+	case <-r.handoff:
+		r.onHandoff()
+		return turnEventRead{control: turnReadContinue}
+	case event, ok := <-r.events:
+		if ok {
+			return turnEventRead{event: event}
+		}
+		return r.deferTerminal(turnTerminalChannelClosed)
+	case err := <-*r.pendingSend:
+		*r.pendingSend = nil
+		if err != nil {
+			r.onSendError(err)
+			return turnEventRead{control: turnReadStop}
+		}
+		return turnEventRead{control: turnReadContinue}
+	case <-r.idle:
+		return r.deferTerminal(turnTerminalIdleTimeout)
+	case <-r.deadline:
+		return r.deferTerminal(turnTerminalDeadline)
+	case <-r.engineDone:
+		r.onEngineDone()
+		return turnEventRead{control: turnReadStop}
+	}
+}
+
+func (r *turnEventReader) deferTerminal(reason turnTerminalReason) turnEventRead {
+	*r.terminal = reason
+	if tail := r.flushFooter(); tail != "" {
+		return turnEventRead{
+			event:               Event{Type: EventText, Content: tail},
+			textAlreadyFiltered: true,
+		}
+	}
+	return turnEventRead{control: turnReadContinue}
+}
+
+type preparedTurnResponse struct {
+	full     string
+	base     string
+	history  string
+	isSilent bool
+}
+
+func (e *Engine) prepareTurnResponse(event Event, display DisplayCfg, textParts []string, segmentStart int, hasRichCard bool) preparedTurnResponse {
+	full := event.Content
+	if display.HideAgentFooter {
+		full = stripAgentFooterLines(full)
+	}
+	if isSilentReply(full) {
+		// Keep the terminal marker authoritative even after speculative text.
+	} else if len(textParts) > 0 && (hasRichCard || (segmentStart == 0 && !display.ToolMessages) || full == "") {
+		full = strings.Join(textParts, "")
+	}
+	if display.HideAgentFooter {
+		full = stripAgentFooterLines(full)
+	}
+	if full == "" {
+		full = e.i18n.T(MsgEmptyResponse)
+	}
+
+	clean := strings.TrimRight(ctxSelfReportRe.ReplaceAllString(full, ""), "\n ")
+	return preparedTurnResponse{full: clean, base: clean, history: clean}
+}
+
+func classifyTurnResponse(prepared preparedTurnResponse) preparedTurnResponse {
+	prepared.isSilent = isSilentReply(prepared.base)
+	if !prepared.isSilent {
+		if stripped, ok := stripTrailingSilent(prepared.base); ok {
+			if strings.TrimSpace(stripped) == "" {
+				prepared.isSilent = true
+			} else {
+				prepared.base = stripped
+				prepared.full = stripped
+			}
+		}
+	}
+	return prepared
+}
+
+func (e *Engine) shouldAutoCompress(state *interactiveState, session *Session, pendingAssistant string) (bool, int) {
+	if !e.autoCompressEnabled || e.autoCompressMaxTokens <= 0 {
+		return false, 0
+	}
+	estimate := estimateTokensWithPendingAssistant(session.GetHistory(0), pendingAssistant)
+	now := time.Now()
+	state.mu.Lock()
+	last := state.lastAutoCompressAt
+	state.mu.Unlock()
+	if estimate < e.autoCompressMaxTokens || (!last.IsZero() && now.Sub(last) < e.autoCompressMinGap) {
+		return false, 0
+	}
+	return true, estimate
+}
+
+func formatToolInput(toolName, input string) string {
+	switch {
+	case input == "", strings.Contains(input, "```"):
+		return input
+	case strings.Contains(input, "\n") || utf8.RuneCountInString(input) > 200:
+		return fmt.Sprintf("```%s\n%s\n```", toolCodeLang(toolName, input), input)
+	case toolName == "shell", toolName == "run_shell_command", toolName == "Bash":
+		return fmt.Sprintf("```bash\n%s\n```", input)
+	default:
+		return fmt.Sprintf("`%s`", input)
+	}
+}
+
+func (t *turnProcessor) handleToolResult(event Event, p Platform, hasRichCard bool, display DisplayCfg, progress *compactProgressWriter) {
+	if hasRichCard || !display.ToolMessages {
+		return
+	}
+	result := strings.TrimSpace(event.ToolResult)
+	if result == "" {
+		result = strings.TrimSpace(event.Content)
+	}
+	if result != "" {
+		result = truncateIf(result, display.ToolMaxLen)
+	}
+	if result == "" && event.ToolStatus == "" && event.ToolExitCode == nil && event.ToolSuccess == nil {
+		return
+	}
+	message := t.engine.formatToolResultEventFallback(event.ToolName, result, event.ToolStatus, event.ToolExitCode, event.ToolSuccess)
+	entry := ProgressCardEntry{
+		Kind:     ProgressEntryToolResult,
+		Tool:     event.ToolName,
+		Text:     result,
+		Status:   event.ToolStatus,
+		ExitCode: event.ToolExitCode,
+		Success:  event.ToolSuccess,
+	}
+	if !progress.AppendStructured(entry, message) && !SuppressStandaloneToolResultEvent(p) {
+		t.engine.sendRaw(p, t.replyCtx, message)
+	}
+}
+
+func (t *turnProcessor) persistAgentSessionID(id string) {
+	if id == "" || t.session.GetAgentSessionID() == id {
+		return
+	}
+	wasEmpty := t.session.GetAgentSessionID() == ""
+	t.session.SetAgentSessionID(id, t.engine.agent.Name())
+	if wasEmpty {
+		name := t.session.GetName()
+		if name != "" && name != "session" && name != "default" {
+			t.sessions.SetSessionName(id, name)
+		}
+	}
+	t.sessions.Save()
+}
+
 func (e *Engine) processInteractiveEvents(state *interactiveState, session *Session, sessions *SessionManager, sessionKey string, msgID string, turnStart time.Time, stopTypingFn func(), sendDone <-chan error, replyCtx any) {
+	processor := &turnProcessor{
+		engine:       e,
+		state:        state,
+		session:      session,
+		sessions:     sessions,
+		sessionKey:   sessionKey,
+		msgID:        msgID,
+		turnStart:    turnStart,
+		stopTypingFn: stopTypingFn,
+		sendDone:     sendDone,
+		replyCtx:     replyCtx,
+	}
+	processor.run()
+}
+
+func (t *turnProcessor) run() {
+	e := t.engine
+	state := t.state
+	session := t.session
+	sessions := t.sessions
+	sessionKey := t.sessionKey
+	msgID := t.msgID
+	turnStart := t.turnStart
+	stopTypingFn := t.stopTypingFn
+	sendDone := t.sendDone
+	replyCtx := t.replyCtx
+
 	if !e.beginInteractiveTurn(state) {
 		state.markStopped()
 		return
@@ -5203,7 +5296,6 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 	var partialText string
 	var richAnswerStarted bool
 	var richAnswerStartedAt time.Time
-	triggerAutoCompress := false
 	pendingSend := sendDone
 
 	// stopTyping tracks the current turn's typing indicator so it can be
@@ -5652,148 +5744,131 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 	}
 
 	events := state.agentSession.Events()
-	var deferredEvent Event
-	hasDeferredEvent := false
-	channelClosedPending := false
-	idleTimeoutPending := false
-	turnDeadlinePending := false
+	var deferredEvent *Event
+	pendingTerminal := turnTerminalNone
+	reader := turnEventReader{
+		silentCancel: func() <-chan struct{} { return silentCancelCh },
+		stop:         stopCh,
+		handoff:      handoffCh,
+		events:       events,
+		pendingSend:  &pendingSend,
+		idle:         idleCh,
+		deadline:     turnDeadlineCh,
+		engineDone:   e.ctx.Done(),
+		terminal:     &pendingTerminal,
+		flushFooter: func() string {
+			if turnDisplay.HideAgentFooter {
+				return agentFooterFilter.Flush()
+			}
+			return ""
+		},
+		onSilent: discardSilentTurn,
+		onStop: func() {
+			if state.shouldDiscardTurn(msgID) {
+				discardSilentTurn()
+				return
+			}
+			sp.discard()
+			discardStreamingCard()
+			state.mu.Lock()
+			p := state.platform
+			state.mu.Unlock()
+			if !markRichCardFailed(p, cardMessageID, persistVisibleRichPartial(p)) && usesRichCard(p) {
+				removeRichCardForFallback(p, cardMessageID)
+			}
+		},
+		onHandoff: applySteerHandoffs,
+		onSendError: func(err error) {
+			slog.Error("failed to send prompt", "error", err, "session_key", sessionKey)
+			sp.discard()
+			discardStreamingCard()
+			if stopTyping != nil {
+				stopTyping()
+				stopTyping = nil
+			}
+			e.notifyDroppedQueuedMessages(state, err)
+			if state.agentSession == nil || !state.agentSession.Alive() {
+				e.cleanupInteractiveState(sessionKey, state)
+			}
+			state.mu.Lock()
+			p := state.platform
+			state.mu.Unlock()
+			safePartial := persistVisibleRichPartial(p)
+			phase := richCardFailurePhase(err)
+			if !markRichCardFailedWithPhase(p, cardMessageID, phase, safePartial) {
+				if usesRichCard(p) {
+					sendRichFailure(p, replyCtx, cardMessageID, phase, safePartial)
+				} else if phase == richCardUsageLimitPhase {
+					message := richCardFailureBody(turnRichCardCopy, phase, "")
+					if message == "" {
+						message = e.i18n.T(MsgRichCardUsageLimitBody)
+					}
+					e.send(p, replyCtx, message)
+				} else {
+					e.send(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), err))
+				}
+			}
+		},
+		onEngineDone: func() {
+			if state.shouldDiscardTurn(msgID) {
+				discardSilentTurn()
+				return
+			}
+			sp.discard()
+			discardStreamingCard()
+			state.mu.Lock()
+			state.eventsNeedResync = true
+			p := state.platform
+			state.mu.Unlock()
+			if !markRichCardFailed(p, cardMessageID, persistVisibleRichPartial(p)) && usesRichCard(p) {
+				removeRichCardForFallback(p, cardMessageID)
+			}
+		},
+	}
+	terminal := turnTerminalHandler{
+		processor:                 t,
+		turnStart:                 &turnStart,
+		replyCtx:                  &replyCtx,
+		progress:                  &cp,
+		streamPreview:             &sp,
+		discardStreamingCard:      discardStreamingCard,
+		persistVisibleRichPartial: persistVisibleRichPartial,
+		cardMessageID:             &cardMessageID,
+		markRichCardFailed:        markRichCardFailed,
+		usesRichCard:              usesRichCard,
+		sendGenericRichFailure:    sendGenericRichFailure,
+		textParts:                 &textParts,
+		segmentStart:              &segmentStart,
+		toolCount:                 &toolCount,
+		removeRichCardForFallback: removeRichCardForFallback,
+		sendWorkspaceWithError:    sendWorkspaceWithError,
+	}
+
 	for {
-		if channelClosedPending {
+		switch pendingTerminal {
+		case turnTerminalChannelClosed:
 			goto channelClosed
-		}
-		if idleTimeoutPending {
+		case turnTerminalIdleTimeout:
 			goto idleTimedOut
-		}
-		if turnDeadlinePending {
+		case turnTerminalDeadline:
 			goto turnDeadlineExceeded
 		}
 		var event Event
-		var ok bool
 		textAlreadyFiltered := false
 
-		if hasDeferredEvent {
-			event = deferredEvent
-			hasDeferredEvent = false
+		if deferredEvent != nil {
+			event = *deferredEvent
+			deferredEvent = nil
 		} else {
-			select {
-			case <-silentCancelCh:
-				discardSilentTurn()
-				return
-			case <-stopCh:
-				if state.shouldDiscardTurn(msgID) {
-					discardSilentTurn()
-					return
-				}
-				sp.discard()
-				discardStreamingCard()
-				state.mu.Lock()
-				p := state.platform
-				state.mu.Unlock()
-				if !markRichCardFailed(p, cardMessageID, persistVisibleRichPartial(p)) && usesRichCard(p) {
-					removeRichCardForFallback(p, cardMessageID)
-				}
-				return
-			case <-handoffCh:
-				// A steer was accepted mid-turn: adopt the presentation
-				// handoff even while no agent events are flowing.
-				applySteerHandoffs()
+			read := reader.read()
+			switch read.control {
+			case turnReadContinue:
 				continue
-			case event, ok = <-events:
-				if !ok {
-					// A closed transport is also a semantic assistant boundary.
-					// Route any safe buffered candidate through the ordinary text
-					// path before abnormal-exit handling so it is rendered and can
-					// become the confirmed partial; an exact private footer remains
-					// omitted by Flush.
-					if turnDisplay.HideAgentFooter {
-						if tail := agentFooterFilter.Flush(); tail != "" {
-							event = Event{Type: EventText, Content: tail}
-							textAlreadyFiltered = true
-							channelClosedPending = true
-							break
-						}
-					}
-					goto channelClosed
-				}
-			case err := <-pendingSend:
-				pendingSend = nil
-				if err != nil {
-					slog.Error("failed to send prompt", "error", err, "session_key", sessionKey)
-					sp.discard()
-					discardStreamingCard()
-					if stopTyping != nil {
-						stopTyping()
-						stopTyping = nil
-					}
-					e.notifyDroppedQueuedMessages(state, err)
-					if state.agentSession == nil || !state.agentSession.Alive() {
-						e.cleanupInteractiveState(sessionKey, state)
-					}
-					state.mu.Lock()
-					p := state.platform
-					state.mu.Unlock()
-					safePartial := persistVisibleRichPartial(p)
-					phase := richCardFailurePhase(err)
-					if !markRichCardFailedWithPhase(p, cardMessageID, phase, safePartial) {
-						if usesRichCard(p) {
-							sendRichFailure(p, replyCtx, cardMessageID, phase, safePartial)
-						} else {
-							if phase == richCardUsageLimitPhase {
-								message := richCardFailureBody(turnRichCardCopy, phase, "")
-								if message == "" {
-									message = e.i18n.T(MsgRichCardUsageLimitBody)
-								}
-								e.send(p, replyCtx, message)
-							} else {
-								e.send(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), err))
-							}
-						}
-					}
-					return
-				}
-				continue
-			case <-idleCh:
-				// An idle timeout is also a semantic assistant boundary. Render any
-				// safe buffered candidate through the ordinary text path before the
-				// failure state; an exact private footer remains omitted by Flush.
-				if turnDisplay.HideAgentFooter {
-					if tail := agentFooterFilter.Flush(); tail != "" {
-						event = Event{Type: EventText, Content: tail}
-						textAlreadyFiltered = true
-						idleTimeoutPending = true
-						break
-					}
-				}
-				goto idleTimedOut
-			case <-turnDeadlineCh:
-				// The absolute turn deadline is a semantic assistant boundary too.
-				// Render a safe buffered candidate before entering the failure and
-				// shutdown path; exact private footers are still dropped by Flush.
-				if turnDisplay.HideAgentFooter {
-					if tail := agentFooterFilter.Flush(); tail != "" {
-						event = Event{Type: EventText, Content: tail}
-						textAlreadyFiltered = true
-						turnDeadlinePending = true
-						break
-					}
-				}
-				goto turnDeadlineExceeded
-			case <-e.ctx.Done():
-				if state.shouldDiscardTurn(msgID) {
-					discardSilentTurn()
-					return
-				}
-				sp.discard()
-				discardStreamingCard()
-				state.mu.Lock()
-				state.eventsNeedResync = true
-				p := state.platform
-				state.mu.Unlock()
-				if !markRichCardFailed(p, cardMessageID, persistVisibleRichPartial(p)) && usesRichCard(p) {
-					removeRichCardForFallback(p, cardMessageID)
-				}
+			case turnReadStop:
 				return
 			}
+			event = read.event
+			textAlreadyFiltered = read.textAlreadyFiltered
 		}
 
 		if event.Type != EventText && turnDisplay.HideAgentFooter {
@@ -5802,8 +5877,8 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			// before the tool/thinking/permission/result event is processed, then
 			// resume the original event on the next loop iteration.
 			if tail := agentFooterFilter.Flush(); tail != "" {
-				deferredEvent = event
-				hasDeferredEvent = true
+				deferred := event
+				deferredEvent = &deferred
 				event = Event{Type: EventText, Content: tail}
 				textAlreadyFiltered = true
 			}
@@ -5875,557 +5950,87 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			return buildRichCard(p, richCardSupporter, status, title, steps, resolved, streaming, statusFooter), resolved
 		}
 
+		presentation := turnPresentation{
+			processor:                  t,
+			event:                      event,
+			platform:                   p,
+			replyCtx:                   replyCtx,
+			display:                    turnDisplay,
+			streamConfig:               turnStreamPreview,
+			hasRichCard:                hasRichCard,
+			richCardPreviewEnabled:     richCardPreviewEnabled,
+			buildResolvedRichCard:      buildResolvedRichCard,
+			buildResolvedRichCardFrame: buildResolvedRichCardFrame,
+			resolveRichCardMarkdown:    resolveRichCardMarkdown,
+			sendWorkspace:              sendWorkspace,
+			streamPreview:              sp,
+			progress:                   cp,
+			footerFilter:               agentFooterFilter,
+			textAlreadyFiltered:        textAlreadyFiltered,
+			streamCard:                 streamCard,
+			cardAnswerText:             &cardAnswerText,
+			textParts:                  &textParts,
+			segmentStart:               &segmentStart,
+			silentHold:                 &silentHold,
+			toolCount:                  &toolCount,
+			toolSteps:                  &toolSteps,
+			cardMessageID:              &cardMessageID,
+			lastRichCardInput:          &lastRichCardInput,
+			lastRichCardPreview:        &lastRichCardPreview,
+			lastRichCardUpdate:         &lastRichCardUpdate,
+			partialText:                &partialText,
+			richAnswerStarted:          &richAnswerStarted,
+			richAnswerStartedAt:        &richAnswerStartedAt,
+			cardThinkingText:           &cardThinkingText,
+			cardToolCalls:              &cardToolCalls,
+		}
+
 		switch event.Type {
 		case EventThinking:
-			if isEllipsisOnly(event.Content) {
-				break
-			}
-			if hasRichCard {
-				// Rich mode records an anonymous event count only. Raw reasoning is
-				// never copied into card state, even when legacy thinking_messages is
-				// enabled for other platforms.
-				toolSteps = append(toolSteps, ToolStep{Kind: ToolStepKindThinking})
-				if cardMessageID == nil && richCardPreviewEnabled {
-					card := buildResolvedRichCard(CardStatusThinking, "thinking", toolSteps, "", true, "")
-					if starter, ok := p.(PreviewStarter); ok {
-						handle, err := starter.SendPreviewStart(e.ctx, replyCtx, card)
-						if err != nil {
-							slog.Debug("rich card: failed to create initial thinking card", "platform", p.Name(), "error", err)
-						} else {
-							cardMessageID = handle
-							lastRichCardInput = ""
-							lastRichCardPreview = ""
-						}
-					}
-				} else if cardMessageID != nil && richCardPreviewEnabled {
-					updater, ok := p.(MessageUpdater)
-					if !ok {
-						break
-					}
-					card := buildResolvedRichCard(CardStatusThinking, "thinking", toolSteps, "", true, "")
-					if err := updater.UpdateMessage(e.ctx, cardMessageID, card); err != nil {
-						slog.Debug("rich card: failed to update thinking card", "platform", p.Name(), "error", err)
-					} else {
-						lastRichCardInput = ""
-						lastRichCardPreview = ""
-					}
-				}
-				break
-			}
-			// When thinking messages are hidden, behavior depends on display mode:
-			//   quiet:   append separator to keep all text in one card
-			//   compact: freeze+detach to split text into separate cards
-			if !turnDisplay.ThinkingMessages && len(textParts) > segmentStart {
-				if turnDisplay.Mode == "quiet" {
-					if sp.canPreview() && sp.appendSeparator("\n\n") {
-						textParts = append(textParts, "\n\n")
-					}
-				} else {
-					if sp.canPreview() {
-						sp.freeze()
-						sp.detachPreview()
-					} else {
-						segment := strings.Join(textParts[segmentStart:], "")
-						if segment != "" {
-							for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
-								sendWorkspace(p, replyCtx, chunk)
-							}
-						}
-					}
-					segmentStart = len(textParts)
-				}
-				silentHold = false
-			}
-			if turnDisplay.ThinkingMessages && event.Content != "" {
-				// --- StreamingCard path ---
-				if streamCard != nil && !streamCard.Failed() {
-					cardThinkingText = truncateIf(event.Content, turnDisplay.ThinkingMaxLen)
-					_ = streamCard.Update(e.ctx, buildCardContent(cardThinkingText, cardToolCalls, cardAnswerText.String()))
-					continue // skip original independent message sending
-				}
-				// --- Original path (fallback) ---
-				// Flush accumulated text segment before thinking display
-				previewActive := sp.canPreview()
-				if len(textParts) > segmentStart {
-					if !previewActive {
-						segment := strings.Join(textParts[segmentStart:], "")
-						if segment != "" {
-							for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
-								sendWorkspace(p, replyCtx, chunk)
-							}
-						}
-					}
-					segmentStart = len(textParts)
-					silentHold = false
-				}
-				sp.freeze()
-				if previewActive {
-					sp.detachPreview() // keep frozen preview visible as permanent message
-				}
-				preview := truncateIf(event.Content, turnDisplay.ThinkingMaxLen)
-				thinkingMsg := fmt.Sprintf(e.i18n.T(MsgThinking), preview)
-				if !cp.AppendEvent(ProgressEntryThinking, preview, "", thinkingMsg) {
-					sendWorkspace(p, replyCtx, thinkingMsg)
-				}
-			}
-
-		case EventToolUse:
-			toolCount++
-			if hasRichCard {
-				// Count the call without retaining its name or arguments. This makes
-				// the privacy boundary true at the engine layer, not just cosmetic.
-				toolSteps = append(toolSteps, ToolStep{Kind: ToolStepKindTool})
-				if cardMessageID == nil && richCardPreviewEnabled {
-					card := buildResolvedRichCard(CardStatusWorking, "tool", toolSteps, "", true, "")
-					if starter, ok := p.(PreviewStarter); ok {
-						handle, err := starter.SendPreviewStart(e.ctx, replyCtx, card)
-						if err != nil {
-							slog.Debug("rich card: failed to create initial tool card", "platform", p.Name(), "error", err)
-						} else {
-							cardMessageID = handle
-							lastRichCardInput = ""
-							lastRichCardPreview = ""
-						}
-					}
-				} else if cardMessageID != nil && richCardPreviewEnabled {
-					updater, ok := p.(MessageUpdater)
-					if !ok {
-						break
-					}
-					card := buildResolvedRichCard(CardStatusWorking, "tool", toolSteps, "", true, "")
-					if err := updater.UpdateMessage(e.ctx, cardMessageID, card); err != nil {
-						slog.Debug("rich card: failed to update tool card", "platform", p.Name(), "error", err)
-					} else {
-						lastRichCardInput = ""
-						lastRichCardPreview = ""
-					}
-				}
-				break
-			}
-			// When tool messages are hidden, behavior depends on display mode:
-			//   quiet:   append separator to keep all text in one card
-			//   compact: freeze+detach to split text into separate cards
-			if !turnDisplay.ToolMessages && len(textParts) > segmentStart {
-				if turnDisplay.Mode == "quiet" {
-					if sp.canPreview() && sp.appendSeparator("\n\n") {
-						textParts = append(textParts, "\n\n")
-					}
-				} else {
-					if sp.canPreview() {
-						sp.freeze()
-						sp.detachPreview()
-					} else {
-						segment := strings.Join(textParts[segmentStart:], "")
-						if segment != "" {
-							for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
-								sendWorkspace(p, replyCtx, chunk)
-							}
-						}
-					}
-					segmentStart = len(textParts)
-				}
-				silentHold = false
-			}
-			if turnDisplay.ToolMessages {
-				// --- StreamingCard path ---
-				if streamCard != nil && !streamCard.Failed() {
-					toolInput := event.ToolInput
-					var formattedInput string
-					if toolInput == "" {
-						formattedInput = ""
-					} else if strings.Contains(toolInput, "```") {
-						formattedInput = toolInput
-					} else if strings.Contains(toolInput, "\n") || utf8.RuneCountInString(toolInput) > 200 {
-						lang := toolCodeLang(event.ToolName, toolInput)
-						formattedInput = fmt.Sprintf("```%s\n%s\n```", lang, toolInput)
-					} else {
-						switch event.ToolName {
-						case "shell", "run_shell_command", "Bash":
-							formattedInput = fmt.Sprintf("```bash\n%s\n```", toolInput)
-						default:
-							formattedInput = fmt.Sprintf("`%s`", toolInput)
-						}
-					}
-					cardToolCalls = append(cardToolCalls, cardToolEntry{
-						Index: toolCount,
-						Name:  event.ToolName,
-						Input: formattedInput,
-					})
-					_ = streamCard.Update(e.ctx, buildCardContent(cardThinkingText, cardToolCalls, cardAnswerText.String()))
-					continue // skip original independent message sending
-				}
-				// --- Original path (fallback) ---
-				// Flush accumulated text segment before tool display
-				previewActive := sp.canPreview()
-				if len(textParts) > segmentStart {
-					if !previewActive {
-						segment := strings.Join(textParts[segmentStart:], "")
-						if segment != "" {
-							for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
-								sendWorkspace(p, replyCtx, chunk)
-							}
-						}
-					}
-					segmentStart = len(textParts)
-					silentHold = false
-				}
-				sp.freeze()
-				if previewActive {
-					sp.detachPreview() // keep frozen preview visible as permanent message
-				}
-				// tool_max_len applies to the card's rendered text and its
-				// structured payload alike (#1233); event.ToolInput itself is
-				// left untouched.
-				toolInput := truncateIf(event.ToolInput, turnDisplay.ToolMaxLen)
-				var formattedInput string
-				if toolInput == "" {
-					formattedInput = ""
-				} else if strings.Contains(toolInput, "```") {
-					formattedInput = toolInput
-				} else if strings.Contains(toolInput, "\n") || utf8.RuneCountInString(toolInput) > 200 {
-					lang := toolCodeLang(event.ToolName, toolInput)
-					formattedInput = fmt.Sprintf("```%s\n%s\n```", lang, toolInput)
-				} else {
-					switch event.ToolName {
-					case "shell", "run_shell_command", "Bash":
-						formattedInput = fmt.Sprintf("```bash\n%s\n```", toolInput)
-					default:
-						formattedInput = fmt.Sprintf("`%s`", toolInput)
-					}
-				}
-				toolMsg := fmt.Sprintf(e.i18n.T(MsgTool), toolCount, event.ToolName, formattedInput)
-				if !cp.AppendEvent(ProgressEntryToolUse, toolInput, event.ToolName, toolMsg) {
-					for _, chunk := range SplitMessageCodeFenceAware(toolMsg, maxPlatformMessageLen) {
-						sendWorkspace(p, replyCtx, chunk)
-					}
-				}
-			}
-
-		case EventToolResult:
-			// The matching EventToolUse already advanced the anonymous counter.
-			// Never retain or render tool result details in privacy-first rich mode.
-			if hasRichCard {
-				break
-			}
-			if turnDisplay.ToolMessages {
-				result := strings.TrimSpace(event.ToolResult)
-				if result == "" {
-					result = strings.TrimSpace(event.Content)
-				}
-				if result != "" {
-					result = truncateIf(result, turnDisplay.ToolMaxLen)
-				}
-				if result != "" || event.ToolStatus != "" || event.ToolExitCode != nil || event.ToolSuccess != nil {
-					resultMsg := e.formatToolResultEventFallback(event.ToolName, result, event.ToolStatus, event.ToolExitCode, event.ToolSuccess)
-					entry := ProgressCardEntry{
-						Kind:     ProgressEntryToolResult,
-						Tool:     event.ToolName,
-						Text:     result,
-						Status:   event.ToolStatus,
-						ExitCode: event.ToolExitCode,
-						Success:  event.ToolSuccess,
-					}
-					if !cp.AppendStructured(entry, resultMsg) {
-						if !SuppressStandaloneToolResultEvent(p) {
-							e.sendRaw(p, replyCtx, resultMsg)
-						}
-					}
-				}
-			}
-
-		case EventText:
-			content := event.Content
-			if !textAlreadyFiltered {
-				content = agentFooterFilter.Push(content)
-			}
-			if content != "" && !isEllipsisOnly(content) {
-				// Pre-compute silentHold transition including this chunk so the
-				// rich-card path doesn't leak a preview that gets recalled at
-				// end-of-stream when the text resolves to bare NO_REPLY (Lark
-				// renders the recall as "撤回了一条消息"). Both rich and legacy
-				// paths share this single transition; couldBeSilentPrefix is
-				// monotonically decreasing as segments grow, so the transition
-				// is held → released at most once per segment.
-				peekSegment := strings.Join(textParts[segmentStart:], "") + content
-				prevHold := silentHold
-				silentHold = couldBeSilentPrefix(peekSegment)
-				releasedNow := prevHold && !silentHold
-
-				handledByStreamCard := false
-				if streamCard != nil && !streamCard.Failed() {
-					textParts = append(textParts, content) // always accumulate for history
-					if !silentHold {
-						if releasedNow {
-							cardAnswerText.WriteString(peekSegment)
-						} else {
-							cardAnswerText.WriteString(content)
-						}
-						_ = streamCard.Update(e.ctx, buildCardContent(cardThinkingText, cardToolCalls, cardAnswerText.String()))
-					}
-					handledByStreamCard = true
-				}
-				if !handledByStreamCard {
-					if len(textParts) == 0 {
-						if hasRichCard {
-							if cardMessageID == nil && !silentHold && richCardPreviewEnabled {
-								card := buildResolvedRichCard(CardStatusWorking, "answer", toolSteps, "", true, "")
-								if starter, ok := p.(PreviewStarter); ok {
-									handle, err := starter.SendPreviewStart(e.ctx, replyCtx, card)
-									if err != nil {
-										slog.Debug("rich card: failed to create initial text card", "platform", p.Name(), "error", err)
-									} else {
-										cardMessageID = handle
-										lastRichCardInput = ""
-										lastRichCardPreview = ""
-									}
-								}
-							}
-						} else if !silentHold {
-							sp.setStatus(CardStatusWorking)
-						}
-					}
-					textParts = append(textParts, content)
-					partialText += content
-					if hasRichCard {
-						if !silentHold && richCardPreviewEnabled {
-							previewBody := truncateStreamPreviewText(partialText, turnStreamPreview.MaxChars)
-							// Lazy creation: if we held during the first text events and
-							// only released this chunk, the initial-create branch above
-							// won't fire (textParts is non-empty by now). Build the card
-							// here using the accumulated partialText so the card emerges
-							// with the post-prefix content already in body.
-							if cardMessageID == nil {
-								card, resolvedPreviewBody := buildResolvedRichCardFrame(CardStatusWorking, "answer", toolSteps, previewBody, true, "")
-								if starter, ok := p.(PreviewStarter); ok {
-									handle, err := starter.SendPreviewStart(e.ctx, replyCtx, card)
-									if err != nil {
-										slog.Debug("rich card: failed to create deferred text card", "platform", p.Name(), "error", err)
-									} else {
-										cardMessageID = handle
-										richAnswerStarted = true
-										richAnswerStartedAt = time.Now()
-										lastRichCardUpdate = time.Now()
-										lastRichCardInput = previewBody
-										lastRichCardPreview = resolvedPreviewBody
-									}
-								}
-							}
-							// A CardKit element update cannot change the card header. Perform
-							// one full-card update at the first visible answer chunk so the
-							// progress shell immediately becomes "正在回答" and the anonymous
-							// progress text disappears before typewriter streaming continues.
-							streamer, hasStreamer := p.(RichCardTextStreamer)
-							if cardMessageID != nil && !richAnswerStarted {
-								// CardKit animates only content delivered through its element
-								// streaming endpoint. Transition the header with an empty body,
-								// then let the first element update print the entire first chunk.
-								// This preserves a visible typewriter effect even when a short
-								// answer arrives in one Agent event. Inline-card fallbacks keep
-								// the partial body in this first full-card update.
-								transitionBody := previewBody
-								if hasStreamer {
-									transitionBody = ""
-								}
-								card, resolvedTransitionBody := buildResolvedRichCardFrame(CardStatusWorking, "answer", toolSteps, transitionBody, true, "")
-								if updater, ok := p.(MessageUpdater); ok {
-									if err := updater.UpdateMessage(e.ctx, cardMessageID, card); err == nil {
-										richAnswerStarted = true
-										if richAnswerStartedAt.IsZero() {
-											richAnswerStartedAt = time.Now()
-										}
-										lastRichCardInput = transitionBody
-										lastRichCardPreview = resolvedTransitionBody
-										if !hasStreamer {
-											lastRichCardUpdate = time.Now()
-										}
-									} else {
-										slog.Debug("rich card: failed to switch to answer phase", "platform", p.Name(), "error", err)
-									}
-								}
-							}
-							// Rich cards share the public stream_preview contract with the
-							// legacy preview path. The first body frame is immediate; later
-							// frames must satisfy both configured minimums and remain capped.
-							interval := time.Duration(turnStreamPreview.IntervalMs) * time.Millisecond
-							elapsedReady := lastRichCardUpdate.IsZero() || interval <= 0 || time.Since(lastRichCardUpdate) >= interval
-							delta := utf8.RuneCountInString(previewBody) - utf8.RuneCountInString(lastRichCardInput)
-							deltaReady := lastRichCardUpdate.IsZero() || delta >= turnStreamPreview.MinDeltaChars
-							if cardMessageID != nil && previewBody != lastRichCardInput && elapsedReady && deltaReady {
-								// Prefer per-element streaming text update (cardkit-v1) when available;
-								// it engages Lark's native typewriter rendering. Falls back to
-								// full-card Patch on ErrNotSupported (handle without cardID) or any error.
-								streamed := false
-								if hasStreamer {
-									streamBody := resolveRichCardMarkdown(previewBody, false)
-									if err := streamer.StreamRichCardText(e.ctx, cardMessageID, streamBody); err == nil {
-										lastRichCardUpdate = time.Now()
-										lastRichCardInput = previewBody
-										lastRichCardPreview = streamBody
-										streamed = true
-									} else if !errors.Is(err, ErrNotSupported) {
-										slog.Debug("rich card: streaming text update failed, falling back to full Patch", "platform", p.Name(), "error", err)
-									}
-								}
-								if !streamed {
-									card, resolvedPreviewBody := buildResolvedRichCardFrame(CardStatusWorking, "answer", toolSteps, previewBody, true, "")
-									if updater, ok := p.(MessageUpdater); ok {
-										if err := updater.UpdateMessage(e.ctx, cardMessageID, card); err == nil {
-											lastRichCardUpdate = time.Now()
-											lastRichCardInput = previewBody
-											lastRichCardPreview = resolvedPreviewBody
-										} else {
-											slog.Debug("rich card: failed to update text card", "platform", p.Name(), "error", err)
-										}
-									}
-								}
-							}
-						}
-					} else {
-						if !silentHold && sp.canPreview() {
-							if releasedNow {
-								sp.appendText(peekSegment) // flush all held chunks at once
-							} else {
-								sp.appendText(content)
-							}
-						}
-					}
-				}
-			}
-			if event.SessionID != "" {
-				wasEmpty := session.GetAgentSessionID() == ""
-				if session.GetAgentSessionID() != event.SessionID {
-					session.SetAgentSessionID(event.SessionID, e.agent.Name())
-					if wasEmpty {
-						pendingName := session.GetName()
-						if pendingName != "" && pendingName != "session" && pendingName != "default" {
-							sessions.SetSessionName(event.SessionID, pendingName)
-						}
-					}
-					sessions.Save()
-				}
-			}
-
-		case EventPermissionRequest:
-			isAskQuestion := event.ToolName == "AskUserQuestion" && len(event.Questions) > 0
-
-			state.mu.Lock()
-			autoApprove := state.approveAll
-			state.mu.Unlock()
-
-			if autoApprove && !isAskQuestion {
-				slog.Debug("auto-approving (approve-all)", "request_id", event.RequestID, "tool", event.ToolName)
-				_ = state.agentSession.RespondPermission(event.RequestID, PermissionResult{
-					Behavior:     "allow",
-					UpdatedInput: event.ToolInputRaw,
-				})
+			if presentation.handleThinking() {
 				continue
 			}
-
-			// Legacy previews become permanent before a permission prompt. Rich
-			// cards keep accumulated answer text on the lifecycle card instead;
-			// flushing here would duplicate it as an unquoted side message.
-			if !hasRichCard {
-				previewActive := sp.canPreview()
-				if len(textParts) > segmentStart {
-					if !previewActive {
-						segment := strings.Join(textParts[segmentStart:], "")
-						if segment != "" {
-							for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
-								sendWorkspace(p, replyCtx, chunk)
-							}
-						}
-					}
-					segmentStart = len(textParts)
-					silentHold = false
-				}
-				if segmentStart > 0 {
-					legacyPermissionDeliveredPrefix = strings.Join(textParts[:segmentStart], "")
-				}
-				sp.freeze()
-				if previewActive {
-					sp.detachPreview() // keep frozen preview visible as permanent message
-				}
+		case EventToolUse:
+			if presentation.handleToolUse() {
+				continue
 			}
+		case EventToolResult:
+			t.handleToolResult(event, p, hasRichCard, turnDisplay, cp)
 
-			slog.Info("permission request",
-				"request_id", event.RequestID,
-				"tool", event.ToolName,
-			)
-
-			pending := &pendingPermission{
-				RequestID:    event.RequestID,
-				ToolName:     event.ToolName,
-				ToolInput:    event.ToolInputRaw,
-				InputPreview: event.ToolInput,
-				Questions:    event.Questions,
-				Resolved:     make(chan struct{}),
+		case EventText:
+			presentation.handleText()
+		case EventPermissionRequest:
+			permission := turnPermission{
+				processor:                 t,
+				event:                     event,
+				platform:                  p,
+				replyCtx:                  replyCtx,
+				msgID:                     msgID,
+				hasRichCard:               hasRichCard,
+				streamPreview:             sp,
+				textParts:                 &textParts,
+				segmentStart:              &segmentStart,
+				silentHold:                &silentHold,
+				legacyDeliveredPrefix:     &legacyPermissionDeliveredPrefix,
+				sendWorkspace:             sendWorkspace,
+				display:                   turnDisplay,
+				idleTimer:                 idleTimer,
+				silentCancel:              silentCancelCh,
+				stop:                      stopCh,
+				discardSilentTurn:         discardSilentTurn,
+				discardStreamingCard:      discardStreamingCard,
+				cardMessageID:             &cardMessageID,
+				persistVisibleRichPartial: persistVisibleRichPartial,
+				markRichCardFailed:        markRichCardFailed,
+				usesRichCard:              usesRichCard,
+				removeRichCardForFallback: removeRichCardForFallback,
 			}
-			state.mu.Lock()
-			state.pending = pending
-			state.mu.Unlock()
-
-			if isAskQuestion {
-				e.sendAskQuestionPrompt(p, replyCtx, event.Questions, 0)
-			} else {
-				permLimit := turnDisplay.ToolMaxLen
-				if permLimit > 0 {
-					permLimit = permLimit * 8 / 5
-				}
-				toolInput := truncateIf(event.ToolInput, permLimit)
-				prompt := fmt.Sprintf(e.i18n.T(MsgPermissionPrompt), event.ToolName, toolInput)
-				e.sendPermissionPrompt(p, replyCtx, prompt, event.ToolName, toolInput)
-			}
-
-			// Stop idle timer while waiting for user permission response;
-			// the user may take a long time to decide, and we don't want
-			// the idle timeout to kill the session during that wait.
-			if idleTimer != nil {
-				idleTimer.Stop()
-			}
-
-			permissionInterrupted := false
-			select {
-			case <-pending.Resolved:
-				slog.Info("permission resolved", "request_id", event.RequestID)
-			case <-silentCancelCh:
-				permissionInterrupted = true
-			case <-stopCh:
-				permissionInterrupted = true
-			case <-e.ctx.Done():
-				permissionInterrupted = true
-			}
-			if permissionInterrupted {
-				// Remove only this request: a concurrent callback may already have
-				// cleared it. Resolve the channel as well so any other waiter cannot
-				// outlive the stopped turn.
-				state.mu.Lock()
-				if state.pending == pending {
-					state.pending = nil
-				}
-				state.eventsNeedResync = true
-				p := state.platform
-				state.mu.Unlock()
-				pending.resolve()
-				if state.shouldDiscardTurn(msgID) {
-					discardSilentTurn()
-					return
-				}
-				sp.discard()
-				discardStreamingCard()
-				if !markRichCardFailed(p, cardMessageID, persistVisibleRichPartial(p)) && usesRichCard(p) {
-					removeRichCardForFallback(p, cardMessageID)
-				}
+			switch permission.handle() {
+			case turnReadContinue:
+				continue
+			case turnReadStop:
 				return
 			}
-			if !hasRichCard {
-				sp.unfreeze()
-			}
-
-			// Restart idle timer after permission is resolved
-			if idleTimer != nil {
-				idleTimer.Reset(e.eventIdleTimeout)
-			}
-
 		case EventResult:
 			// Non-terminal result events (e.g. mid-turn compaction: Claude
 			// Code's auto-context-compact emits type:"result" with
@@ -6459,19 +6064,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			// event.SessionID may be empty in some cases, causing the agent_session_id
 			// to not be persisted to disk, breaking session resume on next startup.
 			if state != nil && state.agentSession != nil {
-				if currentID := state.agentSession.CurrentSessionID(); currentID != "" {
-					wasEmpty := session.GetAgentSessionID() == ""
-					if session.GetAgentSessionID() != currentID {
-						session.SetAgentSessionID(currentID, e.agent.Name())
-						if wasEmpty {
-							pendingName := session.GetName()
-							if pendingName != "" && pendingName != "session" && pendingName != "default" {
-								sessions.SetSessionName(currentID, pendingName)
-							}
-						}
-					}
-					sessions.Save()
-				}
+				t.persistAgentSessionID(state.agentSession.CurrentSessionID())
 			}
 
 			// Mark clean exit so unsolicited reader preserves buffered events.
@@ -6479,746 +6072,867 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			state.eventsNeedResync = false
 			state.mu.Unlock()
 
-			fullResponse := event.Content
-			if turnDisplay.HideAgentFooter {
-				fullResponse = stripAgentFooterLines(fullResponse)
+			completion := turnCompletion{
+				processor:                       t,
+				event:                           event,
+				platform:                        p,
+				replyCtx:                        replyCtx,
+				display:                         turnDisplay,
+				streamConfig:                    turnStreamPreview,
+				replyAgent:                      replyAgent,
+				textParts:                       textParts,
+				segmentStart:                    segmentStart,
+				hasRichCard:                     hasRichCard,
+				richCardSupporter:               richCardSupporter,
+				cardMessageID:                   &cardMessageID,
+				richAnswerStartedAt:             richAnswerStartedAt,
+				silentCancel:                    silentCancelCh,
+				stop:                            stopCh,
+				abortRichCardCompletion:         abortRichCardCompletion,
+				streamCard:                      &streamCard,
+				streamPreview:                   sp,
+				discardStreamingCard:            discardStreamingCard,
+				cardThinkingText:                cardThinkingText,
+				cardToolCalls:                   cardToolCalls,
+				sendWorkspaceWithError:          sendWorkspaceWithError,
+				terminalRenderCtx:               terminalRenderCtx,
+				terminalDeliveryCtx:             terminalDeliveryCtx,
+				workspaceRenderer:               workspaceRenderer,
+				abortIfTerminalDeliveryCanceled: abortIfTerminalDeliveryCanceled,
+				removeRichCardForFallback:       removeRichCardForFallback,
+				resolveRichCardMarkdown:         resolveRichCardMarkdown,
+				buildRichCard:                   buildRichCard,
+				toolSteps:                       toolSteps,
+				toolCount:                       toolCount,
+				legacyPermissionDeliveredPrefix: legacyPermissionDeliveredPrefix,
+				pendingSend:                     &pendingSend,
+				turnStart:                       turnStart,
+				msgID:                           msgID,
 			}
-			// Rich cards always hide tool details regardless of the legacy
-			// ToolMessages setting, so textParts is the authoritative answer across
-			// every tool boundary. EventResult.Content may contain only the final
-			// assistant segment. The non-rich hidden-tool path has the same shape
-			// while segmentStart remains zero. A terminal NO_REPLY is deliberately
-			// authoritative even if speculative text was streamed before it.
-			if isSilentReply(fullResponse) {
-				// Keep the terminal marker for the silent-reply branch below.
-			} else if len(textParts) > 0 && hasRichCard {
-				fullResponse = strings.Join(textParts, "")
-			} else if len(textParts) > 0 && segmentStart == 0 && !turnDisplay.ToolMessages {
-				fullResponse = strings.Join(textParts, "")
-			} else if fullResponse == "" && len(textParts) > 0 {
-				fullResponse = strings.Join(textParts, "")
-			}
-			// A footer can be split across EventText chunks, so filter the fully
-			// assembled response as well as each streaming chunk.
-			if turnDisplay.HideAgentFooter {
-				fullResponse = stripAgentFooterLines(fullResponse)
-			}
-			if fullResponse == "" {
-				fullResponse = e.i18n.T(MsgEmptyResponse)
-			}
-
-			// Strip any agent-self-reported "[ctx: ~XX%]" marker so it does not
-			// leak into the delivered text. The reply footer no longer renders
-			// a ctx indicator either — the footer carries model + effort only.
-			cleanResponse := ctxSelfReportRe.ReplaceAllString(fullResponse, "")
-			cleanResponse = strings.TrimRight(cleanResponse, "\n ")
-			baseResponse := cleanResponse
-			historyResponse := baseResponse
-
-			// Treat the platform-selected answering dwell as a delivery commit gate.
-			// Until it completes, a recalled trigger (or stopped engine/session) must
-			// not persist an answer, emit message.sent, or advance the completed-turn
-			// watermark for a card that will never reach its terminal state.
-			richAnswerDwellApplied := false
-			if hasRichCard && cardMessageID != nil && !isSilentReply(baseResponse) {
-				dwellCompleted := true
-				if dwellProvider, ok := p.(RichCardAnsweringDwellProvider); ok && !richAnswerStartedAt.IsZero() {
-					richAnswerDwellApplied = true
-					dwellCompleted = waitForRichCardAnsweringDwell(e.ctx, richAnswerStartedAt, dwellProvider.RichCardAnsweringDwell(), silentCancelCh, stopCh)
-				}
-				discardTurn := state.shouldDiscardTurn(msgID)
-				if !dwellCompleted || discardTurn || (richAnswerDwellApplied && (state.isStopped() || e.ctx.Err() != nil)) {
-					abortRichCardCompletion(discardTurn)
-					return
-				}
-			}
-
-			contextEstimate := estimateTokensWithPendingAssistant(session.GetHistory(0), historyResponse)
-			autoCompressTokenEstimate := 0
-
-			// Evaluate auto-compress trigger (token estimate on user+assistant text,
-			// including this turn's assistant reply before it is appended to history).
-			if e.autoCompressEnabled && e.autoCompressMaxTokens > 0 {
-				estimate := contextEstimate
-				now := time.Now()
-				state.mu.Lock()
-				last := state.lastAutoCompressAt
-				state.mu.Unlock()
-				if estimate >= e.autoCompressMaxTokens && (last.IsZero() || now.Sub(last) >= e.autoCompressMinGap) {
-					triggerAutoCompress = true
-					autoCompressTokenEstimate = estimate
-				}
-			}
-
-			// Detect NO_REPLY marker on the base response (before indicators/footer are appended).
-			// Three cases:
-			//   1. bare marker (isSilentReply)               → fully silent
-			//   2. trailing marker with non-empty reasoning  → strip marker, deliver reasoning
-			//   3. trailing marker with empty strip result   → fully silent
-			isSilent := isSilentReply(baseResponse)
-			if !isSilent {
-				if stripped, ok := stripTrailingSilent(baseResponse); ok {
-					if strings.TrimSpace(stripped) == "" {
-						isSilent = true
-					} else {
-						baseResponse = stripped
-						cleanResponse = stripped
-					}
-				}
-			}
-
-			// statusFooter holds the reply footer separately so platforms
-			// implementing StatusFooterSender / StatusFooterUpdater can render
-			// it with smaller/dim styling; rich cards render it as a notation
-			// block after the answer body. Other paths inline-append it via
-			// appendReplyFooter as a fallback.
-			var statusFooter string
-			if !isSilent {
-				statusFooter = e.composeStatusFooter(replyAgent, state.agentSession)
-			}
-			fullResponse = cleanResponse
-
-			normalizedBaseResponse := strings.TrimSpace(baseResponse)
-			state.mu.Lock()
-			suppressDuplicate := normalizedBaseResponse != "" && normalizedBaseResponse == state.sideText
-			state.sideText = ""
-			state.mu.Unlock()
-
-			replyStart := time.Now()
-
-			// --- StreamingCard path ---
-			if streamCard != nil && streamCard.Failed() {
-				discardStreamingCard()
-			}
-			if streamCard != nil && !isSilent {
-				sp.finish("", "") // cleanup preview (should be no-op if card was active)
-				// Build final card content with full response
-				finalContent := buildCardContent(cardThinkingText, cardToolCalls, fullResponse)
-				if err := streamCard.Finalize(e.ctx, finalContent); err != nil {
-					slog.Error("streaming card finalize failed, sending fallback", "error", err)
-					discardStreamingCard()
-					// Fallback: send the response as a normal message
-					for _, chunk := range SplitMessageCodeFenceAware(fullResponse, maxPlatformMessageLen) {
-						if err := sendWorkspaceWithError(p, replyCtx, chunk); err != nil {
-							return
-						}
-					}
-				}
-			} else if isSilent {
-				// Silent reply: drop any in-flight preview and skip all send paths.
-				// sp.discard() clears previewMsgID so sp.needsDoneReaction() also returns false,
-				// preventing a stray done_emoji push.
-				sp.discard()
-				discardStreamingCard()
-				// Rich mode tracks the optimistic card independently of sp. A bare
-				// NO_REPLY is an explicit no-visible-response contract, so remove the
-				// card even if speculative text or anonymous tool progress appeared.
-				if hasRichCard && cardMessageID != nil {
-					if cleaner, ok := p.(PreviewCleaner); ok {
-						if err := cleaner.DeletePreviewMessage(e.ctx, cardMessageID); err != nil {
-							slog.Debug("rich card: failed to remove silent preview", "platform", p.Name(), "error", err)
-						}
-					} else {
-						slog.Warn("rich card: platform cannot remove silent preview", "platform", p.Name())
-					}
-					cardMessageID = nil
-				}
-				slog.Info("silent reply suppressed", "session", session.ID)
-			} else if hasRichCard {
-				// Keep the entire answer on the one quoted lifecycle card. Feishu's
-				// renderer converts tables beyond its per-card component budget to
-				// fenced text, avoiding extra unquoted overflow cards.
-				terminalTextDelivered := false
-				if fallback, ok := p.(RichCardTerminalTextFallback); ok {
-					prepared, required, err := fallback.PrepareRichCardTerminalText(
-						terminalRenderCtx,
-						replyCtx,
-						workspaceRenderer(fullResponse),
-					)
-					if err != nil {
-						slog.Warn("rich card: terminal text fallback preparation failed; retaining card delivery", "platform", p.Name(), "error", err)
-					} else if required {
-						if abortIfTerminalDeliveryCanceled() {
-							return
-						}
-						if err := e.waitOutgoingWithContext(terminalDeliveryCtx, p); err != nil {
-							slog.Debug("rich card: terminal text fallback rate-limit wait canceled", "platform", p.Name(), "error", err)
-							abortIfTerminalDeliveryCanceled()
-							return
-						}
-						previousHandle := cardMessageID
-						replacementHandle, err := fallback.SendRichCardTerminalText(terminalDeliveryCtx, replyCtx, prepared)
-						if err != nil || replacementHandle == nil {
-							if abortIfTerminalDeliveryCanceled() {
-								return
-							}
-							slog.Warn("rich card: terminal text fallback failed; retaining card delivery", "platform", p.Name(), "error", err, "handle_nil", replacementHandle == nil)
-						} else {
-							// Track the text message before deleting the old card. If the
-							// triggering message is recalled during this window, the common
-							// recall path can delete this exact replacement handle.
-							cardMessageID = replacementHandle
-							if previousHandle != nil {
-								removeRichCardForFallback(p, previousHandle)
-							}
-							if abortIfTerminalDeliveryCanceled() {
-								return
-							}
-							terminalTextDelivered = true
-						}
-					}
-				}
-				if !terminalTextDelivered {
-					finalBody := resolveRichCardMarkdown(fullResponse, true)
-					finalCard := buildRichCard(p, richCardSupporter, CardStatusDone, "done", toolSteps, finalBody, false, statusFooter)
-					sendAnswerFallback := func() bool {
-						if abortIfTerminalDeliveryCanceled() {
-							return false
-						}
-						starter, canStart := p.(PreviewStarter)
-						_, canDelete := p.(PreviewCleaner)
-						if !canStart || !canDelete {
-							slog.Error("rich card: cannot deliver a recall-safe fallback card", "platform", p.Name(), "can_start", canStart, "can_delete", canDelete)
-							abortRichCardCompletion(false)
-							return false
-						}
-						if err := e.waitOutgoingWithContext(terminalDeliveryCtx, p); err != nil {
-							slog.Debug("rich card: fallback card rate-limit wait canceled", "platform", p.Name(), "error", err)
-							abortIfTerminalDeliveryCanceled()
-							return false
-						}
-						previousHandle := cardMessageID
-						replacementHandle, err := starter.SendPreviewStart(terminalDeliveryCtx, replyCtx, finalCard)
-						if err != nil || replacementHandle == nil {
-							if abortIfTerminalDeliveryCanceled() {
-								return false
-							}
-							slog.Error("rich card: failed to send recall-safe fallback card", "platform", p.Name(), "error", err, "handle_nil", replacementHandle == nil)
-							abortRichCardCompletion(false)
-							return false
-						}
-						// Track the replacement before any further work. If recall won the
-						// API race and the platform still created the message, the next
-						// cancellation check can now delete that exact card as well.
-						cardMessageID = replacementHandle
-						if previousHandle != nil {
-							removeRichCardForFallback(p, previousHandle)
-						}
-						if abortIfTerminalDeliveryCanceled() {
-							return false
-						}
-						return true
-					}
-					if cardMessageID != nil {
-						// Re-check after completion bookkeeping. This window is intentionally
-						// tiny, but an explicit recall must still prevent a final card patch
-						// if it races with footer/log bookkeeping.
-						if abortIfTerminalDeliveryCanceled() {
-							return
-						}
-						// Forced final flush via cardkit-v1 streaming text update before
-						// flipping status to Done via full-card Patch. Configured throttling
-						// may have skipped the last small/recent chunk; this catches it up
-						// when previews are enabled. ErrNotSupported (no cardID) and any
-						// error are silent — the subsequent UpdateMessage rewrites the body.
-						if streamer, ok := p.(RichCardTextStreamer); ok && streamPreviewEnabledForPlatform(turnStreamPreview, p.Name()) {
-							if err := streamer.StreamRichCardText(terminalDeliveryCtx, cardMessageID, finalBody); err != nil && !errors.Is(err, ErrNotSupported) {
-								slog.Debug("rich card: final streaming flush failed (proceeding to full Patch)", "platform", p.Name(), "error", err)
-							}
-						}
-						if abortIfTerminalDeliveryCanceled() {
-							return
-						}
-						if updater, ok := p.(MessageUpdater); ok {
-							if err := updater.UpdateMessage(terminalDeliveryCtx, cardMessageID, finalCard); err != nil {
-								slog.Debug("rich card: final update failed, falling back to a replacement card", "platform", p.Name(), "error", err)
-								if abortIfTerminalDeliveryCanceled() {
-									return
-								}
-								if !sendAnswerFallback() {
-									return
-								}
-							}
-						} else {
-							if abortIfTerminalDeliveryCanceled() {
-								return
-							}
-							if !sendAnswerFallback() {
-								return
-							}
-						}
-					} else {
-						if abortIfTerminalDeliveryCanceled() {
-							return
-						}
-						if !sendAnswerFallback() {
-							return
-						}
-					}
-				}
-			} else if toolCount > 0 && segmentStart > 0 {
-				// When tool calls happened and prior text was already surfaced in segments,
-				// only send the unsent remainder. When tool progress is hidden, tool events don't surface
-				// side-channel messages and segmentStart stays 0, so keep normal finalize flow.
-				sp.discard()
-				if segmentStart < len(textParts) {
-					unsent := strings.Join(textParts[segmentStart:], "")
-					if unsent != "" {
-						if !sendChunksWithStatusFooter(e.ctx, p, replyCtx, unsent, statusFooter, sendWorkspaceWithError) {
-							return
-						}
-					}
-				}
-			} else if suppressDuplicate {
-				sp.discard()
-				metaOnly := strings.TrimSpace(strings.TrimPrefix(fullResponse, baseResponse))
-				if metaOnly != "" || statusFooter != "" {
-					if !sendChunksWithStatusFooter(e.ctx, p, replyCtx, metaOnly, statusFooter, sendWorkspaceWithError) {
-						return
-					}
-				}
-				slog.Debug("EventResult: suppressed duplicate side-channel text", "response_len", len(fullResponse))
-			} else if finalSegment, ok := postPermissionPreviewSegment(fullResponse, legacyPermissionDeliveredPrefix, strings.Join(textParts[segmentStart:], "")); ok {
-				// A legacy permission prompt permanently leaves the current preview
-				// visible. Some Agents report the aggregate turn in EventResult, so
-				// finalize the newly un-frozen preview with only the suffix that has
-				// not already been delivered before the permission boundary.
-				if finalSegment == "" {
-					sp.discard()
-				} else if sp.finish(finalSegment, statusFooter) {
-					slog.Debug("EventResult: finalized post-permission stream preview", "response_len", len(finalSegment), "footer_len", len(statusFooter))
-				} else if !sendChunksWithStatusFooter(e.ctx, p, replyCtx, finalSegment, statusFooter, sendWorkspaceWithError) {
-					return
-				}
-			} else if sp.finish(fullResponse, statusFooter) {
-				slog.Debug("EventResult: finalized via stream preview", "response_len", len(fullResponse), "footer_len", len(statusFooter))
-			} else {
-				slog.Debug("EventResult: sending via p.Send (preview inactive or failed)", "response_len", len(fullResponse), "footer_len", len(statusFooter))
-				if !sendChunksWithStatusFooter(e.ctx, p, replyCtx, fullResponse, statusFooter, sendWorkspaceWithError) {
-					return
-				}
-			}
-
-			if elapsed := time.Since(replyStart); elapsed >= slowPlatformSend {
-				slog.Warn("slow final reply send", "platform", p.Name(), "elapsed", elapsed, "response_len", len(fullResponse))
-			}
-
-			// Commit conversational state only after the terminal delivery path has
-			// succeeded. In rich mode, this keeps a recall during final image
-			// resolution or the final card update from persisting an answer that the
-			// user never received.
-			if hasRichCard && !isSilent && abortIfTerminalDeliveryCanceled() {
+			if !completion.handle() {
 				return
 			}
-			// History records the ORIGINAL baseResponse so the agent retains context
-			// of its own NO_REPLY decision; only outbound text is rewritten/suppressed.
-			session.AddHistory("assistant", historyResponse)
-			sessions.Save()
-			if triggerAutoCompress {
-				state.mu.Lock()
-				state.lastAutoCompressTokens = autoCompressTokenEstimate
-				state.mu.Unlock()
+			isSilent := completion.isSilent
+
+			queue := turnQueue{
+				processor:                   t,
+				platform:                    p,
+				isSilent:                    isSilent,
+				pendingSend:                 &pendingSend,
+				stopTyping:                  &stopTyping,
+				doneReaction:                &doneReaction,
+				turnRichCardCopy:            &turnRichCardCopy,
+				display:                     &turnDisplay,
+				streamConfig:                &turnStreamPreview,
+				footerFilter:                agentFooterFilter,
+				msgID:                       &msgID,
+				silentCancel:                &silentCancelCh,
+				cancelTerminalRender:        &cancelTerminalRender,
+				cancelTerminalDelivery:      &cancelTerminalDelivery,
+				terminalDeliveryCtx:         &terminalDeliveryCtx,
+				terminalRenderCtx:           &terminalRenderCtx,
+				newTerminalDeliveryContexts: newTerminalDeliveryContexts,
+				stop:                        stopCh,
+				textParts:                   &textParts,
+				segmentStart:                &segmentStart,
+				legacyDeliveredPrefix:       &legacyPermissionDeliveredPrefix,
+				toolCount:                   &toolCount,
+				turnStart:                   &turnStart,
+				firstEventLogged:            &firstEventLogged,
+				waitStart:                   &waitStart,
+				replyCtx:                    &replyCtx,
+				cardMessageID:               &cardMessageID,
+				toolSteps:                   &toolSteps,
+				partialText:                 &partialText,
+				richAnswerStarted:           &richAnswerStarted,
+				richAnswerStartedAt:         &richAnswerStartedAt,
+				lastRichCardUpdate:          &lastRichCardUpdate,
+				lastRichCardInput:           &lastRichCardInput,
+				lastRichCardPreview:         &lastRichCardPreview,
+				streamPreview:               &sp,
+				progress:                    &cp,
+				streamCard:                  &streamCard,
+				cardToolCalls:               &cardToolCalls,
+				cardThinkingText:            &cardThinkingText,
+				cardAnswerText:              &cardAnswerText,
+				workspaceDir:                workspaceDir,
+				idleTimer:                   idleTimer,
+				usesRichCard:                usesRichCard,
+				startRichCard:               startRichCard,
 			}
-			if !isSilent {
-				e.hooks.Emit(HookEvent{
-					Event:      HookEventMessageSent,
-					SessionKey: sessionKey,
-					Platform:   p.Name(),
-					Content:    baseResponse,
-				})
-			}
-			e.noteUserTurnCompleted(state)
-
-			turnDuration := time.Since(turnStart)
-			slog.Info("turn complete",
-				"session", session.ID,
-				"agent_session", session.GetAgentSessionID(),
-				"msg_id", msgID,
-				"tools", toolCount,
-				"response_len", len(fullResponse),
-				"turn_duration", turnDuration,
-				"input_tokens", event.InputTokens,
-				"output_tokens", event.OutputTokens,
-				"silent", isSilent,
-			)
-			// DEBUG: full assistant response for in-depth debugging.
-			if slog.Default().Enabled(e.ctx, slog.LevelDebug) {
-				slog.Debug("turn response",
-					"session", session.ID,
-					"agent_session", session.GetAgentSessionID(),
-					"history_len", session.HistoryLen(),
-					"response", previewText(fullResponse, 500),
-				)
-			}
-
-			// TTS: async voice reply if enabled (skipped for silent replies)
-			if !isSilent && e.tts != nil && e.tts.Enabled && e.tts.TTS != nil {
-				state.mu.Lock()
-				fromVoice := state.fromVoice
-				state.mu.Unlock()
-				mode := e.tts.GetTTSMode()
-				slog.Debug("tts: checking conditions", "mode", mode, "fromVoice", fromVoice, "will_send", mode == "always" || (mode == "voice_only" && fromVoice))
-				if mode == "always" || (mode == "voice_only" && fromVoice) {
-					go e.sendTTSReply(p, replyCtx, fullResponse)
-				}
-			} else {
-				slog.Debug("tts: not enabled", "tts_nil", e.tts == nil, "enabled", e.tts != nil && e.tts.Enabled, "tts_obj_nil", e.tts == nil || e.tts.TTS == nil)
-			}
-
-			// Auto-compress after finishing a turn, before sending any queued messages.
-			if triggerAutoCompress {
-				compressor, ok := e.agent.(ContextCompressor)
-				if ok && compressor.CompressCommand() != "" {
-					if pendingSend != nil {
-						if err := <-pendingSend; err != nil {
-							slog.Debug("async send error before compress", "error", err)
-						}
-					}
-					state.mu.Lock()
-					state.lastAutoCompressAt = time.Now()
-					tokenEst := state.lastAutoCompressTokens
-					state.mu.Unlock()
-					slog.Info("auto-compress: triggering", "session", sessionKey)
-
-					// Notify user before compressing so they know the context is about to change.
-					compressNotice := e.i18n.T(MsgCompressing)
-					if tokenEst > 0 {
-						compressNotice = fmt.Sprintf("%s (~%dk tokens)", compressNotice, tokenEst/1000)
-					}
-					e.send(state.platform, state.replyCtx, compressNotice)
-
-					// Run compress inline while the session is still locked.
-					e.runCompress(state, session, sessions, sessionKey, state.platform, state.replyCtx, true)
-					return
-				}
-			}
-
-			// Check for queued messages — if present, continue the event loop
-			// for the next turn instead of returning.
-			state.mu.Lock()
-			droppedStale := 0
-			for len(state.pendingMessages) > 0 && e.isQueuedUserMessageStaleForDrainLocked(state, state.pendingMessages[0].userMessageTimeMs) {
-				state.pendingMessages = state.pendingMessages[1:]
-				droppedStale++
-			}
-			if droppedStale > 0 {
-				slog.Info("dropped stale queued user messages after completed turn",
-					"session", sessionKey,
-					"dropped", droppedStale,
-				)
-			}
-			if state.stopped {
-				state.pendingMessages = nil
-				state.mu.Unlock()
-				return
-			}
-			if len(state.pendingMessages) > 0 {
-				queued := state.pendingMessages[0]
-				state.pendingMessages = state.pendingMessages[1:]
-				remainingQueue := len(state.pendingMessages)
-				state.platform = queued.platform
-				state.replyCtx = queued.replyCtx
-				state.currentMessageID = queued.messageID
-				state.fromVoice = queued.fromVoice
-				state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
-				// Re-open the steer adoption window for the queued turn.
-				state.presentationOpen = true
-				state.mu.Unlock()
-
-				// Stop the previous turn's typing indicator
-				if stopTyping != nil {
-					stopTyping()
-					stopTyping = nil
-				}
-				// Start a new typing indicator for the queued message's context
-				if ti, ok := queued.platform.(TypingIndicator); ok {
-					stopTyping = ti.StartTyping(e.ctx, queued.replyCtx)
-				}
-				// Agent continues working — don't add done reaction for this turn.
-				doneReaction = nil
-
-				// Drain stale events before starting the next turn. Between
-				// EventResult and Send(), the only buffered events would be
-				// stale leftovers (e.g. a deferred EventError from cmd.Wait()).
-				drainEvents(state.agentSession.Events())
-
-				if pendingSend != nil {
-					if err := <-pendingSend; err != nil {
-						slog.Debug("async send error before queued turn", "error", err)
-					}
-				}
-
-				queuedPrompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
-
-				state.mu.Lock()
-				as := state.agentSession // capture under lock to avoid race with cleanup
-				state.mu.Unlock()
-
-				nextSend := make(chan error, 1)
-				go func() {
-					if as == nil {
-						nextSend <- fmt.Errorf("agent session became nil")
-						return
-					}
-					nextSend <- as.Send(queuedPrompt, queued.images, queued.files)
-				}()
-				pendingSend = nextSend
-
-				// Detect language now (deferred from queue time to avoid
-				// flipping locale while the previous turn is still running).
-				e.i18n.DetectAndSet(queued.content)
-				turnRichCardCopy = e.i18n.RichCardCopyForText(queued.content)
-				state.setTurnRichCardCopy(queued.messageID, turnRichCardCopy)
-				turnDisplay, turnStreamPreview = e.displayRuntimeSnapshot()
-				agentFooterFilter.Reset(turnDisplay.HideAgentFooter)
-
-				// Reset per-turn state for the next turn
-				msgID = queued.messageID
-				silentCancelCh = state.silentTurnCancellationSignal(msgID)
-				cancelTerminalRender()
-				cancelTerminalDelivery()
-				terminalDeliveryCtx, cancelTerminalDelivery, terminalRenderCtx, cancelTerminalRender = newTerminalDeliveryContexts(silentCancelCh, stopCh)
-				textParts = nil
-				segmentStart = 0
-				legacyPermissionDeliveredPrefix = ""
-				toolCount = 0
-				turnStart = time.Now()
-				firstEventLogged = false
-				waitStart = time.Now()
-				// Reassign the local replyCtx parameter to the queued message's
-				// trigger context. state.replyCtx was updated above, but the
-				// function-scope replyCtx is what gets passed to p.Send / p.Reply
-				// further down — and platforms derive the parent message_id from
-				// it for the reply quote. Without this reassignment, msg2's
-				// reply would quote msg1's bubble.
-				replyCtx = queued.replyCtx
-				// Rich-mode per-turn state must reset too — otherwise EventText for
-				// the queued message would StreamRichCardText against the previous
-				// turn's cardID, overwriting that card's body with the new turn's
-				// content. Same risk for partialText/toolSteps leaking across turns.
-				cardMessageID = nil
-				toolSteps = nil
-				partialText = ""
-				richAnswerStarted = false
-				richAnswerStartedAt = time.Time{}
-				lastRichCardUpdate = time.Time{}
-				lastRichCardInput = ""
-				lastRichCardPreview = ""
-				queuedRenderer := func(content string) string {
-					return e.renderOutgoingContentForWorkspace(queued.platform, content, workspaceDir)
-				}
-				sp = newStreamPreview(turnStreamPreview, queued.platform, queued.replyCtx, e.ctx, queuedRenderer)
-				cp = newCompactProgressWriter(e.ctx, queued.platform, queued.replyCtx, e.agent.Name(), e.i18n.CurrentLang(), queuedRenderer)
-
-				// Reset streaming card state for the next turn
-				streamCard = nil
-				cardToolCalls = nil
-				cardThinkingText = ""
-				cardAnswerText.Reset()
-
-				// Try to create a new streaming card for the queued turn
-				if !usesRichCard(queued.platform) {
-					if scp, ok := queued.platform.(StreamingCardPlatform); ok {
-						if sc, err := scp.CreateStreamingCard(e.ctx, queued.replyCtx); err != nil {
-							slog.Warn("streaming card creation failed for queued turn", "error", err)
-						} else {
-							streamCard = sc
-						}
-					}
-				}
-				cardMessageID = startRichCard(queued.platform, queued.replyCtx)
-
-				// Send instant reply for queued turn if no streaming card is active.
-				if e.instantReply.Enabled && streamCard == nil && cardMessageID == nil {
-					replyContent := e.instantReply.Content
-					if replyContent == "" {
-						replyContent = e.i18n.T(MsgStarting)
-					}
-					e.send(queued.platform, queued.replyCtx, replyContent)
-				}
-
-				session.AddHistory("user", queued.content)
-				// Persist queued user message immediately (mirror of the
-				// initial AddHistory("user",...) save above).
-				sessions.Save()
-
-				if idleTimer != nil {
-					if !idleTimer.Stop() {
-						select {
-						case <-idleTimer.C:
-						default:
-						}
-					}
-					idleTimer.Reset(e.eventIdleTimeout)
-				}
-
-				slog.Info("processing queued message",
-					"session", sessionKey,
-					"remaining_queue", remainingQueue,
-				)
+			queue.handle()
+			if queue.control == turnReadContinue {
 				continue
 			}
-			state.mu.Unlock()
-
-			if pendingSend != nil {
-				if err := <-pendingSend; err != nil {
-					slog.Debug("async send error after EventResult", "error", err)
-				}
-			}
-
-			// Add a "done" reaction after the final answer when configured. Rich
-			// cards also use it as an optional push notification.
-			if !isSilent {
-				if doneTI, ok := p.(TypingIndicatorDone); ok {
-					doneReaction = func() { doneTI.AddDoneReaction(replyCtx) }
-				}
-			}
-
 			return
-
 		case EventError:
-			cp.Finalize(ProgressCardStateFailed)
-			sp.discard()
-			discardStreamingCard()
-			state.mu.Lock()
-			state.eventsNeedResync = true
-			state.mu.Unlock()
-			safePartial := persistVisibleRichPartial(p)
-			phase := richCardFailurePhase(event.Error)
-			updatedRichError := hasRichCard && markRichCardFailedWithPhase(p, cardMessageID, phase, safePartial)
-			if event.Error != nil {
-				errMsg := event.Error.Error()
-				slog.Error("agent error", "error", event.Error)
-				e.recordFeedbackError(sessionKey, errMsg)
-				e.hooks.Emit(HookEvent{
-					Event:      HookEventError,
-					SessionKey: sessionKey,
-					Platform:   p.Name(),
-					Error:      event.Error.Error(),
-				})
-				if !updatedRichError {
-					if usesRichCard(p) {
-						sendRichFailure(p, replyCtx, cardMessageID, phase, safePartial)
-					} else {
-						userMsg := fmt.Sprintf(e.i18n.T(MsgError), errMsg)
-						if phase == richCardUsageLimitPhase {
-							userMsg = richCardFailureBody(turnRichCardCopy, phase, "")
-							if userMsg == "" {
-								userMsg = e.i18n.T(MsgRichCardUsageLimitBody)
-							}
-						}
-						for _, h := range agentErrorHandlers {
-							if strings.Contains(errMsg, h.contains) {
-								userMsg = e.i18n.T(h.msgKey)
-								break
-							}
-						}
-						e.send(p, replyCtx, userMsg)
-					}
-				}
-			} else if !updatedRichError && usesRichCard(p) {
-				sendGenericRichFailure(p, replyCtx, cardMessageID, safePartial)
+			failure := turnFailure{
+				processor:                   t,
+				event:                       event,
+				platform:                    p,
+				replyCtx:                    replyCtx,
+				progress:                    cp,
+				streamPreview:               sp,
+				discardStreamingCard:        discardStreamingCard,
+				persistVisibleRichPartial:   persistVisibleRichPartial,
+				hasRichCard:                 hasRichCard,
+				markRichCardFailedWithPhase: markRichCardFailedWithPhase,
+				cardMessageID:               cardMessageID,
+				usesRichCard:                usesRichCard,
+				sendRichFailure:             sendRichFailure,
+				turnRichCardCopy:            turnRichCardCopy,
+				sendGenericRichFailure:      sendGenericRichFailure,
 			}
-			if event.Error != nil {
-				e.maybeSendFeedbackErrorHint(p, replyCtx, sessionKey)
-			}
-			// Only drop queued messages if the agent session is dead.
-			// Some agents (e.g. Codex) emit EventError for per-turn failures
-			// while keeping the session alive for subsequent turns.
-			if state.agentSession == nil || !state.agentSession.Alive() {
-				e.notifyDroppedQueuedMessages(state, event.Error)
-			}
+			failure.handle()
 			return
 		}
 	}
 
 idleTimedOut:
-	{
-		slog.Error("agent session idle timeout: no events for too long, killing session",
-			"session_key", sessionKey, "timeout", e.eventIdleTimeout, "elapsed", time.Since(turnStart))
-		cp.Finalize(ProgressCardStateFailed)
-		sp.discard()
-		discardStreamingCard()
-		state.mu.Lock()
-		state.eventsNeedResync = true
-		timedOutPlatform := state.platform
-		state.mu.Unlock()
-		safePartial := persistVisibleRichPartial(timedOutPlatform)
-		if !markRichCardFailed(timedOutPlatform, cardMessageID, safePartial) {
-			if usesRichCard(timedOutPlatform) {
-				sendGenericRichFailure(timedOutPlatform, replyCtx, cardMessageID, safePartial)
-			} else {
-				e.send(timedOutPlatform, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), "agent session timed out (no response)"))
-			}
-		}
-		e.recordFeedbackError(sessionKey, fmt.Sprintf("agent session idle timeout: no events for %v, session killed", e.eventIdleTimeout))
-		e.maybeSendFeedbackErrorHint(timedOutPlatform, replyCtx, sessionKey)
-		e.cleanupInteractiveState(sessionKey, state)
-		return
-	}
+	terminal.handleIdleTimeout()
+	return
 
 turnDeadlineExceeded:
-	{
-		elapsed := time.Since(turnStart)
-		slog.Warn("agent turn exceeded max_turn_time: sending stop signal, will force-kill if needed",
-			"session_key", sessionKey, "max_turn_time", e.maxTurnTime, "elapsed", elapsed)
-		cp.Finalize(ProgressCardStateFailed)
-		sp.discard()
-		discardStreamingCard()
-		state.mu.Lock()
-		deadlinePlatform := state.platform
-		state.mu.Unlock()
-		safePartial := persistVisibleRichPartial(deadlinePlatform)
-		if !markRichCardFailed(deadlinePlatform, cardMessageID, safePartial) {
-			if usesRichCard(deadlinePlatform) {
-				sendGenericRichFailure(deadlinePlatform, replyCtx, cardMessageID, safePartial)
-			} else {
-				e.send(deadlinePlatform, replyCtx, fmt.Sprintf(e.i18n.T(MsgError),
-					fmt.Sprintf("agent turn exceeded maximum time (%v), stopping", e.maxTurnTime)))
-			}
-		}
-		e.recordFeedbackError(sessionKey, fmt.Sprintf("agent turn exceeded max_turn_time (%v), stopped", e.maxTurnTime))
-		e.maybeSendFeedbackErrorHint(deadlinePlatform, replyCtx, sessionKey)
+	terminal.handleDeadline()
+	return
 
-		// Two-phase shutdown: first try a graceful stop so the agent can
-		// write its final state before dying (preserves --resume ability).
-		// If it doesn't exit within a short grace window, force-kill.
-		state.markStopped()
-		gracePeriod := 10 * time.Second
-		graceTimer := time.NewTimer(gracePeriod)
-	graceLoop:
-		for {
-			select {
-			case evt, ok := <-state.agentSession.Events():
-				if !ok || (ok && evt.Done) {
-					// Agent exited cleanly; state is intact, resume will work.
-					slog.Info("agent exited gracefully after max_turn_time stop signal",
-						"session_key", sessionKey, "elapsed", time.Since(turnStart))
-					graceTimer.Stop()
-					state.mu.Lock()
-					state.eventsNeedResync = false
-					state.mu.Unlock()
-					break graceLoop
-				}
-			case <-graceTimer.C:
-				// Agent did not stop within grace period — force-kill.
-				slog.Error("agent did not stop within grace period after max_turn_time; force-killing",
-					"session_key", sessionKey, "grace_period", gracePeriod)
-				graceTimer.Stop()
-				state.mu.Lock()
-				state.eventsNeedResync = true
-				state.mu.Unlock()
-				e.cleanupInteractiveState(sessionKey, state)
-				return
-			}
-		}
-		// Graceful exit path: cleanupInteractiveState closes the session,
-		// but eventsNeedResync=false so the next --resume works correctly.
-		e.cleanupInteractiveState(sessionKey, state)
+channelClosed:
+	terminal.handleChannelClosed()
+	return
+
+}
+
+// turnCompletion is the commit boundary for a terminal agent result. It owns
+// final response classification, delivery, conversational persistence, TTS,
+// and auto-compression. The event loop only decides whether to start another
+// queued turn after this boundary succeeds.
+type turnCompletion struct {
+	processor                       *turnProcessor
+	event                           Event
+	platform                        Platform
+	replyCtx                        any
+	display                         DisplayCfg
+	streamConfig                    StreamPreviewCfg
+	replyAgent                      Agent
+	textParts                       []string
+	segmentStart                    int
+	hasRichCard                     bool
+	richCardSupporter               RichCardSupporter
+	cardMessageID                   *any
+	richAnswerStartedAt             time.Time
+	silentCancel                    <-chan struct{}
+	stop                            <-chan struct{}
+	abortRichCardCompletion         func(bool)
+	streamCard                      *StreamingCard
+	streamPreview                   *streamPreview
+	discardStreamingCard            func()
+	cardThinkingText                string
+	cardToolCalls                   []cardToolEntry
+	sendWorkspaceWithError          func(Platform, any, string) error
+	terminalRenderCtx               context.Context
+	terminalDeliveryCtx             context.Context
+	workspaceRenderer               func(string) string
+	abortIfTerminalDeliveryCanceled func() bool
+	removeRichCardForFallback       func(Platform, any)
+	resolveRichCardMarkdown         func(string, bool) string
+	buildRichCard                   func(Platform, RichCardSupporter, CardStatus, string, []ToolStep, string, bool, string) string
+	toolSteps                       []ToolStep
+	toolCount                       int
+	legacyPermissionDeliveredPrefix string
+	pendingSend                     *<-chan error
+	turnStart                       time.Time
+	msgID                           string
+	isSilent                        bool
+}
+
+func (completion *turnCompletion) handle() bool {
+	t := completion.processor
+	e := t.engine
+	state := t.state
+	session := t.session
+
+	response := e.prepareTurnResponse(
+		completion.event,
+		completion.display,
+		completion.textParts,
+		completion.segmentStart,
+		completion.hasRichCard,
+	)
+	if !completion.waitForAnsweringDwell(response.base) {
+		return false
+	}
+
+	triggerAutoCompress, tokenEstimate := e.shouldAutoCompress(state, session, response.history)
+	response = classifyTurnResponse(response)
+	completion.isSilent = response.isSilent
+
+	statusFooter := ""
+	if !response.isSilent {
+		statusFooter = e.composeStatusFooter(completion.replyAgent, state.agentSession)
+	}
+	normalizedBaseResponse := strings.TrimSpace(response.base)
+	state.mu.Lock()
+	suppressDuplicate := normalizedBaseResponse != "" && normalizedBaseResponse == state.sideText
+	state.sideText = ""
+	state.mu.Unlock()
+
+	replyStart := time.Now()
+	delivery := turnDelivery{
+		processor:                       t,
+		platform:                        completion.platform,
+		replyCtx:                        completion.replyCtx,
+		fullResponse:                    response.full,
+		baseResponse:                    response.base,
+		isSilent:                        response.isSilent,
+		statusFooter:                    statusFooter,
+		streamCard:                      completion.streamCard,
+		streamPreview:                   completion.streamPreview,
+		discardStreamingCard:            completion.discardStreamingCard,
+		cardThinkingText:                completion.cardThinkingText,
+		cardToolCalls:                   completion.cardToolCalls,
+		sendWorkspaceWithError:          completion.sendWorkspaceWithError,
+		hasRichCard:                     completion.hasRichCard,
+		cardMessageID:                   completion.cardMessageID,
+		terminalRenderCtx:               completion.terminalRenderCtx,
+		terminalDeliveryCtx:             completion.terminalDeliveryCtx,
+		workspaceRenderer:               completion.workspaceRenderer,
+		abortIfTerminalDeliveryCanceled: completion.abortIfTerminalDeliveryCanceled,
+		removeRichCardForFallback:       completion.removeRichCardForFallback,
+		resolveRichCardMarkdown:         completion.resolveRichCardMarkdown,
+		buildRichCard:                   completion.buildRichCard,
+		richCardSupporter:               completion.richCardSupporter,
+		toolSteps:                       completion.toolSteps,
+		turnStreamPreview:               completion.streamConfig,
+		abortRichCardCompletion:         completion.abortRichCardCompletion,
+		toolCount:                       completion.toolCount,
+		segmentStart:                    completion.segmentStart,
+		textParts:                       completion.textParts,
+		suppressDuplicate:               suppressDuplicate,
+		legacyPermissionDeliveredPrefix: completion.legacyPermissionDeliveredPrefix,
+	}
+	delivery.deliver()
+	if !delivery.completed {
+		return false
+	}
+	if elapsed := time.Since(replyStart); elapsed >= slowPlatformSend {
+		slog.Warn("slow final reply send", "platform", completion.platform.Name(), "elapsed", elapsed, "response_len", len(response.full))
+	}
+
+	// Commit conversational state only after terminal delivery succeeds. In
+	// rich mode, a recall during final rendering must not persist an answer the
+	// user never received.
+	if completion.hasRichCard && !response.isSilent && completion.abortIfTerminalDeliveryCanceled() {
+		return false
+	}
+	completion.commit(response, triggerAutoCompress, tokenEstimate)
+	return !completion.runAutoCompress(triggerAutoCompress)
+}
+
+func (completion *turnCompletion) waitForAnsweringDwell(baseResponse string) bool {
+	if !completion.hasRichCard || *completion.cardMessageID == nil || isSilentReply(baseResponse) {
+		return true
+	}
+
+	t := completion.processor
+	e := t.engine
+	state := t.state
+	dwellCompleted := true
+	dwellApplied := false
+	if provider, ok := completion.platform.(RichCardAnsweringDwellProvider); ok && !completion.richAnswerStartedAt.IsZero() {
+		dwellApplied = true
+		dwellCompleted = waitForRichCardAnsweringDwell(
+			e.ctx,
+			completion.richAnswerStartedAt,
+			provider.RichCardAnsweringDwell(),
+			completion.silentCancel,
+			completion.stop,
+		)
+	}
+	discardTurn := state.shouldDiscardTurn(completion.msgID)
+	if dwellCompleted && !discardTurn && (!dwellApplied || (!state.isStopped() && e.ctx.Err() == nil)) {
+		return true
+	}
+	completion.abortRichCardCompletion(discardTurn)
+	return false
+}
+
+func (completion *turnCompletion) commit(response preparedTurnResponse, triggerAutoCompress bool, tokenEstimate int) {
+	t := completion.processor
+	e := t.engine
+	state := t.state
+	session := t.session
+
+	// History records the original response so the agent retains its own
+	// NO_REPLY decision; only outbound text is rewritten or suppressed.
+	session.AddHistory("assistant", response.history)
+	t.sessions.Save()
+	if triggerAutoCompress {
+		state.mu.Lock()
+		state.lastAutoCompressTokens = tokenEstimate
+		state.mu.Unlock()
+	}
+	if !response.isSilent {
+		e.hooks.Emit(HookEvent{
+			Event:      HookEventMessageSent,
+			SessionKey: t.sessionKey,
+			Platform:   completion.platform.Name(),
+			Content:    response.base,
+		})
+	}
+	e.noteUserTurnCompleted(state)
+
+	slog.Info("turn complete",
+		"session", session.ID,
+		"agent_session", session.GetAgentSessionID(),
+		"msg_id", completion.msgID,
+		"tools", completion.toolCount,
+		"response_len", len(response.full),
+		"turn_duration", time.Since(completion.turnStart),
+		"input_tokens", completion.event.InputTokens,
+		"output_tokens", completion.event.OutputTokens,
+		"silent", response.isSilent,
+	)
+	if slog.Default().Enabled(e.ctx, slog.LevelDebug) {
+		slog.Debug("turn response",
+			"session", session.ID,
+			"agent_session", session.GetAgentSessionID(),
+			"history_len", session.HistoryLen(),
+			"response", previewText(response.full, 500),
+		)
+	}
+	completion.sendTTS(response)
+}
+
+func (completion *turnCompletion) sendTTS(response preparedTurnResponse) {
+	e := completion.processor.engine
+	if response.isSilent || e.tts == nil || !e.tts.Enabled || e.tts.TTS == nil {
+		slog.Debug("tts: not enabled", "tts_nil", e.tts == nil, "enabled", e.tts != nil && e.tts.Enabled, "tts_obj_nil", e.tts == nil || e.tts.TTS == nil)
 		return
 	}
 
-channelClosed:
+	state := completion.processor.state
+	state.mu.Lock()
+	fromVoice := state.fromVoice
+	state.mu.Unlock()
+	mode := e.tts.GetTTSMode()
+	shouldSend := mode == "always" || (mode == "voice_only" && fromVoice)
+	slog.Debug("tts: checking conditions", "mode", mode, "fromVoice", fromVoice, "will_send", shouldSend)
+	if shouldSend {
+		go e.sendTTSReply(completion.platform, completion.replyCtx, response.full)
+	}
+}
+
+// runAutoCompress runs after a committed turn and before any queued message.
+// It returns true when compression consumed the event loop.
+func (completion *turnCompletion) runAutoCompress(trigger bool) bool {
+	if !trigger {
+		return false
+	}
+	t := completion.processor
+	e := t.engine
+	compressor, ok := e.agent.(ContextCompressor)
+	if !ok || compressor.CompressCommand() == "" {
+		return false
+	}
+	if pendingSend := *completion.pendingSend; pendingSend != nil {
+		if err := <-pendingSend; err != nil {
+			slog.Debug("async send error before compress", "error", err)
+		}
+	}
+
+	state := t.state
+	state.mu.Lock()
+	state.lastAutoCompressAt = time.Now()
+	tokenEstimate := state.lastAutoCompressTokens
+	state.mu.Unlock()
+	slog.Info("auto-compress: triggering", "session", t.sessionKey)
+
+	compressNotice := e.i18n.T(MsgCompressing)
+	if tokenEstimate > 0 {
+		compressNotice = fmt.Sprintf("%s (~%dk tokens)", compressNotice, tokenEstimate/1000)
+	}
+	e.send(state.platform, state.replyCtx, compressNotice)
+	e.runCompress(state, t.session, t.sessions, t.sessionKey, state.platform, state.replyCtx, true)
+	return true
+}
+
+type turnQueue struct {
+	processor                   *turnProcessor
+	platform                    Platform
+	isSilent                    bool
+	pendingSend                 *<-chan error
+	stopTyping                  *func()
+	doneReaction                *func()
+	turnRichCardCopy            *RichCardCopy
+	display                     *DisplayCfg
+	streamConfig                *StreamPreviewCfg
+	footerFilter                *agentFooterStreamFilter
+	msgID                       *string
+	silentCancel                *<-chan struct{}
+	cancelTerminalRender        *context.CancelFunc
+	cancelTerminalDelivery      *context.CancelFunc
+	terminalDeliveryCtx         *context.Context
+	terminalRenderCtx           *context.Context
+	newTerminalDeliveryContexts func(<-chan struct{}, <-chan struct{}) (context.Context, context.CancelFunc, context.Context, context.CancelFunc)
+	stop                        <-chan struct{}
+	textParts                   *[]string
+	segmentStart                *int
+	legacyDeliveredPrefix       *string
+	toolCount                   *int
+	turnStart                   *time.Time
+	firstEventLogged            *bool
+	waitStart                   *time.Time
+	replyCtx                    *any
+	cardMessageID               *any
+	toolSteps                   *[]ToolStep
+	partialText                 *string
+	richAnswerStarted           *bool
+	richAnswerStartedAt         *time.Time
+	lastRichCardUpdate          *time.Time
+	lastRichCardInput           *string
+	lastRichCardPreview         *string
+	streamPreview               **streamPreview
+	progress                    **compactProgressWriter
+	streamCard                  *StreamingCard
+	cardToolCalls               *[]cardToolEntry
+	cardThinkingText            *string
+	cardAnswerText              *strings.Builder
+	workspaceDir                string
+	idleTimer                   *time.Timer
+	usesRichCard                func(Platform) bool
+	startRichCard               func(Platform, any) any
+	control                     turnReadControl
+}
+
+func (queue *turnQueue) handle() {
+	t := queue.processor
+	e := t.engine
+	state := t.state
+	session := t.session
+	sessions := t.sessions
+	sessionKey := t.sessionKey
+	p := queue.platform
+	isSilent := queue.isSilent
+	pendingSend := *queue.pendingSend
+	stopTyping := *queue.stopTyping
+	doneReaction := *queue.doneReaction
+	turnRichCardCopy := *queue.turnRichCardCopy
+	turnDisplay := *queue.display
+	turnStreamPreview := *queue.streamConfig
+	agentFooterFilter := queue.footerFilter
+	msgID := *queue.msgID
+	silentCancelCh := *queue.silentCancel
+	cancelTerminalRender := *queue.cancelTerminalRender
+	cancelTerminalDelivery := *queue.cancelTerminalDelivery
+	terminalDeliveryCtx := *queue.terminalDeliveryCtx
+	terminalRenderCtx := *queue.terminalRenderCtx
+	newTerminalDeliveryContexts := queue.newTerminalDeliveryContexts
+	stopCh := queue.stop
+	textParts := *queue.textParts
+	segmentStart := *queue.segmentStart
+	legacyPermissionDeliveredPrefix := *queue.legacyDeliveredPrefix
+	toolCount := *queue.toolCount
+	turnStart := *queue.turnStart
+	firstEventLogged := *queue.firstEventLogged
+	waitStart := *queue.waitStart
+	replyCtx := *queue.replyCtx
+	cardMessageID := *queue.cardMessageID
+	toolSteps := *queue.toolSteps
+	partialText := *queue.partialText
+	richAnswerStarted := *queue.richAnswerStarted
+	richAnswerStartedAt := *queue.richAnswerStartedAt
+	lastRichCardUpdate := *queue.lastRichCardUpdate
+	lastRichCardInput := *queue.lastRichCardInput
+	lastRichCardPreview := *queue.lastRichCardPreview
+	sp := *queue.streamPreview
+	cp := *queue.progress
+	streamCard := *queue.streamCard
+	cardToolCalls := *queue.cardToolCalls
+	cardThinkingText := *queue.cardThinkingText
+	cardAnswerText := queue.cardAnswerText
+	workspaceDir := queue.workspaceDir
+	idleTimer := queue.idleTimer
+	usesRichCard := queue.usesRichCard
+	startRichCard := queue.startRichCard
+	defer func() {
+		*queue.pendingSend = pendingSend
+		*queue.stopTyping = stopTyping
+		*queue.doneReaction = doneReaction
+		*queue.turnRichCardCopy = turnRichCardCopy
+		*queue.display = turnDisplay
+		*queue.streamConfig = turnStreamPreview
+		*queue.msgID = msgID
+		*queue.silentCancel = silentCancelCh
+		*queue.cancelTerminalRender = cancelTerminalRender
+		*queue.cancelTerminalDelivery = cancelTerminalDelivery
+		*queue.terminalDeliveryCtx = terminalDeliveryCtx
+		*queue.terminalRenderCtx = terminalRenderCtx
+		*queue.textParts = textParts
+		*queue.segmentStart = segmentStart
+		*queue.legacyDeliveredPrefix = legacyPermissionDeliveredPrefix
+		*queue.toolCount = toolCount
+		*queue.turnStart = turnStart
+		*queue.firstEventLogged = firstEventLogged
+		*queue.waitStart = waitStart
+		*queue.replyCtx = replyCtx
+		*queue.cardMessageID = cardMessageID
+		*queue.toolSteps = toolSteps
+		*queue.partialText = partialText
+		*queue.richAnswerStarted = richAnswerStarted
+		*queue.richAnswerStartedAt = richAnswerStartedAt
+		*queue.lastRichCardUpdate = lastRichCardUpdate
+		*queue.lastRichCardInput = lastRichCardInput
+		*queue.lastRichCardPreview = lastRichCardPreview
+		*queue.streamPreview = sp
+		*queue.progress = cp
+		*queue.streamCard = streamCard
+		*queue.cardToolCalls = cardToolCalls
+		*queue.cardThinkingText = cardThinkingText
+	}()
+	// Check for queued messages — if present, continue the event loop
+	// for the next turn instead of returning.
+	state.mu.Lock()
+	droppedStale := 0
+	for len(state.pendingMessages) > 0 && e.isQueuedUserMessageStaleForDrainLocked(state, state.pendingMessages[0].userMessageTimeMs) {
+		state.pendingMessages = state.pendingMessages[1:]
+		droppedStale++
+	}
+	if droppedStale > 0 {
+		slog.Info("dropped stale queued user messages after completed turn",
+			"session", sessionKey,
+			"dropped", droppedStale,
+		)
+	}
+	if state.stopped {
+		state.pendingMessages = nil
+		state.mu.Unlock()
+		queue.control = turnReadStop
+		return
+	}
+	if len(state.pendingMessages) > 0 {
+		queued := state.pendingMessages[0]
+		state.pendingMessages = state.pendingMessages[1:]
+		remainingQueue := len(state.pendingMessages)
+		state.platform = queued.platform
+		state.replyCtx = queued.replyCtx
+		state.currentMessageID = queued.messageID
+		state.fromVoice = queued.fromVoice
+		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
+		// Re-open the steer adoption window for the queued turn.
+		state.presentationOpen = true
+		state.mu.Unlock()
+
+		// Stop the previous turn's typing indicator
+		if stopTyping != nil {
+			stopTyping()
+			stopTyping = nil
+		}
+		// Start a new typing indicator for the queued message's context
+		if ti, ok := queued.platform.(TypingIndicator); ok {
+			stopTyping = ti.StartTyping(e.ctx, queued.replyCtx)
+		}
+		// Agent continues working — don't add done reaction for this turn.
+		doneReaction = nil
+
+		// Drain stale events before starting the next turn. Between
+		// EventResult and Send(), the only buffered events would be
+		// stale leftovers (e.g. a deferred EventError from cmd.Wait()).
+		drainEvents(state.agentSession.Events())
+
+		if pendingSend != nil {
+			if err := <-pendingSend; err != nil {
+				slog.Debug("async send error before queued turn", "error", err)
+			}
+		}
+
+		queuedPrompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
+
+		state.mu.Lock()
+		as := state.agentSession // capture under lock to avoid race with cleanup
+		state.mu.Unlock()
+
+		nextSend := make(chan error, 1)
+		go func() {
+			if as == nil {
+				nextSend <- fmt.Errorf("agent session became nil")
+				return
+			}
+			nextSend <- as.Send(queuedPrompt, queued.images, queued.files)
+		}()
+		pendingSend = nextSend
+
+		// Detect language now (deferred from queue time to avoid
+		// flipping locale while the previous turn is still running).
+		e.i18n.DetectAndSet(queued.content)
+		turnRichCardCopy = e.i18n.RichCardCopyForText(queued.content)
+		state.setTurnRichCardCopy(queued.messageID, turnRichCardCopy)
+		turnDisplay, turnStreamPreview = e.displayRuntimeSnapshot()
+		// Presentation callbacks close over the outer turn variables. Publish the
+		// queued turn's locale/config before invoking them, rather than waiting for
+		// this method's deferred write-back.
+		*queue.turnRichCardCopy = turnRichCardCopy
+		*queue.display = turnDisplay
+		*queue.streamConfig = turnStreamPreview
+		agentFooterFilter.Reset(turnDisplay.HideAgentFooter)
+
+		// Reset per-turn state for the next turn
+		msgID = queued.messageID
+		silentCancelCh = state.silentTurnCancellationSignal(msgID)
+		cancelTerminalRender()
+		cancelTerminalDelivery()
+		terminalDeliveryCtx, cancelTerminalDelivery, terminalRenderCtx, cancelTerminalRender = newTerminalDeliveryContexts(silentCancelCh, stopCh)
+		textParts = nil
+		segmentStart = 0
+		legacyPermissionDeliveredPrefix = ""
+		toolCount = 0
+		turnStart = time.Now()
+		firstEventLogged = false
+		waitStart = time.Now()
+		// Reassign the local replyCtx parameter to the queued message's
+		// trigger context. state.replyCtx was updated above, but the
+		// function-scope replyCtx is what gets passed to p.Send / p.Reply
+		// further down — and platforms derive the parent message_id from
+		// it for the reply quote. Without this reassignment, msg2's
+		// reply would quote msg1's bubble.
+		replyCtx = queued.replyCtx
+		// Rich-mode per-turn state must reset too — otherwise EventText for
+		// the queued message would StreamRichCardText against the previous
+		// turn's cardID, overwriting that card's body with the new turn's
+		// content. Same risk for partialText/toolSteps leaking across turns.
+		cardMessageID = nil
+		toolSteps = nil
+		partialText = ""
+		richAnswerStarted = false
+		richAnswerStartedAt = time.Time{}
+		lastRichCardUpdate = time.Time{}
+		lastRichCardInput = ""
+		lastRichCardPreview = ""
+		queuedRenderer := func(content string) string {
+			return e.renderOutgoingContentForWorkspace(queued.platform, content, workspaceDir)
+		}
+		sp = newStreamPreview(turnStreamPreview, queued.platform, queued.replyCtx, e.ctx, queuedRenderer)
+		cp = newCompactProgressWriter(e.ctx, queued.platform, queued.replyCtx, e.agent.Name(), e.i18n.CurrentLang(), queuedRenderer)
+
+		// Reset streaming card state for the next turn
+		streamCard = nil
+		cardToolCalls = nil
+		cardThinkingText = ""
+		cardAnswerText.Reset()
+
+		// Try to create a new streaming card for the queued turn
+		if !usesRichCard(queued.platform) {
+			if scp, ok := queued.platform.(StreamingCardPlatform); ok {
+				if sc, err := scp.CreateStreamingCard(e.ctx, queued.replyCtx); err != nil {
+					slog.Warn("streaming card creation failed for queued turn", "error", err)
+				} else {
+					streamCard = sc
+				}
+			}
+		}
+		cardMessageID = startRichCard(queued.platform, queued.replyCtx)
+
+		// Send instant reply for queued turn if no streaming card is active.
+		if e.instantReply.Enabled && streamCard == nil && cardMessageID == nil {
+			replyContent := e.instantReply.Content
+			if replyContent == "" {
+				replyContent = e.i18n.T(MsgStarting)
+			}
+			e.send(queued.platform, queued.replyCtx, replyContent)
+		}
+
+		session.AddHistory("user", queued.content)
+		// Persist queued user message immediately (mirror of the
+		// initial AddHistory("user",...) save above).
+		sessions.Save()
+
+		if idleTimer != nil {
+			if !idleTimer.Stop() {
+				select {
+				case <-idleTimer.C:
+				default:
+				}
+			}
+			idleTimer.Reset(e.eventIdleTimeout)
+		}
+
+		slog.Info("processing queued message",
+			"session", sessionKey,
+			"remaining_queue", remainingQueue,
+		)
+		queue.control = turnReadContinue
+		return
+	}
+	state.mu.Unlock()
+
+	if pendingSend != nil {
+		if err := <-pendingSend; err != nil {
+			slog.Debug("async send error after EventResult", "error", err)
+		}
+	}
+
+	// Add a "done" reaction after the final answer when configured. Rich
+	// cards also use it as an optional push notification.
+	if !isSilent {
+		if doneTI, ok := p.(TypingIndicatorDone); ok {
+			doneReaction = func() { doneTI.AddDoneReaction(replyCtx) }
+		}
+	}
+
+	queue.control = turnReadStop
+	return
+}
+
+type turnTerminalHandler struct {
+	processor                 *turnProcessor
+	turnStart                 *time.Time
+	replyCtx                  *any
+	progress                  **compactProgressWriter
+	streamPreview             **streamPreview
+	discardStreamingCard      func()
+	persistVisibleRichPartial func(Platform) string
+	cardMessageID             *any
+	markRichCardFailed        func(p Platform, handle any, safeBody ...string) bool
+	usesRichCard              func(Platform) bool
+	sendGenericRichFailure    func(p Platform, replyCtx any, handle any, safeBody ...string)
+	textParts                 *[]string
+	segmentStart              *int
+	toolCount                 *int
+	removeRichCardForFallback func(Platform, any)
+	sendWorkspaceWithError    func(Platform, any, string) error
+}
+
+func (terminal *turnTerminalHandler) handleIdleTimeout() {
+	t := terminal.processor
+	e := t.engine
+	state := t.state
+	sessionKey := t.sessionKey
+	turnStart := *terminal.turnStart
+	replyCtx := *terminal.replyCtx
+	cp := *terminal.progress
+	sp := *terminal.streamPreview
+	discardStreamingCard := terminal.discardStreamingCard
+	persistVisibleRichPartial := terminal.persistVisibleRichPartial
+	cardMessageID := *terminal.cardMessageID
+	markRichCardFailed := terminal.markRichCardFailed
+	usesRichCard := terminal.usesRichCard
+	sendGenericRichFailure := terminal.sendGenericRichFailure
+	slog.Error("agent session idle timeout: no events for too long, killing session",
+		"session_key", sessionKey, "timeout", e.eventIdleTimeout, "elapsed", time.Since(turnStart))
+	cp.Finalize(ProgressCardStateFailed)
+	sp.discard()
+	discardStreamingCard()
+	state.mu.Lock()
+	state.eventsNeedResync = true
+	timedOutPlatform := state.platform
+	state.mu.Unlock()
+	safePartial := persistVisibleRichPartial(timedOutPlatform)
+	if !markRichCardFailed(timedOutPlatform, cardMessageID, safePartial) {
+		if usesRichCard(timedOutPlatform) {
+			sendGenericRichFailure(timedOutPlatform, replyCtx, cardMessageID, safePartial)
+		} else {
+			e.send(timedOutPlatform, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), "agent session timed out (no response)"))
+		}
+	}
+	e.recordFeedbackError(sessionKey, fmt.Sprintf("agent session idle timeout: no events for %v, session killed", e.eventIdleTimeout))
+	e.maybeSendFeedbackErrorHint(timedOutPlatform, replyCtx, sessionKey)
+	e.cleanupInteractiveState(sessionKey, state)
+	return
+}
+
+func (terminal *turnTerminalHandler) handleDeadline() {
+	t := terminal.processor
+	e := t.engine
+	state := t.state
+	sessionKey := t.sessionKey
+	turnStart := *terminal.turnStart
+	replyCtx := *terminal.replyCtx
+	cp := *terminal.progress
+	sp := *terminal.streamPreview
+	discardStreamingCard := terminal.discardStreamingCard
+	persistVisibleRichPartial := terminal.persistVisibleRichPartial
+	cardMessageID := *terminal.cardMessageID
+	markRichCardFailed := terminal.markRichCardFailed
+	usesRichCard := terminal.usesRichCard
+	sendGenericRichFailure := terminal.sendGenericRichFailure
+	elapsed := time.Since(turnStart)
+	slog.Warn("agent turn exceeded max_turn_time: sending stop signal, will force-kill if needed",
+		"session_key", sessionKey, "max_turn_time", e.maxTurnTime, "elapsed", elapsed)
+	cp.Finalize(ProgressCardStateFailed)
+	sp.discard()
+	discardStreamingCard()
+	state.mu.Lock()
+	deadlinePlatform := state.platform
+	state.mu.Unlock()
+	safePartial := persistVisibleRichPartial(deadlinePlatform)
+	if !markRichCardFailed(deadlinePlatform, cardMessageID, safePartial) {
+		if usesRichCard(deadlinePlatform) {
+			sendGenericRichFailure(deadlinePlatform, replyCtx, cardMessageID, safePartial)
+		} else {
+			e.send(deadlinePlatform, replyCtx, fmt.Sprintf(e.i18n.T(MsgError),
+				fmt.Sprintf("agent turn exceeded maximum time (%v), stopping", e.maxTurnTime)))
+		}
+	}
+	e.recordFeedbackError(sessionKey, fmt.Sprintf("agent turn exceeded max_turn_time (%v), stopped", e.maxTurnTime))
+	e.maybeSendFeedbackErrorHint(deadlinePlatform, replyCtx, sessionKey)
+
+	// Two-phase shutdown: first try a graceful stop so the agent can
+	// write its final state before dying (preserves --resume ability).
+	// If it doesn't exit within a short grace window, force-kill.
+	state.markStopped()
+	gracePeriod := 10 * time.Second
+	graceTimer := time.NewTimer(gracePeriod)
+graceLoop:
+	for {
+		select {
+		case evt, ok := <-state.agentSession.Events():
+			if !ok || (ok && evt.Done) {
+				// Agent exited cleanly; state is intact, resume will work.
+				slog.Info("agent exited gracefully after max_turn_time stop signal",
+					"session_key", sessionKey, "elapsed", time.Since(turnStart))
+				graceTimer.Stop()
+				state.mu.Lock()
+				state.eventsNeedResync = false
+				state.mu.Unlock()
+				break graceLoop
+			}
+		case <-graceTimer.C:
+			// Agent did not stop within grace period — force-kill.
+			slog.Error("agent did not stop within grace period after max_turn_time; force-killing",
+				"session_key", sessionKey, "grace_period", gracePeriod)
+			graceTimer.Stop()
+			state.mu.Lock()
+			state.eventsNeedResync = true
+			state.mu.Unlock()
+			e.cleanupInteractiveState(sessionKey, state)
+			return
+		}
+	}
+	// Graceful exit path: cleanupInteractiveState closes the session,
+	// but eventsNeedResync=false so the next --resume works correctly.
+	e.cleanupInteractiveState(sessionKey, state)
+	return
+}
+
+func (terminal *turnTerminalHandler) handleChannelClosed() {
+	t := terminal.processor
+	e := t.engine
+	state := t.state
+	session := t.session
+	sessions := t.sessions
+	sessionKey := t.sessionKey
+	replyCtx := *terminal.replyCtx
+	sp := *terminal.streamPreview
+	discardStreamingCard := terminal.discardStreamingCard
+	cardMessageID := *terminal.cardMessageID
+	markRichCardFailed := terminal.markRichCardFailed
+	usesRichCard := terminal.usesRichCard
+	sendGenericRichFailure := terminal.sendGenericRichFailure
+	textParts := *terminal.textParts
+	segmentStart := *terminal.segmentStart
+	toolCount := *terminal.toolCount
+	persistVisibleRichPartial := terminal.persistVisibleRichPartial
+	removeRichCardForFallback := terminal.removeRichCardForFallback
+	sendWorkspaceWithError := terminal.sendWorkspaceWithError
 	// Channel closed - process exited unexpectedly
 	slog.Warn("agent process exited", "session_key", sessionKey)
 	state.mu.Lock()
@@ -7311,52 +7025,1076 @@ channelClosed:
 			}
 		}
 	}
+
 }
 
-func mergeRichToolResult(steps []ToolStep, event Event, result string, maxLen int) []ToolStep {
-	toolName := strings.TrimSpace(event.ToolName)
-	if toolName == "" {
-		toolName = "Tool"
-	}
+type turnFailure struct {
+	processor                   *turnProcessor
+	event                       Event
+	platform                    Platform
+	replyCtx                    any
+	progress                    *compactProgressWriter
+	streamPreview               *streamPreview
+	discardStreamingCard        func()
+	persistVisibleRichPartial   func(Platform) string
+	hasRichCard                 bool
+	markRichCardFailedWithPhase func(p Platform, handle any, phase string, safeBody ...string) bool
+	cardMessageID               any
+	usesRichCard                func(Platform) bool
+	sendRichFailure             func(p Platform, replyCtx any, handle any, phase string, safeBody ...string)
+	turnRichCardCopy            RichCardCopy
+	sendGenericRichFailure      func(p Platform, replyCtx any, handle any, safeBody ...string)
+}
 
-	idx := -1
-	for i := len(steps) - 1; i >= 0; i-- {
-		if steps[i].Kind == ToolStepKindThinking {
-			continue
-		}
-		if strings.TrimSpace(steps[i].Name) == "" || strings.TrimSpace(steps[i].Name) == toolName {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
-		summary := strings.TrimSpace(event.ToolInput)
-		if summary != "" {
-			summary = truncateIf(summary, maxLen)
-		}
-		steps = append(steps, ToolStep{
-			Kind:    ToolStepKindTool,
-			Name:    toolName,
-			Summary: summary,
+func (failure *turnFailure) handle() {
+	t := failure.processor
+	e := t.engine
+	state := t.state
+	sessionKey := t.sessionKey
+	event := failure.event
+	p := failure.platform
+	replyCtx := failure.replyCtx
+	cp := failure.progress
+	sp := failure.streamPreview
+	discardStreamingCard := failure.discardStreamingCard
+	persistVisibleRichPartial := failure.persistVisibleRichPartial
+	hasRichCard := failure.hasRichCard
+	markRichCardFailedWithPhase := failure.markRichCardFailedWithPhase
+	cardMessageID := failure.cardMessageID
+	usesRichCard := failure.usesRichCard
+	sendRichFailure := failure.sendRichFailure
+	turnRichCardCopy := failure.turnRichCardCopy
+	sendGenericRichFailure := failure.sendGenericRichFailure
+	cp.Finalize(ProgressCardStateFailed)
+	sp.discard()
+	discardStreamingCard()
+	state.mu.Lock()
+	state.eventsNeedResync = true
+	state.mu.Unlock()
+	safePartial := persistVisibleRichPartial(p)
+	phase := richCardFailurePhase(event.Error)
+	updatedRichError := hasRichCard && markRichCardFailedWithPhase(p, cardMessageID, phase, safePartial)
+	if event.Error != nil {
+		errMsg := event.Error.Error()
+		slog.Error("agent error", "error", event.Error)
+		e.recordFeedbackError(sessionKey, errMsg)
+		e.hooks.Emit(HookEvent{
+			Event:      HookEventError,
+			SessionKey: sessionKey,
+			Platform:   p.Name(),
+			Error:      event.Error.Error(),
 		})
-		idx = len(steps) - 1
+		if !updatedRichError {
+			if usesRichCard(p) {
+				sendRichFailure(p, replyCtx, cardMessageID, phase, safePartial)
+			} else {
+				userMsg := fmt.Sprintf(e.i18n.T(MsgError), errMsg)
+				if phase == richCardUsageLimitPhase {
+					userMsg = richCardFailureBody(turnRichCardCopy, phase, "")
+					if userMsg == "" {
+						userMsg = e.i18n.T(MsgRichCardUsageLimitBody)
+					}
+				}
+				for _, h := range agentErrorHandlers {
+					if strings.Contains(errMsg, h.contains) {
+						userMsg = e.i18n.T(h.msgKey)
+						break
+					}
+				}
+				e.send(p, replyCtx, userMsg)
+			}
+		}
+	} else if !updatedRichError && usesRichCard(p) {
+		sendGenericRichFailure(p, replyCtx, cardMessageID, safePartial)
+	}
+	if event.Error != nil {
+		e.maybeSendFeedbackErrorHint(p, replyCtx, sessionKey)
+	}
+	// Only drop queued messages if the agent session is dead.
+	// Some agents (e.g. Codex) emit EventError for per-turn failures
+	// while keeping the session alive for subsequent turns.
+	if state.agentSession == nil || !state.agentSession.Alive() {
+		e.notifyDroppedQueuedMessages(state, event.Error)
+	}
+	return
+}
+
+type turnPermission struct {
+	processor                 *turnProcessor
+	event                     Event
+	platform                  Platform
+	replyCtx                  any
+	msgID                     string
+	hasRichCard               bool
+	streamPreview             *streamPreview
+	textParts                 *[]string
+	segmentStart              *int
+	silentHold                *bool
+	legacyDeliveredPrefix     *string
+	sendWorkspace             func(Platform, any, string)
+	display                   DisplayCfg
+	idleTimer                 *time.Timer
+	silentCancel              <-chan struct{}
+	stop                      <-chan struct{}
+	discardSilentTurn         func()
+	discardStreamingCard      func()
+	cardMessageID             *any
+	persistVisibleRichPartial func(Platform) string
+	markRichCardFailed        func(Platform, any, ...string) bool
+	usesRichCard              func(Platform) bool
+	removeRichCardForFallback func(Platform, any)
+}
+
+func (permission *turnPermission) handle() turnReadControl {
+	t := permission.processor
+	e := t.engine
+	state := t.state
+	msgID := permission.msgID
+	event := permission.event
+	p := permission.platform
+	replyCtx := permission.replyCtx
+	hasRichCard := permission.hasRichCard
+	sp := permission.streamPreview
+	textParts := *permission.textParts
+	segmentStart := *permission.segmentStart
+	silentHold := *permission.silentHold
+	legacyPermissionDeliveredPrefix := *permission.legacyDeliveredPrefix
+	sendWorkspace := permission.sendWorkspace
+	turnDisplay := permission.display
+	idleTimer := permission.idleTimer
+	silentCancelCh := permission.silentCancel
+	stopCh := permission.stop
+	discardSilentTurn := permission.discardSilentTurn
+	discardStreamingCard := permission.discardStreamingCard
+	cardMessageID := *permission.cardMessageID
+	persistVisibleRichPartial := permission.persistVisibleRichPartial
+	markRichCardFailed := permission.markRichCardFailed
+	usesRichCard := permission.usesRichCard
+	removeRichCardForFallback := permission.removeRichCardForFallback
+	defer func() {
+		*permission.textParts = textParts
+		*permission.segmentStart = segmentStart
+		*permission.silentHold = silentHold
+		*permission.legacyDeliveredPrefix = legacyPermissionDeliveredPrefix
+		*permission.cardMessageID = cardMessageID
+	}()
+	isAskQuestion := event.ToolName == "AskUserQuestion" && len(event.Questions) > 0
+
+	state.mu.Lock()
+	autoApprove := state.approveAll
+	state.mu.Unlock()
+
+	if autoApprove && !isAskQuestion {
+		slog.Debug("auto-approving (approve-all)", "request_id", event.RequestID, "tool", event.ToolName)
+		_ = state.agentSession.RespondPermission(event.RequestID, PermissionResult{
+			Behavior:     "allow",
+			UpdatedInput: event.ToolInputRaw,
+		})
+		return turnReadContinue
 	}
 
-	if strings.TrimSpace(steps[idx].Name) == "" {
-		steps[idx].Name = toolName
+	// Legacy previews become permanent before a permission prompt. Rich
+	// cards keep accumulated answer text on the lifecycle card instead;
+	// flushing here would duplicate it as an unquoted side message.
+	if !hasRichCard {
+		previewActive := sp.canPreview()
+		if len(textParts) > segmentStart {
+			if !previewActive {
+				segment := strings.Join(textParts[segmentStart:], "")
+				if segment != "" {
+					for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
+						sendWorkspace(p, replyCtx, chunk)
+					}
+				}
+			}
+			segmentStart = len(textParts)
+			silentHold = false
+		}
+		if segmentStart > 0 {
+			legacyPermissionDeliveredPrefix = strings.Join(textParts[:segmentStart], "")
+		}
+		sp.freeze()
+		if previewActive {
+			sp.detachPreview() // keep frozen preview visible as permanent message
+		}
 	}
-	if steps[idx].Kind == "" {
-		steps[idx].Kind = ToolStepKindTool
+
+	slog.Info("permission request",
+		"request_id", event.RequestID,
+		"tool", event.ToolName,
+	)
+
+	pending := &pendingPermission{
+		RequestID:    event.RequestID,
+		ToolName:     event.ToolName,
+		ToolInput:    event.ToolInputRaw,
+		InputPreview: event.ToolInput,
+		Questions:    event.Questions,
+		Resolved:     make(chan struct{}),
 	}
-	if strings.TrimSpace(steps[idx].Summary) == "" && strings.TrimSpace(event.ToolInput) != "" {
-		steps[idx].Summary = truncateIf(strings.TrimSpace(event.ToolInput), maxLen)
+	state.mu.Lock()
+	state.pending = pending
+	state.mu.Unlock()
+
+	if isAskQuestion {
+		e.sendAskQuestionPrompt(p, replyCtx, event.Questions, 0)
+	} else {
+		permLimit := turnDisplay.ToolMaxLen
+		if permLimit > 0 {
+			permLimit = permLimit * 8 / 5
+		}
+		toolInput := truncateIf(event.ToolInput, permLimit)
+		prompt := fmt.Sprintf(e.i18n.T(MsgPermissionPrompt), event.ToolName, toolInput)
+		e.sendPermissionPrompt(p, replyCtx, prompt, event.ToolName, toolInput)
 	}
-	steps[idx].Result = result
-	steps[idx].Status = strings.TrimSpace(event.ToolStatus)
-	steps[idx].ExitCode = event.ToolExitCode
-	steps[idx].Success = event.ToolSuccess
-	steps[idx].Done = true
-	return steps
+
+	// Stop idle timer while waiting for user permission response;
+	// the user may take a long time to decide, and we don't want
+	// the idle timeout to kill the session during that wait.
+	if idleTimer != nil {
+		idleTimer.Stop()
+	}
+
+	permissionInterrupted := false
+	select {
+	case <-pending.Resolved:
+		slog.Info("permission resolved", "request_id", event.RequestID)
+	case <-silentCancelCh:
+		permissionInterrupted = true
+	case <-stopCh:
+		permissionInterrupted = true
+	case <-e.ctx.Done():
+		permissionInterrupted = true
+	}
+	if permissionInterrupted {
+		// Remove only this request: a concurrent callback may already have
+		// cleared it. Resolve the channel as well so any other waiter cannot
+		// outlive the stopped turn.
+		state.mu.Lock()
+		if state.pending == pending {
+			state.pending = nil
+		}
+		state.eventsNeedResync = true
+		p := state.platform
+		state.mu.Unlock()
+		pending.resolve()
+		if state.shouldDiscardTurn(msgID) {
+			discardSilentTurn()
+			return turnReadStop
+		}
+		sp.discard()
+		discardStreamingCard()
+		if !markRichCardFailed(p, cardMessageID, persistVisibleRichPartial(p)) && usesRichCard(p) {
+			removeRichCardForFallback(p, cardMessageID)
+		}
+		return turnReadStop
+	}
+	if !hasRichCard {
+		sp.unfreeze()
+	}
+
+	// Restart idle timer after permission is resolved
+	if idleTimer != nil {
+		idleTimer.Reset(e.eventIdleTimeout)
+	}
+	return turnReadDispatch
+}
+
+type turnPresentation struct {
+	processor                  *turnProcessor
+	event                      Event
+	platform                   Platform
+	replyCtx                   any
+	display                    DisplayCfg
+	streamConfig               StreamPreviewCfg
+	hasRichCard                bool
+	richCardPreviewEnabled     bool
+	buildResolvedRichCard      func(CardStatus, string, []ToolStep, string, bool, string) string
+	buildResolvedRichCardFrame func(CardStatus, string, []ToolStep, string, bool, string) (string, string)
+	resolveRichCardMarkdown    func(string, bool) string
+	sendWorkspace              func(Platform, any, string)
+	streamPreview              *streamPreview
+	progress                   *compactProgressWriter
+	footerFilter               *agentFooterStreamFilter
+	textAlreadyFiltered        bool
+	streamCard                 StreamingCard
+	cardAnswerText             *strings.Builder
+	textParts                  *[]string
+	segmentStart               *int
+	silentHold                 *bool
+	toolCount                  *int
+	toolSteps                  *[]ToolStep
+	cardMessageID              *any
+	lastRichCardInput          *string
+	lastRichCardPreview        *string
+	lastRichCardUpdate         *time.Time
+	partialText                *string
+	richAnswerStarted          *bool
+	richAnswerStartedAt        *time.Time
+	cardThinkingText           *string
+	cardToolCalls              *[]cardToolEntry
+}
+
+func (presentation *turnPresentation) handleThinking() bool {
+	e := presentation.processor.engine
+	event := presentation.event
+	hasRichCard := presentation.hasRichCard
+	toolSteps := *presentation.toolSteps
+	cardMessageID := *presentation.cardMessageID
+	richCardPreviewEnabled := presentation.richCardPreviewEnabled
+	buildResolvedRichCard := presentation.buildResolvedRichCard
+	p := presentation.platform
+	replyCtx := presentation.replyCtx
+	lastRichCardInput := *presentation.lastRichCardInput
+	lastRichCardPreview := *presentation.lastRichCardPreview
+	turnDisplay := presentation.display
+	textParts := *presentation.textParts
+	segmentStart := *presentation.segmentStart
+	sp := presentation.streamPreview
+	sendWorkspace := presentation.sendWorkspace
+	silentHold := *presentation.silentHold
+	streamCard := presentation.streamCard
+	cardThinkingText := *presentation.cardThinkingText
+	cardToolCalls := *presentation.cardToolCalls
+	cardAnswerText := presentation.cardAnswerText
+	cp := presentation.progress
+	defer func() {
+		*presentation.toolSteps = toolSteps
+		*presentation.cardMessageID = cardMessageID
+		*presentation.lastRichCardInput = lastRichCardInput
+		*presentation.lastRichCardPreview = lastRichCardPreview
+		*presentation.textParts = textParts
+		*presentation.segmentStart = segmentStart
+		*presentation.silentHold = silentHold
+		*presentation.cardThinkingText = cardThinkingText
+	}()
+	if isEllipsisOnly(event.Content) {
+		return false
+	}
+	if hasRichCard {
+		// Rich mode records an anonymous event count only. Raw reasoning is
+		// never copied into card state, even when legacy thinking_messages is
+		// enabled for other platforms.
+		toolSteps = append(toolSteps, ToolStep{Kind: ToolStepKindThinking})
+		if cardMessageID == nil && richCardPreviewEnabled {
+			card := buildResolvedRichCard(CardStatusThinking, "thinking", toolSteps, "", true, "")
+			if starter, ok := p.(PreviewStarter); ok {
+				handle, err := starter.SendPreviewStart(e.ctx, replyCtx, card)
+				if err != nil {
+					slog.Debug("rich card: failed to create initial thinking card", "platform", p.Name(), "error", err)
+				} else {
+					cardMessageID = handle
+					lastRichCardInput = ""
+					lastRichCardPreview = ""
+				}
+			}
+		} else if cardMessageID != nil && richCardPreviewEnabled {
+			updater, ok := p.(MessageUpdater)
+			if !ok {
+				return false
+			}
+			card := buildResolvedRichCard(CardStatusThinking, "thinking", toolSteps, "", true, "")
+			if err := updater.UpdateMessage(e.ctx, cardMessageID, card); err != nil {
+				slog.Debug("rich card: failed to update thinking card", "platform", p.Name(), "error", err)
+			} else {
+				lastRichCardInput = ""
+				lastRichCardPreview = ""
+			}
+		}
+		return false
+	}
+	// When thinking messages are hidden, behavior depends on display mode:
+	//
+	//	quiet:   append separator to keep all text in one card
+	//	compact: freeze+detach to split text into separate cards
+	if !turnDisplay.ThinkingMessages && len(textParts) > segmentStart {
+		if turnDisplay.Mode == "quiet" {
+			if sp.canPreview() && sp.appendSeparator("\n\n") {
+				textParts = append(textParts, "\n\n")
+			}
+		} else {
+			if sp.canPreview() {
+				sp.freeze()
+				sp.detachPreview()
+			} else {
+				segment := strings.Join(textParts[segmentStart:], "")
+				if segment != "" {
+					for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
+						sendWorkspace(p, replyCtx, chunk)
+					}
+				}
+			}
+			segmentStart = len(textParts)
+		}
+		silentHold = false
+	}
+	if turnDisplay.ThinkingMessages && event.Content != "" {
+		// --- StreamingCard path ---
+		if streamCard != nil && !streamCard.Failed() {
+			cardThinkingText = truncateIf(event.Content, turnDisplay.ThinkingMaxLen)
+			_ = streamCard.Update(e.ctx, buildCardContent(cardThinkingText, cardToolCalls, cardAnswerText.String()))
+			return true // skip original independent message sending
+		}
+		// --- Original path (fallback) ---
+		// Flush accumulated text segment before thinking display
+		previewActive := sp.canPreview()
+		if len(textParts) > segmentStart {
+			if !previewActive {
+				segment := strings.Join(textParts[segmentStart:], "")
+				if segment != "" {
+					for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
+						sendWorkspace(p, replyCtx, chunk)
+					}
+				}
+			}
+			segmentStart = len(textParts)
+			silentHold = false
+		}
+		sp.freeze()
+		if previewActive {
+			sp.detachPreview() // keep frozen preview visible as permanent message
+		}
+		preview := truncateIf(event.Content, turnDisplay.ThinkingMaxLen)
+		thinkingMsg := fmt.Sprintf(e.i18n.T(MsgThinking), preview)
+		if !cp.AppendEvent(ProgressEntryThinking, preview, "", thinkingMsg) {
+			sendWorkspace(p, replyCtx, thinkingMsg)
+		}
+	}
+	return false
+}
+
+func (presentation *turnPresentation) handleToolUse() bool {
+	e := presentation.processor.engine
+	event := presentation.event
+	hasRichCard := presentation.hasRichCard
+	toolCount := *presentation.toolCount
+	toolSteps := *presentation.toolSteps
+	cardMessageID := *presentation.cardMessageID
+	richCardPreviewEnabled := presentation.richCardPreviewEnabled
+	buildResolvedRichCard := presentation.buildResolvedRichCard
+	p := presentation.platform
+	replyCtx := presentation.replyCtx
+	lastRichCardInput := *presentation.lastRichCardInput
+	lastRichCardPreview := *presentation.lastRichCardPreview
+	turnDisplay := presentation.display
+	textParts := *presentation.textParts
+	segmentStart := *presentation.segmentStart
+	sp := presentation.streamPreview
+	sendWorkspace := presentation.sendWorkspace
+	silentHold := *presentation.silentHold
+	streamCard := presentation.streamCard
+	cardThinkingText := *presentation.cardThinkingText
+	cardToolCalls := *presentation.cardToolCalls
+	cardAnswerText := presentation.cardAnswerText
+	cp := presentation.progress
+	defer func() {
+		*presentation.toolCount = toolCount
+		*presentation.toolSteps = toolSteps
+		*presentation.cardMessageID = cardMessageID
+		*presentation.lastRichCardInput = lastRichCardInput
+		*presentation.lastRichCardPreview = lastRichCardPreview
+		*presentation.textParts = textParts
+		*presentation.segmentStart = segmentStart
+		*presentation.silentHold = silentHold
+		*presentation.cardToolCalls = cardToolCalls
+	}()
+	toolCount++
+	if hasRichCard {
+		// Count the call without retaining its name or arguments. This makes
+		// the privacy boundary true at the engine layer, not just cosmetic.
+		toolSteps = append(toolSteps, ToolStep{Kind: ToolStepKindTool})
+		if cardMessageID == nil && richCardPreviewEnabled {
+			card := buildResolvedRichCard(CardStatusWorking, "tool", toolSteps, "", true, "")
+			if starter, ok := p.(PreviewStarter); ok {
+				handle, err := starter.SendPreviewStart(e.ctx, replyCtx, card)
+				if err != nil {
+					slog.Debug("rich card: failed to create initial tool card", "platform", p.Name(), "error", err)
+				} else {
+					cardMessageID = handle
+					lastRichCardInput = ""
+					lastRichCardPreview = ""
+				}
+			}
+		} else if cardMessageID != nil && richCardPreviewEnabled {
+			updater, ok := p.(MessageUpdater)
+			if !ok {
+				return false
+			}
+			card := buildResolvedRichCard(CardStatusWorking, "tool", toolSteps, "", true, "")
+			if err := updater.UpdateMessage(e.ctx, cardMessageID, card); err != nil {
+				slog.Debug("rich card: failed to update tool card", "platform", p.Name(), "error", err)
+			} else {
+				lastRichCardInput = ""
+				lastRichCardPreview = ""
+			}
+		}
+		return false
+	}
+	// When tool messages are hidden, behavior depends on display mode:
+	//
+	//	quiet:   append separator to keep all text in one card
+	//	compact: freeze+detach to split text into separate cards
+	if !turnDisplay.ToolMessages && len(textParts) > segmentStart {
+		if turnDisplay.Mode == "quiet" {
+			if sp.canPreview() && sp.appendSeparator("\n\n") {
+				textParts = append(textParts, "\n\n")
+			}
+		} else {
+			if sp.canPreview() {
+				sp.freeze()
+				sp.detachPreview()
+			} else {
+				segment := strings.Join(textParts[segmentStart:], "")
+				if segment != "" {
+					for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
+						sendWorkspace(p, replyCtx, chunk)
+					}
+				}
+			}
+			segmentStart = len(textParts)
+		}
+		silentHold = false
+	}
+	if turnDisplay.ToolMessages {
+		// --- StreamingCard path ---
+		if streamCard != nil && !streamCard.Failed() {
+			toolInput := event.ToolInput
+			formattedInput := formatToolInput(event.ToolName, toolInput)
+			cardToolCalls = append(cardToolCalls, cardToolEntry{
+				Index: toolCount,
+				Name:  event.ToolName,
+				Input: formattedInput,
+			})
+			_ = streamCard.Update(e.ctx, buildCardContent(cardThinkingText, cardToolCalls, cardAnswerText.String()))
+			return true // skip original independent message sending
+		}
+		// --- Original path (fallback) ---
+		// Flush accumulated text segment before tool display
+		previewActive := sp.canPreview()
+		if len(textParts) > segmentStart {
+			if !previewActive {
+				segment := strings.Join(textParts[segmentStart:], "")
+				if segment != "" {
+					for _, chunk := range SplitMessageCodeFenceAware(segment, maxPlatformMessageLen) {
+						sendWorkspace(p, replyCtx, chunk)
+					}
+				}
+			}
+			segmentStart = len(textParts)
+			silentHold = false
+		}
+		sp.freeze()
+		if previewActive {
+			sp.detachPreview() // keep frozen preview visible as permanent message
+		}
+		// tool_max_len applies to the card's rendered text and its
+		// structured payload alike (#1233); event.ToolInput itself is
+		// left untouched.
+		toolInput := truncateIf(event.ToolInput, turnDisplay.ToolMaxLen)
+		formattedInput := formatToolInput(event.ToolName, toolInput)
+		toolMsg := fmt.Sprintf(e.i18n.T(MsgTool), toolCount, event.ToolName, formattedInput)
+		if !cp.AppendEvent(ProgressEntryToolUse, toolInput, event.ToolName, toolMsg) {
+			for _, chunk := range SplitMessageCodeFenceAware(toolMsg, maxPlatformMessageLen) {
+				sendWorkspace(p, replyCtx, chunk)
+			}
+		}
+	}
+	return false
+}
+
+func (presentation *turnPresentation) handleText() {
+	e := presentation.processor.engine
+	event := presentation.event
+	textAlreadyFiltered := presentation.textAlreadyFiltered
+	agentFooterFilter := presentation.footerFilter
+	textParts := *presentation.textParts
+	segmentStart := *presentation.segmentStart
+	silentHold := *presentation.silentHold
+	streamCard := presentation.streamCard
+	cardAnswerText := presentation.cardAnswerText
+	cardThinkingText := *presentation.cardThinkingText
+	cardToolCalls := *presentation.cardToolCalls
+	hasRichCard := presentation.hasRichCard
+	cardMessageID := *presentation.cardMessageID
+	richCardPreviewEnabled := presentation.richCardPreviewEnabled
+	buildResolvedRichCard := presentation.buildResolvedRichCard
+	buildResolvedRichCardFrame := presentation.buildResolvedRichCardFrame
+	replyCtx := presentation.replyCtx
+	p := presentation.platform
+	lastRichCardInput := *presentation.lastRichCardInput
+	lastRichCardPreview := *presentation.lastRichCardPreview
+	lastRichCardUpdate := *presentation.lastRichCardUpdate
+	partialText := *presentation.partialText
+	turnStreamPreview := presentation.streamConfig
+	richAnswerStarted := *presentation.richAnswerStarted
+	richAnswerStartedAt := *presentation.richAnswerStartedAt
+	toolSteps := *presentation.toolSteps
+	resolveRichCardMarkdown := presentation.resolveRichCardMarkdown
+	sp := presentation.streamPreview
+	defer func() {
+		*presentation.textParts = textParts
+		*presentation.segmentStart = segmentStart
+		*presentation.silentHold = silentHold
+		*presentation.cardMessageID = cardMessageID
+		*presentation.lastRichCardInput = lastRichCardInput
+		*presentation.lastRichCardPreview = lastRichCardPreview
+		*presentation.lastRichCardUpdate = lastRichCardUpdate
+		*presentation.partialText = partialText
+		*presentation.richAnswerStarted = richAnswerStarted
+		*presentation.richAnswerStartedAt = richAnswerStartedAt
+	}()
+	content := event.Content
+	if !textAlreadyFiltered {
+		content = agentFooterFilter.Push(content)
+	}
+	if content != "" && !isEllipsisOnly(content) {
+		// Pre-compute silentHold transition including this chunk so the
+		// rich-card path doesn't leak a preview that gets recalled at
+		// end-of-stream when the text resolves to bare NO_REPLY (Lark
+		// renders the recall as "撤回了一条消息"). Both rich and legacy
+		// paths share this single transition; couldBeSilentPrefix is
+		// monotonically decreasing as segments grow, so the transition
+		// is held → released at most once per segment.
+		peekSegment := strings.Join(textParts[segmentStart:], "") + content
+		prevHold := silentHold
+		silentHold = couldBeSilentPrefix(peekSegment)
+		releasedNow := prevHold && !silentHold
+
+		handledByStreamCard := false
+		if streamCard != nil && !streamCard.Failed() {
+			textParts = append(textParts, content) // always accumulate for history
+			if !silentHold {
+				if releasedNow {
+					cardAnswerText.WriteString(peekSegment)
+				} else {
+					cardAnswerText.WriteString(content)
+				}
+				_ = streamCard.Update(e.ctx, buildCardContent(cardThinkingText, cardToolCalls, cardAnswerText.String()))
+			}
+			handledByStreamCard = true
+		}
+		if !handledByStreamCard {
+			if len(textParts) == 0 {
+				if hasRichCard {
+					if cardMessageID == nil && !silentHold && richCardPreviewEnabled {
+						card := buildResolvedRichCard(CardStatusWorking, "answer", toolSteps, "", true, "")
+						if starter, ok := p.(PreviewStarter); ok {
+							handle, err := starter.SendPreviewStart(e.ctx, replyCtx, card)
+							if err != nil {
+								slog.Debug("rich card: failed to create initial text card", "platform", p.Name(), "error", err)
+							} else {
+								cardMessageID = handle
+								lastRichCardInput = ""
+								lastRichCardPreview = ""
+							}
+						}
+					}
+				} else if !silentHold {
+					sp.setStatus(CardStatusWorking)
+				}
+			}
+			textParts = append(textParts, content)
+			partialText += content
+			if hasRichCard {
+				if !silentHold && richCardPreviewEnabled {
+					previewBody := truncateStreamPreviewText(partialText, turnStreamPreview.MaxChars)
+					// Lazy creation: if we held during the first text events and
+					// only released this chunk, the initial-create branch above
+					// won't fire (textParts is non-empty by now). Build the card
+					// here using the accumulated partialText so the card emerges
+					// with the post-prefix content already in body.
+					if cardMessageID == nil {
+						card, resolvedPreviewBody := buildResolvedRichCardFrame(CardStatusWorking, "answer", toolSteps, previewBody, true, "")
+						if starter, ok := p.(PreviewStarter); ok {
+							handle, err := starter.SendPreviewStart(e.ctx, replyCtx, card)
+							if err != nil {
+								slog.Debug("rich card: failed to create deferred text card", "platform", p.Name(), "error", err)
+							} else {
+								cardMessageID = handle
+								richAnswerStarted = true
+								richAnswerStartedAt = time.Now()
+								lastRichCardUpdate = time.Now()
+								lastRichCardInput = previewBody
+								lastRichCardPreview = resolvedPreviewBody
+							}
+						}
+					}
+					// A CardKit element update cannot change the card header. Perform
+					// one full-card update at the first visible answer chunk so the
+					// progress shell immediately becomes "正在回答" and the anonymous
+					// progress text disappears before typewriter streaming continues.
+					streamer, hasStreamer := p.(RichCardTextStreamer)
+					if cardMessageID != nil && !richAnswerStarted {
+						// CardKit animates only content delivered through its element
+						// streaming endpoint. Transition the header with an empty body,
+						// then let the first element update print the entire first chunk.
+						// This preserves a visible typewriter effect even when a short
+						// answer arrives in one Agent event. Inline-card fallbacks keep
+						// the partial body in this first full-card update.
+						transitionBody := previewBody
+						if hasStreamer {
+							transitionBody = ""
+						}
+						card, resolvedTransitionBody := buildResolvedRichCardFrame(CardStatusWorking, "answer", toolSteps, transitionBody, true, "")
+						if updater, ok := p.(MessageUpdater); ok {
+							if err := updater.UpdateMessage(e.ctx, cardMessageID, card); err == nil {
+								richAnswerStarted = true
+								if richAnswerStartedAt.IsZero() {
+									richAnswerStartedAt = time.Now()
+								}
+								lastRichCardInput = transitionBody
+								lastRichCardPreview = resolvedTransitionBody
+								if !hasStreamer {
+									lastRichCardUpdate = time.Now()
+								}
+							} else {
+								slog.Debug("rich card: failed to switch to answer phase", "platform", p.Name(), "error", err)
+							}
+						}
+					}
+					// Rich cards share the public stream_preview contract with the
+					// legacy preview path. The first body frame is immediate; later
+					// frames must satisfy both configured minimums and remain capped.
+					interval := time.Duration(turnStreamPreview.IntervalMs) * time.Millisecond
+					elapsedReady := lastRichCardUpdate.IsZero() || interval <= 0 || time.Since(lastRichCardUpdate) >= interval
+					delta := utf8.RuneCountInString(previewBody) - utf8.RuneCountInString(lastRichCardInput)
+					deltaReady := lastRichCardUpdate.IsZero() || delta >= turnStreamPreview.MinDeltaChars
+					if cardMessageID != nil && previewBody != lastRichCardInput && elapsedReady && deltaReady {
+						// Prefer per-element streaming text update (cardkit-v1) when available;
+						// it engages Lark's native typewriter rendering. Falls back to
+						// full-card Patch on ErrNotSupported (handle without cardID) or any error.
+						streamed := false
+						if hasStreamer {
+							streamBody := resolveRichCardMarkdown(previewBody, false)
+							if err := streamer.StreamRichCardText(e.ctx, cardMessageID, streamBody); err == nil {
+								lastRichCardUpdate = time.Now()
+								lastRichCardInput = previewBody
+								lastRichCardPreview = streamBody
+								streamed = true
+							} else if !errors.Is(err, ErrNotSupported) {
+								slog.Debug("rich card: streaming text update failed, falling back to full Patch", "platform", p.Name(), "error", err)
+							}
+						}
+						if !streamed {
+							card, resolvedPreviewBody := buildResolvedRichCardFrame(CardStatusWorking, "answer", toolSteps, previewBody, true, "")
+							if updater, ok := p.(MessageUpdater); ok {
+								if err := updater.UpdateMessage(e.ctx, cardMessageID, card); err == nil {
+									lastRichCardUpdate = time.Now()
+									lastRichCardInput = previewBody
+									lastRichCardPreview = resolvedPreviewBody
+								} else {
+									slog.Debug("rich card: failed to update text card", "platform", p.Name(), "error", err)
+								}
+							}
+						}
+					}
+				}
+			} else {
+				if !silentHold && sp.canPreview() {
+					if releasedNow {
+						sp.appendText(peekSegment) // flush all held chunks at once
+					} else {
+						sp.appendText(content)
+					}
+				}
+			}
+		}
+	}
+	presentation.processor.persistAgentSessionID(event.SessionID)
+}
+
+type turnDelivery struct {
+	processor                       *turnProcessor
+	platform                        Platform
+	replyCtx                        any
+	fullResponse                    string
+	baseResponse                    string
+	isSilent                        bool
+	statusFooter                    string
+	streamCard                      *StreamingCard
+	streamPreview                   *streamPreview
+	discardStreamingCard            func()
+	cardThinkingText                string
+	cardToolCalls                   []cardToolEntry
+	sendWorkspaceWithError          func(Platform, any, string) error
+	hasRichCard                     bool
+	cardMessageID                   *any
+	terminalRenderCtx               context.Context
+	terminalDeliveryCtx             context.Context
+	workspaceRenderer               func(string) string
+	abortIfTerminalDeliveryCanceled func() bool
+	removeRichCardForFallback       func(Platform, any)
+	resolveRichCardMarkdown         func(string, bool) string
+	buildRichCard                   func(Platform, RichCardSupporter, CardStatus, string, []ToolStep, string, bool, string) string
+	richCardSupporter               RichCardSupporter
+	toolSteps                       []ToolStep
+	turnStreamPreview               StreamPreviewCfg
+	abortRichCardCompletion         func(bool)
+	toolCount                       int
+	segmentStart                    int
+	textParts                       []string
+	suppressDuplicate               bool
+	legacyPermissionDeliveredPrefix string
+	completed                       bool
+}
+
+func (d *turnDelivery) deliver() {
+	e := d.processor.engine
+	p := d.platform
+	replyCtx := d.replyCtx
+	fullResponse := d.fullResponse
+	baseResponse := d.baseResponse
+	isSilent := d.isSilent
+	statusFooter := d.statusFooter
+	streamCard := *d.streamCard
+	cardMessageID := *d.cardMessageID
+	defer func() {
+		*d.streamCard = streamCard
+		*d.cardMessageID = cardMessageID
+	}()
+	sp := d.streamPreview
+	discardStreamingCard := func() {
+		d.discardStreamingCard()
+		streamCard = *d.streamCard
+	}
+	setCardMessageID := func(handle any) {
+		cardMessageID = handle
+		*d.cardMessageID = handle
+	}
+	cardThinkingText := d.cardThinkingText
+	cardToolCalls := d.cardToolCalls
+	sendWorkspaceWithError := d.sendWorkspaceWithError
+	hasRichCard := d.hasRichCard
+	terminalRenderCtx := d.terminalRenderCtx
+	terminalDeliveryCtx := d.terminalDeliveryCtx
+	workspaceRenderer := d.workspaceRenderer
+	abortIfTerminalDeliveryCanceled := d.abortIfTerminalDeliveryCanceled
+	removeRichCardForFallback := d.removeRichCardForFallback
+	resolveRichCardMarkdown := d.resolveRichCardMarkdown
+	buildRichCard := d.buildRichCard
+	richCardSupporter := d.richCardSupporter
+	toolSteps := d.toolSteps
+	turnStreamPreview := d.turnStreamPreview
+	abortRichCardCompletion := d.abortRichCardCompletion
+	toolCount := d.toolCount
+	segmentStart := d.segmentStart
+	textParts := d.textParts
+	suppressDuplicate := d.suppressDuplicate
+	legacyPermissionDeliveredPrefix := d.legacyPermissionDeliveredPrefix
+	session := d.processor.session
+	// --- StreamingCard path ---
+	if streamCard != nil && streamCard.Failed() {
+		discardStreamingCard()
+	}
+	if streamCard != nil && !isSilent {
+		sp.finish("", "") // cleanup preview (should be no-op if card was active)
+		// Build final card content with full response
+		finalContent := buildCardContent(cardThinkingText, cardToolCalls, fullResponse)
+		if err := streamCard.Finalize(e.ctx, finalContent); err != nil {
+			slog.Error("streaming card finalize failed, sending fallback", "error", err)
+			discardStreamingCard()
+			// Fallback: send the response as a normal message
+			for _, chunk := range SplitMessageCodeFenceAware(fullResponse, maxPlatformMessageLen) {
+				if err := sendWorkspaceWithError(p, replyCtx, chunk); err != nil {
+					return
+				}
+			}
+		}
+	} else if isSilent {
+		// Silent reply: drop any in-flight preview and skip all send paths.
+		// sp.discard() clears previewMsgID so sp.needsDoneReaction() also returns false,
+		// preventing a stray done_emoji push.
+		sp.discard()
+		discardStreamingCard()
+		// Rich mode tracks the optimistic card independently of sp. A bare
+		// NO_REPLY is an explicit no-visible-response contract, so remove the
+		// card even if speculative text or anonymous tool progress appeared.
+		if hasRichCard && cardMessageID != nil {
+			if cleaner, ok := p.(PreviewCleaner); ok {
+				if err := cleaner.DeletePreviewMessage(e.ctx, cardMessageID); err != nil {
+					slog.Debug("rich card: failed to remove silent preview", "platform", p.Name(), "error", err)
+				}
+			} else {
+				slog.Warn("rich card: platform cannot remove silent preview", "platform", p.Name())
+			}
+			setCardMessageID(nil)
+		}
+		slog.Info("silent reply suppressed", "session", session.ID)
+	} else if hasRichCard {
+		// Keep the entire answer on the one quoted lifecycle card. Feishu's
+		// renderer converts tables beyond its per-card component budget to
+		// fenced text, avoiding extra unquoted overflow cards.
+		terminalTextDelivered := false
+		if fallback, ok := p.(RichCardTerminalTextFallback); ok {
+			prepared, required, err := fallback.PrepareRichCardTerminalText(
+				terminalRenderCtx,
+				replyCtx,
+				workspaceRenderer(fullResponse),
+			)
+			if err != nil {
+				slog.Warn("rich card: terminal text fallback preparation failed; retaining card delivery", "platform", p.Name(), "error", err)
+			} else if required {
+				if abortIfTerminalDeliveryCanceled() {
+					return
+				}
+				if err := e.waitOutgoingWithContext(terminalDeliveryCtx, p); err != nil {
+					slog.Debug("rich card: terminal text fallback rate-limit wait canceled", "platform", p.Name(), "error", err)
+					abortIfTerminalDeliveryCanceled()
+					return
+				}
+				previousHandle := cardMessageID
+				replacementHandle, err := fallback.SendRichCardTerminalText(terminalDeliveryCtx, replyCtx, prepared)
+				if err != nil || replacementHandle == nil {
+					if abortIfTerminalDeliveryCanceled() {
+						return
+					}
+					slog.Warn("rich card: terminal text fallback failed; retaining card delivery", "platform", p.Name(), "error", err, "handle_nil", replacementHandle == nil)
+				} else {
+					// Track the text message before deleting the old card. If the
+					// triggering message is recalled during this window, the common
+					// recall path can delete this exact replacement handle.
+					setCardMessageID(replacementHandle)
+					if previousHandle != nil {
+						removeRichCardForFallback(p, previousHandle)
+					}
+					if abortIfTerminalDeliveryCanceled() {
+						return
+					}
+					terminalTextDelivered = true
+				}
+			}
+		}
+		if !terminalTextDelivered {
+			finalBody := resolveRichCardMarkdown(fullResponse, true)
+			finalCard := buildRichCard(p, richCardSupporter, CardStatusDone, "done", toolSteps, finalBody, false, statusFooter)
+			sendAnswerFallback := func() bool {
+				if abortIfTerminalDeliveryCanceled() {
+					return false
+				}
+				starter, canStart := p.(PreviewStarter)
+				_, canDelete := p.(PreviewCleaner)
+				if !canStart || !canDelete {
+					slog.Error("rich card: cannot deliver a recall-safe fallback card", "platform", p.Name(), "can_start", canStart, "can_delete", canDelete)
+					abortRichCardCompletion(false)
+					return false
+				}
+				if err := e.waitOutgoingWithContext(terminalDeliveryCtx, p); err != nil {
+					slog.Debug("rich card: fallback card rate-limit wait canceled", "platform", p.Name(), "error", err)
+					abortIfTerminalDeliveryCanceled()
+					return false
+				}
+				previousHandle := cardMessageID
+				replacementHandle, err := starter.SendPreviewStart(terminalDeliveryCtx, replyCtx, finalCard)
+				if err != nil || replacementHandle == nil {
+					if abortIfTerminalDeliveryCanceled() {
+						return false
+					}
+					slog.Error("rich card: failed to send recall-safe fallback card", "platform", p.Name(), "error", err, "handle_nil", replacementHandle == nil)
+					abortRichCardCompletion(false)
+					return false
+				}
+				// Track the replacement before any further work. If recall won the
+				// API race and the platform still created the message, the next
+				// cancellation check can now delete that exact card as well.
+				setCardMessageID(replacementHandle)
+				if previousHandle != nil {
+					removeRichCardForFallback(p, previousHandle)
+				}
+				if abortIfTerminalDeliveryCanceled() {
+					return false
+				}
+				return true
+			}
+			if cardMessageID != nil {
+				// Re-check after completion bookkeeping. This window is intentionally
+				// tiny, but an explicit recall must still prevent a final card patch
+				// if it races with footer/log bookkeeping.
+				if abortIfTerminalDeliveryCanceled() {
+					return
+				}
+				// Forced final flush via cardkit-v1 streaming text update before
+				// flipping status to Done via full-card Patch. Configured throttling
+				// may have skipped the last small/recent chunk; this catches it up
+				// when previews are enabled. ErrNotSupported (no cardID) and any
+				// error are silent — the subsequent UpdateMessage rewrites the body.
+				if streamer, ok := p.(RichCardTextStreamer); ok && streamPreviewEnabledForPlatform(turnStreamPreview, p.Name()) {
+					if err := streamer.StreamRichCardText(terminalDeliveryCtx, cardMessageID, finalBody); err != nil && !errors.Is(err, ErrNotSupported) {
+						slog.Debug("rich card: final streaming flush failed (proceeding to full Patch)", "platform", p.Name(), "error", err)
+					}
+				}
+				if abortIfTerminalDeliveryCanceled() {
+					return
+				}
+				if updater, ok := p.(MessageUpdater); ok {
+					if err := updater.UpdateMessage(terminalDeliveryCtx, cardMessageID, finalCard); err != nil {
+						slog.Debug("rich card: final update failed, falling back to a replacement card", "platform", p.Name(), "error", err)
+						if abortIfTerminalDeliveryCanceled() {
+							return
+						}
+						if !sendAnswerFallback() {
+							return
+						}
+					}
+				} else {
+					if abortIfTerminalDeliveryCanceled() {
+						return
+					}
+					if !sendAnswerFallback() {
+						return
+					}
+				}
+			} else {
+				if abortIfTerminalDeliveryCanceled() {
+					return
+				}
+				if !sendAnswerFallback() {
+					return
+				}
+			}
+		}
+	} else if toolCount > 0 && segmentStart > 0 {
+		// When tool calls happened and prior text was already surfaced in segments,
+		// only send the unsent remainder. When tool progress is hidden, tool events don't surface
+		// side-channel messages and segmentStart stays 0, so keep normal finalize flow.
+		sp.discard()
+		if segmentStart < len(textParts) {
+			unsent := strings.Join(textParts[segmentStart:], "")
+			if unsent != "" {
+				if !sendChunksWithStatusFooter(e.ctx, p, replyCtx, unsent, statusFooter, sendWorkspaceWithError) {
+					return
+				}
+			}
+		}
+	} else if suppressDuplicate {
+		sp.discard()
+		metaOnly := strings.TrimSpace(strings.TrimPrefix(fullResponse, baseResponse))
+		if metaOnly != "" || statusFooter != "" {
+			if !sendChunksWithStatusFooter(e.ctx, p, replyCtx, metaOnly, statusFooter, sendWorkspaceWithError) {
+				return
+			}
+		}
+		slog.Debug("EventResult: suppressed duplicate side-channel text", "response_len", len(fullResponse))
+	} else if finalSegment, ok := postPermissionPreviewSegment(fullResponse, legacyPermissionDeliveredPrefix, strings.Join(textParts[segmentStart:], "")); ok {
+		// A legacy permission prompt permanently leaves the current preview
+		// visible. Some Agents report the aggregate turn in EventResult, so
+		// finalize the newly un-frozen preview with only the suffix that has
+		// not already been delivered before the permission boundary.
+		if finalSegment == "" {
+			sp.discard()
+		} else if sp.finish(finalSegment, statusFooter) {
+			slog.Debug("EventResult: finalized post-permission stream preview", "response_len", len(finalSegment), "footer_len", len(statusFooter))
+		} else if !sendChunksWithStatusFooter(e.ctx, p, replyCtx, finalSegment, statusFooter, sendWorkspaceWithError) {
+			return
+		}
+	} else if sp.finish(fullResponse, statusFooter) {
+		slog.Debug("EventResult: finalized via stream preview", "response_len", len(fullResponse), "footer_len", len(statusFooter))
+	} else {
+		slog.Debug("EventResult: sending via p.Send (preview inactive or failed)", "response_len", len(fullResponse), "footer_len", len(statusFooter))
+		if !sendChunksWithStatusFooter(e.ctx, p, replyCtx, fullResponse, statusFooter, sendWorkspaceWithError) {
+			return
+		}
+	}
+	d.completed = true
 }
 
 // notifyDroppedQueuedMessages drains pendingMessages from the state and
@@ -8507,28 +9245,6 @@ func appendReplyFooter(content, footer string) string {
 		return "*" + footer + "*"
 	}
 	return content + "\n\n*" + footer + "*"
-}
-
-func appendFinalMetadataToSegment(segment, fullResponse string) string {
-	segment = strings.TrimRight(segment, "\n ")
-	if segment == "" {
-		return fullResponse
-	}
-	fullResponse = strings.TrimSpace(fullResponse)
-	if fullResponse == "" || strings.TrimSpace(segment) == fullResponse {
-		return segment
-	}
-
-	metadata := ""
-	if idx := strings.LastIndex(fullResponse, "\n\n*"); idx >= 0 && strings.HasSuffix(fullResponse, "*") {
-		metadata = fullResponse[idx:]
-	} else if match := ctxSelfReportRe.FindString(fullResponse); match != "" {
-		metadata = "\n" + strings.TrimSpace(match)
-	}
-	if metadata == "" || strings.Contains(segment, strings.TrimSpace(metadata)) {
-		return segment
-	}
-	return segment + metadata
 }
 
 func (e *Engine) cmdShow(p Platform, msg *Message, args []string) {
@@ -17165,15 +17881,6 @@ func extractUserID(sessionKey string) string {
 	return ""
 }
 
-func stringSliceContains(ss []string, target string) bool {
-	for _, s := range ss {
-		if s == target {
-			return true
-		}
-	}
-	return false
-}
-
 func extractPlatformName(sessionKey string) string {
 	if i := strings.IndexByte(sessionKey, ':'); i >= 0 {
 		return sessionKey[:i]
@@ -17806,24 +18513,9 @@ func gitClone(repoURL, dest string) error {
 	return nil
 }
 
-// ── Context usage indicator ──────────────────────────────────
-
-const modelContextWindow = 200_000 // generic fallback window for heuristic context estimates
-
-func contextIndicatorText(inputTokens int) string {
-	if inputTokens <= 0 {
-		return ""
-	}
-	pct := inputTokens * 100 / modelContextWindow
-	if pct > 100 {
-		pct = 100
-	}
-	return fmt.Sprintf("[ctx: ~%d%%]", pct)
-}
-
 // ctxSelfReportRe matches agent self-reported context lines like "[ctx: ~42%]".
-// Used to strip such markers from delivered text — the ctx indicator is now
-// rendered exclusively in the reply footer.
+// These private estimates are stripped because reply footers deliberately show
+// only model and reasoning effort.
 var ctxSelfReportRe = regexp.MustCompile(`(?m)\n?\[ctx: ~\d+%\]`)
 
 // agentFooterLineRe matches a standalone agent-emitted status line only when

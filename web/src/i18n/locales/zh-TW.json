@@ -6,7 +6,6 @@
     "sessions": "工作階段",
     "chat": "對話",
     "cron": "排程工作",
-    "bridge": "橋接",
     "skills": "技能",
     "system": "系統"
   },
@@ -16,7 +15,6 @@
     "uptime": "運作時間",
     "platforms": "平台",
     "projects": "專案",
-    "bridgeAdapters": "橋接介接器",
     "noData": "尚無資料",
     "recentSessions": "最近會話"
   },
@@ -41,8 +39,6 @@
     "agentMode": "權限模式",
     "agentSettings": "Agent 設定",
     "generalSettings": "通用設定",
-    "showCtxIndicator": "上下文指示",
-    "showCtxIndicatorHint": "在回覆末尾顯示 [ctx: ~N%]",
     "replyFooter": "回覆尾部資訊",
     "replyFooterHint": "在回覆末尾附加模型/用量元資訊",
     "injectSender": "注入發送者",
@@ -146,13 +142,6 @@
     "skippedBusy": "略過（忙碌）",
     "lastRun": "上次執行",
     "notEnabled": "該專案未配置心跳功能。請在 config.toml 中添加 [heartbeat] 配置段以啟用。"
-  },
-  "bridge": {
-    "title": "橋接",
-    "platform": "平台",
-    "capabilities": "能力",
-    "connectedAt": "連線時間",
-    "noAdapters": "尚無橋接介接器"
   },
   "system": {
     "title": "系統",

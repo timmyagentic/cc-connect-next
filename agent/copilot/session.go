@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -859,33 +858,9 @@ func (cs *copilotSession) Close() error {
 // saveImagesToTempDir saves image attachments to a temp directory under workDir
 // and returns their file paths for inclusion in the prompt.
 func saveImagesToTempDir(workDir string, images []core.ImageAttachment) ([]string, error) {
-	imgDir := filepath.Join(workDir, ".cc-connect-next", "images")
-	if err := os.MkdirAll(imgDir, 0o755); err != nil {
-		return nil, fmt.Errorf("saveImagesToTempDir: mkdir: %w", err)
-	}
-
-	paths := make([]string, 0, len(images))
-	for i, img := range images {
-		ext := imageExt(img.MimeType)
-		fname := fmt.Sprintf("img_%d_%d%s", time.Now().UnixMilli(), i, ext)
-		fpath := filepath.Join(imgDir, fname)
-		if err := os.WriteFile(fpath, img.Data, 0o644); err != nil {
-			return nil, fmt.Errorf("saveImagesToTempDir: write %s: %w", fname, err)
-		}
-		paths = append(paths, fpath)
+	paths, err := core.StageImagesToDisk(workDir, images)
+	if err != nil {
+		return nil, fmt.Errorf("saveImagesToTempDir: %w", err)
 	}
 	return paths, nil
-}
-
-func imageExt(mimeType string) string {
-	switch strings.ToLower(mimeType) {
-	case "image/png":
-		return ".png"
-	case "image/gif":
-		return ".gif"
-	case "image/webp":
-		return ".webp"
-	default:
-		return ".jpg"
-	}
 }

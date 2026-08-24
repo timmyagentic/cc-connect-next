@@ -210,7 +210,7 @@ func TestReadSettingsModels(t *testing.T) {
 			"provider-a/family-a/model-beta",
 			"provider-b/family-b/model-gamma",
 		},
-		"defaultModel":  "family-a/model-beta",
+		"defaultModel":    "family-a/model-beta",
 		"defaultProvider": "provider-a",
 	}
 	data, _ := json.Marshal(settings)
@@ -591,29 +591,6 @@ func TestSaveImagesToDisk_RejectsPathTraversal(t *testing.T) {
 	// Sanity: legitimate "ok.png" must still have been saved.
 	if _, err := os.Stat(filepath.Join(attachDir, "ok.png")); err != nil {
 		t.Errorf("legitimate ok.png not saved: %v", err)
-	}
-}
-
-func TestSanitizePiAttachmentName(t *testing.T) {
-	tests := []struct {
-		in, want string
-	}{
-		{"image.png", "image.png"},
-		{"subdir/file.png", "file.png"},
-		{"../../escape.png", "escape.png"},
-		{`..\..\winescape.png`, "winescape.png"},
-		{"/etc/passwd", "passwd"},
-		{"..", ""},
-		{".", ""},
-		{"", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.in, func(t *testing.T) {
-			got := sanitizePiAttachmentName(tt.in)
-			if got != tt.want {
-				t.Errorf("sanitizePiAttachmentName(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
 	}
 }
 

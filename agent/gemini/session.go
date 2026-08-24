@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -55,7 +54,7 @@ func newGeminiSession(ctx context.Context, cmd string, extraArgs []string, workD
 		extraEnv:  extraEnv,
 		events:    make(chan core.Event, 64),
 		ctx:       sessionCtx,
-		cancel:   cancel,
+		cancel:    cancel,
 	}
 	gs.alive.Store(true)
 
@@ -71,45 +70,8 @@ func (gs *geminiSession) Send(prompt string, images []core.ImageAttachment, file
 		return fmt.Errorf("session is closed")
 	}
 
-	// Save images and files into the workspace so Gemini CLI tools can access them.
-	attachDir := filepath.Join(gs.workDir, ".cc-connect-next", "attachments")
-	if (len(images) > 0 || len(files) > 0) && os.MkdirAll(attachDir, 0o755) != nil {
-		attachDir = os.TempDir()
-	}
-
-	var imageRefs []string
-	for i, img := range images {
-		ext := ".png"
-		switch img.MimeType {
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/gif":
-			ext = ".gif"
-		case "image/webp":
-			ext = ".webp"
-		}
-		fname := fmt.Sprintf("img_%d_%d%s", time.Now().UnixMilli(), i, ext)
-		fpath := filepath.Join(attachDir, fname)
-		if err := os.WriteFile(fpath, img.Data, 0o644); err != nil {
-			slog.Warn("geminiSession: failed to save image", "error", err)
-			continue
-		}
-		imageRefs = append(imageRefs, fpath)
-	}
-
-	var fileRefs []string
-	for i, f := range files {
-		fname := filepath.Base(f.FileName)
-		if fname == "" || fname == "." || fname == ".." {
-			fname = fmt.Sprintf("file_%d_%d", time.Now().UnixMilli(), i)
-		}
-		fpath := filepath.Join(attachDir, fname)
-		if err := os.WriteFile(fpath, f.Data, 0o644); err != nil {
-			slog.Warn("geminiSession: failed to save file", "error", err)
-			continue
-		}
-		fileRefs = append(fileRefs, fpath)
-	}
+	imageRefs := core.SaveImagesToDisk(gs.workDir, images)
+	fileRefs := core.SaveFilesToDisk(gs.workDir, files)
 
 	chatID := gs.CurrentSessionID()
 	isResume := chatID != ""

@@ -210,7 +210,7 @@ go test ./...       # 全量测试
 make build-noweb    # 不含 Web 面板的快速构建
 ```
 
-定向套件：`go test ./platform/feishu -run TestBuildRichCard`、`go test ./core -run TestCUJ_Steer`、`go test -tags no_web ./cmd/cc-connect -run TestMigrateLegacyData`。贡献遵循 [CLAUDE.md](CLAUDE.md) 的分层规则：core 只依赖标准库、适配器按能力接口注册、所有用户可见文案五语言齐全、新功能必须附带回归测试。
+定向套件：`go test ./platform/feishu -run TestBuildRichCard`、`go test ./core -run TestCUJ_Steer`、`go test -tags no_web ./cmd/cc-connect -run TestMigrateLegacyData`。贡献遵循 [AGENTS.md](AGENTS.md) 的分层规则：core 不反向依赖 agent/platform、适配器按能力接口注册、所有用户可见文案五语言齐全、新功能必须附带回归测试。
 
 ## 🙏 来源与许可证
 

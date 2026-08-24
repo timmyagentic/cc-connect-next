@@ -88,41 +88,8 @@ func (as *antigravitySession) Send(prompt string, images []core.ImageAttachment,
 		}
 	}
 
-	// Save images and files into the workspace
-	attachDir := filepath.Join(as.workDir, ".cc-connect-next", "attachments")
-	if (len(images) > 0 || len(files) > 0) && os.MkdirAll(attachDir, 0o755) != nil {
-		attachDir = os.TempDir()
-	}
-
-	var imageRefs []string
-	for i, img := range images {
-		ext := ".png"
-		switch img.MimeType {
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/gif":
-			ext = ".gif"
-		case "image/webp":
-			ext = ".webp"
-		}
-		fname := fmt.Sprintf("img_%d_%d%s", time.Now().UnixMilli(), i, ext)
-		fpath := filepath.Join(attachDir, fname)
-		if err := os.WriteFile(fpath, img.Data, 0o600); err == nil {
-			imageRefs = append(imageRefs, fpath)
-		}
-	}
-
-	var fileRefs []string
-	for i, f := range files {
-		fname := filepath.Base(f.FileName)
-		if fname == "" || fname == "." || fname == ".." {
-			fname = fmt.Sprintf("file_%d_%d", time.Now().UnixMilli(), i)
-		}
-		fpath := filepath.Join(attachDir, fname)
-		if err := os.WriteFile(fpath, f.Data, 0o600); err == nil {
-			fileRefs = append(fileRefs, fpath)
-		}
-	}
+	imageRefs := core.SaveImagesToDisk(as.workDir, images)
+	fileRefs := core.SaveFilesToDisk(as.workDir, files)
 
 	chatID := as.CurrentSessionID()
 	isResume := chatID != ""

@@ -7,17 +7,21 @@ import (
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
-func TestAgentUsageProbeEnv_AddsHostManagedFlagForCustomProvider(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{
-				Name:    "custom",
-				BaseURL: "https://example.com/v1",
-				APIKey:  "secret",
-			},
-		},
-		activeIdx: 0,
+func providerTestAgent(providers []core.ProviderConfig, active string) *Agent {
+	a := &Agent{}
+	a.SetProviders(providers)
+	if active != "" && !a.SetActiveProvider(active) {
+		panic("test provider not found: " + active)
 	}
+	return a
+}
+
+func TestAgentUsageProbeEnv_AddsHostManagedFlagForCustomProvider(t *testing.T) {
+	a := providerTestAgent([]core.ProviderConfig{{
+		Name:    "custom",
+		BaseURL: "https://example.com/v1",
+		APIKey:  "secret",
+	}}, "custom")
 
 	env := envSliceToMap(a.usageProbeEnv())
 
@@ -33,15 +37,10 @@ func TestAgentUsageProbeEnv_AddsHostManagedFlagForCustomProvider(t *testing.T) {
 }
 
 func TestAgentUsageProbeEnv_DoesNotAddHostManagedFlagForModelOnlyProvider(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{
-				Name:  "model-only",
-				Model: "claude-sonnet-4",
-			},
-		},
-		activeIdx: 0,
-	}
+	a := providerTestAgent([]core.ProviderConfig{{
+		Name:  "model-only",
+		Model: "claude-sonnet-4",
+	}}, "model-only")
 
 	env := envSliceToMap(a.usageProbeEnv())
 	if _, ok := env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"]; ok {
@@ -50,17 +49,10 @@ func TestAgentUsageProbeEnv_DoesNotAddHostManagedFlagForModelOnlyProvider(t *tes
 }
 
 func TestAgentUsageProbeEnv_AddsHostManagedFlagForProviderEnvRoutingOverrides(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{
-				Name: "bedrock",
-				Env: map[string]string{
-					"CLAUDE_CODE_USE_BEDROCK": "1",
-				},
-			},
-		},
-		activeIdx: 0,
-	}
+	a := providerTestAgent([]core.ProviderConfig{{
+		Name: "bedrock",
+		Env:  map[string]string{"CLAUDE_CODE_USE_BEDROCK": "1"},
+	}}, "bedrock")
 
 	env := envSliceToMap(a.usageProbeEnv())
 	if got := env["CLAUDE_CODE_USE_BEDROCK"]; got != "1" {
@@ -106,23 +98,20 @@ func TestAgentUsageProbeEnv_AddsHostManagedFlagForRouterOverrides(t *testing.T) 
 }
 
 func TestProviderEnv_SetsAnthropicModel(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{
-				Name:    "provider-a",
-				BaseURL: "https://a.example.com/v1",
-				APIKey:  "key-a",
-				Model:   "model-a",
-			},
-			{
-				Name:    "provider-b",
-				BaseURL: "https://b.example.com/v1",
-				APIKey:  "key-b",
-				Model:   "model-b",
-			},
+	a := providerTestAgent([]core.ProviderConfig{
+		{
+			Name:    "provider-a",
+			BaseURL: "https://a.example.com/v1",
+			APIKey:  "key-a",
+			Model:   "model-a",
 		},
-		activeIdx: 0,
-	}
+		{
+			Name:    "provider-b",
+			BaseURL: "https://b.example.com/v1",
+			APIKey:  "key-b",
+			Model:   "model-b",
+		},
+	}, "provider-a")
 
 	env := envSliceToMap(a.providerEnvLocked())
 	if got := env["ANTHROPIC_MODEL"]; got != "model-a" {
@@ -143,16 +132,11 @@ func TestProviderEnv_SetsAnthropicModel(t *testing.T) {
 }
 
 func TestProviderEnv_NoModelWhenEmpty(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{
-				Name:    "no-model",
-				BaseURL: "https://example.com/v1",
-				APIKey:  "key",
-			},
-		},
-		activeIdx: 0,
-	}
+	a := providerTestAgent([]core.ProviderConfig{{
+		Name:    "no-model",
+		BaseURL: "https://example.com/v1",
+		APIKey:  "key",
+	}}, "no-model")
 	env := envSliceToMap(a.providerEnvLocked())
 	if _, ok := env["ANTHROPIC_MODEL"]; ok {
 		t.Fatalf("ANTHROPIC_MODEL should not be set when provider has no model")
@@ -160,12 +144,9 @@ func TestProviderEnv_NoModelWhenEmpty(t *testing.T) {
 }
 
 func TestProviderEnv_ClearReturnsNil(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{Name: "p", BaseURL: "https://x.com", APIKey: "k", Model: "m"},
-		},
-		activeIdx: 0,
-	}
+	a := providerTestAgent([]core.ProviderConfig{
+		{Name: "p", BaseURL: "https://x.com", APIKey: "k", Model: "m"},
+	}, "p")
 	a.SetActiveProvider("")
 	env := a.providerEnvLocked()
 	if env != nil {
@@ -174,39 +155,20 @@ func TestProviderEnv_ClearReturnsNil(t *testing.T) {
 }
 
 func TestStartSession_UsesActiveProviderModel(t *testing.T) {
-	a := &Agent{
-		model: "default-model",
-		providers: []core.ProviderConfig{
-			{Name: "p1", Model: "provider-model-1"},
-			{Name: "p2", Model: "provider-model-2"},
-		},
-		activeIdx: 0,
-	}
+	a := providerTestAgent([]core.ProviderConfig{
+		{Name: "p1", Model: "provider-model-1"},
+		{Name: "p2", Model: "provider-model-2"},
+	}, "p1")
+	a.model = "default-model"
 
-	a.mu.Lock()
-	activeIdx := a.activeIdx
-	model := a.model
-	if activeIdx >= 0 && activeIdx < len(a.providers) {
-		if m := a.providers[activeIdx].Model; m != "" {
-			model = m
-		}
-	}
-	a.mu.Unlock()
+	model := a.GetModel()
 
 	if model != "provider-model-1" {
 		t.Fatalf("model = %q, want %q", model, "provider-model-1")
 	}
 
 	a.SetActiveProvider("p2")
-	a.mu.Lock()
-	activeIdx = a.activeIdx
-	model = a.model
-	if activeIdx >= 0 && activeIdx < len(a.providers) {
-		if m := a.providers[activeIdx].Model; m != "" {
-			model = m
-		}
-	}
-	a.mu.Unlock()
+	model = a.GetModel()
 
 	if model != "provider-model-2" {
 		t.Fatalf("after switch: model = %q, want %q", model, "provider-model-2")
@@ -226,19 +188,16 @@ func envSliceToMap(env []string) map[string]string {
 }
 
 func TestProviderEnv_BedrockThinkingRewrite(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{
-				Name: "bedrock",
-				Env: map[string]string{
-					"CLAUDE_CODE_USE_BEDROCK": "1",
-					"AWS_PROFILE":             "bedrock",
-				},
-				Thinking: "disabled",
+	a := providerTestAgent([]core.ProviderConfig{
+		{
+			Name: "bedrock",
+			Env: map[string]string{
+				"CLAUDE_CODE_USE_BEDROCK": "1",
+				"AWS_PROFILE":             "bedrock",
 			},
+			Thinking: "disabled",
 		},
-		activeIdx: 0,
-	}
+	}, "bedrock")
 
 	env := envSliceToMap(a.providerEnvLocked())
 
@@ -263,19 +222,16 @@ func TestProviderEnv_BedrockThinkingRewrite(t *testing.T) {
 }
 
 func TestProviderEnv_VertexThinkingRewrite(t *testing.T) {
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{
-				Name: "vertex",
-				Env: map[string]string{
-					"CLAUDE_CODE_USE_VERTEX": "1",
-					"CLOUD_ML_REGION":        "us-east1",
-				},
-				Thinking: "disabled",
+	a := providerTestAgent([]core.ProviderConfig{
+		{
+			Name: "vertex",
+			Env: map[string]string{
+				"CLAUDE_CODE_USE_VERTEX": "1",
+				"CLOUD_ML_REGION":        "us-east1",
 			},
+			Thinking: "disabled",
 		},
-		activeIdx: 0,
-	}
+	}, "vertex")
 
 	env := envSliceToMap(a.providerEnvLocked())
 
@@ -291,17 +247,14 @@ func TestProviderEnv_VertexThinkingRewrite(t *testing.T) {
 
 func TestProviderEnv_BedrockNoThinking(t *testing.T) {
 	// Without thinking override, Bedrock provider should not use proxy.
-	a := &Agent{
-		providers: []core.ProviderConfig{
-			{
-				Name: "bedrock",
-				Env: map[string]string{
-					"CLAUDE_CODE_USE_BEDROCK": "1",
-				},
+	a := providerTestAgent([]core.ProviderConfig{
+		{
+			Name: "bedrock",
+			Env: map[string]string{
+				"CLAUDE_CODE_USE_BEDROCK": "1",
 			},
 		},
-		activeIdx: 0,
-	}
+	}, "bedrock")
 
 	env := envSliceToMap(a.providerEnvLocked())
 
@@ -339,7 +292,7 @@ func TestClaudecode_SessionResume_PreservesActiveProvider(t *testing.T) {
 	}
 
 	// Step 1: simulate the user's first message after `/provider switch minimax`.
-	a1 := &Agent{providers: providers, activeIdx: -1}
+	a1 := providerTestAgent(providers, "")
 	if !a1.SetActiveProvider("minimax") {
 		t.Fatal("SetActiveProvider(minimax) returned false")
 	}
@@ -354,7 +307,7 @@ func TestClaudecode_SessionResume_PreservesActiveProvider(t *testing.T) {
 	// Step 2: simulate a cc-connect-next process restart. agent_session_id is
 	// already on disk (carried by the engine via session.AgentSessionID), but
 	// the in-memory activeIdx is back to -1.
-	a2 := &Agent{providers: providers, activeIdx: -1}
+	a2 := providerTestAgent(providers, "")
 	gotBefore := envSliceToMap(a2.providerEnvLocked())
 	if _, hasModel := gotBefore["ANTHROPIC_MODEL"]; hasModel {
 		t.Fatalf("post-restart pre-restore should have empty providerEnv, got %v", gotBefore)

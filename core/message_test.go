@@ -145,6 +145,39 @@ func TestSaveFilesToDisk_DuplicateNamesWithinMessageAreUnique(t *testing.T) {
 	}
 }
 
+func TestSaveImagesToDiskSanitizesNamesAndInfersExtensions(t *testing.T) {
+	workDir := t.TempDir()
+	paths := SaveImagesToDisk(workDir, []ImageAttachment{
+		{FileName: "../../photo.jpg", MimeType: "image/jpeg", Data: []byte("jpeg")},
+		{MimeType: "image/webp", Data: []byte("webp")},
+	})
+	if len(paths) != 2 {
+		t.Fatalf("SaveImagesToDisk() paths = %v, want 2", paths)
+	}
+	attachDir := filepath.Join(workDir, ".cc-connect-next", "attachments")
+	for _, path := range paths {
+		if !strings.HasPrefix(path, attachDir+string(filepath.Separator)) {
+			t.Fatalf("image escaped attachment directory: %q", path)
+		}
+	}
+	if got := filepath.Base(paths[0]); got != "photo.jpg" {
+		t.Fatalf("sanitized image name = %q, want photo.jpg", got)
+	}
+	if got := filepath.Ext(paths[1]); got != ".webp" {
+		t.Fatalf("inferred image extension = %q, want .webp", got)
+	}
+}
+
+func TestStageImagesToDiskFailsWhenAttachmentDirectoryCannotBeCreated(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(workDir, []byte("file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StageImagesToDisk(workDir, []ImageAttachment{{Data: []byte("image")}}); err == nil {
+		t.Fatal("StageImagesToDisk() error = nil, want directory creation failure")
+	}
+}
+
 func TestScopeFileAttachmentsUsesTriggerMessageWithoutMutatingInput(t *testing.T) {
 	input := []FileAttachment{{FileName: "report.txt"}}
 	got := scopeFileAttachments(input, "trigger-message")

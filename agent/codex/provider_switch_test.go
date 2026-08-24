@@ -96,10 +96,8 @@ func TestIntegration_Codex_ProviderSwitch_EnvVars(t *testing.T) {
 		t.Skipf("project %q has only %d provider(s), need at least 2", name, len(providers))
 	}
 
-	a := &Agent{
-		providers: providers,
-		activeIdx: -1,
-	}
+	a := &Agent{}
+	a.SetProviders(providers)
 
 	p0, p1 := providers[0], providers[1]
 	t.Logf("provider[0]: name=%s model=%s base_url=%s", p0.Name, p0.Model, p0.BaseURL)
@@ -159,13 +157,12 @@ func TestIntegration_Codex_ProviderSwitch_SessionArgs(t *testing.T) {
 		t.Run(prov.Name, func(t *testing.T) {
 			a := &Agent{
 				model:     "default-model",
-				providers: providers,
-				activeIdx: -1,
 				workDir:   workDir,
 				codexHome: codexHome,
 				mode:      "suggest",
 				backend:   "exec",
 			}
+			a.SetProviders(providers)
 			a.SetActiveProvider(prov.Name)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -292,13 +289,12 @@ func TestIntegration_Codex_ProviderSwitch_SendMessage(t *testing.T) {
 
 			a := &Agent{
 				model:     "default-model",
-				providers: providers,
-				activeIdx: -1,
 				workDir:   workDir,
 				codexHome: codexHome,
 				mode:      "full-auto",
 				backend:   "exec",
 			}
+			a.SetProviders(providers)
 			a.SetActiveProvider(prov.Name)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

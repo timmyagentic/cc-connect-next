@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 func skipUnlessKimiAvailable(t *testing.T) {
@@ -63,11 +63,10 @@ func TestAgentNew(t *testing.T) {
 // the kimi CLI on PATH — constructs the struct directly.
 func TestAgentFields(t *testing.T) {
 	a := &Agent{
-		workDir:   "/tmp",
-		model:     "kimi-k2",
-		mode:      "yolo",
-		cmd:       "kimi",
-		activeIdx: -1,
+		workDir: "/tmp",
+		model:   "kimi-k2",
+		mode:    "yolo",
+		cmd:     "kimi",
 	}
 	assert.Equal(t, "kimi", a.Name())
 	assert.Equal(t, "Kimi", a.CLIDisplayName())
@@ -78,7 +77,7 @@ func TestAgentFields(t *testing.T) {
 }
 
 func TestAgentSetters(t *testing.T) {
-	a := &Agent{workDir: "/tmp", mode: "default", activeIdx: -1}
+	a := &Agent{workDir: "/tmp", mode: "default"}
 
 	a.SetWorkDir("/new/path")
 	assert.Equal(t, "/new/path", a.GetWorkDir())
@@ -102,7 +101,7 @@ func TestAgentPermissionModes(t *testing.T) {
 }
 
 func TestAgentProviderSwitcher(t *testing.T) {
-	a := &Agent{workDir: "/tmp", activeIdx: -1}
+	a := &Agent{workDir: "/tmp"}
 
 	providers := []core.ProviderConfig{
 		{Name: "moonshot", APIKey: "sk-123"},
@@ -144,7 +143,7 @@ func TestAgentStartSession(t *testing.T) {
 }
 
 func TestAgentMemoryAndSkill(t *testing.T) {
-	a := &Agent{workDir: "/tmp/my-project", activeIdx: -1}
+	a := &Agent{workDir: "/tmp/my-project"}
 
 	assert.Equal(t, "/tmp/my-project/AGENTS.md", a.ProjectMemoryFile())
 	assert.NotEmpty(t, a.GlobalMemoryFile())
@@ -156,7 +155,7 @@ func TestAgentMemoryAndSkill(t *testing.T) {
 }
 
 func TestAgentAvailableModels(t *testing.T) {
-	a := &Agent{workDir: "/tmp", activeIdx: -1}
+	a := &Agent{workDir: "/tmp"}
 
 	models := a.AvailableModels(context.Background())
 	require.True(t, len(models) > 0)

@@ -116,7 +116,6 @@ func TestStartSession_ExecCarriesModelContextWindow(t *testing.T) {
 		mode:          "suggest",
 		backend:       "exec",
 		contextWindow: testModelContextWindow,
-		activeIdx:     -1,
 	}
 	session, err := agent.StartSession(context.Background(), "")
 	if err != nil {

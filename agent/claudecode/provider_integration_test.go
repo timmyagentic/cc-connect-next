@@ -85,10 +85,7 @@ func TestIntegration_ProviderSwitch_EnvVars(t *testing.T) {
 		t.Skipf("project %q has only %d provider(s), need at least 2", name, len(providers))
 	}
 
-	a := &Agent{
-		providers: providers,
-		activeIdx: -1,
-	}
+	a := providerTestAgent(providers, "")
 
 	p0, p1 := providers[0], providers[1]
 	t.Logf("provider[0]: name=%s model=%s base_url=%s", p0.Name, p0.Model, p0.BaseURL)
@@ -156,12 +153,11 @@ func TestIntegration_ProviderSwitch_SessionStartModel(t *testing.T) {
 	for _, prov := range providers[:2] {
 		t.Run(prov.Name, func(t *testing.T) {
 			a := &Agent{
-				model:     "default-model",
-				providers: providers,
-				activeIdx: -1,
-				workDir:   workDir,
-				cmd:    cliBin,
+				model:   "default-model",
+				workDir: workDir,
+				cmd:     cliBin,
 			}
+			a.SetProviders(providers)
 			a.SetActiveProvider(prov.Name)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -97,38 +97,115 @@ func SaveFilesToDisk(workDir string, files []FileAttachment) []string {
 	if len(files) == 0 {
 		return nil
 	}
-	absWorkDir, err := filepath.Abs(workDir)
-	if err != nil {
-		absWorkDir = workDir
-		slog.Warn("SaveFilesToDisk: filepath.Abs failed, using raw workDir", "workDir", workDir, "error", err)
-	}
-	baseDir := filepath.Join(absWorkDir, ".cc-connect-next", "attachments")
+	baseDir := filepath.Join(absoluteWorkDir(workDir), ".cc-connect-next", "attachments")
 
 	var paths []string
-	for i, f := range files {
+	for _, f := range files {
 		attachDir := baseDir
 		if messageID := sanitizeAttachmentFileName(f.MessageID); messageID != "" {
 			attachDir = filepath.Join(baseDir, messageID)
 		}
-		if err := os.MkdirAll(attachDir, 0o755); err != nil {
-			slog.Warn("SaveFilesToDisk: mkdir failed", "dir", attachDir, "error", err)
-			continue
-		}
-		fname := sanitizeAttachmentFileName(f.FileName)
-		if fname == "" {
-			fname = fmt.Sprintf("file_%d_%d", time.Now().UnixNano(), i)
-		}
-		fpath, ok := writeUniqueAttachmentFile(attachDir, fname, f.Data)
-		if !ok {
-			continue
-		}
-		paths = append(paths, fpath)
-		slog.Debug("SaveFilesToDisk: file saved", "path", fpath, "name", f.FileName, "mime", f.MimeType, "size", len(f.Data))
+		paths = append(paths, SaveFilesToDir(attachDir, []FileAttachment{f})...)
 	}
 	return paths
 }
 
-func writeUniqueAttachmentFile(dir, name string, data []byte) (string, bool) {
+// SaveFilesToDir saves files directly under dir using the same sanitization and
+// collision handling as SaveFilesToDisk. It is best-effort: failed items are
+// logged and omitted from the returned paths.
+func SaveFilesToDir(dir string, files []FileAttachment) []string {
+	if len(files) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		slog.Warn("SaveFilesToDir: mkdir failed", "dir", dir, "error", err)
+		return nil
+	}
+	paths := make([]string, 0, len(files))
+	for i, file := range files {
+		name := sanitizeAttachmentFileName(file.FileName)
+		if name == "" {
+			name = fmt.Sprintf("file_%d_%d", time.Now().UnixNano(), i)
+		}
+		path, err := writeUniqueAttachmentFile(dir, name, file.Data)
+		if err != nil {
+			continue
+		}
+		paths = append(paths, path)
+		slog.Debug("SaveFilesToDir: file saved", "path", path, "name", file.FileName, "mime", file.MimeType, "size", len(file.Data))
+	}
+	return paths
+}
+
+// SaveImagesToDisk saves images under the workspace attachment directory.
+// It is best-effort and returns every successfully staged absolute path.
+func SaveImagesToDisk(workDir string, images []ImageAttachment) []string {
+	return SaveImagesToDir(filepath.Join(absoluteWorkDir(workDir), ".cc-connect-next", "attachments"), images)
+}
+
+// SaveImagesToDir is the directory-scoped form of SaveImagesToDisk.
+func SaveImagesToDir(dir string, images []ImageAttachment) []string {
+	paths, err := saveImagesToDir(dir, images, false)
+	if err != nil {
+		slog.Warn("SaveImagesToDir: staging failed", "dir", dir, "error", err)
+	}
+	return paths
+}
+
+// StageImagesToDisk is the fail-fast form used by agents whose protocol cannot
+// continue after an image fails to stage.
+func StageImagesToDisk(workDir string, images []ImageAttachment) ([]string, error) {
+	return saveImagesToDir(filepath.Join(absoluteWorkDir(workDir), ".cc-connect-next", "attachments"), images, true)
+}
+
+func saveImagesToDir(dir string, images []ImageAttachment, failFast bool) ([]string, error) {
+	if len(images) == 0 {
+		return nil, nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create image attachment dir: %w", err)
+	}
+	paths := make([]string, 0, len(images))
+	for i, image := range images {
+		name := sanitizeAttachmentFileName(image.FileName)
+		if name == "" {
+			name = fmt.Sprintf("image_%d_%d%s", time.Now().UnixNano(), i, imageFileExtension(image.MimeType))
+		}
+		path, err := writeUniqueAttachmentFile(dir, name, image.Data)
+		if err != nil {
+			if failFast {
+				return nil, err
+			}
+			continue
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
+}
+
+func absoluteWorkDir(workDir string) string {
+	absWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		slog.Warn("attachment staging: filepath.Abs failed, using raw workDir", "workDir", workDir, "error", err)
+		return workDir
+	}
+	return absWorkDir
+}
+
+func imageFileExtension(mimeType string) string {
+	switch strings.ToLower(mimeType) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ".png"
+	}
+}
+
+func writeUniqueAttachmentFile(dir, name string, data []byte) (string, error) {
 	for index := 0; ; index++ {
 		candidate := name
 		if index > 0 {
@@ -142,21 +219,21 @@ func writeUniqueAttachmentFile(dir, name string, data []byte) (string, bool) {
 			if os.IsExist(err) {
 				continue
 			}
-			slog.Error("SaveFilesToDisk: create failed", "path", path, "error", err)
-			return "", false
+			slog.Error("attachment staging: create failed", "path", path, "error", err)
+			return "", err
 		}
 		if _, err := file.Write(data); err != nil {
 			_ = file.Close()
 			_ = os.Remove(path)
-			slog.Error("SaveFilesToDisk: write failed", "path", path, "error", err)
-			return "", false
+			slog.Error("attachment staging: write failed", "path", path, "error", err)
+			return "", err
 		}
 		if err := file.Close(); err != nil {
 			_ = os.Remove(path)
-			slog.Error("SaveFilesToDisk: close failed", "path", path, "error", err)
-			return "", false
+			slog.Error("attachment staging: close failed", "path", path, "error", err)
+			return "", err
 		}
-		return path, true
+		return path, nil
 	}
 }
 

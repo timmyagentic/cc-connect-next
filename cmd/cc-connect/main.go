@@ -476,15 +476,8 @@ func main() {
 		lang := configLanguage(cfg.Language)
 
 		engine := core.NewEngine(proj.Name, agent, platforms, sessionFile, lang)
-		// Wire display settings including show_context_indicator and reply_footer
-		// Global [display] config can be overridden by project-level settings
-		_, _, _, _, _, showCtx, showFooter, _ := config.EffectiveDisplay(cfg, &proj)
-		engine.SetShowContextIndicator(showCtx)
-		showWorkdir := true
-		if proj.ShowWorkdirIndicator != nil {
-			showWorkdir = *proj.ShowWorkdirIndicator
-		}
-		engine.SetShowWorkdirIndicator(showWorkdir)
+		// Global [display] config can be overridden by project-level settings.
+		_, _, _, _, _, _, showFooter, _ := config.EffectiveDisplay(cfg, &proj)
 		engine.SetReplyFooterEnabled(showFooter)
 		engine.SetAttachmentSendEnabled(cfg.AttachmentSend != "off")
 		feedbackEndpoint := cfg.Feedback.Endpoint
@@ -1803,7 +1796,7 @@ func reloadConfig(configPath, projName string, engine *core.Engine) (*core.Confi
 	}
 
 	// Reload display config (includes legacy quiet → display mapping)
-	mode, tm, tool, tmlen, toollen, showCtx, showFooter, hideAgentFooter := config.EffectiveDisplay(cfg, proj)
+	mode, tm, tool, tmlen, toollen, _, showFooter, hideAgentFooter := config.EffectiveDisplay(cfg, proj)
 	historyMaxLen := config.EffectiveHistoryMaxLen(cfg, proj)
 	engine.SetDisplayConfig(core.DisplayCfg{
 		Mode:             mode,
@@ -1817,13 +1810,6 @@ func reloadConfig(configPath, projName string, engine *core.Engine) (*core.Confi
 	})
 	result.DisplayUpdated = true
 
-	// Wire show_context_indicator and reply_footer from display config
-	engine.SetShowContextIndicator(showCtx)
-	showWorkdir := true
-	if proj.ShowWorkdirIndicator != nil {
-		showWorkdir = *proj.ShowWorkdirIndicator
-	}
-	engine.SetShowWorkdirIndicator(showWorkdir)
 	engine.SetReplyFooterEnabled(showFooter)
 
 	// Reload auto-compress settings

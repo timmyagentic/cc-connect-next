@@ -2831,19 +2831,6 @@ type quotedMessage struct {
 // when building a reply chain. This limits API calls per inbound reply.
 const maxReplyChainDepth = 5
 
-// fetchQuotedMessage retrieves the content of a parent message that the user
-// is replying to, and returns formatted context plus downloaded attachments.
-// For multi-level reply chains, it traces parent_id links up to maxReplyChainDepth
-// levels and returns the full conversation chain.
-// Returns every successfully recovered message. A failure before the first
-// message yields empty content; an ancestor failure yields a partial chain so
-// the user's current message still reaches the Agent while bootstrap remains
-// retryable through fetchQuotedMessageWithStatus.
-func (p *Platform) fetchQuotedMessage(ctx context.Context, parentID string) quotedMessage {
-	quoted, _ := p.fetchQuotedMessageWithStatus(ctx, parentID)
-	return quoted
-}
-
 // fetchQuotedMessageWithStatus also reports whether traversal is terminal.
 // False with non-empty content means an ancestor fetch failed after a partial
 // chain was recovered and topic bootstrap should try again on the next turn.
@@ -3878,10 +3865,6 @@ func detectMimeType(data []byte) string {
 	return "image/png"
 }
 
-func buildReplyContent(content string) (msgType string, body string) {
-	return buildReplyContentWithResolvedMention(content, false)
-}
-
 func buildReplyContentWithResolvedMention(content string, resolvedMention bool) (msgType string, body string) {
 	// Feishu only generates a native mention event for MsgTypeText. A card or
 	// post at-tag can look correct while silently failing to notify the target.
@@ -3982,74 +3965,6 @@ func containsMarkdown(s string) bool {
 		}
 	}
 	return false
-}
-
-// buildPostJSON converts markdown content to Feishu post (rich text) format.
-func buildPostJSON(content string) string {
-	lines := strings.Split(content, "\n")
-	var postLines [][]map[string]any
-	inCodeBlock := false
-	var codeLines []string
-	codeLang := ""
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		if strings.HasPrefix(trimmed, "```") {
-			if !inCodeBlock {
-				inCodeBlock = true
-				codeLang = strings.TrimPrefix(trimmed, "```")
-				codeLines = nil
-			} else {
-				inCodeBlock = false
-				postLines = append(postLines, []map[string]any{{
-					"tag":      "code_block",
-					"language": codeLang,
-					"text":     strings.Join(codeLines, "\n"),
-				}})
-			}
-			continue
-		}
-
-		if inCodeBlock {
-			codeLines = append(codeLines, line)
-			continue
-		}
-
-		// Convert # headers to bold
-		headerLine := line
-		for level := 6; level >= 1; level-- {
-			prefix := strings.Repeat("#", level) + " "
-			if strings.HasPrefix(line, prefix) {
-				headerLine = "**" + strings.TrimPrefix(line, prefix) + "**"
-				break
-			}
-		}
-
-		elements := parseInlineMarkdown(headerLine)
-		if len(elements) > 0 {
-			postLines = append(postLines, elements)
-		} else {
-			postLines = append(postLines, []map[string]any{{"tag": "text", "text": ""}})
-		}
-	}
-
-	// Handle unclosed code block
-	if inCodeBlock && len(codeLines) > 0 {
-		postLines = append(postLines, []map[string]any{{
-			"tag":      "code_block",
-			"language": codeLang,
-			"text":     strings.Join(codeLines, "\n"),
-		}})
-	}
-
-	post := map[string]any{
-		"zh_cn": map[string]any{
-			"content": postLines,
-		},
-	}
-	b, _ := json.Marshal(post)
-	return string(b)
 }
 
 // isValidFeishuHref checks whether a URL is acceptable as a Feishu post href.

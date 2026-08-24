@@ -570,9 +570,9 @@ func TestSession_SendWithImages(t *testing.T) {
 		{MimeType: "image/png", Data: []byte{0x89, 0x50, 0x4e, 0x47}},
 	}
 
-	// Just ensure no panic and images dir gets created
+	// Just ensure no panic and the shared attachment directory gets created.
 	_ = cs.Send("describe image", images, nil)
-	imgDir := tmpDir + "/.cc-connect-next/images"
+	imgDir := tmpDir + "/.cc-connect-next/attachments"
 	entries, _ := os.ReadDir(imgDir)
 	if len(entries) != 1 {
 		t.Fatalf("expected 1 image file, got %d", len(entries))
