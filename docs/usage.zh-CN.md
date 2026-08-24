@@ -96,6 +96,15 @@ backend = "app_server"   # 默认；原生 turn/steer
 app_server_url = "stdio" # 默认；本地子进程传输
 ```
 
+如果要为当前 CC Connect 项目覆盖 Codex 上下文窗口，可在同一张表中设置正整数。
+CC Connect 会在两种 Codex 后端上都把它作为结构化 `-c` 覆盖下发；省略时继续使用
+Codex 模型或自身配置中的默认值：
+
+```toml
+[projects.agent.options]
+model_context_window = 872000
+```
+
 steer 通过 `turn/steer` 发送，并用 `expectedTurnId` 锁定当前回合，不会与回合完成产生竞态。steer 确定不可用时（后端不支持、回合刚好结束），消息安全回退到队列。
 
 **`queue`。** 设置 `busy_message_mode = "queue"` 可始终使用会话级 FIFO：忙时消息在当前回合结束后作为新回合处理（v0.1.3 之前的行为）。若 steer 结果**未知**（RPC 超时），消息刻意**不会**自动重新排队——那可能造成重复投递——你会收到明确的警告提示。

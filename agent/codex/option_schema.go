@@ -19,6 +19,7 @@ func (a *Agent) KnownOptionKeys() []string {
 		"env",
 		"mode",
 		"model",
+		"model_context_window",
 		"reasoning_effort",
 		"service_tier",
 		"system_prompt",
