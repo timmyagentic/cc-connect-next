@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -116,44 +115,14 @@ func (s *opencodeSession) Send(prompt string, images []core.ImageAttachment, fil
 }
 
 func (s *opencodeSession) stageImages(prompt string, images []core.ImageAttachment) (string, []string, error) {
-	if len(images) == 0 {
-		return prompt, nil, nil
+	imagePaths, err := core.StageImagesToDisk(s.workDir, images)
+	if err != nil {
+		return "", nil, fmt.Errorf("opencodeSession: stage images: %w", err)
 	}
-
-	imgDir := filepath.Join(s.workDir, ".cc-connect-next", "images")
-	if err := os.MkdirAll(imgDir, 0o755); err != nil {
-		return "", nil, fmt.Errorf("opencodeSession: create image dir: %w", err)
-	}
-
-	imagePaths := make([]string, 0, len(images))
-	for i, img := range images {
-		ext := opencodeImageExt(img.MimeType)
-		fname := fmt.Sprintf("img_%d_%d%s", time.Now().UnixMilli(), i, ext)
-		fpath := filepath.Join(imgDir, fname)
-		if err := os.WriteFile(fpath, img.Data, 0o644); err != nil {
-			return "", nil, fmt.Errorf("opencodeSession: save image: %w", err)
-		}
-		imagePaths = append(imagePaths, fpath)
-	}
-
-	if prompt == "" {
+	if len(imagePaths) > 0 && prompt == "" {
 		prompt = "Please analyze the attached image(s)."
 	}
-
 	return prompt, imagePaths, nil
-}
-
-func opencodeImageExt(mimeType string) string {
-	switch mimeType {
-	case "image/jpeg":
-		return ".jpg"
-	case "image/gif":
-		return ".gif"
-	case "image/webp":
-		return ".webp"
-	default:
-		return ".png"
-	}
 }
 
 func (s *opencodeSession) buildRunArgs(prompt string, imagePaths []string, chatID string) []string {

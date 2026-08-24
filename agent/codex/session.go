@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -206,31 +205,7 @@ func (cs *codexSession) Steer(string, []core.ImageAttachment, []core.FileAttachm
 }
 
 func (cs *codexSession) stageImages(prompt string, images []core.ImageAttachment) (string, []string, error) {
-	if len(images) == 0 {
-		return prompt, nil, nil
-	}
-
-	imgDir := filepath.Join(cs.workDir, ".cc-connect-next", "images")
-	if err := os.MkdirAll(imgDir, 0o755); err != nil {
-		return "", nil, fmt.Errorf("codexSession: create image dir: %w", err)
-	}
-
-	imagePaths := make([]string, 0, len(images))
-	for i, img := range images {
-		ext := codexImageExt(img.MimeType)
-		fname := fmt.Sprintf("img_%d_%d%s", time.Now().UnixMilli(), i, ext)
-		fpath := filepath.Join(imgDir, fname)
-		if err := os.WriteFile(fpath, img.Data, 0o644); err != nil {
-			return "", nil, fmt.Errorf("codexSession: save image: %w", err)
-		}
-		imagePaths = append(imagePaths, fpath)
-	}
-
-	if strings.TrimSpace(prompt) == "" {
-		prompt = "Please analyze the attached image(s)."
-	}
-
-	return prompt, imagePaths, nil
+	return stageCodexImages(cs.workDir, prompt, "codexSession", images)
 }
 
 // launchArgs composes the full exec argv: cliExtraArgs from the user's cmd
@@ -328,19 +303,6 @@ func (cs *codexSession) buildExecArgs(prompt string, imagePaths []string) []stri
 		args = append(args, "--json", "--cd", cs.workDir, "-")
 	}
 	return args
-}
-
-func codexImageExt(mime string) string {
-	switch mime {
-	case "image/jpeg":
-		return ".jpg"
-	case "image/gif":
-		return ".gif"
-	case "image/webp":
-		return ".webp"
-	default:
-		return ".png"
-	}
 }
 
 func (cs *codexSession) readLoop(cmd *exec.Cmd, stdout io.ReadCloser, stderrBuf *bytes.Buffer) {

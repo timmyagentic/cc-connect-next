@@ -952,26 +952,11 @@ func (cs *claudeSession) Send(prompt string, images []core.ImageAttachment, file
 		})
 	}
 
-	attachDir := filepath.Join(cs.workDir, ".cc-connect-next", "attachments")
-	if err := os.MkdirAll(attachDir, 0o755); err != nil {
-		slog.Warn("claudeSession: mkdir attachments failed", "error", err, "path", attachDir)
-	}
-
 	var parts []map[string]any
-	var savedPaths []string
+	savedPaths := core.SaveImagesToDisk(cs.workDir, images)
 
-	// Save and encode images
-	for i, img := range images {
-		ext := extFromMime(img.MimeType)
-		fname := fmt.Sprintf("img_%d_%d%s", time.Now().UnixMilli(), i, ext)
-		fpath := filepath.Join(attachDir, fname)
-		if err := os.WriteFile(fpath, img.Data, 0o644); err != nil {
-			slog.Error("claudeSession: save image failed", "error", err)
-			continue
-		}
-		savedPaths = append(savedPaths, fpath)
-		slog.Debug("claudeSession: image saved", "path", fpath, "size", len(img.Data))
-
+	// Images are sent inline even if the optional local staging copy fails.
+	for _, img := range images {
 		mimeType := img.MimeType
 		if mimeType == "" {
 			mimeType = "image/png"
@@ -1008,19 +993,6 @@ func (cs *claudeSession) Send(prompt string, images []core.ImageAttachment, file
 		"type":    "user",
 		"message": map[string]any{"role": "user", "content": parts},
 	})
-}
-
-func extFromMime(mime string) string {
-	switch mime {
-	case "image/jpeg":
-		return ".jpg"
-	case "image/gif":
-		return ".gif"
-	case "image/webp":
-		return ".webp"
-	default:
-		return ".png"
-	}
 }
 
 // RespondPermission writes a control_response to the Claude process stdin.

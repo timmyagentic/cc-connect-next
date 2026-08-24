@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -110,45 +109,8 @@ func (ks *kimiSession) Send(prompt string, images []core.ImageAttachment, files 
 		return fmt.Errorf("session is closed")
 	}
 
-	// Save images and files into the workspace so Kimi CLI can access them.
-	attachDir := filepath.Join(ks.workDir, ".cc-connect-next", "attachments")
-	if (len(images) > 0 || len(files) > 0) && os.MkdirAll(attachDir, 0o755) != nil {
-		attachDir = os.TempDir()
-	}
-
-	var imageRefs []string
-	for i, img := range images {
-		ext := ".png"
-		switch img.MimeType {
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/gif":
-			ext = ".gif"
-		case "image/webp":
-			ext = ".webp"
-		}
-		fname := fmt.Sprintf("img_%d_%d%s", time.Now().UnixMilli(), i, ext)
-		fpath := filepath.Join(attachDir, fname)
-		if err := os.WriteFile(fpath, img.Data, 0o644); err != nil {
-			slog.Warn("kimiSession: failed to save image", "error", err)
-			continue
-		}
-		imageRefs = append(imageRefs, fpath)
-	}
-
-	var fileRefs []string
-	for i, f := range files {
-		fname := filepath.Base(f.FileName)
-		if fname == "" || fname == "." || fname == ".." {
-			fname = fmt.Sprintf("file_%d_%d", time.Now().UnixMilli(), i)
-		}
-		fpath := filepath.Join(attachDir, fname)
-		if err := os.WriteFile(fpath, f.Data, 0o644); err != nil {
-			slog.Warn("kimiSession: failed to save file", "error", err)
-			continue
-		}
-		fileRefs = append(fileRefs, fpath)
-	}
+	imageRefs := core.SaveImagesToDisk(ks.workDir, images)
+	fileRefs := core.SaveFilesToDisk(ks.workDir, files)
 
 	fullPrompt := prompt
 	if len(imageRefs) > 0 {

@@ -578,80 +578,12 @@ func cleanAttachments(attachDir string) {
 	}
 }
 
-// saveImagesToDisk saves image attachments to attachDir
-// and returns the list of absolute file paths.
-//
-// img.FileName originates from IM upload metadata and is treated as
-// untrusted: directory components are stripped (both `/` and `\`, the
-// latter so Linux strips Windows-style paths too) before joining into
-// attachDir. Without this, FileName="../../escape.png" wrote to
-// workDir/escape.png — outside the intended attachments directory.
 func saveImagesToDisk(attachDir string, images []core.ImageAttachment) []string {
-	if err := os.MkdirAll(attachDir, 0o755); err != nil {
-		slog.Error("piSession: failed to create attachments dir", "error", err)
-		return nil
-	}
-
-	var paths []string
-	for i, img := range images {
-		ext := ".png"
-		switch img.MimeType {
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/gif":
-			ext = ".gif"
-		case "image/webp":
-			ext = ".webp"
-		}
-		fname := sanitizePiAttachmentName(img.FileName)
-		if fname == "" {
-			fname = fmt.Sprintf("image_%d_%d%s", time.Now().UnixMilli(), i, ext)
-		}
-		fpath := filepath.Join(attachDir, fname)
-		if err := os.WriteFile(fpath, img.Data, 0o644); err != nil {
-			slog.Error("piSession: save image failed", "error", err)
-			continue
-		}
-		paths = append(paths, fpath)
-	}
-	return paths
+	return core.SaveImagesToDir(attachDir, images)
 }
 
 func saveFilesToDisk(attachDir string, files []core.FileAttachment) []string {
-	if err := os.MkdirAll(attachDir, 0o755); err != nil {
-		slog.Error("piSession: failed to create attachments dir", "error", err)
-		return nil
-	}
-
-	paths := make([]string, 0, len(files))
-	for i, f := range files {
-		fname := sanitizePiAttachmentName(f.FileName)
-		if fname == "" {
-			fname = fmt.Sprintf("file_%d_%d", time.Now().UnixMilli(), i)
-		}
-		fpath := filepath.Join(attachDir, fname)
-		if err := os.WriteFile(fpath, f.Data, 0o644); err != nil {
-			slog.Error("piSession: save file failed", "error", err)
-			continue
-		}
-		paths = append(paths, fpath)
-	}
-	return paths
-}
-
-// sanitizePiAttachmentName reduces a user-supplied attachment filename to a
-// safe basename for joining into an attachment directory. Strips directory
-// components (handling both `/` and `\` so an attacker can't bypass via
-// Windows-style separators on Linux), and rejects parent / current-directory
-// references so the caller's empty-name fallback can substitute a generated
-// name. Mirrors core.SaveFilesToDisk's sanitization.
-func sanitizePiAttachmentName(name string) string {
-	name = strings.ReplaceAll(name, "\\", "/")
-	name = filepath.Base(name)
-	if name == "" || name == "." || name == ".." {
-		return ""
-	}
-	return name
+	return core.SaveFilesToDir(attachDir, files)
 }
 
 func truncStr(s string, maxRunes int) string {

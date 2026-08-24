@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -675,31 +674,7 @@ func (s *appServerSession) Steer(prompt string, images []core.ImageAttachment, f
 }
 
 func (s *appServerSession) stageImages(prompt string, images []core.ImageAttachment) (string, []string, error) {
-	if len(images) == 0 {
-		return prompt, nil, nil
-	}
-
-	imgDir := filepath.Join(s.workDir, ".cc-connect-next", "images")
-	if err := os.MkdirAll(imgDir, 0o755); err != nil {
-		return "", nil, fmt.Errorf("codex app-server: create image dir: %w", err)
-	}
-
-	imagePaths := make([]string, 0, len(images))
-	for i, img := range images {
-		ext := codexImageExt(img.MimeType)
-		fname := fmt.Sprintf("img_%d_%d%s", time.Now().UnixMilli(), i, ext)
-		fpath := filepath.Join(imgDir, fname)
-		if err := os.WriteFile(fpath, img.Data, 0o644); err != nil {
-			return "", nil, fmt.Errorf("codex app-server: save image: %w", err)
-		}
-		imagePaths = append(imagePaths, fpath)
-	}
-
-	if strings.TrimSpace(prompt) == "" {
-		prompt = "Please analyze the attached image(s)."
-	}
-
-	return prompt, imagePaths, nil
+	return stageCodexImages(s.workDir, prompt, "codex app-server", images)
 }
 
 func (s *appServerSession) RespondPermission(requestID string, result core.PermissionResult) error {

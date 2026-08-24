@@ -394,7 +394,7 @@ func (s *acpSession) maybeAbsorbCurrentModeUpdate(params json.RawMessage) {
 		return
 	}
 	var head struct {
-		Kind     string `json:"sessionUpdate"`
+		Kind          string `json:"sessionUpdate"`
 		CurrentModeID string `json:"currentModeId"`
 	}
 	if json.Unmarshal(wrap.Update, &head) != nil {
@@ -632,32 +632,7 @@ func (s *acpSession) Send(prompt string, images []core.ImageAttachment, files []
 }
 
 func (s *acpSession) appendImageRefs(prompt string, images []core.ImageAttachment) string {
-	attachDir := filepath.Join(s.workDir, ".cc-connect-next", "attachments")
-	if err := os.MkdirAll(attachDir, 0o755); err != nil {
-		slog.Warn("acp: mkdir attachments failed", "error", err)
-		return prompt
-	}
-	var paths []string
-	for i, img := range images {
-		ext := ".bin"
-		switch img.MimeType {
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/gif":
-			ext = ".gif"
-		case "image/webp":
-			ext = ".webp"
-		case "image/png", "":
-			ext = ".png"
-		}
-		fname := fmt.Sprintf("img_%d_%d%s", time.Now().UnixMilli(), i, ext)
-		fpath := filepath.Join(attachDir, fname)
-		if err := os.WriteFile(fpath, img.Data, 0o644); err != nil {
-			slog.Error("acp: save image failed", "error", err)
-			continue
-		}
-		paths = append(paths, fpath)
-	}
+	paths := core.SaveImagesToDisk(s.workDir, images)
 	if len(paths) == 0 {
 		return prompt
 	}
