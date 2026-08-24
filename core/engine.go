@@ -2024,163 +2024,23 @@ func timerRunTitle(job *TimerJob) string {
 	return truncateStr(job.Prompt, 40)
 }
 
-// executeTimerShell runs a shell command for a timer job and sends the output.
+type scheduledShellSpec struct {
+	command      string
+	workDir      string
+	timeout      time.Duration
+	shell        string
+	shellFlag    string
+	shellProfile string
+}
+
 func (e *Engine) executeTimerShell(p Platform, replyCtx any, job *TimerJob) error {
-	workDir := job.WorkDir
-	if workDir == "" {
-		if wd, ok := e.agent.(interface{ GetWorkDir() string }); ok {
-			workDir = wd.GetWorkDir()
-		}
-	}
-	if workDir == "" {
-		workDir, _ = os.Getwd()
-	}
-
-	timeout := job.ExecutionTimeout()
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
-
-	cmdLabel := truncateStr(job.Exec, 60)
-
-	ctx, cancel := context.WithTimeout(e.ctx, timeout)
-	defer cancel()
-
-	var shellCmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		shellCmd = exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", job.Exec)
-	} else {
-		shellCmd = exec.CommandContext(ctx, "sh", "-c", job.Exec)
-	}
-	shellCmd.Dir = workDir
-
-	stdout, err := shellCmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("shell: stdout pipe: %w", err)
-	}
-	stderr, err := shellCmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("shell: stderr pipe: %w", err)
-	}
-
-	if err := shellCmd.Start(); err != nil {
-		e.send(p, replyCtx, fmt.Sprintf("⏰ ❌ `%s`\nerror: failed to start: %v", cmdLabel, err))
-		return fmt.Errorf("shell: start: %w", err)
-	}
-
-	var mu sync.Mutex
-	var buf bytes.Buffer
-	doneCh := make(chan struct{})
-
-	readPipe := func(r io.Reader) {
-		scanner := bufio.NewScanner(r)
-		scanner.Buffer(make([]byte, 0, 64*1024), 64*1024)
-		for scanner.Scan() {
-			mu.Lock()
-			if buf.Len() > 0 {
-				buf.WriteByte('\n')
-			}
-			buf.WriteString(scanner.Text())
-			mu.Unlock()
-		}
-	}
-	var pipeWg sync.WaitGroup
-	pipeWg.Add(2)
-	go func() { defer pipeWg.Done(); readPipe(stdout) }()
-	go func() { defer pipeWg.Done(); readPipe(stderr) }()
-
-	go func() {
-		pipeWg.Wait()
-		_ = shellCmd.Wait()
-		close(doneCh)
-	}()
-
-	select {
-	case <-doneCh:
-		return e.finishCronShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel)
-	case <-ctx.Done():
-		killAndWait(shellCmd, doneCh)
-		mu.Lock()
-		output := buf.String()
-		mu.Unlock()
-		msg := fmt.Sprintf("⏰ ⚠️ timeout: `%s`", cmdLabel)
-		if output != "" {
-			msg = fmt.Sprintf("⏰ ⚠️ timeout: `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-		}
-		e.send(p, replyCtx, msg)
-		return fmt.Errorf("shell command timed out")
-	case <-time.After(quickFinishTimeout):
-	}
-
-	// Long-running command — try in-place updates
-	var previewHandle any
-	var useUpdate bool
-	if _, ok := p.(MessageUpdater); ok {
-		if starter, ok := p.(PreviewStarter); ok {
-			mu.Lock()
-			output := buf.String()
-			mu.Unlock()
-			progressMsg := fmt.Sprintf("⏰ ⏳ `%s`", cmdLabel)
-			if output != "" {
-				progressMsg = fmt.Sprintf("⏰ ⏳ `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-			}
-			handle, err := starter.SendPreviewStart(e.ctx, replyCtx, progressMsg)
-			if err == nil && handle != nil {
-				previewHandle = handle
-				useUpdate = true
-			}
-		}
-	}
-	if !useUpdate {
-		e.send(p, replyCtx, fmt.Sprintf("⏰ ⏳ `%s`", cmdLabel))
-	}
-
-	updateDone := make(chan struct{})
-	if useUpdate {
-		go func() {
-			ticker := time.NewTicker(2 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					mu.Lock()
-					output := buf.String()
-					mu.Unlock()
-					msg := fmt.Sprintf("⏰ ⏳ `%s`", cmdLabel)
-					if output != "" {
-						msg = fmt.Sprintf("⏰ ⏳ `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-					}
-					_ = updaterFor(p).UpdateMessage(e.ctx, previewHandle, msg)
-				case <-updateDone:
-					return
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-
-	select {
-	case <-doneCh:
-		close(updateDone)
-		return e.finishCronShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, useUpdate, previewHandle)
-	case <-ctx.Done():
-		close(updateDone)
-		killAndWait(shellCmd, doneCh)
-		mu.Lock()
-		output := buf.String()
-		mu.Unlock()
-		msg := fmt.Sprintf("⏰ ⚠️ timeout: `%s`", cmdLabel)
-		if output != "" {
-			msg = fmt.Sprintf("⏰ ⚠️ timeout: `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-		}
-		if useUpdate {
-			_ = updaterFor(p).UpdateMessage(e.ctx, previewHandle, msg)
-		} else {
-			e.send(p, replyCtx, msg)
-		}
-		return fmt.Errorf("shell command timed out")
-	}
+	return e.executeScheduledShell(p, replyCtx, scheduledShellSpec{
+		command:   job.Exec,
+		workDir:   job.WorkDir,
+		timeout:   job.ExecutionTimeout(),
+		shell:     defaultShell(),
+		shellFlag: defaultShellFlag(),
+	})
 }
 
 func cronRunTitle(job *CronJob) string {
@@ -2202,9 +2062,22 @@ func cronRunTitle(job *CronJob) string {
 	return "cron"
 }
 
-// executeCronShell runs a shell command for a cron job and sends the output.
 func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error {
-	workDir := job.WorkDir
+	return e.executeScheduledShell(p, replyCtx, scheduledShellSpec{
+		command:      job.Exec,
+		workDir:      job.WorkDir,
+		timeout:      job.ExecutionTimeout(),
+		shell:        e.shell,
+		shellFlag:    e.shellFlag,
+		shellProfile: e.shellProfile,
+	})
+}
+
+// executeScheduledShell owns the shared Cron/Timer process, progress, timeout,
+// and terminal-delivery lifecycle. Job-specific wrappers only select the shell
+// and resolve their command settings.
+func (e *Engine) executeScheduledShell(p Platform, replyCtx any, spec scheduledShellSpec) error {
+	workDir := spec.workDir
 	if workDir == "" {
 		if wd, ok := e.agent.(interface{ GetWorkDir() string }); ok {
 			workDir = wd.GetWorkDir()
@@ -2214,17 +2087,12 @@ func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error 
 		workDir, _ = os.Getwd()
 	}
 
-	timeout := job.ExecutionTimeout()
-	if timeout <= 0 {
-		timeout = 60 * time.Second
-	}
+	cmdLabel := truncateStr(spec.command, 60)
 
-	cmdLabel := truncateStr(job.Exec, 60)
-
-	ctx, cancel := context.WithTimeout(e.ctx, timeout)
+	ctx, cancel := scheduledShellContext(e.ctx, spec.timeout)
 	defer cancel()
 
-	shellCmd := shellExecCommand(ctx, e.shell, e.shellFlag, e.shellProfile, job.Exec)
+	shellCmd := shellExecCommand(ctx, spec.shell, spec.shellFlag, spec.shellProfile, spec.command)
 	shellCmd.Dir = workDir
 
 	stdout, err := shellCmd.StdoutPipe()
@@ -2260,7 +2128,7 @@ func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error 
 	// Use a WaitGroup so both pipe-reader goroutines drain completely before
 	// doneCh is closed. Without this, shellCmd.Wait() can return (closing the
 	// pipe write-ends) while the scanners still have unread data in the OS
-	// buffer, causing finishCronShell to read a truncated output.
+	// buffer, causing finishScheduledShell to read a truncated output.
 	var pipeWg sync.WaitGroup
 	pipeWg.Add(2)
 	go func() { defer pipeWg.Done(); readPipe(stdout) }()
@@ -2275,7 +2143,7 @@ func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error 
 	// Wait briefly to see if the command finishes quickly
 	select {
 	case <-doneCh:
-		return e.finishCronShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel)
+		return e.finishScheduledShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, false, nil)
 	case <-ctx.Done():
 		killAndWait(shellCmd, doneCh)
 		mu.Lock()
@@ -2342,7 +2210,7 @@ func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error 
 	select {
 	case <-doneCh:
 		close(updateDone)
-		return e.finishCronShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, useUpdate, previewHandle)
+		return e.finishScheduledShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, useUpdate, previewHandle)
 	case <-ctx.Done():
 		close(updateDone)
 		killAndWait(shellCmd, doneCh)
@@ -2362,7 +2230,14 @@ func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error 
 	}
 }
 
-func (e *Engine) finishCronShell(p Platform, replyCtx any, cmd *exec.Cmd, mu *sync.Mutex, buf *bytes.Buffer, cmdLabel string, opts ...any) error {
+func scheduledShellContext(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, timeout)
+}
+
+func (e *Engine) finishScheduledShell(p Platform, replyCtx any, cmd *exec.Cmd, mu *sync.Mutex, buf *bytes.Buffer, cmdLabel string, useUpdate bool, previewHandle any) error {
 	mu.Lock()
 	output := buf.String()
 	mu.Unlock()
@@ -2385,16 +2260,12 @@ func (e *Engine) finishCronShell(p Platform, replyCtx any, cmd *exec.Cmd, mu *sy
 		}
 	}
 
-	if len(opts) >= 2 {
-		if useUpdate, ok := opts[0].(bool); ok && useUpdate {
-			if handle := opts[1]; handle != nil {
-				_ = updaterFor(p).UpdateMessage(e.ctx, handle, finalMsg)
-				if !exitOK {
-					return fmt.Errorf("shell: exit code %d", cmd.ProcessState.ExitCode())
-				}
-				return nil
-			}
+	if useUpdate && previewHandle != nil {
+		_ = updaterFor(p).UpdateMessage(e.ctx, previewHandle, finalMsg)
+		if !exitOK {
+			return fmt.Errorf("shell: exit code %d", cmd.ProcessState.ExitCode())
 		}
+		return nil
 	}
 
 	e.send(p, replyCtx, finalMsg)
