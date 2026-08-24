@@ -102,7 +102,25 @@ type itemNotification struct {
 }
 
 type errorNotification struct {
-	Message string `json:"message"`
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
+	Message  string `json:"message"` // legacy app-server payload
+	Error    *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+	WillRetry bool `json:"willRetry"`
+}
+
+func (n errorNotification) errorMessage() string {
+	if n.Error != nil && strings.TrimSpace(n.Error.Message) != "" {
+		return n.Error.Message
+	}
+	return n.Message
+}
+
+type appServerMessageRoute struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
 }
 
 type appServerRateLimitsResponse struct {
@@ -211,8 +229,9 @@ type appServerSession struct {
 }
 
 const (
-	appServerRequestTimeout      = 120 * time.Second
-	appServerUsageRefreshTimeout = 1500 * time.Millisecond
+	appServerRequestTimeout       = 120 * time.Second
+	appServerResponseWriteTimeout = 1500 * time.Millisecond
+	appServerUsageRefreshTimeout  = 1500 * time.Millisecond
 )
 
 // appServerSessionParams bundles the launch configuration for a Codex
@@ -698,6 +717,13 @@ func (s *appServerSession) handleServerRequest(probe map[string]json.RawMessage)
 		return
 	}
 	params := probe["params"]
+	if appServerRequestIsTurnScoped(method) {
+		var route appServerMessageRoute
+		if err := json.Unmarshal(params, &route); err == nil && !s.ownsActiveTurn(method, route.ThreadID, route.TurnID) {
+			s.rejectUnownedServerRequest(rawID, method)
+			return
+		}
+	}
 
 	switch method {
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
@@ -713,6 +739,42 @@ func (s *appServerSession) handleServerRequest(probe map[string]json.RawMessage)
 			"jsonrpc": "2.0", "id": rawID,
 			"error": map[string]any{"code": -32601, "message": "method not found"},
 		})
+	}
+}
+
+func appServerRequestIsTurnScoped(method string) bool {
+	switch method {
+	case "item/commandExecution/requestApproval",
+		"item/fileChange/requestApproval",
+		"item/permissions/requestApproval",
+		"item/tool/requestUserInput",
+		"item/tool/call":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *appServerSession) rejectUnownedServerRequest(rawID json.RawMessage, method string) {
+	var result any
+	switch method {
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval":
+		result = map[string]any{"decision": "decline"}
+	case "item/permissions/requestApproval":
+		result = map[string]any{"permissions": map[string]any{}}
+	case "item/tool/requestUserInput":
+		result = appServerRequestUserInputResponse{Answers: map[string]appServerRequestUserInputAnswer{}}
+	case "item/tool/call":
+		result = map[string]any{
+			"success":      false,
+			"contentItems": []map[string]any{{"type": "inputText", "text": "tool not available on this client"}},
+		}
+	default:
+		return
+	}
+	payload := map[string]any{"jsonrpc": "2.0", "id": rawID, "result": result}
+	if err := s.writeJSONWithTimeout(method, payload, appServerResponseWriteTimeout); err != nil {
+		slog.Warn("codex app-server: failed to reject request for another turn", "method", method, "error", err)
 	}
 }
 
@@ -1241,7 +1303,7 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 	switch method {
 	case "turn/started":
 		var notif turnNotification
-		if err := json.Unmarshal(paramsRaw, &notif); err == nil {
+		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsThread(method, notif.ThreadID) {
 			s.stateMu.Lock()
 			s.currentTurn = notif.Turn.ID
 			s.pendingMsgs = s.pendingMsgs[:0]
@@ -1251,19 +1313,19 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 
 	case "item/started":
 		var notif itemNotification
-		if err := json.Unmarshal(paramsRaw, &notif); err == nil {
+		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsActiveTurn(method, notif.ThreadID, notif.TurnID) {
 			s.handleItemStarted(notif.Item)
 		}
 
 	case "item/completed":
 		var notif itemNotification
-		if err := json.Unmarshal(paramsRaw, &notif); err == nil {
+		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsActiveTurn(method, notif.ThreadID, notif.TurnID) {
 			s.handleItemCompleted(notif.Item)
 		}
 
 	case "turn/completed":
 		var notif turnNotification
-		if err := json.Unmarshal(paramsRaw, &notif); err == nil {
+		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsActiveTurn(method, notif.ThreadID, notif.Turn.ID) {
 			if notif.Turn.Error != nil && strings.TrimSpace(notif.Turn.Error.Message) != "" {
 				s.failTurn(classifyCodexError(fmt.Errorf("%s", notif.Turn.Error.Message)))
 				return
@@ -1278,7 +1340,7 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 				Type string `json:"type"`
 			} `json:"status"`
 		}
-		if err := json.Unmarshal(paramsRaw, &notif); err == nil && notif.Status.Type == "idle" {
+		if err := json.Unmarshal(paramsRaw, &notif); err == nil && notif.Status.Type == "idle" && s.ownsThread(method, notif.ThreadID) {
 			// In codex 0.125+, thread going idle signals turn completion.
 			s.completeTurn()
 		}
@@ -1291,16 +1353,65 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 
 	case "thread/tokenUsage/updated":
 		var notif appServerThreadTokenUsageNotification
-		if err := json.Unmarshal(paramsRaw, &notif); err == nil {
+		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsActiveTurn(method, notif.ThreadID, notif.TurnID) {
 			s.storeContextUsage(mapAppServerTokenUsage(notif))
 		}
 
 	case "error":
 		var notif errorNotification
-		if err := json.Unmarshal(paramsRaw, &notif); err == nil && strings.TrimSpace(notif.Message) != "" {
-			s.emitError(classifyCodexError(fmt.Errorf("%s", notif.Message)))
+		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsActiveTurn(method, notif.ThreadID, notif.TurnID) {
+			message := strings.TrimSpace(notif.errorMessage())
+			if message != "" && !notif.WillRetry {
+				s.emitError(classifyCodexError(fmt.Errorf("%s", message)))
+			}
 		}
 	}
+}
+
+// ownsThread applies the app-server routing boundary. Current v2 messages
+// always include threadId; accepting an omitted id is an explicit compatibility
+// path for older app-server versions that did not expose routing metadata.
+func (s *appServerSession) ownsThread(method, threadID string) bool {
+	currentThreadID := s.CurrentSessionID()
+	if threadID == "" {
+		slog.Debug("codex app-server: accepting legacy message without thread id", "method", method)
+		return true
+	}
+	if currentThreadID == "" {
+		// During thread/start or thread/resume the response that establishes
+		// ownership may race with notifications on the same connection.
+		slog.Debug("codex app-server: accepting message before thread ownership is established", "method", method, "thread_id", threadID)
+		return true
+	}
+	if threadID == currentThreadID {
+		return true
+	}
+	slog.Debug("codex app-server: ignoring message for another thread",
+		"method", method, "thread_id", threadID, "current_thread_id", currentThreadID)
+	return false
+}
+
+// ownsActiveTurn accepts only the active root turn once a turnId is present.
+// An omitted turnId uses the same explicit legacy compatibility path as an
+// omitted threadId; a non-empty id never matches an empty or different turn.
+func (s *appServerSession) ownsActiveTurn(method, threadID, turnID string) bool {
+	if !s.ownsThread(method, threadID) {
+		return false
+	}
+	if turnID == "" {
+		slog.Debug("codex app-server: accepting legacy message without turn id", "method", method)
+		return true
+	}
+
+	s.stateMu.Lock()
+	currentTurn := s.currentTurn
+	s.stateMu.Unlock()
+	if currentTurn != "" && turnID == currentTurn {
+		return true
+	}
+	slog.Debug("codex app-server: ignoring message for another turn",
+		"method", method, "turn_id", turnID, "current_turn_id", currentTurn)
+	return false
 }
 
 func (s *appServerSession) handleItemStarted(item map[string]any) {

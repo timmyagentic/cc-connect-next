@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -26,7 +27,9 @@ func TestAppServerSession_UsageLimitErrorNotificationIsClassified(t *testing.T) 
 
 func TestAppServerSession_TurnCompletedUsageLimitIsClassified(t *testing.T) {
 	s := &appServerSession{events: make(chan core.Event, 1)}
-	s.handleNotification("turn/completed", json.RawMessage(`{"turn":{"id":"turn-1","status":"failed","error":{"message":"You've reached your usage limit"}}}`))
+	s.threadID.Store("thread-1")
+	s.currentTurn = "turn-1"
+	s.handleNotification("turn/completed", json.RawMessage(`{"threadId":"thread-1","turn":{"id":"turn-1","status":"failed","error":{"message":"You've reached your usage limit"}}}`))
 
 	event := <-s.events
 	if !errors.Is(event.Error, core.ErrUsageLimit) {
@@ -97,6 +100,8 @@ func TestAppServerSession_HandleRateLimitsUpdatedCachesUsage(t *testing.T) {
 
 func TestAppServerSession_HandleThreadTokenUsageUpdatedCachesContextUsage(t *testing.T) {
 	s := &appServerSession{}
+	s.threadID.Store("thread-1")
+	s.currentTurn = "turn-1"
 	raw, err := json.Marshal(appServerThreadTokenUsageNotification{
 		ThreadID: "thread-1",
 		TurnID:   "turn-1",
@@ -149,6 +154,381 @@ func TestAppServerSession_HandleThreadTokenUsageUpdatedCachesContextUsage(t *tes
 	}
 	if usage.InputTokens != 40849 {
 		t.Fatalf("input tokens = %d, want 40849", usage.InputTokens)
+	}
+}
+
+func TestAppServerSession_Issue68IgnoresSubagentLifecycleNotifications(t *testing.T) {
+	s := &appServerSession{
+		events:      make(chan core.Event, 8),
+		pendingMsgs: []string{"parent partial"},
+		currentTurn: "parent-turn",
+	}
+	s.threadID.Store("parent-thread")
+
+	s.handleNotification("turn/started", notificationProbe(t, map[string]any{
+		"threadId": "child-thread",
+		"turn":     map[string]any{"id": "child-turn", "status": "inProgress"},
+	}))
+	s.handleNotification("item/started", notificationProbe(t, map[string]any{
+		"threadId": "child-thread",
+		"turnId":   "child-turn",
+		"item":     map[string]any{"type": "commandExecution", "command": "internal-child-command"},
+	}))
+	s.handleNotification("item/completed", notificationProbe(t, map[string]any{
+		"threadId": "child-thread",
+		"turnId":   "child-turn",
+		"item":     map[string]any{"type": "agentMessage", "text": "child-only answer"},
+	}))
+	s.handleNotification("turn/completed", notificationProbe(t, map[string]any{
+		"threadId": "child-thread",
+		"turn":     map[string]any{"id": "child-turn", "status": "completed"},
+	}))
+	s.handleNotification("turn/completed", notificationProbe(t, map[string]any{
+		"threadId": "failed-child-thread",
+		"turn": map[string]any{
+			"id":     "failed-child-turn",
+			"status": "failed",
+			"error":  map[string]any{"message": "child-only failure"},
+		},
+	}))
+	s.handleNotification("thread/status/changed", notificationProbe(t, map[string]any{
+		"threadId": "child-thread",
+		"status":   map[string]any{"type": "idle"},
+	}))
+
+	if got := appServerCurrentTurn(s); got != "parent-turn" {
+		t.Fatalf("current turn = %q after child lifecycle, want parent-turn", got)
+	}
+	if got := appServerPendingMessages(s); len(got) != 1 || got[0] != "parent partial" {
+		t.Fatalf("pending messages = %v after child lifecycle, want parent partial", got)
+	}
+	assertNoAppServerEvent(t, s.events, "child lifecycle")
+
+	s.handleNotification("item/completed", notificationProbe(t, map[string]any{
+		"threadId": "parent-thread",
+		"turnId":   "parent-turn",
+		"item":     map[string]any{"type": "agentMessage", "text": " parent final"},
+	}))
+	s.handleNotification("turn/completed", notificationProbe(t, map[string]any{
+		"threadId": "parent-thread",
+		"turn":     map[string]any{"id": "parent-turn", "status": "completed"},
+	}))
+
+	wantEvents := []struct {
+		type_   core.EventType
+		content string
+		done    bool
+	}{
+		{type_: core.EventText, content: "parent partial"},
+		{type_: core.EventText, content: " parent final"},
+		{type_: core.EventResult, done: true},
+	}
+	for i, want := range wantEvents {
+		select {
+		case event := <-s.events:
+			if event.Type != want.type_ || event.Content != want.content || event.Done != want.done {
+				t.Fatalf("event %d = %#v, want type=%s content=%q done=%v", i, event, want.type_, want.content, want.done)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for parent event %d", i)
+		}
+	}
+	assertNoAppServerEvent(t, s.events, "completed parent turn")
+}
+
+func TestAppServerSession_Issue68IgnoresInactiveRootTurnNotifications(t *testing.T) {
+	s := &appServerSession{
+		events:      make(chan core.Event, 4),
+		pendingMsgs: []string{"parent partial"},
+		currentTurn: "parent-turn",
+	}
+	s.threadID.Store("parent-thread")
+
+	s.handleNotification("item/started", notificationProbe(t, map[string]any{
+		"threadId": "parent-thread",
+		"turnId":   "stale-turn",
+		"item":     map[string]any{"type": "commandExecution", "command": "stale command"},
+	}))
+	s.handleNotification("item/completed", notificationProbe(t, map[string]any{
+		"threadId": "parent-thread",
+		"turnId":   "stale-turn",
+		"item":     map[string]any{"type": "agentMessage", "text": "stale answer"},
+	}))
+	s.handleNotification("turn/completed", notificationProbe(t, map[string]any{
+		"threadId": "parent-thread",
+		"turn":     map[string]any{"id": "stale-turn", "status": "completed"},
+	}))
+
+	if got := appServerCurrentTurn(s); got != "parent-turn" {
+		t.Fatalf("current turn = %q after stale notifications, want parent-turn", got)
+	}
+	if got := appServerPendingMessages(s); len(got) != 1 || got[0] != "parent partial" {
+		t.Fatalf("pending messages = %v after stale notifications, want parent partial", got)
+	}
+	assertNoAppServerEvent(t, s.events, "inactive root turn")
+}
+
+func TestAppServerSession_Issue68IgnoresSubagentTokenUsageNotifications(t *testing.T) {
+	s := &appServerSession{currentTurn: "parent-turn"}
+	s.threadID.Store("parent-thread")
+
+	s.handleNotification("thread/tokenUsage/updated", tokenUsageNotificationProbe(t, "parent-thread", "parent-turn", 1234))
+	s.handleNotification("thread/tokenUsage/updated", tokenUsageNotificationProbe(t, "child-thread", "child-turn", 9876))
+	s.handleNotification("thread/tokenUsage/updated", tokenUsageNotificationProbe(t, "parent-thread", "stale-turn", 5555))
+
+	usage := s.GetContextUsage()
+	if usage == nil {
+		t.Fatal("GetContextUsage() = nil, want parent usage")
+	}
+	if usage.UsedTokens != 1234 {
+		t.Fatalf("used tokens = %d after child update, want parent value 1234", usage.UsedTokens)
+	}
+}
+
+func TestAppServerSession_Issue68IgnoresSubagentErrorNotification(t *testing.T) {
+	s := &appServerSession{
+		events:      make(chan core.Event, 2),
+		pendingMsgs: []string{"parent partial"},
+		currentTurn: "parent-turn",
+	}
+	s.threadID.Store("parent-thread")
+
+	s.handleNotification("error", notificationProbe(t, map[string]any{
+		"threadId":  "child-thread",
+		"turnId":    "child-turn",
+		"message":   "No remaining credits for this account",
+		"error":     map[string]any{"message": "No remaining credits for this account"},
+		"willRetry": false,
+	}))
+
+	if got := appServerCurrentTurn(s); got != "parent-turn" {
+		t.Fatalf("current turn = %q after child error, want parent-turn", got)
+	}
+	if got := appServerPendingMessages(s); len(got) != 1 || got[0] != "parent partial" {
+		t.Fatalf("pending messages = %v after child error, want parent partial", got)
+	}
+	assertNoAppServerEvent(t, s.events, "child error")
+}
+
+func TestAppServerSession_Issue68ClassifiesScopedV2ErrorNotification(t *testing.T) {
+	s := &appServerSession{events: make(chan core.Event, 1), currentTurn: "parent-turn"}
+	s.threadID.Store("parent-thread")
+
+	s.handleNotification("error", notificationProbe(t, map[string]any{
+		"threadId":  "parent-thread",
+		"turnId":    "parent-turn",
+		"error":     map[string]any{"message": "No remaining credits for this account"},
+		"willRetry": false,
+	}))
+
+	select {
+	case event := <-s.events:
+		if !errors.Is(event.Error, core.ErrUsageLimit) {
+			t.Fatalf("v2 error notification = %v, want usage-limit marker", event.Error)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for scoped v2 error")
+	}
+}
+
+func TestAppServerSession_Issue68IgnoresRetryableScopedV2Error(t *testing.T) {
+	s := &appServerSession{events: make(chan core.Event, 1), currentTurn: "parent-turn"}
+	s.threadID.Store("parent-thread")
+
+	s.handleNotification("error", notificationProbe(t, map[string]any{
+		"threadId":  "parent-thread",
+		"turnId":    "parent-turn",
+		"error":     map[string]any{"message": "temporary upstream disconnect"},
+		"willRetry": true,
+	}))
+
+	if got := appServerCurrentTurn(s); got != "parent-turn" {
+		t.Fatalf("current turn = %q after retryable error, want parent-turn", got)
+	}
+	assertNoAppServerEvent(t, s.events, "retryable root error")
+}
+
+func TestAppServerSession_Issue68RejectsSubagentInteractiveRequests(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     string
+		threadID   string
+		turnID     string
+		params     map[string]any
+		resultKey  string
+		resultText string
+	}{
+		{
+			name:       "command approval",
+			method:     "item/commandExecution/requestApproval",
+			threadID:   "child-thread",
+			turnID:     "child-turn",
+			params:     map[string]any{"itemId": "cmd-1", "command": "internal-child-command", "cwd": "/tmp"},
+			resultKey:  "decision",
+			resultText: "decline",
+		},
+		{
+			name:       "file approval",
+			method:     "item/fileChange/requestApproval",
+			threadID:   "child-thread",
+			turnID:     "child-turn",
+			params:     map[string]any{"itemId": "patch-1", "reason": "internal child patch"},
+			resultKey:  "decision",
+			resultText: "decline",
+		},
+		{
+			name:      "permissions approval",
+			method:    "item/permissions/requestApproval",
+			threadID:  "child-thread",
+			turnID:    "child-turn",
+			params:    map[string]any{"itemId": "permissions-1", "permissions": map[string]any{"network": true}},
+			resultKey: "permissions",
+		},
+		{
+			name:     "request user input",
+			method:   "item/tool/requestUserInput",
+			threadID: "child-thread",
+			turnID:   "child-turn",
+			params: map[string]any{
+				"itemId":    "question-1",
+				"questions": []any{map[string]any{"id": "secret", "question": "Expose child-only data?"}},
+			},
+			resultKey: "answers",
+		},
+		{
+			name:     "same thread wrong turn",
+			method:   "item/tool/requestUserInput",
+			threadID: "parent-thread",
+			turnID:   "stale-turn",
+			params: map[string]any{
+				"itemId":    "question-2",
+				"questions": []any{map[string]any{"id": "stale", "question": "Expose stale-turn data?"}},
+			},
+			resultKey: "answers",
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			stdin := &lockedWriteCloser{}
+			s := &appServerSession{
+				events:           make(chan core.Event, 2),
+				ctx:              ctx,
+				pendingApprovals: make(map[string]chan core.PermissionResult),
+				stdin:            stdin,
+				currentTurn:      "parent-turn",
+			}
+			s.threadID.Store("parent-thread")
+
+			params := make(map[string]any, len(tt.params)+2)
+			for key, value := range tt.params {
+				params[key] = value
+			}
+			params["threadId"] = tt.threadID
+			params["turnId"] = tt.turnID
+			s.handleServerRequest(serverRequestProbe(t, fmt.Sprintf(`"child-%d"`, i), tt.method, params))
+
+			assertNoAppServerEvent(t, s.events, tt.name)
+			line := waitForWrittenJSONLine(t, stdin)
+			var envelope struct {
+				ID     string         `json:"id"`
+				Result map[string]any `json:"result"`
+			}
+			if err := json.Unmarshal([]byte(line), &envelope); err != nil {
+				t.Fatalf("decode response %q: %v", line, err)
+			}
+			if envelope.ID != fmt.Sprintf("child-%d", i) {
+				t.Fatalf("response id = %q, want child-%d", envelope.ID, i)
+			}
+			got, ok := envelope.Result[tt.resultKey]
+			if !ok {
+				t.Fatalf("response result = %#v, want key %q", envelope.Result, tt.resultKey)
+			}
+			if tt.resultText != "" {
+				if got != tt.resultText {
+					t.Fatalf("response %s = %#v, want %q", tt.resultKey, got, tt.resultText)
+				}
+			} else if values, ok := got.(map[string]any); !ok || len(values) != 0 {
+				t.Fatalf("response %s = %#v, want empty object", tt.resultKey, got)
+			}
+
+			s.approvalsMu.Lock()
+			pendingCount := len(s.pendingApprovals)
+			s.approvalsMu.Unlock()
+			if pendingCount != 0 {
+				t.Fatalf("pending approvals = %d, want none", pendingCount)
+			}
+		})
+	}
+}
+
+func TestAppServerSession_Issue68RejectRequestWriteTimeoutAbortsTransport(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stdin := newBlockingWriteCloser()
+	defer func() { _ = stdin.Close() }()
+	s := &appServerSession{
+		events:           make(chan core.Event, 1),
+		ctx:              ctx,
+		cancel:           cancel,
+		pendingApprovals: make(map[string]chan core.PermissionResult),
+		stdin:            stdin,
+		currentTurn:      "parent-turn",
+	}
+	s.alive.Store(true)
+	s.threadID.Store("parent-thread")
+	request := serverRequestProbe(t, `"blocked-child"`, "item/commandExecution/requestApproval", map[string]any{
+		"threadId": "child-thread",
+		"turnId":   "child-turn",
+		"itemId":   "command-1",
+		"command":  "internal-child-command",
+	})
+
+	done := make(chan struct{})
+	go func() {
+		s.handleServerRequest(request)
+		close(done)
+	}()
+
+	select {
+	case <-stdin.started:
+	case <-time.After(time.Second):
+		t.Fatal("foreign request rejection did not attempt to write")
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("foreign request rejection blocked the app-server read path")
+	}
+	if s.alive.Load() {
+		t.Fatal("blocked rejection write did not mark the session unavailable")
+	}
+	if !stdin.Closed() {
+		t.Fatal("blocked rejection write did not close the transport")
+	}
+	assertNoAppServerEvent(t, s.events, "blocked child rejection")
+}
+
+func TestAppServerSession_Issue68AcceptsLegacyUnscopedRootNotifications(t *testing.T) {
+	s := &appServerSession{events: make(chan core.Event, 2), currentTurn: "parent-turn"}
+	s.threadID.Store("parent-thread")
+
+	s.handleNotification("item/completed", notificationProbe(t, map[string]any{
+		"item": map[string]any{"type": "agentMessage", "text": "legacy parent answer"},
+	}))
+	s.handleNotification("turn/completed", notificationProbe(t, map[string]any{
+		"turn": map[string]any{"status": "completed"},
+	}))
+
+	textEvent := <-s.events
+	if textEvent.Type != core.EventText || textEvent.Content != "legacy parent answer" {
+		t.Fatalf("legacy text event = %#v, want parent answer", textEvent)
+	}
+	resultEvent := <-s.events
+	if resultEvent.Type != core.EventResult || !resultEvent.Done {
+		t.Fatalf("legacy result event = %#v, want completed result", resultEvent)
 	}
 }
 
@@ -244,7 +624,9 @@ func TestAppServerSession_HandleRequestUserInputEmitsAskQuestion(t *testing.T) {
 		ctx:              ctx,
 		pendingApprovals: make(map[string]chan core.PermissionResult),
 		stdin:            stdin,
+		currentTurn:      "turn-1",
 	}
+	s.threadID.Store("thread-1")
 
 	s.handleServerRequest(serverRequestProbe(t, `"rui-1"`, "item/tool/requestUserInput", map[string]any{
 		"threadId": "thread-1",
@@ -305,7 +687,9 @@ func TestAppServerSession_HandleRequestUserInputWritesCodexResponse(t *testing.T
 		ctx:              ctx,
 		pendingApprovals: make(map[string]chan core.PermissionResult),
 		stdin:            stdin,
+		currentTurn:      "turn-1",
 	}
+	s.threadID.Store("thread-1")
 
 	s.handleServerRequest(serverRequestProbe(t, `"rui-2"`, "item/tool/requestUserInput", map[string]any{
 		"threadId": "thread-1",
@@ -450,6 +834,51 @@ func serverRequestProbe(t *testing.T, idJSON, method string, params any) map[str
 		"id":     json.RawMessage(idJSON),
 		"method": methodJSON,
 		"params": paramsJSON,
+	}
+}
+
+func notificationProbe(t *testing.T, params any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal notification: %v", err)
+	}
+	return raw
+}
+
+func tokenUsageNotificationProbe(t *testing.T, threadID, turnID string, totalTokens int) json.RawMessage {
+	t.Helper()
+	return notificationProbe(t, map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"tokenUsage": map[string]any{
+			"total": map[string]any{},
+			"last": map[string]any{
+				"totalTokens": totalTokens,
+			},
+			"modelContextWindow": 258400,
+		},
+	})
+}
+
+func appServerCurrentTurn(s *appServerSession) string {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.currentTurn
+}
+
+func appServerPendingMessages(s *appServerSession) []string {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return append([]string(nil), s.pendingMsgs...)
+}
+
+func assertNoAppServerEvent(t *testing.T, events <-chan core.Event, after string) {
+	t.Helper()
+	select {
+	case event := <-events:
+		t.Fatalf("%s emitted event %#v, want none", after, event)
+	default:
 	}
 }
 
