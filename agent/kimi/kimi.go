@@ -242,10 +242,6 @@ func (a *Agent) SkillDirs() []string {
 	return dirs
 }
 
-// ── ContextCompressor implementation ──────────────────────────
-
-func (a *Agent) CompressCommand() string { return "" }
-
 // ── MemoryFileProvider implementation ─────────────────────────
 
 func (a *Agent) ProjectMemoryFile() string {

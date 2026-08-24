@@ -771,7 +771,7 @@ func TestBuildReplyContent_FallbackWhenManyTables(t *testing.T) {
 	}
 	content := sb.String()
 
-	msgType, _ := buildReplyContent(content)
+	msgType, _ := buildReplyContentWithResolvedMention(content, false)
 	if msgType == larkim.MsgTypeInteractive {
 		t.Errorf("expected non-card message type for >5 tables, got interactive")
 	}
@@ -786,7 +786,7 @@ func TestBuildReplyContent_FallbackWhenManyTables(t *testing.T) {
 	}
 	content5 := sb.String()
 
-	msgType5, _ := buildReplyContent(content5)
+	msgType5, _ := buildReplyContentWithResolvedMention(content5, false)
 	if msgType5 != larkim.MsgTypeInteractive {
 		t.Errorf("expected interactive card for 5 tables, got %s", msgType5)
 	}

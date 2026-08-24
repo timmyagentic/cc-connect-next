@@ -40,9 +40,9 @@ CC-Connect is a bridge that connects AI coding agents (Claude Code, Codex, Gemin
 **Dependency direction:**
 ```
 cmd/ → config/, core/, agent/*, platform/*
-agent/*   → core/   (never other agents or platforms)
-platform/* → core/  (never other platforms or agents)
-core/     → stdlib only (never agent/ or platform/)
+agent/*    → core/   (never other agents or platforms)
+platform/* → core/   (never other platforms or agents)
+core/      → stdlib/infrastructure dependencies (never agent/ or platform/)
 ```
 
 ### Core Interfaces
@@ -240,10 +240,9 @@ make build EXCLUDE=discord,dingtalk,qq,qqbot,line
 go build -tags 'no_discord no_dingtalk no_qq no_qqbot no_line' ./cmd/cc-connect
 ```
 
-Available tags: `no_acp`, `no_claudecode`, `no_codex`, `no_copilot`, `no_cursor`, `no_gemini`,
-`no_iflow`, `no_opencode`, `no_qoder`, `no_feishu`, `no_telegram`,
-`no_discord`, `no_slack`, `no_dingtalk`, `no_wecom`, `no_weixin`, `no_qq`, `no_qqbot`,
-`no_line`, `no_weibo`.
+The authoritative agent and platform lists are `ALL_AGENTS` and
+`ALL_PLATFORMS` in the `Makefile`; each entry supports its matching `no_<name>`
+build tag. Do not duplicate that inventory in documentation.
 
 ## Pre-Commit Checklist
 

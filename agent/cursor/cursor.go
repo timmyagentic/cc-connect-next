@@ -253,10 +253,6 @@ func (a *Agent) SkillDirs() []string {
 	return dirs
 }
 
-// ── ContextCompressor implementation ──────────────────────────
-
-func (a *Agent) CompressCommand() string { return "" }
-
 // ── ModeSwitcher ────────────────────────────────────────────────
 
 func (a *Agent) SetMode(mode string) {

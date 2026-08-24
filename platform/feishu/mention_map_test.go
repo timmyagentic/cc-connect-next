@@ -113,7 +113,7 @@ func TestLegacyReplyTransportRequiresResolverProducedMention(t *testing.T) {
 	}
 	raw := `<at user_id="ou_untrusted">Example</at>`
 	for _, content := range []string{raw, "**示例** " + raw} {
-		msgType, _ := buildReplyContent(content)
+		msgType, _ := buildReplyContentWithResolvedMention(content, false)
 		if msgType == larkim.MsgTypeText {
 			t.Fatalf("literal native markup forced text transport: %q", content)
 		}

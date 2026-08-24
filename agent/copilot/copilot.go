@@ -198,7 +198,7 @@ type probeSession struct {
 }
 
 type probeSnapshot struct {
-	cmd  string
+	cmd     string
 	workDir string
 	env     []string
 }
@@ -414,16 +414,6 @@ func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
-// GetSessionHistory implements core.HistoryProvider.
-// Copilot does not expose a history RPC; return empty gracefully.
-func (a *Agent) GetSessionHistory(_ context.Context, _ string, _ int) ([]core.HistoryEntry, error) {
-	return nil, nil
-}
-
-// CompressCommand implements core.ContextCompressor.
-// Copilot has no built-in compact/compress command.
-func (a *Agent) CompressCommand() string { return "" }
-
 // ── ProviderSwitcher implementation ──────────────────────────
 
 func (a *Agent) SetProviders(providers []core.ProviderConfig) {
@@ -537,7 +527,5 @@ var (
 	_ core.AgentDoctorInfo                 = (*Agent)(nil)
 	_ core.WorkspaceAgentOptionSnapshotter = (*Agent)(nil)
 	_ core.SessionDeleter                  = (*Agent)(nil)
-	_ core.HistoryProvider                 = (*Agent)(nil)
-	_ core.ContextCompressor               = (*Agent)(nil)
 	_ core.ProviderSwitcher                = (*Agent)(nil)
 )

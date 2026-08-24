@@ -210,7 +210,7 @@ go test ./...       # full suite
 make build-noweb    # fast binary without the web dashboard
 ```
 
-Focused suites: `go test ./platform/feishu -run TestBuildRichCard`, `go test ./core -run TestCUJ_Steer`, `go test -tags no_web ./cmd/cc-connect -run TestMigrateLegacyData`. Contributions follow the layering rules in [CLAUDE.md](CLAUDE.md): core imports stdlib only, adapters register capabilities, every user-facing string ships in five languages, and new features come with regression tests.
+Focused suites: `go test ./platform/feishu -run TestBuildRichCard`, `go test ./core -run TestCUJ_Steer`, `go test -tags no_web ./cmd/cc-connect -run TestMigrateLegacyData`. Contributions follow the layering rules in [AGENTS.md](AGENTS.md): core never imports agents or platforms, adapters register capabilities, every user-facing string ships in five languages, and new features come with regression tests.
 
 ## 🙏 Attribution & license
 

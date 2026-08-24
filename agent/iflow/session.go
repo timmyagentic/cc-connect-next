@@ -18,14 +18,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/creack/pty"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 var (
-	sessionIDRe = regexp.MustCompile(`"session-id"\s*:\s*"([^"]+)"`)
-	ansiCSIRe   = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
-	ansiOSCRe   = regexp.MustCompile(`\x1b\][^\a]*(?:\a|\x1b\\)`)
+	ansiCSIRe = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+	ansiOSCRe = regexp.MustCompile(`\x1b\][^\a]*(?:\a|\x1b\\)`)
 )
 
 const (
@@ -799,28 +798,6 @@ func (s *iflowSession) emitEvent(evt core.Event) {
 	case s.events <- evt:
 	case <-s.ctx.Done():
 	}
-}
-
-func readExecutionInfoSessionID(path string) (string, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	var payload struct {
-		SessionID string `json:"session-id"`
-	}
-	if err := json.Unmarshal(b, &payload); err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(payload.SessionID), nil
-}
-
-func extractSessionIDFromExecutionInfo(stderrText string) string {
-	m := sessionIDRe.FindStringSubmatch(stderrText)
-	if len(m) == 2 {
-		return strings.TrimSpace(m[1])
-	}
-	return ""
 }
 
 func stripANSI(s string) string {

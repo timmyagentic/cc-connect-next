@@ -471,14 +471,8 @@ type Engine struct {
 	autoCompressMinGap    time.Duration
 	resetOnIdle           time.Duration
 
-	// Reply footer composition flags. The footer renders up to two lines:
-	//   line 1 — model · [effort ·] out/in/cw/cr · ctx%   (gated by showContextIndicator)
-	//   line 2 — workspace directory                       (gated by showWorkdirIndicator)
-	// replyFooterEnabled is the master toggle: when false, no footer is emitted
-	// regardless of the per-line flags.
-	showContextIndicator bool
-	showWorkdirIndicator bool
-	replyFooterEnabled   bool
+	// The reply footer contains model and reasoning effort only.
+	replyFooterEnabled bool
 
 	// Feedback channel state (see core/feedback.go). feedbackPostFn is a
 	// test seam; production uses postFeedback.
@@ -918,8 +912,6 @@ func NewEngine(name string, ag Agent, platforms []Platform, sessionStorePath str
 		eventIdleTimeout:      defaultEventIdleTimeout,
 		maxQueuedMessages:     defaultMaxQueuedMessages,
 		busyMessageMode:       BusyMessageModeSteer,
-		showContextIndicator:  true,
-		showWorkdirIndicator:  true,
 		shell:                 defaultShell(),
 		shellFlag:             defaultShellFlag(),
 		pendingRestartTimeout: defaultPendingRestartTimeout,
@@ -1094,11 +1086,6 @@ func (e *Engine) SetReferenceConfig(cfg ReferenceRenderCfg) {
 	e.references = normalizeReferenceRenderCfg(cfg)
 }
 
-// estimateTokens provides a rough token estimate for a set of history entries.
-func estimateTokens(entries []HistoryEntry) int {
-	return estimateTokensWithPendingAssistant(entries, "")
-}
-
 // estimateTokensWithPendingAssistant is like estimateTokens but includes an assistant
 // message not yet written to history (used at EventResult before AddHistory).
 func estimateTokensWithPendingAssistant(entries []HistoryEntry, pendingAssistant string) int {
@@ -1136,24 +1123,16 @@ func (e *Engine) SetResetOnIdle(d time.Duration) {
 	e.resetOnIdle = d
 }
 
-// SetShowContextIndicator controls whether the reply footer's first line
-// (model / reasoning effort / token counts / context %) is rendered.
-// Subordinate to SetReplyFooterEnabled — when the footer is disabled overall,
-// this flag has no effect.
-func (e *Engine) SetShowContextIndicator(show bool) {
-	e.showContextIndicator = show
-}
+// SetShowContextIndicator is retained for source compatibility.
+// Deprecated: context details are no longer rendered in reply footers.
+func (*Engine) SetShowContextIndicator(bool) {}
 
-// SetShowWorkdirIndicator controls whether the reply footer's second line
-// (workspace directory) is rendered. Subordinate to SetReplyFooterEnabled.
-func (e *Engine) SetShowWorkdirIndicator(show bool) {
-	e.showWorkdirIndicator = show
-}
+// SetShowWorkdirIndicator is retained for source compatibility.
+// Deprecated: work directories are no longer rendered in reply footers.
+func (*Engine) SetShowWorkdirIndicator(bool) {}
 
 // SetReplyFooterEnabled is the master toggle for the per-turn reply footer.
-// When false, no footer (statusline-style or single-line) is emitted, and the
-// per-line flags (SetShowContextIndicator / SetShowWorkdirIndicator) become
-// no-ops.
+// When false, no footer is emitted.
 func (e *Engine) SetReplyFooterEnabled(show bool) {
 	e.replyFooterEnabled = show
 }
@@ -7313,52 +7292,6 @@ channelClosed:
 	}
 }
 
-func mergeRichToolResult(steps []ToolStep, event Event, result string, maxLen int) []ToolStep {
-	toolName := strings.TrimSpace(event.ToolName)
-	if toolName == "" {
-		toolName = "Tool"
-	}
-
-	idx := -1
-	for i := len(steps) - 1; i >= 0; i-- {
-		if steps[i].Kind == ToolStepKindThinking {
-			continue
-		}
-		if strings.TrimSpace(steps[i].Name) == "" || strings.TrimSpace(steps[i].Name) == toolName {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
-		summary := strings.TrimSpace(event.ToolInput)
-		if summary != "" {
-			summary = truncateIf(summary, maxLen)
-		}
-		steps = append(steps, ToolStep{
-			Kind:    ToolStepKindTool,
-			Name:    toolName,
-			Summary: summary,
-		})
-		idx = len(steps) - 1
-	}
-
-	if strings.TrimSpace(steps[idx].Name) == "" {
-		steps[idx].Name = toolName
-	}
-	if steps[idx].Kind == "" {
-		steps[idx].Kind = ToolStepKindTool
-	}
-	if strings.TrimSpace(steps[idx].Summary) == "" && strings.TrimSpace(event.ToolInput) != "" {
-		steps[idx].Summary = truncateIf(strings.TrimSpace(event.ToolInput), maxLen)
-	}
-	steps[idx].Result = result
-	steps[idx].Status = strings.TrimSpace(event.ToolStatus)
-	steps[idx].ExitCode = event.ToolExitCode
-	steps[idx].Success = event.ToolSuccess
-	steps[idx].Done = true
-	return steps
-}
-
 // notifyDroppedQueuedMessages drains pendingMessages from the state and
 // sends an error notification to each queued message's sender. Called when
 // the event loop exits abnormally (EventError, channel closed) and queued
@@ -8507,28 +8440,6 @@ func appendReplyFooter(content, footer string) string {
 		return "*" + footer + "*"
 	}
 	return content + "\n\n*" + footer + "*"
-}
-
-func appendFinalMetadataToSegment(segment, fullResponse string) string {
-	segment = strings.TrimRight(segment, "\n ")
-	if segment == "" {
-		return fullResponse
-	}
-	fullResponse = strings.TrimSpace(fullResponse)
-	if fullResponse == "" || strings.TrimSpace(segment) == fullResponse {
-		return segment
-	}
-
-	metadata := ""
-	if idx := strings.LastIndex(fullResponse, "\n\n*"); idx >= 0 && strings.HasSuffix(fullResponse, "*") {
-		metadata = fullResponse[idx:]
-	} else if match := ctxSelfReportRe.FindString(fullResponse); match != "" {
-		metadata = "\n" + strings.TrimSpace(match)
-	}
-	if metadata == "" || strings.Contains(segment, strings.TrimSpace(metadata)) {
-		return segment
-	}
-	return segment + metadata
 }
 
 func (e *Engine) cmdShow(p Platform, msg *Message, args []string) {
@@ -17165,15 +17076,6 @@ func extractUserID(sessionKey string) string {
 	return ""
 }
 
-func stringSliceContains(ss []string, target string) bool {
-	for _, s := range ss {
-		if s == target {
-			return true
-		}
-	}
-	return false
-}
-
 func extractPlatformName(sessionKey string) string {
 	if i := strings.IndexByte(sessionKey, ':'); i >= 0 {
 		return sessionKey[:i]
@@ -17806,24 +17708,9 @@ func gitClone(repoURL, dest string) error {
 	return nil
 }
 
-// ── Context usage indicator ──────────────────────────────────
-
-const modelContextWindow = 200_000 // generic fallback window for heuristic context estimates
-
-func contextIndicatorText(inputTokens int) string {
-	if inputTokens <= 0 {
-		return ""
-	}
-	pct := inputTokens * 100 / modelContextWindow
-	if pct > 100 {
-		pct = 100
-	}
-	return fmt.Sprintf("[ctx: ~%d%%]", pct)
-}
-
 // ctxSelfReportRe matches agent self-reported context lines like "[ctx: ~42%]".
-// Used to strip such markers from delivered text — the ctx indicator is now
-// rendered exclusively in the reply footer.
+// These private estimates are stripped because reply footers deliberately show
+// only model and reasoning effort.
 var ctxSelfReportRe = regexp.MustCompile(`(?m)\n?\[ctx: ~\d+%\]`)
 
 // agentFooterLineRe matches a standalone agent-emitted status line only when

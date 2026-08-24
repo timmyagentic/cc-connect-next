@@ -262,22 +262,9 @@ func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, actionCopy, textCopy
 	return e.sendWithError(p, replyCtx, textCopy)
 }
 
-// notifyMostRecentSession delivers a proactive daemon-side message to this
-// engine's most recently active session (ranked by real user activity;
-// UpdatedAt is the fallback for stores predating LastUserActivity). Returns
-// true only when a message was actually delivered, so callers can retry
-// later instead of losing the notice. logTag labels the slog lines.
-func (e *Engine) notifyMostRecentSession(content, logTag string) bool {
-	_, ok := e.notifyMostRecentSessionFn(logTag, func(p Platform, replyCtx any) error {
-		return e.sendWithError(p, replyCtx, content)
-	})
-	return ok
-}
-
-// notifyMostRecentSessionFn is the delivery-agnostic core of
-// notifyMostRecentSession: deliver is invoked per candidate (newest first)
-// until one send succeeds. Returns the session key that received the
-// message so callers can associate follow-up state with it.
+// notifyMostRecentSessionFn invokes deliver for candidates ordered by recent
+// user activity until one succeeds. It returns the receiving session key so
+// callers can associate follow-up state with that conversation.
 func (e *Engine) notifyMostRecentSessionFn(logTag string, deliver func(Platform, any) error) (string, bool) {
 	sessions := e.sessions.AllSessions()
 	idToKey, _ := e.sessions.SessionKeyMap()

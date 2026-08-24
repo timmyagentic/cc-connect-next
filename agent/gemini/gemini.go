@@ -316,13 +316,6 @@ func (a *Agent) SkillDirs() []string {
 	return dirs
 }
 
-// ── ContextCompressor implementation ──────────────────────────
-// Gemini CLI has no interactive compress/compact command.
-// Return "" so engine reports "not supported" instead of sending
-// a bogus "/compress" prompt to the model.
-
-func (a *Agent) CompressCommand() string { return "" }
-
 // ── MemoryFileProvider implementation ─────────────────────────
 
 func (a *Agent) ProjectMemoryFile() string {

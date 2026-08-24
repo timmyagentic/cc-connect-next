@@ -31,10 +31,3 @@ export const listSessions = (project: string) =>
   api.get<{ sessions: Session[]; active_keys: Record<string, string> }>(`/projects/${project}/sessions`);
 export const getSession = (project: string, id: string, historyLimit?: number) =>
   api.get<SessionDetail>(`/projects/${project}/sessions/${id}`, historyLimit ? { history_limit: String(historyLimit) } : undefined);
-export const createSession = (project: string, body: { session_key: string; name?: string }) =>
-  api.post(`/projects/${project}/sessions`, body);
-export const deleteSession = (project: string, id: string) => api.delete(`/projects/${project}/sessions/${id}`);
-export const switchSession = (project: string, body: { session_key: string; session_id: string }) =>
-  api.post(`/projects/${project}/sessions/switch`, body);
-export const sendMessage = (project: string, body: { session_key: string; message: string }) =>
-  api.post(`/projects/${project}/send`, body);

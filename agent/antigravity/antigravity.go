@@ -314,8 +314,6 @@ func (a *Agent) SkillDirs() []string {
 	return dirs
 }
 
-func (a *Agent) CompressCommand() string { return "" }
-
 func (a *Agent) ProjectMemoryFile() string {
 	absDir, err := filepath.Abs(a.workDir)
 	if err != nil {
