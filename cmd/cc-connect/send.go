@@ -2,13 +2,11 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,13 +40,7 @@ func runSend(args []string) {
 		os.Exit(1)
 	}
 
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", sockPath)
-			},
-		},
-	}
+	client := newLocalAPIClient(sockPath)
 
 	resp, err := client.Post("http://unix/send", "application/json", bytes.NewReader(payload))
 	if err != nil {

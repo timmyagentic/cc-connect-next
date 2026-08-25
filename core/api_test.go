@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -11,6 +12,72 @@ import (
 	"testing"
 	"time"
 )
+
+func TestHandleHealthRequiresEveryConfiguredPlatform(t *testing.T) {
+	readyPlatform := &stubPlatformEngine{n: "feishu"}
+	pendingPlatform := &stubPlatformEngine{n: "telegram"}
+	readyEngine := NewEngine("ready-project", &stubAgent{}, []Platform{readyPlatform}, "", LangEnglish)
+	readyEngine.OnPlatformReady(readyPlatform)
+	pendingEngine := NewEngine("pending-project", &stubAgent{}, []Platform{pendingPlatform}, "", LangEnglish)
+
+	api := &APIServer{engines: map[string]*Engine{
+		"ready-project":   readyEngine,
+		"pending-project": pendingEngine,
+	}}
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	api.handleHealth(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+	var health RuntimeHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &health); err != nil {
+		t.Fatal(err)
+	}
+	if health.Ready || len(health.Projects) != 2 {
+		t.Fatalf("health = %+v", health)
+	}
+	if health.Projects[0].Name != "pending-project" || health.Projects[0].Platforms[0].State != RuntimePlatformStarting {
+		t.Fatalf("projects are not sorted or pending state missing: %+v", health.Projects)
+	}
+
+	pendingEngine.OnPlatformReady(pendingPlatform)
+	rec = httptest.NewRecorder()
+	api.handleHealth(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ready status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleHealthSurfacesUnavailablePlatform(t *testing.T) {
+	broken := &stubUnhealthyPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}, err: errors.New("app_id is invalid")}
+	engine := NewEngine("alpha", &stubAgent{}, []Platform{broken}, "", LangEnglish)
+	engine.OnPlatformReady(broken)
+	api := &APIServer{engines: map[string]*Engine{"alpha": engine}}
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	api.handleHealth(rec, req)
+
+	var health RuntimeHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &health); err != nil {
+		t.Fatal(err)
+	}
+	platform := health.Projects[0].Platforms[0]
+	if rec.Code != http.StatusServiceUnavailable || health.Ready || platform.State != RuntimePlatformUnavailable || !strings.Contains(platform.Reason, "app_id is invalid") {
+		t.Fatalf("health = %+v status=%d", health, rec.Code)
+	}
+}
+
+func TestHandleHealthWithoutEnginesIsNotReady(t *testing.T) {
+	api := &APIServer{engines: map[string]*Engine{}}
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	api.handleHealth(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+}
 
 func TestHandleSend_AllowsAttachmentOnly(t *testing.T) {
 	engine := NewEngine("test", &stubAgent{}, []Platform{&stubMediaPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}, "", LangEnglish)

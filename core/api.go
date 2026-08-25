@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -62,6 +63,31 @@ type SendRequest struct {
 	AtAll      bool              `json:"at_all,omitempty"`
 }
 
+type RuntimePlatformState string
+
+const (
+	RuntimePlatformStarting    RuntimePlatformState = "starting"
+	RuntimePlatformReady       RuntimePlatformState = "ready"
+	RuntimePlatformUnavailable RuntimePlatformState = "unavailable"
+)
+
+type RuntimePlatformHealth struct {
+	Name   string               `json:"name"`
+	State  RuntimePlatformState `json:"state"`
+	Reason string               `json:"reason,omitempty"`
+}
+
+type RuntimeProjectHealth struct {
+	Name      string                  `json:"name"`
+	Ready     bool                    `json:"ready"`
+	Platforms []RuntimePlatformHealth `json:"platforms"`
+}
+
+type RuntimeHealth struct {
+	Ready    bool                   `json:"ready"`
+	Projects []RuntimeProjectHealth `json:"projects"`
+}
+
 // NewAPIServer creates an API server on a Unix socket.
 func NewAPIServer(dataDir string) (*APIServer, error) {
 	sockDir := filepath.Join(dataDir, "run")
@@ -92,6 +118,7 @@ func NewAPIServer(dataDir string) (*APIServer, error) {
 		maxAttachmentBytes: DefaultMaxAttachmentSize,
 	}
 	s.mux.HandleFunc("/send", s.handleSend)
+	s.mux.HandleFunc("/healthz", s.handleHealth)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
 	s.mux.HandleFunc("/cron/add", s.handleCronAdd)
 	s.mux.HandleFunc("/cron/list", s.handleCronList)
@@ -109,6 +136,58 @@ func NewAPIServer(dataDir string) (*APIServer, error) {
 	s.mux.HandleFunc("/relay/binding", s.handleRelayBinding)
 
 	return s, nil
+}
+
+func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "GET only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.mu.RLock()
+	engines := make(map[string]*Engine, len(s.engines))
+	for name, engine := range s.engines {
+		engines[name] = engine
+	}
+	s.mu.RUnlock()
+
+	names := make([]string, 0, len(engines))
+	for name := range engines {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	health := RuntimeHealth{Ready: len(names) > 0, Projects: make([]RuntimeProjectHealth, 0, len(names))}
+	for _, name := range names {
+		statuses := engines[name].PlatformStatuses()
+		project := RuntimeProjectHealth{Name: name, Ready: len(statuses) > 0, Platforms: make([]RuntimePlatformHealth, 0, len(statuses))}
+		for _, status := range statuses {
+			platform := RuntimePlatformHealth{Name: status.Name, State: RuntimePlatformStarting}
+			switch {
+			case status.Usable():
+				platform.State = RuntimePlatformReady
+			case status.Err != nil:
+				platform.State = RuntimePlatformUnavailable
+				platform.Reason = strings.TrimSpace(status.Err.Error())
+			default:
+				platform.Reason = "waiting for platform connection"
+			}
+			if platform.State != RuntimePlatformReady {
+				project.Ready = false
+			}
+			project.Platforms = append(project.Platforms, platform)
+		}
+		if !project.Ready {
+			health.Ready = false
+		}
+		health.Projects = append(health.Projects, project)
+	}
+
+	statusCode := http.StatusOK
+	if !health.Ready {
+		statusCode = http.StatusServiceUnavailable
+	}
+	apiJSON(w, statusCode, health)
 }
 
 func (s *APIServer) SocketPath() string {
