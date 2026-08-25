@@ -7,7 +7,10 @@ import {
   Slash, ChevronDown,
 } from 'lucide-react';
 import { Badge, Button } from '@/components/ui';
-import { listSessions, getSession, type Session, type SessionDetail } from '@/api/sessions';
+import {
+  listSessions, getSession, switchSession as activateSession,
+  type Session, type SessionDetail,
+} from '@/api/sessions';
 import {
   useBridgeSocket, fetchBridgeConfig,
   type BridgeConfig, type BridgeIncoming, type BridgeStatus,
@@ -15,7 +18,7 @@ import {
 import CommandPalette, { type SlashCommand, slashCommands } from './CommandPalette';
 import SessionDrawer from './SessionDrawer';
 import CommandResultPanel, { type CommandResult } from './CommandResultPanel';
-import { selectDefaultWebSession } from './sessionSelection.js';
+import { loadSelectedSession, selectDefaultWebSession } from './sessionSelection.js';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -376,9 +379,9 @@ export default function ChatView() {
     if (!projectName) return;
     setDrawerOpen(false);
     setLoading(true);
-    setUserPickedSession(true);
     try {
-      const detail = await getSession(projectName, s.id, 200);
+      const detail = await loadSelectedSession(projectName, s, activateSession, getSession);
+      setUserPickedSession(true);
       setCurrentSession(detail);
       if (detail.history) {
         setMessages(detail.history.map((h, i) => ({
