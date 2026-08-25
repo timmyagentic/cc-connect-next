@@ -50,6 +50,48 @@ func (s *stubMainAgentSession) Close() error                                    
 func (s *stubMainAgentSession) CurrentSessionID() string                              { return "" }
 func (s *stubMainAgentSession) Alive() bool                                           { return true }
 
+func TestNormalizeLeadingConfigDoctorArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "separate config value",
+			in:   []string{"--config", "/tmp/config.toml", "doctor", "--project", "demo"},
+			want: []string{"doctor", "--config", "/tmp/config.toml", "--project", "demo"},
+		},
+		{
+			name: "equals config value",
+			in:   []string{"--config=/tmp/config.toml", "doctor", "--project", "demo"},
+			want: []string{"doctor", "--config=/tmp/config.toml", "--project", "demo"},
+		},
+		{
+			name: "ordinary runtime flags unchanged",
+			in:   []string{"--config", "/tmp/config.toml", "--force"},
+			want: []string{"--config", "/tmp/config.toml", "--force"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeLeadingConfigDoctorArgs(tc.in); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("normalizeLeadingConfigDoctorArgs(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRuntimePositionalArgErrorRejectsUnconsumedCommand(t *testing.T) {
+	if err := runtimePositionalArgError(nil); err != nil {
+		t.Fatalf("empty runtime args returned error: %v", err)
+	}
+	err := runtimePositionalArgError([]string{"doctor"})
+	if err == nil || !strings.Contains(err.Error(), "doctor") {
+		t.Fatalf("runtimePositionalArgError(doctor) = %v, want clear error", err)
+	}
+}
+
 func TestProjectStatePath(t *testing.T) {
 	dataDir := t.TempDir()
 	got := projectStatePath(dataDir, "my/project:one")

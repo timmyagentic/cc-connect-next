@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -34,6 +35,11 @@ type BridgeServer struct {
 	mu       sync.RWMutex
 	adapters map[string]*bridgeAdapter // platform name → adapter
 
+	// lifecycleMu serializes adapter availability transitions with engine
+	// registration. The adapter and engine maps keep their own locks because
+	// readiness callbacks may call back into Bridge methods.
+	lifecycleMu sync.Mutex
+
 	enginesMu sync.RWMutex
 	engines   map[string]*bridgeEngineRef // project name → engine ref
 }
@@ -42,6 +48,8 @@ type bridgeEngineRef struct {
 	engine   *Engine
 	platform *BridgePlatform
 }
+
+var errBridgeNoAdapters = errors.New("no Bridge adapters connected")
 
 type bridgeAdapter struct {
 	platform     string
@@ -196,18 +204,57 @@ func newBridgeServer(port int, token, path string, corsOrigins []string, insecur
 
 // NewPlatform creates a BridgePlatform for a specific project engine.
 func (bs *BridgeServer) NewPlatform(projectName string) *BridgePlatform {
-	return &BridgePlatform{server: bs, project: projectName}
+	return &BridgePlatform{server: bs, project: projectName, connectionErr: errBridgeNoAdapters}
 }
 
 // RegisterEngine associates a project engine with its BridgePlatform.
 func (bs *BridgeServer) RegisterEngine(projectName string, engine *Engine, bp *BridgePlatform) {
-	bs.enginesMu.Lock()
-	defer bs.enginesMu.Unlock()
-	if err := bp.Start(engine.handleMessage); err != nil {
-		slog.Warn("bridge: platform start failed", "project", projectName, "error", err)
+	startErr := bp.Start(engine.handleMessage)
+	if startErr != nil {
+		slog.Warn("bridge: platform start failed", "project", projectName, "error", startErr)
 	}
 	bp.SetCardNavigationHandler(engine.handleCardNav)
+	bs.lifecycleMu.Lock()
+	defer bs.lifecycleMu.Unlock()
+	bs.enginesMu.Lock()
 	bs.engines[projectName] = &bridgeEngineRef{engine: engine, platform: bp}
+	bs.enginesMu.Unlock()
+	if startErr == nil && bs.hasConnectedAdapters() {
+		bp.setConnectionError(nil)
+		engine.OnPlatformReady(bp)
+	}
+}
+
+func (bs *BridgeServer) hasConnectedAdapters() bool {
+	bs.mu.RLock()
+	defer bs.mu.RUnlock()
+	return len(bs.adapters) > 0
+}
+
+func (bs *BridgeServer) setEnginePlatformsReady() {
+	bs.enginesMu.RLock()
+	refs := make([]*bridgeEngineRef, 0, len(bs.engines))
+	for _, ref := range bs.engines {
+		refs = append(refs, ref)
+	}
+	bs.enginesMu.RUnlock()
+	for _, ref := range refs {
+		ref.platform.setConnectionError(nil)
+		ref.engine.OnPlatformReady(ref.platform)
+	}
+}
+
+func (bs *BridgeServer) setEnginePlatformsUnavailable() {
+	bs.enginesMu.RLock()
+	refs := make([]*bridgeEngineRef, 0, len(bs.engines))
+	for _, ref := range bs.engines {
+		refs = append(refs, ref)
+	}
+	bs.enginesMu.RUnlock()
+	for _, ref := range refs {
+		ref.platform.setConnectionError(errBridgeNoAdapters)
+		ref.engine.OnPlatformUnavailable(ref.platform, errBridgeNoAdapters)
+	}
 }
 
 // Start launches the HTTP/WebSocket server.
@@ -297,10 +344,12 @@ func (bs *BridgeServer) ConnectedAdapters() []string {
 // BridgePlatform implements core.Platform for a single project.
 // It is a lightweight handle; the actual WebSocket server lives in BridgeServer.
 type BridgePlatform struct {
-	server     *BridgeServer
-	project    string
-	handler    MessageHandler
-	navHandler CardNavigationHandler
+	server        *BridgeServer
+	project       string
+	handler       MessageHandler
+	navHandler    CardNavigationHandler
+	healthMu      sync.RWMutex
+	connectionErr error
 }
 
 // Compile-time interface checks.
@@ -318,6 +367,7 @@ var (
 	_ FileSender                = (*BridgePlatform)(nil)
 	_ CardNavigable             = (*BridgePlatform)(nil)
 	_ ReplyContextReconstructor = (*BridgePlatform)(nil)
+	_ PlatformHealth            = (*BridgePlatform)(nil)
 )
 
 func (bp *BridgePlatform) Name() string { return "bridge" }
@@ -328,6 +378,18 @@ func (bp *BridgePlatform) Start(handler MessageHandler) error {
 }
 
 func (bp *BridgePlatform) Stop() error { return nil }
+
+func (bp *BridgePlatform) ConnectionError() error {
+	bp.healthMu.RLock()
+	defer bp.healthMu.RUnlock()
+	return bp.connectionErr
+}
+
+func (bp *BridgePlatform) setConnectionError(err error) {
+	bp.healthMu.Lock()
+	bp.connectionErr = err
+	bp.healthMu.Unlock()
+}
 
 func (bp *BridgePlatform) Reply(ctx context.Context, replyCtx any, content string) error {
 	rc, ok := replyCtx.(*bridgeReplyCtx)
@@ -807,6 +869,7 @@ func (bs *BridgeServer) handleConnection(conn *websocket.Conn) {
 		previewRequests: make(map[string]chan string),
 	}
 
+	bs.lifecycleMu.Lock()
 	bs.mu.Lock()
 	if old, exists := bs.adapters[reg.Platform]; exists {
 		if err := old.conn.Close(); err != nil {
@@ -816,6 +879,8 @@ func (bs *BridgeServer) handleConnection(conn *websocket.Conn) {
 	}
 	bs.adapters[reg.Platform] = adapter
 	bs.mu.Unlock()
+	bs.setEnginePlatformsReady()
+	bs.lifecycleMu.Unlock()
 
 	if err := writeJSON(conn, &adapter.writeMu, map[string]any{"type": "register_ack", "ok": true}); err != nil {
 		slog.Debug("bridge: write register ack failed", "error", err)
@@ -832,11 +897,18 @@ func (bs *BridgeServer) handleConnection(conn *websocket.Conn) {
 	slog.Info("bridge: adapter registered", "platform", reg.Platform, "capabilities", reg.Capabilities)
 
 	defer func() {
+		lastAdapterDisconnected := false
+		bs.lifecycleMu.Lock()
 		bs.mu.Lock()
 		if bs.adapters[reg.Platform] == adapter {
 			delete(bs.adapters, reg.Platform)
+			lastAdapterDisconnected = len(bs.adapters) == 0
 		}
 		bs.mu.Unlock()
+		if lastAdapterDisconnected {
+			bs.setEnginePlatformsUnavailable()
+		}
+		bs.lifecycleMu.Unlock()
 		slog.Info("bridge: adapter disconnected", "platform", reg.Platform)
 	}()
 

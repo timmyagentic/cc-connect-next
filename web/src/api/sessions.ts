@@ -31,3 +31,8 @@ export const listSessions = (project: string) =>
   api.get<{ sessions: Session[]; active_keys: Record<string, string> }>(`/projects/${project}/sessions`);
 export const getSession = (project: string, id: string, historyLimit?: number) =>
   api.get<SessionDetail>(`/projects/${project}/sessions/${id}`, historyLimit ? { history_limit: String(historyLimit) } : undefined);
+export const switchSession = (project: string, sessionKey: string, sessionId: string) =>
+  api.post<{ message: string; active_session_id: string }>(`/projects/${project}/sessions/switch`, {
+    session_key: sessionKey,
+    session_id: sessionId,
+  });

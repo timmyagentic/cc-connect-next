@@ -165,7 +165,7 @@ func TestQueueMessageForBusySession_RejectsStaleBeforeEnqueue(t *testing.T) {
 		Content:           "stale while busy",
 		ReplyCtx:          "rctx",
 	}
-	if !e.queueMessageForBusySession(p, msg, sessionKey) {
+	if !e.queueMessageForBusySession(p, msg, sessionKey, nil) {
 		t.Fatal("stale message should be handled (dropped) without enqueue failure")
 	}
 
@@ -191,7 +191,7 @@ func TestQueueMessageForBusySession_RejectsStaleBeforeEnqueue(t *testing.T) {
 		Content:           "A while B processing",
 		ReplyCtx:          "rctx2",
 	}
-	if !e.queueMessageForBusySession(p, msg, sessionKey) {
+	if !e.queueMessageForBusySession(p, msg, sessionKey, nil) {
 		t.Fatal("stale vs in-flight should return handled=true")
 	}
 	state.mu.Lock()

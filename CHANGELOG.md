@@ -32,6 +32,22 @@ See `changelogs/v0.1.6.md` for the bilingual release notes.
 - Turn handling is split into a dedicated processor without changing the
   public engine contract, and superseded Web/session surfaces were removed.
 
+### End-to-end hardening
+
+- The Web chat now opens its own persistent Web session instead of rendering
+  another platform's latest history and then sending into a fresh context;
+  external sessions remain available through explicit selection.
+- `--config <path> doctor` is normalized to the doctor command, while any
+  other unconsumed positional argument is rejected before locks, platforms,
+  or the daemon can start.
+- Bridge readiness now follows the adapter lifecycle: the first registered
+  adapter marks every Bridge platform ready, and the last disconnect marks it
+  unavailable with an explicit reason instead of a false `never connected`.
+- Accepted queued and steered messages refresh `last_user_activity`, keeping
+  opt-in idle session rotation aligned with real user activity.
+- Doctor checks the effective configured `data_dir` in both CLI and in-chat
+  reports instead of always inspecting `~/.cc-connect-next`.
+
 ### Security and release quality
 
 - The build baseline is Go 1.25.13, with `golang.org/x/crypto`, `x/net`,
