@@ -129,13 +129,13 @@ core 从不硬编码任何 Agent 或平台名称；富卡片、steer、模型切
 
 ```bash
 cc-connect-next migrate --dry-run   # 先查看完整迁移计划
-cc-connect-next migrate             # 迁移配置、会话、cron/heartbeat 状态、绑定……
-cc-connect-next --config ~/.cc-connect-next/config.toml
+cc-connect-next migrate --switch    # 停官方服务、最终同步并启动 Next
+cc-connect-next daemon status
 ```
 
-迁移不会停止、卸载或修改官方安装，两者可以并存（命令、数据目录、服务、socket 全部独立）。每个源文件都会计算哈希、staging 构建并反复校验后才原子启用；迁移期间的任何并发变更都会让本次运行安全失败，并留下带时间戳的备份和逐项记录路径与 SHA-256 的 `migration-manifest.json`。
+不需要申请第二个飞书应用。`--switch` 从官方 daemon 生命周期之外的终端执行；已连接的 CC Agent 会话会在停服前拒绝。命令要求没有已安装的 Next 服务，随后停止并禁用官方 daemon、完成最终一致性迁移，再用迁移配置与官方原运行目录安装并启动 Next。成功后 CLI 直接用迁移后的飞书/Lark 机器人向唯一或显式操作者私聊“迁移完成，cc-connect-next 已运行”；目标有歧义或发送失败不会误发群聊，也不会回滚成功迁移。官方 binary 和数据始终保留。
 
-双跑冲突由产品层兜底：官方 daemon 还在用相同飞书凭证运行时，cc-connect-next 会**拒绝启动**而不是重复消费消息；正式割接用一条 `cc-connect-next migrate --switch` 完成——停止官方 daemon、禁用其开机自启（binary 和数据不动，随时可回滚）、确认静止后做最终同步。`doctor` 也会报告共存状态。
+双跑冲突由产品层兜底：官方 daemon 还在使用相同飞书凭证时，cc-connect-next 会**拒绝启动**而不是重复消费消息；`doctor` 也会报告共存状态。只复制、不切换服务的 `cc-connect-next migrate` 仍保留给备份和高级并行试用场景。
 
 📖 **[完整迁移与共存指南](docs/migration.zh-CN.md)** —— 自定义路径、兼容矩阵、服务切换、回滚，以及可直接交给 Agent 执行的任务块。
 
@@ -176,7 +176,7 @@ done_emoji = "Done"
 
 ## 🆚 对比官方 CC Connect
 
-cc-connect-next 从 CC Connect v1.4.1 分叉，通过逐项审计而非整体合并跟进上游（[审计策略与历史](docs/upstream-v1.5.0-beta.3-audit.md)）。正在用官方版本？完整的长文——真正的差异、零风险试用、切换与回滚——见 **[写给官方 CC Connect 用户](docs/coming-from-cc-connect.zh-CN.md)**。
+cc-connect-next 从 CC Connect v1.4.1 分叉，通过逐项审计而非整体合并跟进上游（[审计策略与历史](docs/upstream-v1.5.0-beta.3-audit.md)）。正在用官方版本？完整的长文——真正的差异、直接迁移与安全回滚——见 **[写给官方 CC Connect 用户](docs/coming-from-cc-connect.zh-CN.md)**。
 
 | | CC Connect | cc-connect-next |
 |---|---|---|
@@ -195,7 +195,7 @@ cc-connect-next 从 CC Connect v1.4.1 分叉，通过逐项审计而非整体合
 | [使用指南](docs/usage.zh-CN.md) | 会话、排队 vs steer、权限、provider、模型、cron、relay、语音 |
 | [飞书配置](docs/feishu.md) | 应用创建、权限、事件订阅 |
 | [回答卡片契约](docs/feishu-card-contract.md) | 卡片生命周期与隐私保证的精确定义 |
-| [写给官方 CC Connect 用户](docs/coming-from-cc-connect.zh-CN.md) | 诚实对比、零风险试用、切换与回滚 |
+| [写给官方 CC Connect 用户](docs/coming-from-cc-connect.zh-CN.md) | 诚实对比、直接迁移与安全回滚 |
 | [迁移指南](docs/migration.zh-CN.md) | 迁移、共存与切换的完整参考 |
 | [迁移兼容矩阵](docs/migration-compatibility.md) | 哪些官方版本与配置可迁移 |
 | [Bridge 协议](docs/bridge-protocol.zh-CN.md) | 通过 WebSocket 编写自定义平台适配器 |

@@ -1,15 +1,15 @@
-# Coming from official CC Connect: what's different, and how to try it with zero risk
+# Coming from official CC Connect: what's different, and how to migrate directly
 
 [中文版](coming-from-cc-connect.zh-CN.md)
 
-If you use [official CC Connect](https://github.com/chenhg5/cc-connect) and you're happy with it, you don't need to switch — it remains a fine project, and cc-connect-next is a fork of it (v1.4.1, MIT). This article is for a different reader: someone who wants a native Feishu card experience, a stricter privacy boundary, or the ability to add "one more thing" while a task is already running. Every difference below is verifiable, and the trial and rollback paths at the end are genuinely zero-risk.
+If you use [official CC Connect](https://github.com/chenhg5/cc-connect) and you're happy with it, you don't need to switch — it remains a fine project, and cc-connect-next is a fork of it (v1.4.1, MIT). This article is for a different reader: someone who wants a native Feishu card experience, a stricter privacy boundary, or the ability to add "one more thing" while a task is already running. Every difference below is verifiable, and the direct migration path needs no second Feishu app while preserving a safe rollback source.
 
 ## What this is, exactly
 
 cc-connect-next is an **independent successor**, not a patch, proxy, or companion plugin:
 
 - a single Go binary with its own command (`cc-connect-next`), data directory (`~/.cc-connect-next`), daemon service name, and npm package;
-- installing, migrating, and trialing **never stops, uninstalls, or modifies** official CC Connect — the two coexist indefinitely;
+- ordinary installation and copy-only migration do not modify official CC Connect; explicit production cutover stops and disables only its service while preserving binaries and data;
 - upstream is treated with respect: instead of blind merges, every upstream change is audited individually and either adopted or deliberately diverged from ([audit policy & history](upstream-v1.5.0-beta.3-audit.md)).
 
 ## Five things that are actually different
@@ -36,7 +36,7 @@ Official CC Connect queues busy-time messages FIFO: they wait for the next turn.
 
 Everything else (14 agents × 15 platforms, cron & webhooks, voice in/out, web admin, five-language i18n) is in the [main README](../README.en.md).
 
-## Trying it requires no commitment
+## Migration needs no second Feishu app
 
 The two systems are fully isolated:
 
@@ -48,7 +48,7 @@ The two systems are fully isolated:
 | Linux service | `cc-connect.service` | `cc-connect-next.service` |
 | API socket | `~/.cc-connect/run/api.sock` | `~/.cc-connect-next/run/api.sock` |
 
-The one rule: **don't let both processes consume the same Feishu app credentials simultaneously** (two WebSocket consumers race for messages). Create a test Feishu app for the trial; the official daemon keeps running untouched.
+Default migration reuses the existing Feishu credentials. `migrate --switch` stops and disables the official daemon before starting Next, so it does not intentionally create two same-credential consumers. No test app is required. The separate runtime identities and preserved official data still provide rollback; only an advanced parallel trial needs a second app.
 
 ## Why the one-command migration can be trusted
 
@@ -58,41 +58,39 @@ The one rule: **don't let both processes consume the same Feishu app credentials
 cc-connect-next migrate --dry-run
 ```
 
-It prints the full plan without writing anything. Supported official versions and settings are listed in the [migration compatibility matrix](migration-compatibility.md) (currently v1.4.1 and v1.5.0-beta.1 – beta.3); complete semantics are in the [migration guide](migration.md).
+It prints the full plan without writing anything. Supported official versions and settings are listed in the [migration compatibility matrix](migration-compatibility.md) (currently v1.4.1 and v1.5.0-beta.1 through stable v1.5.0); complete semantics are in the [migration guide](migration.md).
 
-## Switching for real, and rolling back
+## One-command switch and rollback
 
-To move production traffic, stop the official daemon, run a final synchronizing migration (bringing over sessions, bindings, and timers the official install wrote during your trial), then install the service:
+Preview the complete plan, then run the direct cutover:
 
 ```bash
-cc-connect daemon stop
-cc-connect-next migrate --dry-run --force
-cc-connect-next migrate --force
-cc-connect-next daemon install \
-  --config ~/.cc-connect-next/config.toml \
-  --work-dir /absolute/original/cwd
+cc-connect-next migrate --dry-run
+cc-connect-next migrate --switch
+cc-connect-next daemon status
 ```
 
-Rollback is always two commands — the official data directory is never touched:
+Run `--switch` outside a connected CC Agent session and with no installed Next service. It stops/disables official, final-syncs, installs/starts Next, then privately sends the completion message to one unique or explicit Feishu/Lark operator. For manual rollback, unregister Next before restoring official autostart:
 
 ```bash
-cc-connect-next daemon stop
+cc-connect-next daemon uninstall
+# Re-enable official autostart with launchctl/systemctl/Task Scheduler first.
 cc-connect daemon start
 ```
 
-## Three minutes to first run
+## Three minutes to migrate
 
 ```bash
 npm install -g cc-connect-next
-cc-connect-next                # writes ~/.cc-connect-next/config.toml and guides you
-cc-connect-next feishu setup   # interactive Feishu app setup with the recommended profile
+cc-connect-next migrate --dry-run
+cc-connect-next migrate --switch
 cc-connect-next doctor
-cc-connect-next
+cc-connect-next daemon status
 ```
 
 ## Common concerns
 
-- **Will it touch my official install?** No. Migration never stops, uninstalls, or modifies it; the coexistence boundaries are in the table above.
+- **Will it delete my official install?** No. `--switch` stops and disables its service, but the binary, configuration, and data remain intact for automatic failure recovery or manual rollback.
 - **What about future upstream releases?** Each upstream change is audited individually — adopted when valuable, recorded as a deliberate divergence otherwise. No wholesale merges.
 - **I don't use Feishu — still relevant?** Steer, self-updates, `/feedback`, and `doctor` are platform-independent; the Feishu card contract is just the largest single difference.
 - **License?** MIT, same as upstream, with upstream attribution preserved. Thanks to [chenhg5](https://github.com/chenhg5) and all CC Connect contributors — this project exists because of that work.

@@ -584,6 +584,17 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 
 func (p *Platform) Name() string { return p.platformName }
 
+// SendDirectUser opens a private bot conversation with one app-scoped open_id.
+func (p *Platform) SendDirectUser(ctx context.Context, userID, content string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("%s: direct user ID is empty", p.tag())
+	}
+	msgType, body := buildReplyContentWithResolvedMention(content, false)
+	_, err := p.createMessageToReceiveID(ctx, userID, larkim.ReceiveIdTypeOpenId, msgType, body, "send direct user")
+	return err
+}
+
 func (p *Platform) ProgressStyle() string { return p.progressStyle }
 
 func (p *Platform) SupportsProgressCardPayload() bool { return true }
@@ -4487,10 +4498,14 @@ func (p *Platform) createMessage(ctx context.Context, chatID, msgType, content, 
 }
 
 func (p *Platform) createMessageWithID(ctx context.Context, chatID, msgType, content, op string) (string, error) {
+	return p.createMessageToReceiveID(ctx, chatID, larkim.ReceiveIdTypeChatId, msgType, content, op)
+}
+
+func (p *Platform) createMessageToReceiveID(ctx context.Context, receiveID, receiveIDType, msgType, content, op string) (string, error) {
 	req := larkim.NewCreateMessageReqBuilder().
-		ReceiveIdType(larkim.ReceiveIdTypeChatId).
+		ReceiveIdType(receiveIDType).
 		Body(larkim.NewCreateMessageReqBodyBuilder().
-			ReceiveId(chatID).
+			ReceiveId(receiveID).
 			MsgType(msgType).
 			Content(content).
 			Build()).

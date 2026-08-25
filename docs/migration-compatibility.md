@@ -1,6 +1,6 @@
 # Official CC Connect migration compatibility
 
-`cc-connect-next migrate` validates compatibility before creating or changing any target. The default `--source-version auto` does not execute a binary from daemon metadata; it validates the actual TOML schema, the same semantic requirements as normal startup, the configured Agent/platform registry, persistent-path inventory, source identity, and access metadata. Use an exact version only when provenance is known, for example `--source-version v1.5.0-beta.3`; unsupported explicit releases fail closed.
+`cc-connect-next migrate` validates compatibility before creating or changing any target. The default `--source-version auto` does not execute a binary from daemon metadata; it validates the actual TOML schema, the same semantic requirements as normal startup, the configured Agent/platform registry, persistent-path inventory, source identity, and access metadata. Use an exact version when provenance is known, for example `--source-version v1.5.0`; unsupported explicit releases fail closed.
 
 | Official source | Persistent layout | Configuration behavior | Status |
 |---|---|---|---|
@@ -8,6 +8,9 @@
 | v1.5.0-beta.1 | Same known layout | Covered when every configured plugin exists in the Next build | Supported with preflight |
 | v1.5.0-beta.2 | Same known layout | Covered when every configured plugin exists in the Next build | Supported with preflight |
 | v1.5.0-beta.3 | Same known layout | `hide_agent_footer`, Feishu `mention_map` and `peer_bots`, topic workspace isolation, quoted-file retrieval, topic bootstrap, relay visibility, Weixin `burst_limit`/`burst_window_secs`, pi `thinking`, and the `cmd` array form are supported. The known rejections below fail preflight until implemented. | Supported with preflight |
+| v1.5.0-beta.4 | Same known layout | Same strict configuration/plugin preflight; deferred settings below remain rejected. | Supported with preflight |
+| v1.5.0-beta.5 | Same known layout | Same strict configuration/plugin preflight; deferred settings below remain rejected. | Supported with preflight |
+| v1.5.0 | Same known layout | Full v1.4.1→v1.5.0 history was audited; configuration-specific gaps below fail before writes instead of silently changing behavior. | Supported with preflight |
 
 Compatibility is deliberately configuration-specific. A release row does not mean an unavailable platform is silently removed or a new setting is ignored. If source TOML contains a field the current build cannot honor, fails normal startup validation (for example, an invalid display mode or a missing Agent/platform), or names a plugin unavailable in the current build, migration reports the exact incompatibility and writes nothing.
 
@@ -43,16 +46,16 @@ The generated manifest is schema version 2 and records `source_version` as eithe
 
 ```bash
 cc-connect-next migrate --dry-run
-cc-connect-next migrate
+cc-connect-next migrate --switch
 ```
 
 When the official release is known:
 
 ```bash
-cc-connect-next migrate --source-version v1.5.0-beta.3 --dry-run
-cc-connect-next migrate --source-version v1.5.0-beta.3
+cc-connect-next migrate --source-version v1.5.0 --dry-run
+cc-connect-next migrate --source-version v1.5.0 --switch
 ```
 
-Before production cutover, stop the official runtime and repeat the same command with `--force` so state written after the earlier rehearsal is included. `--force` merges: the existing target is copied into the staged tree first, then the source overwrites matching files, and the pre-migration target is retained as a timestamped backup.
+`--switch` handles service order, final synchronization, Next activation, and rollback. It requires no installed Next service and must run outside a connected CC Agent session. Repeat every custom path/version option from the dry run.
 
 Official and Next may remain installed together, but must not establish concurrent Feishu connections with the same app credentials. If the report listed configuration values that still point at the source, update them before removing the official directory — the migrated installation keeps using it until you do.

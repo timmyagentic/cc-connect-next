@@ -1,15 +1,15 @@
-# 写给官方 CC Connect 用户：cc-connect-next 有什么不同，怎么零风险试用
+# 写给官方 CC Connect 用户：cc-connect-next 有什么不同，怎么直接迁移
 
 [English](coming-from-cc-connect.md)
 
-如果你正在用 [官方 CC Connect](https://github.com/chenhg5/cc-connect)，并且对它满意，你不需要换——它依然是一个很好的项目，cc-connect-next 也正是从它 fork 出来的（v1.4.1，MIT）。这篇文章写给另一类用户：想要原生飞书卡片体验、更严格的隐私边界、或者"任务跑着的时候还能补一句"的用户。下面每一条差异都可以自己验证，文末给出零风险的试用与回退路径。
+如果你正在用 [官方 CC Connect](https://github.com/chenhg5/cc-connect)，并且对它满意，你不需要换——它依然是一个很好的项目，cc-connect-next 也正是从它 fork 出来的（v1.4.1，MIT）。这篇文章写给另一类用户：想要原生飞书卡片体验、更严格的隐私边界、或者"任务跑着的时候还能补一句"的用户。下面每一条差异都可以自己验证，文末给出不需要第二个飞书应用的直接迁移与安全回退路径。
 
 ## 先说清楚这是什么
 
 cc-connect-next 是一个**独立后继**，不是补丁、代理或伴生插件：
 
 - 单个 Go 二进制，拥有自己的命令（`cc-connect-next`）、数据目录（`~/.cc-connect-next`）、daemon 服务名和 npm 包；
-- 安装、迁移、试用全程**不停止、不卸载、不修改**官方 CC Connect，两者可以长期并存；
+- 普通安装和只复制迁移不修改官方 CC Connect；显式生产割接只停止并禁用其服务，binary 与数据始终保留；
 - 对上游保持尊重：不做盲目 merge，而是对每个上游变更做逐条审计后决定采纳或刻意偏离（[审计策略与记录](upstream-v1.5.0-beta.3-audit.md)）。
 
 ## 五个真正不同的地方
@@ -36,7 +36,7 @@ cc-connect-next 是一个**独立后继**，不是补丁、代理或伴生插件
 
 其余能力（14 种 Agent × 15 个平台、cron 与 webhook、语音输入输出、Web 管理台、五种语言 i18n）见[主 README](../README.md)。
 
-## 试用不需要"下决心"
+## 迁移不需要第二个飞书应用
 
 两套系统的边界完全隔离：
 
@@ -48,7 +48,7 @@ cc-connect-next 是一个**独立后继**，不是补丁、代理或伴生插件
 | Linux 服务 | `cc-connect.service` | `cc-connect-next.service` |
 | API socket | `~/.cc-connect/run/api.sock` | `~/.cc-connect-next/run/api.sock` |
 
-唯一的注意事项：**不要让两个进程同时连接同一个飞书应用凭证**（两个 WebSocket 消费者会竞争消息）。试用时建一个测试用飞书应用即可，官方 daemon 完全不用停。
+默认迁移直接复用现有飞书应用凭证：`migrate --switch` 会先停止并禁用官方 daemon，再启动 Next，因此不会主动制造两个同凭证消费者。你不需要创建测试应用。两套身份仍保持独立，官方 binary 和数据不会删除；只有主动做高级并行试用时才需要第二个应用。
 
 ## 一键迁移为什么敢用
 
@@ -58,41 +58,39 @@ cc-connect-next 是一个**独立后继**，不是补丁、代理或伴生插件
 cc-connect-next migrate --dry-run
 ```
 
-它会打印完整计划而不写任何东西。支持的官方版本与配置项见[迁移兼容矩阵](migration-compatibility.md)（当前覆盖 v1.4.1 与 v1.5.0-beta.1 ~ beta.3）；完整语义在[迁移指南](migration.zh-CN.md)。
+它会打印完整计划而不写任何东西。支持的官方版本与配置项见[迁移兼容矩阵](migration-compatibility.md)（当前覆盖 v1.4.1 与 v1.5.0-beta.1 ~ 稳定版 v1.5.0）；完整语义在[迁移指南](migration.zh-CN.md)。
 
-## 正式切换与回滚
+## 一条命令切换与回滚
 
-切换生产流量时，先停官方 daemon，再做最终同步迁移（把测试期间官方新写的会话、绑定、定时器也带过来），然后装服务：
+先预览完整计划，再执行直接割接：
 
 ```bash
-cc-connect daemon stop
-cc-connect-next migrate --dry-run --force
-cc-connect-next migrate --force
-cc-connect-next daemon install \
-  --config ~/.cc-connect-next/config.toml \
-  --work-dir /原运行目录的绝对路径
+cc-connect-next migrate --dry-run
+cc-connect-next migrate --switch
+cc-connect-next daemon status
 ```
 
-回滚永远只有两条命令，官方数据目录从头到尾没有被动过：
+`--switch` 从已连接 CC Agent 之外的终端执行，并要求没有已安装的 Next 服务。它停止并禁用官方服务、最终同步、安装启动 Next，再私聊唯一或显式飞书/Lark 操作者。手工回滚先解除 Next 服务注册，再恢复官方自启：
 
 ```bash
-cc-connect-next daemon stop
+cc-connect-next daemon uninstall
+# 先按平台重新启用官方自启（launchctl/systemctl/Task Scheduler）
 cc-connect daemon start
 ```
 
-## 三分钟上手
+## 三分钟迁移
 
 ```bash
 npm install -g cc-connect-next
-cc-connect-next                # 生成 ~/.cc-connect-next/config.toml 并引导
-cc-connect-next feishu setup   # 交互式飞书应用配置（内置推荐档）
+cc-connect-next migrate --dry-run
+cc-connect-next migrate --switch
 cc-connect-next doctor
-cc-connect-next
+cc-connect-next daemon status
 ```
 
 ## 常见疑虑
 
-- **会动我的官方安装吗？** 不会。迁移不停止、不卸载、不修改官方；并存边界见上表。
+- **会删我的官方安装吗？** 不会。`--switch` 会停止并禁用官方服务，但 binary、配置和数据始终保留，失败恢复和手工回滚都有来源。
 - **上游以后更新了怎么办？** 逐条审计上游变更，采纳有价值的、记录刻意偏离的，不做整体 merge。
 - **我不用飞书，值得看吗？** steer、自更新、`/feedback`、doctor 与平台无关；飞书卡片契约只是差异最大的一块。
 - **许可证？** MIT，与上游一致；代码保留上游署名。感谢 [chenhg5](https://github.com/chenhg5) 和 CC Connect 的所有贡献者——没有上游就没有这个项目。

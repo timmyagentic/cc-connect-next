@@ -63,6 +63,16 @@ See `changelogs/v0.1.6.md` for the bilingual release notes.
 
 ### Review hardening
 
+- `migrate --switch` is now a complete first-time production cutover: it
+  rejects an installed successor, stops and disables official CC Connect, performs the
+  final consistent migration, installs/starts Next with the exact migrated
+  config and original work directory, and waits for the service manager to
+  report Running. It must run outside a connected CC Agent session. On success
+  the CLI directly sends one private Feishu/Lark completion message; ambiguous
+  targets and send failures are reported without group fallback or rollback.
+- Exact migration provenance now accepts official `v1.5.0-beta.4`,
+  `v1.5.0-beta.5`, and stable `v1.5.0`; the same strict plugin/config gates
+  still reject unsupported behavior before any target write.
 - `migrate --switch` now validates the full migration before stopping the
   official daemon; credential overlap resolves `${ENV}` app IDs; Linux
   switchover selects the detected user or system service manager.
@@ -104,9 +114,9 @@ now enforced by the product instead of documentation:
   and warns when the official autostart is merely armed for the next boot;
 - `migrate` ends with a status-aware switchover/trial guide instead of the
   passive "was not modified or stopped" line;
-- `migrate --switch` stops the official daemon, disarms its autostart
-  (binaries and data untouched — rollback stays two commands plus a
-  re-enable), verifies quiescence fail-closed, then runs the final sync;
+- `migrate --switch` stops the official daemon, disarms and verifies its
+  autostart, final-syncs, installs/starts Next, and recovers official service
+  state on downstream failure (binaries and data stay untouched);
 - `doctor` gains an "official CC Connect coexistence" section with redacted
   credential-overlap reporting.
 

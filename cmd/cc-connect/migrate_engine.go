@@ -29,6 +29,9 @@ var supportedMigrationSourceVersions = map[string]struct{}{
 	"v1.5.0-beta.1": {},
 	"v1.5.0-beta.2": {},
 	"v1.5.0-beta.3": {},
+	"v1.5.0-beta.4": {},
+	"v1.5.0-beta.5": {},
+	"v1.5.0":        {},
 }
 
 type migrationOptions struct {
@@ -515,8 +518,9 @@ func migrateLegacyDataWithHooks(opts migrationOptions, hooks migrationHooks) (mi
 		return plan.Report, fmt.Errorf("write migration manifest: %w", err)
 	}
 
-	// The official process intentionally remains online during migration. Build
-	// a fresh, read-only plan immediately before activation so additions,
+	// Copy-only migration may leave the official process online; direct cutover
+	// stops it first. In either case, build a fresh read-only plan immediately
+	// before activation so additions,
 	// deletions, newly discovered projects, and access-mode changes cannot be
 	// silently omitted just because they were absent from the first inventory.
 	freshPlan, err := prepareLegacyMigration(opts)

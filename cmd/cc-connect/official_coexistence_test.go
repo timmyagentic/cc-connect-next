@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -53,6 +54,7 @@ func testProbe(home string) officialProbe {
 		DialTimeout: func(network, address string, timeout time.Duration) (net.Conn, error) {
 			return net.DialTimeout(network, address, timeout)
 		},
+		Sleep: func(time.Duration) {},
 	}
 }
 
@@ -185,7 +187,7 @@ func TestOfficialConflictRefusal(t *testing.T) {
 	if msg == "" {
 		t.Fatal("want refusal for running daemon with overlap")
 	}
-	for _, want := range []string{"Refusing to start", "cc-connect daemon stop", "launchctl disable gui/501/com.cc-connect.service", "CC_NEXT_ALLOW_OFFICIAL_CONFLICT"} {
+	for _, want := range []string{"Refusing to start", "cc-connect-next migrate --switch", "stops and disables official CC Connect", "CC_NEXT_ALLOW_OFFICIAL_CONFLICT"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("refusal missing %q:\n%s", want, msg)
 		}
@@ -203,23 +205,35 @@ func TestOfficialConflictRefusal(t *testing.T) {
 	}
 }
 
+func TestOfficialConflictRefusal_ProbeFailureWithSharedCredentialsFailsClosed(t *testing.T) {
+	st := officialInstallState{ProbeErr: errors.New("scheduled task probe failed")}
+	msg := officialConflictRefusal(st, []string{"cli_shared"}, "darwin", 501)
+	for _, want := range []string{"Refusing to start", "could not verify", "migrate --switch"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("refusal missing %q:\n%s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "cli_shared") {
+		t.Fatal("probe-failure refusal leaked credential value")
+	}
+}
+
 func TestRenderOfficialCoexistenceGuidance(t *testing.T) {
 	quiet := officialInstallState{}
-	out := renderOfficialCoexistenceGuidance(quiet, nil, "darwin", 501, "/t/config.toml", "/w")
+	out := renderOfficialCoexistenceGuidance(quiet, nil)
 	if !strings.Contains(out, "was not modified or stopped") || strings.Contains(out, "⚠") {
 		t.Fatalf("quiet state should keep the single passive line, got:\n%s", out)
 	}
 
 	hot := officialInstallState{Running: true, RunningVia: "live API socket /x", AutostartArmed: true, ServicePath: "/p"}
-	out = renderOfficialCoexistenceGuidance(hot, []string{"cli_a"}, "darwin", 501, "/t/config.toml", "/w")
+	out = renderOfficialCoexistenceGuidance(hot, []string{"cli_a"})
 	for _, want := range []string{
 		"RUNNING right now",
 		"armed to autostart",
 		"credential(s) are shared",
-		"cc-connect daemon stop",
 		"migrate --switch",
-		"daemon install --config /t/config.toml --work-dir /w",
-		"test-app credentials",
+		"installs and starts cc-connect-next",
+		"Advanced side-by-side trials",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("guidance missing %q:\n%s", want, out)
@@ -284,10 +298,20 @@ func TestRunOfficialSwitchover_StopsAndDisarms(t *testing.T) {
 	writeOfficialFixture(t, base, "", officialPlistRunAtLoad)
 
 	var commands []string
+	disabled := false
 	p := testProbe(base)
 	p.LookPath = func(string) (string, error) { return "/usr/local/bin/cc-connect", nil }
 	p.RunCommand = func(name string, args ...string) (string, error) {
 		commands = append(commands, name+" "+strings.Join(args, " "))
+		if name == "launchctl" && len(args) > 0 && args[0] == "print-disabled" {
+			if disabled {
+				return `"com.cc-connect.service" => disabled`, nil
+			}
+			return "", nil
+		}
+		if name == "launchctl" && len(args) > 0 && args[0] == "disable" {
+			disabled = true
+		}
 		if strings.HasSuffix(name, "cc-connect") && len(args) == 2 && args[0] == "daemon" && args[1] == "stop" {
 			_ = ln.Close() // the official CLI stop actually kills the daemon
 		}
@@ -304,6 +328,39 @@ func TestRunOfficialSwitchover_StopsAndDisarms(t *testing.T) {
 	}
 	if !strings.Contains(joined, "launchctl disable gui/501/com.cc-connect.service") {
 		t.Fatalf("expected autostart disarm, got:\n%s", joined)
+	}
+}
+
+func TestRunOfficialSwitchover_StopsRegisteredServiceWithoutLiveSocket(t *testing.T) {
+	home := t.TempDir()
+	writeOfficialFixture(t, home, "", officialPlistRunAtLoad)
+	disabled := false
+	var commands []string
+	p := testProbe(home)
+	p.LookPath = func(string) (string, error) { return "/usr/local/bin/cc-connect", nil }
+	p.RunCommand = func(name string, args ...string) (string, error) {
+		joined := name + " " + strings.Join(args, " ")
+		commands = append(commands, joined)
+		if name == "launchctl" && len(args) > 0 && args[0] == "print-disabled" {
+			if disabled {
+				return `"com.cc-connect.service" => disabled`, nil
+			}
+			return "", nil
+		}
+		if name == "launchctl" && len(args) > 0 && args[0] == "disable" {
+			disabled = true
+		}
+		return "", nil
+	}
+	before := probeOfficialInstall(p)
+	if before.Running || !before.ServiceRegistered {
+		t.Fatalf("fixture state = %+v, want registered without live socket", before)
+	}
+	if err := runOfficialSwitchover(p, before, func(string, ...any) bool { return true }); err != nil {
+		t.Fatalf("runOfficialSwitchover() error: %v", err)
+	}
+	if !strings.Contains(strings.Join(commands, "\n"), "/usr/local/bin/cc-connect daemon stop") {
+		t.Fatalf("registered service was not stopped:\n%s", strings.Join(commands, "\n"))
 	}
 }
 
@@ -341,29 +398,6 @@ func TestExtractAppIDs_OmitsUnsetEnvironmentPlaceholders(t *testing.T) {
 	}
 }
 
-func TestPrepareAndRunOfficialSwitchover_PreflightsBeforeCommands(t *testing.T) {
-	root := t.TempDir()
-	var commands []string
-	p := testProbe(root)
-	p.RunCommand = func(name string, args ...string) (string, error) {
-		commands = append(commands, name+" "+strings.Join(args, " "))
-		return "", nil
-	}
-
-	_, err := prepareAndRunOfficialSwitchover(migrationOptions{
-		Source:             filepath.Join(root, "missing-source"),
-		Target:             filepath.Join(root, "target"),
-		Home:               root,
-		IncludeProjectData: true,
-	}, p, func(string, ...any) bool { return true })
-	if err == nil || !strings.Contains(err.Error(), "preflight") {
-		t.Fatalf("prepareAndRunOfficialSwitchover() error = %v, want preflight failure", err)
-	}
-	if len(commands) != 0 {
-		t.Fatalf("preflight failure ran service commands: %v", commands)
-	}
-}
-
 func TestRunOfficialSwitchover_SelectsSystemdManager(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
@@ -398,5 +432,211 @@ func TestRunOfficialSwitchover_SelectsSystemdManager(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestProbeOfficialInstall_RejectsMultipleSystemdRegistrations(t *testing.T) {
+	home := t.TempDir()
+	userUnit := filepath.Join(home, "user", "cc-connect.service")
+	systemUnit := filepath.Join(home, "system", "cc-connect.service")
+	for _, unit := range []string{userUnit, systemUnit} {
+		if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(unit, []byte("[Service]\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := testProbe(home)
+	p.GOOS = "linux"
+	p.SystemdUnitPaths = []string{userUnit, systemUnit}
+	state := probeOfficialInstall(p)
+	if state.ProbeErr == nil || !strings.Contains(state.ProbeErr.Error(), "multiple official systemd services") {
+		t.Fatalf("state = %+v", state)
+	}
+}
+
+func TestSystemdServiceEnabled_RecognizesDisabledNonzeroResult(t *testing.T) {
+	p := testProbe(t.TempDir())
+	p.RunCommand = func(name string, args ...string) (string, error) {
+		return "disabled\n", errors.New("exit status 1")
+	}
+	if systemdServiceEnabled(p, "/home/demo/.config/systemd/user/cc-connect.service") {
+		t.Fatal("disabled systemd service reported as enabled")
+	}
+}
+
+func TestProbeOfficialInstall_WindowsScheduledTask(t *testing.T) {
+	home := t.TempDir()
+	writeOfficialFixture(t, home, `app_id = "cli_windows"`, "")
+	p := testProbe(home)
+	p.GOOS = "windows"
+	p.RunCommand = func(name string, args ...string) (string, error) {
+		if name != "powershell.exe" {
+			return "", fmt.Errorf("unexpected command %s", name)
+		}
+		return "Running", nil
+	}
+
+	st := probeOfficialInstall(p)
+	if !st.ServiceRegistered || !st.AutostartArmed || !st.Running {
+		t.Fatalf("windows official state = %+v, want registered, armed, and running", st)
+	}
+}
+
+func TestRestoreOfficialInstall_ReenablesAndStartsPreviousState(t *testing.T) {
+	var commands []string
+	p := testProbe(t.TempDir())
+	p.RunCommand = func(name string, args ...string) (string, error) {
+		commands = append(commands, name+" "+strings.Join(args, " "))
+		return "", nil
+	}
+	before := officialInstallState{
+		BinaryPath:        "/usr/local/bin/cc-connect",
+		ServiceRegistered: true,
+		ServicePath:       "/Users/demo/Library/LaunchAgents/com.cc-connect.service.plist",
+		AutostartArmed:    true,
+		Running:           true,
+	}
+
+	if err := restoreOfficialInstall(p, before, func(string, ...any) bool { return true }); err != nil {
+		t.Fatalf("restoreOfficialInstall() error: %v", err)
+	}
+	joined := strings.Join(commands, "\n")
+	for _, want := range []string{
+		"launchctl enable gui/501/com.cc-connect.service",
+		"/usr/local/bin/cc-connect daemon start",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("restore commands missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestRestoreOfficialInstall_NativeFallbackCanRecoverAfterCLIStartFailure(t *testing.T) {
+	var commands []string
+	p := testProbe(t.TempDir())
+	p.RunCommand = func(name string, args ...string) (string, error) {
+		commands = append(commands, name+" "+strings.Join(args, " "))
+		if strings.HasSuffix(name, "cc-connect") {
+			return "", errors.New("stale CLI path")
+		}
+		return "", nil
+	}
+	before := officialInstallState{
+		BinaryPath:  "/stale/cc-connect",
+		ServicePath: "/Users/demo/Library/LaunchAgents/com.cc-connect.service.plist",
+		Running:     true,
+	}
+	if err := restoreOfficialInstall(p, before, func(string, ...any) bool { return true }); err != nil {
+		t.Fatalf("native fallback recovered service but returned error: %v", err)
+	}
+	joined := strings.Join(commands, "\n")
+	if !strings.Contains(joined, "launchctl bootstrap") || !strings.Contains(joined, "launchctl kickstart") {
+		t.Fatalf("native fallback commands missing:\n%s", joined)
+	}
+}
+
+func TestRunOfficialSwitchover_WindowsStopsAndDisables(t *testing.T) {
+	state := "Running"
+	var commands []string
+	p := testProbe(t.TempDir())
+	p.GOOS = "windows"
+	p.LookPath = func(string) (string, error) { return "", errors.New("not found") }
+	p.RunCommand = func(name string, args ...string) (string, error) {
+		joined := name + " " + strings.Join(args, " ")
+		commands = append(commands, joined)
+		if strings.Contains(joined, "Get-ScheduledTask") {
+			return state, nil
+		}
+		if strings.Contains(joined, "Stop-ScheduledTask") {
+			state = "Ready"
+		}
+		if strings.Contains(joined, "Disable-ScheduledTask") {
+			state = "Disabled"
+		}
+		return "", nil
+	}
+	before := probeOfficialInstall(p)
+	if err := runOfficialSwitchover(p, before, func(string, ...any) bool { return true }); err != nil {
+		t.Fatalf("runOfficialSwitchover() error: %v", err)
+	}
+	if state != "Disabled" {
+		t.Fatalf("scheduled task state = %q, want Disabled", state)
+	}
+	joined := strings.Join(commands, "\n")
+	for _, want := range []string{"Stop-ScheduledTask", "Disable-ScheduledTask"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("windows switchover missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestOfficialProbeForMigrationUsesCustomSourcePaths(t *testing.T) {
+	base := testProbe("/home/demo")
+	got := officialProbeForMigration(base, &preparedMigration{
+		SourceRoot:    "/srv/official-config",
+		SourceDataDir: "/var/lib/official-state",
+	})
+	if got.ConfigPath != "/srv/official-config/config.toml" {
+		t.Fatalf("ConfigPath = %q", got.ConfigPath)
+	}
+	if got.SocketPath != "/var/lib/official-state/run/api.sock" {
+		t.Fatalf("SocketPath = %q", got.SocketPath)
+	}
+}
+
+func TestWaitForOfficialRestoredWaitsForRunningAndAutostart(t *testing.T) {
+	calls := 0
+	p := testProbe(t.TempDir())
+	p.GOOS = "windows"
+	p.RunCommand = func(name string, args ...string) (string, error) {
+		calls++
+		if calls < 3 {
+			return "Disabled", nil
+		}
+		return "Running", nil
+	}
+	before := officialInstallState{ServiceRegistered: true, AutostartArmed: true, Running: true}
+	if err := waitForOfficialRestored(p, before); err != nil {
+		t.Fatalf("waitForOfficialRestored() error: %v", err)
+	}
+	if calls < 3 {
+		t.Fatalf("probe calls = %d, want retry", calls)
+	}
+}
+
+func TestRunOfficialSwitchover_PostStopProbeFailureFailsClosed(t *testing.T) {
+	probeCalls := 0
+	p := testProbe(t.TempDir())
+	p.GOOS = "windows"
+	p.LookPath = func(string) (string, error) { return "", errors.New("not found") }
+	p.RunCommand = func(name string, args ...string) (string, error) {
+		joined := name + " " + strings.Join(args, " ")
+		if strings.Contains(joined, "Get-ScheduledTask") {
+			probeCalls++
+			if probeCalls == 1 {
+				return "Running", nil
+			}
+			return "", errors.New("Task Scheduler query failed")
+		}
+		return "", nil
+	}
+	before := probeOfficialInstall(p)
+	err := runOfficialSwitchover(p, before, func(string, ...any) bool { return true })
+	if err == nil || !strings.Contains(err.Error(), "could not verify official daemon quiescence") || !strings.Contains(err.Error(), "Task Scheduler query failed") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWaitForOfficialRestored_ProbeFailureFailsClosed(t *testing.T) {
+	p := testProbe(t.TempDir())
+	p.GOOS = "windows"
+	p.RunCommand = func(string, ...string) (string, error) {
+		return "", errors.New("Task Scheduler unavailable")
+	}
+	err := waitForOfficialRestored(p, officialInstallState{ServiceRegistered: true, AutostartArmed: true, Running: true})
+	if err == nil || !strings.Contains(err.Error(), "Task Scheduler unavailable") {
+		t.Fatalf("error = %v", err)
 	}
 }

@@ -15,7 +15,7 @@ cc-connect --version 2>/dev/null || true
 cc-connect-next --version 2>/dev/null || true
 ```
 
-Do not stop, uninstall, overwrite, or edit official CC Connect during installation or migration.
+Do not modify official CC Connect during inspection, installation, or copy-only migration. The explicit `migrate --switch` cutover is the sole exception and preserves official binaries/data.
 
 ## 2. Install
 
@@ -98,22 +98,37 @@ For Feishu, `cc-connect-next feishu setup` fills the credentials for you and the
 
 ### Migrate official CC Connect
 
-Migration is explicit, local, and copy-only. Start with a dry run:
+The normal user journey is a direct production cutover. It reuses the existing
+platform credentials; you do not need to create a second Feishu app. Start with
+a read-only dry run, then authorize the switch explicitly:
 
 ```bash
 cc-connect-next migrate --dry-run
-cc-connect-next migrate
+cc-connect-next migrate --switch
 ```
+
+`--switch` must run outside a connected CC Agent session and rejects an installed
+Next service before touching official. It stops and disables official CC Connect, performs the
+final migration against a quiet source, then installs and starts cc-connect-next
+with the migrated config and the detected official runtime work directory. If
+the final sync or successor activation fails, it disarms the successor service
+and makes a best-effort restoration of official CC Connect's previous running
+and autostart state. On success it privately notifies one unique or explicit
+Feishu/Lark operator. Official binaries and data are never deleted.
+
+Plain `cc-connect-next migrate` remains a copy-only advanced operation. It does
+not switch traffic or start a daemon and is useful for backups or a deliberately
+configured parallel trial.
 
 The default `--source-version auto` validates the actual configuration and
 persistent layout without executing any binary recorded by the official daemon.
 The current compatibility matrix covers official v1.4.1 and v1.5.0-beta.1
-through beta.3. When provenance is known, record it explicitly on both the dry
+through stable v1.5.0. When provenance is known, record it explicitly on both the dry
 run and real migration, for example:
 
 ```bash
-cc-connect-next migrate --source-version v1.5.0-beta.3 --dry-run
-cc-connect-next migrate --source-version v1.5.0-beta.3
+cc-connect-next migrate --source-version v1.5.0 --dry-run
+cc-connect-next migrate --source-version v1.5.0 --switch
 ```
 
 Unknown configuration fields and unavailable Agent/platform implementations
@@ -130,7 +145,7 @@ target: ~/.cc-connect-next
 
 The command reads exactly the official `config.toml`, inventories the effective `data_dir` (including a custom location), and inventories project-local `.cc-connect` directories referenced by configured work directories, multi-workspace roots, project state, or workspace bindings. If the config file is separate from the effective data directory, its sibling files and directories are never inventoried. It copies persistent configuration, sessions, project overrides, cron/timer/heartbeat state, bindings, local provider configuration, and project-local images/attachments without copying a surrounding repository, `.env`, backup tree, or service home. Agent-native stores such as Codex and Claude sessions remain in their original locations, so their existing IDs stay valid.
 
-Before activation it hashes every source, builds the complete result in sibling staging directories, verifies the staged files, and checks the sources again. It activates each destination with an atomic rename and rolls back earlier activations if a later one fails, then writes `migration-manifest.json` with source, target, size, and SHA-256 records. Source/target overlap checks use filesystem identity, rejecting symlinked ancestors and case-only aliases on case-insensitive volumes. Global `data_dir` and project-local access modes and ownership are preserved so `run_as_user` agents retain traversal access. Missing custom-target ancestors created by migration inherit the corresponding source root's access and owner; existing ancestors are not modified. The rewritten config remains `0600`. Logs, sockets, locks, restart notifications, daemon metadata, and source symlinks are excluded. A non-empty target is rejected unless `--force` is explicit; with `--force`, the previous target is first preserved as a timestamped `*.pre-migration-*` backup. Use `--skip-project-data` only to deliberately omit project-local images and attachments. The official installation is never stopped or modified.
+Before activation it hashes every source, builds the complete result in sibling staging directories, verifies the staged files, and checks the sources again. It activates each destination with an atomic rename and rolls back earlier activations if a later one fails, then writes `migration-manifest.json` with source, target, size, and SHA-256 records. Source/target overlap checks use filesystem identity, rejecting symlinked ancestors and case-only aliases on case-insensitive volumes. Global `data_dir` and project-local access modes and ownership are preserved so `run_as_user` agents retain traversal access. Missing custom-target ancestors created by migration inherit the corresponding source root's access and owner; existing ancestors are not modified. The rewritten config remains `0600`. Logs, sockets, locks, restart notifications, daemon metadata, and source symlinks are excluded. A non-empty target is rejected unless `--force` is explicit; `--switch` supplies that explicit final merge and preserves the previous target as a timestamped `*.pre-migration-*` backup. Use `--skip-project-data` only to deliberately omit project-local images and attachments. Copy-only migration never stops or modifies official CC Connect; `--switch` changes only its service running/autostart state and keeps its binary and data intact.
 
 For custom locations:
 
@@ -199,19 +214,32 @@ See the [Feishu answer-card contract](docs/feishu-card-contract.md) for the exac
 
 Set `card_mode = "legacy"` only when intentionally opting back into inherited CC Connect rendering.
 
-## 5. Validate without taking over production
+## 5. Validate the cutover plan
 
-Parse and inspect the migrated configuration before startup:
+Validate the source and environment before switching production:
 
 ```bash
 cc-connect-next --version
-ls -ld ~/.cc-connect-next
-ls -l ~/.cc-connect-next/config.toml
 cc-connect-next migrate --dry-run
+```
+
+The dry run uses the same config, plugin, path, permissions, persistent-state,
+source-identity, and target checks as the real switch without changing either
+service. Review every skipped discovery and source-reference warning before
+continuing.
+
+After a successful `--switch`, run:
+
+```bash
+cc-connect-next daemon status
 cc-connect-next doctor
 ```
 
-`doctor` checks the configuration, the Agent CLI and its login state, every configured platform, local dependencies, and network reachability, then exits non-zero if any check failed. It never opens a platform connection, so it works before the first start and while the instance is down — which is when it is needed. Limit it to one project with `--project <name>`, or point it at another file with `--config <path>`.
+`--switch` already waits for the service manager to report cc-connect-next as
+installed and running. `doctor` checks the migrated configuration, Agent CLI and
+login state, every configured platform, local dependencies, network reachability,
+and official-service coexistence. It never opens a platform connection, so one
+real message remains the final client-visible acceptance.
 
 If a platform cannot connect after startup, the process stays up and retries, and says so 30 seconds in:
 
@@ -219,7 +247,10 @@ If a platform cannot connect after startup, the process stays up and retries, an
 level=ERROR msg="platform startup incomplete" detail="my-project/feishu (1000040346: app_id is invalid) cannot deliver messages ..."
 ```
 
-For live Feishu testing, use a separate test Feishu app while official CC Connect is running. Two WebSocket consumers using the same app credentials can race or duplicate message handling.
+No separate Feishu app is needed for the normal migration. The official daemon
+is stopped and disabled before Next starts with the migrated credentials, so
+there is never an intentional two-consumer window. A separate app is required
+only for an advanced parallel trial using copy-only migration.
 
 Expected isolated identities:
 
@@ -231,30 +262,31 @@ Expected isolated identities:
 | Linux systemd | `cc-connect.service` | `cc-connect-next.service` |
 | API socket | `~/.cc-connect/run/api.sock` | `~/.cc-connect-next/run/api.sock` |
 
-## 6. Deliberate production switch
+## 6. Direct production switch
 
-Only after a separate live test succeeds, stop any running test successor, stop the official daemon, and perform one final migration before starting production. This second migration is mandatory: it captures sessions, bindings, timers, and project state written by official CC Connect after the earlier test migration. Repeat any custom `--source`, `--target`, or `--runtime-work-dir` options used before. `--force` is deliberate here because the tested target already exists; it first preserves that entire target in timestamped backups.
+Run the one explicit cutover command after the dry run succeeds. Repeat any
+custom `--source`, `--target`, `--source-version`, or `--runtime-work-dir`
+options from the dry run:
 
 ```bash
-# If a separately configured test successor is running, stop it first:
-cc-connect-next daemon stop
-cc-connect daemon stop
-
-cc-connect-next migrate --dry-run --force
-cc-connect-next migrate --force
-
-cc-connect-next daemon install \
-  --config ~/.cc-connect-next/config.toml \
-  --work-dir /absolute/original/cwd
+cc-connect-next migrate --switch
 cc-connect-next daemon status
 ```
 
-Inspect the final command's `migration-manifest.json` path and timestamped backups before startup. The official config is authoritative during this refresh; review the backed-up tested config and deliberately reapply only required successor-specific settings, never stale test-app credentials. If either final migration command fails, do not start cc-connect-next; restart `cc-connect` and resolve the reported source, permission, or concurrency problem. If cc-connect-next was already installed as a service with the exact migrated config and work directory, use `cc-connect-next daemon start` instead of reinstalling it.
+The command requires no installed Next service, then stops/disables official,
+final-syncs, installs/starts Next, waits for Running, and directly sends the
+private completion message. Use `--notify-project` and `--notify-user` when the
+operator is not unique. Notification failure does not roll back a successful cutover.
 
 Rollback leaves official data intact:
 
 ```bash
-cc-connect-next daemon stop
+cc-connect-next daemon uninstall
+# Re-enable official autostart for your service manager:
+# macOS: launchctl enable gui/$(id -u)/com.cc-connect.service
+# Linux user: systemctl --user enable cc-connect.service
+# Linux system: sudo systemctl enable cc-connect.service
+# Windows: Enable-ScheduledTask -TaskName cc-connect
 cc-connect daemon start
 ```
 
@@ -265,11 +297,13 @@ An installing agent should report each item separately:
 - exact cc-connect-next version and installation source;
 - target OS and architecture;
 - `~/.cc-connect-next` and config permission checks;
-- dry-run migration result and whether a real migration was authorized;
+- dry-run migration result and whether `--switch` was authorized;
+- confirmation that `--switch` ran outside a connected CC Agent session and no Next service was already installed;
 - migration manifest path and every timestamped pre-migration backup;
-- confirmation that a final `--force` migration ran after the official daemon stopped and before the successor started;
+- confirmation that the official daemon was stopped and disabled before the final sync, and that Next was installed and reported running afterward;
 - the reported official runtime work directory when the config contains relative paths;
-- confirmation that official files and services were not modified during install/migration;
+- confirmation that official binaries/data were preserved and the old service was disabled;
 - independent command, data directory, service, and API socket names;
-- whether live Feishu validation used a separate app;
+- confirmation that the normal cutover reused the migrated platform credentials without a parallel consumer;
+- whether the private completion message was sent or why the target/send was skipped;
 - any validation that remains unverified.
