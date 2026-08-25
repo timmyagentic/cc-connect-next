@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -59,10 +61,13 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 	dryRun := flags.Bool("dry-run", false, "validate and report without writing files")
 	skipProjectData := flags.Bool("skip-project-data", false, "do not copy project-local .cc-connect images and attachments")
 	runtimeWorkDir := flags.String("runtime-work-dir", "", "official runtime working directory for resolving relative config paths (auto-detected)")
-	sourceVersion := flags.String("source-version", "auto", "official CC Connect release (auto, v1.4.1, or v1.5.0-beta.1 through beta.3)")
-	switchOver := flags.Bool("switch", false, "stop the official daemon and disarm its autostart, then run the final --force sync; binaries and data are left untouched")
+	sourceVersion := flags.String("source-version", "auto", "official CC Connect release (auto, v1.4.1, or v1.5.0-beta.1 through v1.5.0)")
+	switchOver := flags.Bool("switch", false, "require no installed Next service, stop and disable official CC Connect, final-sync, then install and start Next")
+	notifyProject := flags.String("notify-project", "", "project whose Feishu/Lark bot sends the private completion message")
+	notifyPlatform := flags.String("notify-platform", "", "choose feishu or lark when both are configured")
+	notifyUser := flags.String("notify-user", "", "Feishu/Lark open_id to receive the private completion message")
 	flags.Usage = func() {
-		_, _ = fmt.Fprintln(flags.Output(), "Usage: cc-connect-next migrate [--source DIR] [--target DIR] [--source-version RELEASE] [--runtime-work-dir DIR] [--dry-run] [--force] [--switch] [--skip-project-data]")
+		_, _ = fmt.Fprintln(flags.Output(), "Usage: cc-connect-next migrate [--source DIR] [--target DIR] [--source-version RELEASE] [--runtime-work-dir DIR] [--dry-run] [--force] [--switch] [--notify-project NAME] [--notify-platform TYPE] [--notify-user OPEN_ID] [--skip-project-data]")
 		_, _ = fmt.Fprintln(flags.Output(), "Copies configuration, the effective data_dir, and project-local state while excluding daemon, logs, locks, and sockets.")
 		flags.PrintDefaults()
 	}
@@ -74,6 +79,11 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	if *switchOver && *dryRun {
 		_, _ = fmt.Fprintln(stderr, "migrate: --switch cannot be combined with --dry-run (the switchover stops a live daemon)")
+		return 2
+	}
+	if *switchOver && strings.TrimSpace(os.Getenv("CC_SESSION_KEY")) != "" {
+		_, _ = fmt.Fprintln(stderr, "migrate: --switch must run from an external terminal; stopping the official daemon would also terminate an Agent-launched migration")
+		_, _ = fmt.Fprintln(stderr, "Rerun outside the connected Agent session; use --notify-project and --notify-user when the private-message target is not unique.")
 		return 2
 	}
 
@@ -94,16 +104,29 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 		DryRun:             *dryRun,
 		IncludeProjectData: !*skipProjectData,
 	}
+	var notifyTarget *migrationNotifyTarget
+	notifyReason := ""
 	if *switchOver {
-		probe := defaultOfficialProbe()
-		migrationOpts, err = prepareAndRunOfficialSwitchover(migrationOpts, probe, writeStdout)
+		notifyTarget, notifyReason, err = resolveMigrationNotifyTarget(filepath.Join(migrationOpts.Source, "config.toml"), migrationNotifyHints{
+			Project: *notifyProject, Platform: *notifyPlatform, UserID: *notifyUser,
+		})
 		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "migrate: switchover: %v\n", err)
-			return 1
+			notifyReason = err.Error()
+		}
+		if notifyTarget == nil {
+			if !writeStdout("Completion notification will be skipped: %s.\n", notifyReason) {
+				return 1
+			}
 		}
 	}
-
-	report, err := migrateLegacyDataWithOptions(migrationOpts)
+	var report migrationReport
+	var cutover migrationCutoverResult
+	if *switchOver {
+		cutover, err = runDirectMigrationCutover(migrationOpts, defaultMigrationCutoverDeps(), writeStdout)
+		report = cutover.Report
+	} else {
+		report, err = migrateLegacyDataWithOptions(migrationOpts)
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "migrate: %v\n", err)
 		return 1
@@ -184,39 +207,54 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 		if !writeOutput("Verification manifest: %s\n", report.ManifestPath) {
 			return 1
 		}
-		targetConfig := filepath.Join(expandMigrationPath(*target, home), "config.toml")
-		probe := defaultOfficialProbe()
-		coexistState := probeOfficialInstall(probe)
-		overlap := officialCredentialOverlap(coexistState, extractAppIDsFromConfigFile(targetConfig))
-		if !writeOutput("%s", renderOfficialCoexistenceGuidance(coexistState, overlap, probe.GOOS, probe.UID, targetConfig, report.SourceWorkDir)) {
-			return 1
-		}
-		if !writeOutput("Next: cc-connect-next --config %s\n", targetConfig) {
-			return 1
-		}
-		if !writeOutput("Daemon config: %s\n", filepath.Join(expandMigrationPath(*target, home), "config.toml")) {
-			return 1
-		}
-		if !writeOutput("Daemon work_dir: %s\n", report.SourceWorkDir) {
-			return 1
+		if *switchOver {
+			if !writeOutput("Production cutover complete: official CC Connect is stopped and disabled; cc-connect-next is installed and running.\n") {
+				return 1
+			}
+			if cutover.DaemonStatus != nil && cutover.DaemonStatus.PID > 0 {
+				if !writeOutput("cc-connect-next daemon: running (PID %d, platform %s).\n", cutover.DaemonStatus.PID, cutover.DaemonStatus.Platform) {
+					return 1
+				}
+			} else if cutover.DaemonStatus != nil {
+				if !writeOutput("cc-connect-next daemon: running (platform %s).\n", cutover.DaemonStatus.Platform) {
+					return 1
+				}
+			}
+			if !writeOutput("Daemon config: %s\nDaemon work_dir: %s\n", cutover.ConfigPath, cutover.WorkDir) {
+				return 1
+			}
+			if notifyTarget != nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				notifyErr := sendMigrationComplete(ctx, notifyTarget, filepath.Dir(cutover.ConfigPath))
+				cancel()
+				if notifyErr != nil {
+					if !writeOutput("Migration is complete, but the private Feishu/Lark notification failed: %v\n", notifyErr) {
+						return 1
+					}
+				} else if !writeOutput("Private migration-completion message sent to the selected Feishu/Lark operator.\n") {
+					return 1
+				}
+			}
+		} else {
+			targetConfig := filepath.Join(expandMigrationPath(*target, home), "config.toml")
+			probe := defaultOfficialProbe()
+			coexistState := probeOfficialInstall(probe)
+			overlap := officialCredentialOverlap(coexistState, extractAppIDsFromConfigFile(targetConfig))
+			if !writeOutput("%s", renderOfficialCoexistenceGuidance(coexistState, overlap)) {
+				return 1
+			}
+			if !writeOutput("Next: cc-connect-next --config %s\n", targetConfig) {
+				return 1
+			}
+			if !writeOutput("Daemon config: %s\n", filepath.Join(expandMigrationPath(*target, home), "config.toml")) {
+				return 1
+			}
+			if !writeOutput("Daemon work_dir: %s\n", report.SourceWorkDir) {
+				return 1
+			}
 		}
 	}
 	return 0
-}
-
-// prepareAndRunOfficialSwitchover validates the entire final migration before
-// touching the official service. The real migration prepares again after the
-// daemon is quiet, so source changes between preflight and cutover still fail
-// closed instead of being activated from a stale plan.
-func prepareAndRunOfficialSwitchover(opts migrationOptions, probe officialProbe, out func(format string, args ...any) bool) (migrationOptions, error) {
-	opts.Force = true
-	if _, err := prepareLegacyMigration(opts); err != nil {
-		return opts, fmt.Errorf("migration preflight: %w", err)
-	}
-	if err := runOfficialSwitchover(probe, probeOfficialInstall(probe), out); err != nil {
-		return opts, err
-	}
-	return opts, nil
 }
 
 func migrateLegacyData(source, target string, force, dryRun bool) (migrationReport, error) {

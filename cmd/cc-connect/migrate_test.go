@@ -21,6 +21,9 @@ func TestNormalizeMigrationSourceVersion(t *testing.T) {
 		"v1.5.0-beta.1",
 		"v1.5.0-beta.2",
 		"v1.5.0-beta.3",
+		"v1.5.0-beta.4",
+		"v1.5.0-beta.5",
+		"v1.5.0",
 	} {
 		got, err := normalizeMigrationSourceVersion(version)
 		if err != nil {
@@ -34,7 +37,7 @@ func TestNormalizeMigrationSourceVersion(t *testing.T) {
 	if got, err := normalizeMigrationSourceVersion("auto"); err != nil || got != automaticMigrationSourceVersion {
 		t.Fatalf("auto source version = %q, %v", got, err)
 	}
-	if _, err := normalizeMigrationSourceVersion("v1.5.0-beta.4"); err == nil {
+	if _, err := normalizeMigrationSourceVersion("v1.5.1"); err == nil {
 		t.Fatal("unknown future source release was accepted")
 	}
 }
@@ -45,6 +48,9 @@ func TestPrepareLegacyMigration_KnownSourceReleaseMatrix(t *testing.T) {
 		"v1.5.0-beta.1",
 		"v1.5.0-beta.2",
 		"v1.5.0-beta.3",
+		"v1.5.0-beta.4",
+		"v1.5.0-beta.5",
+		"v1.5.0",
 	} {
 		t.Run(version, func(t *testing.T) {
 			root := t.TempDir()

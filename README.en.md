@@ -129,13 +129,13 @@ Core never hardcodes an agent or platform name; optional capabilities (rich card
 
 ```bash
 cc-connect-next migrate --dry-run   # inspect the full plan first
-cc-connect-next migrate             # copy config, sessions, cron/heartbeat state, bindings…
-cc-connect-next --config ~/.cc-connect-next/config.toml
+cc-connect-next migrate --switch    # stop official, final-sync, and start Next
+cc-connect-next daemon status
 ```
 
-The migration never stops, uninstalls, or modifies the official install, and both can stay installed side by side (separate commands, data directories, services, and sockets). Every source file is hashed, staged, and re-verified before an atomic activation; any concurrent change fails the run closed with timestamped backups and a `migration-manifest.json` recording every path and SHA-256.
+No second Feishu app is required. Run `--switch` from a terminal outside the official daemon lifecycle; a connected CC Agent invocation is rejected before service mutation. The command requires no installed Next service, then stops and disables official, final-syncs, and installs/starts Next with the migrated config and original work directory. On success the CLI directly uses the migrated Feishu/Lark bot to privately tell one unique or explicit operator that migration completed. Ambiguous targets and send failures never fall back to a group or roll back a successful migration. Official binaries and data remain intact.
 
-Dual-daemon conflicts are prevented by the product, not just documented: cc-connect-next **refuses to start** while the official daemon is running with the same Feishu credentials, and a single `cc-connect-next migrate --switch` performs the switchover — stop the official daemon, disarm its autostart (binaries and data untouched, so rollback stays trivial), verify quiescence, final sync. `doctor` reports the coexistence state too.
+Dual-daemon conflicts are prevented by the product, not just documented: cc-connect-next **refuses to start** while the official daemon is running with the same Feishu credentials, and `doctor` reports coexistence state. Copy-only `cc-connect-next migrate` remains available for backups and advanced parallel trials.
 
 📖 **[Full migration & coexistence guide](docs/migration.md)** — including custom paths, the compatibility matrix, service switchover, rollback, and a paste-into-your-agent task block.
 
@@ -176,7 +176,7 @@ The exact lifecycle, privacy boundary, fallback behavior, and verification comma
 
 ## 🆚 Versus official CC Connect
 
-cc-connect-next forked from CC Connect v1.4.1 and tracks upstream through per-change audits instead of merges ([policy & history](docs/upstream-v1.5.0-beta.3-audit.md)). Coming from the official version? The long-form walkthrough — what's actually different, the zero-risk trial, and rollback — is **[Coming from official CC Connect](docs/coming-from-cc-connect.md)**.
+cc-connect-next forked from CC Connect v1.4.1 and tracks upstream through per-change audits instead of merges ([policy & history](docs/upstream-v1.5.0-beta.3-audit.md)). Coming from the official version? The long-form walkthrough — what's actually different, direct migration, and safe rollback — is **[Coming from official CC Connect](docs/coming-from-cc-connect.md)**.
 
 | | CC Connect | cc-connect-next |
 |---|---|---|
@@ -195,7 +195,7 @@ cc-connect-next forked from CC Connect v1.4.1 and tracks upstream through per-ch
 | [Usage guide](docs/usage.md) | sessions, queue vs steer, permissions, providers, models, cron, relay, TTS/STT |
 | [Feishu setup](docs/feishu.md) | app creation, permissions, event subscription |
 | [Answer-card contract](docs/feishu-card-contract.md) | the exact card lifecycle and privacy guarantees |
-| [Coming from CC Connect](docs/coming-from-cc-connect.md) | honest comparison, zero-risk trial, switchover and rollback |
+| [Coming from CC Connect](docs/coming-from-cc-connect.md) | honest comparison, direct migration, and safe rollback |
 | [Migration guide](docs/migration.md) | full migration, coexistence, and switchover reference |
 | [Migration matrix](docs/migration-compatibility.md) | which official versions and settings migrate |
 | [Bridge protocol](docs/bridge-protocol.md) | build your own platform adapter over WebSocket |

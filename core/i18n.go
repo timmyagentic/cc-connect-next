@@ -500,8 +500,9 @@ const (
 	MsgDoctorTitle   MsgKey = "doctor_title"
 	MsgDoctorSummary MsgKey = "doctor_summary"
 
-	MsgRestarting     MsgKey = "restarting"
-	MsgRestartSuccess MsgKey = "restart_success"
+	MsgRestarting        MsgKey = "restarting"
+	MsgRestartSuccess    MsgKey = "restart_success"
+	MsgMigrationComplete MsgKey = "migration_complete"
 
 	MsgUpgradeChecking        MsgKey = "upgrade_checking"
 	MsgUpgradeUpToDate        MsgKey = "upgrade_up_to_date"
@@ -3168,6 +3169,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ cc-connect-next 重啟成功。",
 		LangJapanese:           "✅ cc-connect-next の再起動が完了しました。",
 		LangSpanish:            "✅ cc-connect-next se reinició correctamente.",
+	},
+	MsgMigrationComplete: {
+		LangEnglish:            "Migration complete. cc-connect-next is running",
+		LangChinese:            "迁移完成，cc-connect-next 已运行",
+		LangTraditionalChinese: "遷移完成，cc-connect-next 已運行",
+		LangJapanese:           "移行が完了し、cc-connect-next が稼働しています",
+		LangSpanish:            "La migración terminó y cc-connect-next está en ejecución",
 	},
 	MsgUpgradeChecking: {
 		LangEnglish:            "🔍 Checking for updates...",
