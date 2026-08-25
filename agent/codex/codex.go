@@ -243,6 +243,12 @@ func (a *Agent) GetReasoningEffort() string {
 	return a.reasoningEffort
 }
 
+func (a *Agent) GetServiceTier() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return strings.TrimSpace(a.serviceTier)
+}
+
 func (a *Agent) AvailableReasoningEfforts() []string {
 	return []string{"low", "medium", "high", "xhigh", "max"}
 }

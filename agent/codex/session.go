@@ -52,6 +52,8 @@ type codexSession struct {
 	runtimeCfgEffort   string
 	runtimeCfgFetched  time.Time
 	runtimeCfgFetchErr error
+	turnOptionsMu      sync.RWMutex
+	turnOptions        *core.TurnOptions
 
 	contextMu    sync.RWMutex
 	contextUsage *core.ContextUsage
@@ -142,6 +144,14 @@ func newCodexSession(ctx context.Context, p codexSessionParams) (*codexSession, 
 // If a threadID exists (from a prior turn or resume), uses `codex exec resume <id> <prompt>`.
 // Otherwise uses `codex exec <prompt>` to start a new conversation.
 func (cs *codexSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
+	return cs.send(prompt, images, files, nil)
+}
+
+func (cs *codexSession) SendWithTurnOptions(prompt string, images []core.ImageAttachment, files []core.FileAttachment, options core.TurnOptions) error {
+	return cs.send(prompt, images, files, &options)
+}
+
+func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files []core.FileAttachment, options *core.TurnOptions) error {
 	if len(files) > 0 {
 		filePaths := core.SaveFilesToDisk(cs.workDir, files)
 		prompt = core.AppendFileRefs(prompt, filePaths)
@@ -159,7 +169,7 @@ func (cs *codexSession) Send(prompt string, images []core.ImageAttachment, files
 	if !isResume {
 		prompt = prependCodexPromptPreamble(prompt, cs.promptPreamble)
 	}
-	args := cs.launchArgs(prompt, imagePaths)
+	args := cs.launchArgsWithTurnOptions(prompt, imagePaths, options)
 
 	bin := cs.cmd
 	if bin == "" {
@@ -187,6 +197,7 @@ func (cs *codexSession) Send(prompt string, images []core.ImageAttachment, files
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("codexSession: start: %w", err)
 	}
+	cs.storeActiveTurnOptions(options)
 	cs.addCmd(cmd)
 
 	cs.wg.Add(1)
@@ -212,7 +223,11 @@ func (cs *codexSession) stageImages(prompt string, images []core.ImageAttachment
 // option go before the exec subcommand (global-flag position), so the
 // structured options emitted by buildExecArgs win on duplicate -c keys.
 func (cs *codexSession) launchArgs(prompt string, imagePaths []string) []string {
-	args := cs.buildExecArgs(prompt, imagePaths)
+	return cs.launchArgsWithTurnOptions(prompt, imagePaths, nil)
+}
+
+func (cs *codexSession) launchArgsWithTurnOptions(prompt string, imagePaths []string, options *core.TurnOptions) []string {
+	args := cs.buildExecArgsWithTurnOptions(prompt, imagePaths, options)
 	if len(cs.cliExtraArgs) > 0 {
 		args = append(append([]string{}, cs.cliExtraArgs...), args...)
 	}
@@ -220,6 +235,10 @@ func (cs *codexSession) launchArgs(prompt string, imagePaths []string) []string 
 }
 
 func (cs *codexSession) buildExecArgs(prompt string, imagePaths []string) []string {
+	return cs.buildExecArgsWithTurnOptions(prompt, imagePaths, nil)
+}
+
+func (cs *codexSession) buildExecArgsWithTurnOptions(prompt string, imagePaths []string, options *core.TurnOptions) []string {
 	tid := cs.CurrentSessionID()
 	isResume := tid != ""
 
@@ -269,8 +288,16 @@ func (cs *codexSession) buildExecArgs(prompt string, imagePaths []string) []stri
 		}
 	}
 
-	if cs.model != "" {
-		args = append(args, "--model", cs.model)
+	model := cs.model
+	effort := cs.effort
+	serviceTier := cs.serviceTier
+	if options != nil {
+		model = strings.TrimSpace(options.Model)
+		effort = strings.TrimSpace(options.ReasoningEffort)
+		serviceTier = strings.TrimSpace(options.ServiceTier)
+	}
+	if model != "" {
+		args = append(args, "--model", model)
 	}
 	if cs.contextWindow > 0 {
 		args = append(args, "-c", fmt.Sprintf("model_context_window=%d", cs.contextWindow))
@@ -281,10 +308,10 @@ func (cs *codexSession) buildExecArgs(prompt string, imagePaths []string) []stri
 	if cs.baseURL != "" {
 		args = append(args, "-c", fmt.Sprintf("openai_base_url=%q", cs.baseURL))
 	}
-	if cs.effort != "" {
-		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", cs.effort))
+	if effort != "" {
+		args = append(args, "-c", fmt.Sprintf("model_reasoning_effort=%q", effort))
 	}
-	if tier := strings.TrimSpace(cs.serviceTier); tier != "" {
+	if tier := strings.TrimSpace(serviceTier); tier != "" {
 		args = append(args, "-c", fmt.Sprintf("service_tier=%q", tier))
 	}
 
@@ -826,6 +853,14 @@ func (cs *codexSession) GetWorkDir() string {
 }
 
 func (cs *codexSession) GetModel() string {
+	cs.turnOptionsMu.RLock()
+	turnOptions := cs.turnOptions
+	cs.turnOptionsMu.RUnlock()
+	if turnOptions != nil {
+		if model := strings.TrimSpace(turnOptions.Model); model != "" {
+			return model
+		}
+	}
 	if model := strings.TrimSpace(cs.model); model != "" {
 		return model
 	}
@@ -834,11 +869,30 @@ func (cs *codexSession) GetModel() string {
 }
 
 func (cs *codexSession) GetReasoningEffort() string {
+	cs.turnOptionsMu.RLock()
+	turnOptions := cs.turnOptions
+	cs.turnOptionsMu.RUnlock()
+	if turnOptions != nil {
+		if effort := strings.TrimSpace(turnOptions.ReasoningEffort); effort != "" {
+			return effort
+		}
+	}
 	if effort := strings.TrimSpace(cs.effort); effort != "" {
 		return effort
 	}
 	_, effort := cs.runtimeConfig()
 	return effort
+}
+
+func (cs *codexSession) storeActiveTurnOptions(options *core.TurnOptions) {
+	cs.turnOptionsMu.Lock()
+	defer cs.turnOptionsMu.Unlock()
+	if options == nil {
+		cs.turnOptions = nil
+		return
+	}
+	copy := *options
+	cs.turnOptions = &copy
 }
 
 func (cs *codexSession) Alive() bool {

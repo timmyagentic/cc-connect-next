@@ -223,9 +223,10 @@ type appServerSession struct {
 	currentTurn  string
 	preambleSent bool
 
-	runtimeMu sync.RWMutex
-	usage     *core.UsageReport
-	context   *core.ContextUsage
+	runtimeMu   sync.RWMutex
+	usage       *core.UsageReport
+	context     *core.ContextUsage
+	turnOptions *core.TurnOptions
 }
 
 const (
@@ -533,6 +534,14 @@ func (s *appServerSession) storeContextUsage(usage *core.ContextUsage) {
 }
 
 func (s *appServerSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
+	return s.send(prompt, images, files, nil)
+}
+
+func (s *appServerSession) SendWithTurnOptions(prompt string, images []core.ImageAttachment, files []core.FileAttachment, options core.TurnOptions) error {
+	return s.send(prompt, images, files, &options)
+}
+
+func (s *appServerSession) send(prompt string, images []core.ImageAttachment, files []core.FileAttachment, options *core.TurnOptions) error {
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
@@ -572,19 +581,7 @@ func (s *appServerSession) Send(prompt string, images []core.ImageAttachment, fi
 		})
 	}
 
-	params := map[string]any{
-		"threadId": threadID,
-		"input":    input,
-	}
-	if model := s.GetModel(); model != "" {
-		params["model"] = model
-	}
-	if effort := s.GetReasoningEffort(); effort != "" {
-		params["effort"] = effort
-	}
-	if approval, _ := appServerModeSettings(s.mode); approval != "" {
-		params["approvalPolicy"] = approval
-	}
+	params := s.turnStartParams(threadID, input, options)
 
 	var resp turnStartResponse
 	if err := s.request("turn/start", params, &resp); err != nil {
@@ -598,8 +595,55 @@ func (s *appServerSession) Send(prompt string, images []core.ImageAttachment, fi
 	s.currentTurn = resp.Turn.ID
 	s.pendingMsgs = s.pendingMsgs[:0]
 	s.stateMu.Unlock()
+	s.storeActiveTurnOptions(options)
 
 	return nil
+}
+
+func (s *appServerSession) turnStartParams(threadID string, input []map[string]any, options *core.TurnOptions) map[string]any {
+	params := map[string]any{
+		"threadId": threadID,
+		"input":    input,
+	}
+	if options == nil {
+		s.runtimeMu.RLock()
+		model := strings.TrimSpace(s.model)
+		effort := strings.TrimSpace(s.effort)
+		s.runtimeMu.RUnlock()
+		if model != "" {
+			params["model"] = model
+		}
+		if effort != "" {
+			params["effort"] = effort
+		}
+	} else {
+		params["model"] = nullableTurnOption(options.Model)
+		params["effort"] = nullableTurnOption(options.ReasoningEffort)
+		params["serviceTier"] = nullableTurnOption(options.ServiceTier)
+	}
+	if approval, _ := appServerModeSettings(s.mode); approval != "" {
+		params["approvalPolicy"] = approval
+	}
+	return params
+}
+
+func nullableTurnOption(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func (s *appServerSession) storeActiveTurnOptions(options *core.TurnOptions) {
+	s.runtimeMu.Lock()
+	defer s.runtimeMu.Unlock()
+	if options == nil {
+		s.turnOptions = nil
+		return
+	}
+	copy := *options
+	s.turnOptions = &copy
 }
 
 // Steer implements core.SteerableSession: it appends user input to the
@@ -1107,12 +1151,18 @@ func (s *appServerSession) GetWorkDir() string {
 func (s *appServerSession) GetModel() string {
 	s.runtimeMu.RLock()
 	defer s.runtimeMu.RUnlock()
+	if s.turnOptions != nil {
+		return strings.TrimSpace(s.turnOptions.Model)
+	}
 	return strings.TrimSpace(s.model)
 }
 
 func (s *appServerSession) GetReasoningEffort() string {
 	s.runtimeMu.RLock()
 	defer s.runtimeMu.RUnlock()
+	if s.turnOptions != nil {
+		return strings.TrimSpace(s.turnOptions.ReasoningEffort)
+	}
 	return strings.TrimSpace(s.effort)
 }
 

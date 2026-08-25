@@ -637,10 +637,26 @@ type ProjectConfig struct {
 }
 
 type AgentConfig struct {
-	Type         string           `toml:"type"`
-	Options      map[string]any   `toml:"options"`
-	ProviderRefs []string         `toml:"provider_refs,omitempty"` // references to global [[providers]] by name
-	Providers    []ProviderConfig `toml:"providers"`
+	Type           string               `toml:"type"`
+	Options        map[string]any       `toml:"options"`
+	AnswerProfiles AnswerProfilesConfig `toml:"answer_profiles,omitempty"`
+	ProviderRefs   []string             `toml:"provider_refs,omitempty"` // references to global [[providers]] by name
+	Providers      []ProviderConfig     `toml:"providers"`
+}
+
+// AnswerProfilesConfig contains the two explicit one-shot answer profiles.
+// Ordinary messages continue to use AgentConfig.Options as their default.
+type AnswerProfilesConfig struct {
+	Fast    *AnswerProfileConfig `toml:"fast,omitempty"`
+	Quality *AnswerProfileConfig `toml:"quality,omitempty"`
+}
+
+// AnswerProfileConfig is a partial override of the current agent defaults.
+// At least one field must be set when the profile table is present.
+type AnswerProfileConfig struct {
+	Model           string `toml:"model,omitempty"`
+	ReasoningEffort string `toml:"reasoning_effort,omitempty"`
+	ServiceTier     string `toml:"service_tier,omitempty"`
 }
 
 // ProviderModelConfig defines a selectable model entry for a provider,
@@ -1156,6 +1172,9 @@ func (c *Config) validateInternal(permissive bool) error {
 		if proj.Agent.Type == "" {
 			return fmt.Errorf("config: %s.agent.type is required", prefix)
 		}
+		if err := validateAnswerProfiles(prefix+".agent.answer_profiles", proj.Agent.AnswerProfiles); err != nil {
+			return err
+		}
 		if len(proj.Platforms) == 0 && !permissive {
 			return fmt.Errorf("config: %s needs at least one [[projects.platforms]]", prefix)
 		}
@@ -1192,6 +1211,34 @@ func (c *Config) validateInternal(permissive bool) error {
 		}
 		if err := validateDisplayConfig(prefix+".display", proj.Display); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateAnswerProfiles(prefix string, profiles AnswerProfilesConfig) error {
+	for _, entry := range []struct {
+		name    string
+		profile *AnswerProfileConfig
+	}{
+		{name: "fast", profile: profiles.Fast},
+		{name: "quality", profile: profiles.Quality},
+	} {
+		name, profile := entry.name, entry.profile
+		if profile == nil {
+			continue
+		}
+		if strings.TrimSpace(profile.Model) == "" &&
+			strings.TrimSpace(profile.ReasoningEffort) == "" &&
+			strings.TrimSpace(profile.ServiceTier) == "" {
+			return fmt.Errorf("config: %s.%s must override at least one setting", prefix, name)
+		}
+		if effort := strings.ToLower(strings.TrimSpace(profile.ReasoningEffort)); effort != "" {
+			switch effort {
+			case "low", "medium", "high", "xhigh", "max":
+			default:
+				return fmt.Errorf("config: %s.%s.reasoning_effort must be low, medium, high, xhigh, or max", prefix, name)
+			}
 		}
 	}
 	return nil
@@ -2858,8 +2905,9 @@ func pickAgentTemplateForNewProject(cfg *Config, opts EnsureProjectWithFeishuOpt
 
 func cloneAgentConfig(in AgentConfig) AgentConfig {
 	out := AgentConfig{
-		Type:    in.Type,
-		Options: cloneAnyMap(in.Options),
+		Type:           in.Type,
+		Options:        cloneAnyMap(in.Options),
+		AnswerProfiles: cloneAnswerProfiles(in.AnswerProfiles),
 	}
 	if len(in.Providers) > 0 {
 		out.Providers = make([]ProviderConfig, len(in.Providers))
@@ -2892,6 +2940,20 @@ func cloneAgentConfig(in AgentConfig) AgentConfig {
 		}
 	}
 	return out
+}
+
+func cloneAnswerProfiles(in AnswerProfilesConfig) AnswerProfilesConfig {
+	clone := func(profile *AnswerProfileConfig) *AnswerProfileConfig {
+		if profile == nil {
+			return nil
+		}
+		copy := *profile
+		return &copy
+	}
+	return AnswerProfilesConfig{
+		Fast:    clone(in.Fast),
+		Quality: clone(in.Quality),
+	}
 }
 
 func cloneAnyMap(in map[string]any) map[string]any {

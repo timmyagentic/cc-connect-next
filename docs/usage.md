@@ -213,6 +213,43 @@ Switch at runtime:
 
 ---
 
+## One-shot Answer Profiles (Codex)
+
+Codex projects can define optional `fast` and `quality` profiles. A profile overrides only the current message; it does not mutate the project defaults or affect the next ordinary message.
+
+```toml
+[projects.agent.options]
+model = "your-balanced-model"
+reasoning_effort = "medium"
+service_tier = "default"
+
+[projects.agent.answer_profiles.fast]
+model = "your-fast-model"
+reasoning_effort = "low"
+service_tier = "fast"
+
+[projects.agent.answer_profiles.quality]
+model = "your-quality-model"
+reasoning_effort = "max"
+service_tier = "default"
+```
+
+Blank profile fields inherit the ordinary `[projects.agent.options]` defaults. A configured profile table must override at least one field.
+
+```text
+/fast check this quickly
+/quality analyze this deeply
+用快速模式完成这个检查
+用高质量模式来完成这个设计
+```
+
+- Ordinary messages always use the defaults; there is no `/balanced` or default-mode command.
+- Only explicit leading directives match. Negations, comparisons, and mentions later in the message do not trigger a profile.
+- A profiled message received while the Agent is busy is queued as the next turn instead of being steered into the active turn.
+- Only the Codex `app_server` and `exec` backends support this today. Missing or unsupported profiles fail visibly and never silently downgrade.
+
+---
+
 ## API Provider Management
 
 Switch between API providers at runtime without restart.

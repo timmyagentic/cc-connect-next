@@ -34,6 +34,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2301,4 +2303,99 @@ func TestCUJ_H2_TwoPlatformsConcurrentNoBleed(t *testing.T) {
 	if len(pB.getSent()) == 0 {
 		t.Fatal("platB received no replies")
 	}
+}
+
+// CUJ-F5 · One-shot answer profiles affect only the prefixed turn. The user
+// sees quality and fast replies for explicit requests, then an ordinary reply
+// immediately returns to the project's default profile.
+func TestCUJ_F5_OneShotAnswerProfilesReturnToDefault(t *testing.T) {
+	session := &answerProfileCUJSession{events: make(chan Event, 16)}
+	agent := &answerProfileCUJAgent{session: session}
+	platform := &stubPlatformEngine{n: "test"}
+	engine := NewEngine("test", agent, []Platform{platform}, filepath.Join(t.TempDir(), "sessions.json"), LangChinese)
+	engine.SetAnswerProfiles(AnswerProfiles{
+		Fast:    &AnswerProfileOptions{Model: "fast-model", ReasoningEffort: "low", ServiceTier: "fast"},
+		Quality: &AnswerProfileOptions{Model: "quality-model", ReasoningEffort: "max", ServiceTier: "default"},
+	})
+	t.Cleanup(func() { _ = engine.Stop() })
+
+	inputs := []string{
+		"普通任务一",
+		"/quality 深入检查这个问题",
+		"用快速模式完成快速确认这个问题",
+		"普通任务二",
+	}
+	wantReplies := []string{
+		"default:普通任务一",
+		"quality:深入检查这个问题",
+		"fast:完成快速确认这个问题",
+		"default:普通任务二",
+	}
+	for i, input := range inputs {
+		engine.ReceiveMessage(platform, &Message{
+			SessionKey: "test:user",
+			Platform:   "test",
+			MessageID:  fmt.Sprintf("profile-%d", i+1),
+			UserID:     "user",
+			Content:    input,
+			ReplyCtx:   fmt.Sprintf("ctx-%d", i+1),
+		})
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			visible := slices.Contains(platform.getSent(), wantReplies[i])
+			idle := !engine.sessions.GetOrCreateActive("test:user").Busy()
+			if visible && idle {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := platform.getSent(); !slices.Contains(got, wantReplies[i]) {
+			t.Fatalf("turn %d did not produce a visible reply: %v", i+1, got)
+		}
+	}
+
+	if got := platform.getSent(); !reflect.DeepEqual(got, wantReplies) {
+		t.Fatalf("visible profile journey = %#v, want %#v", got, wantReplies)
+	}
+}
+
+type answerProfileCUJAgent struct {
+	session *answerProfileCUJSession
+}
+
+func (a *answerProfileCUJAgent) Name() string { return "answer-profile-cuj" }
+func (a *answerProfileCUJAgent) StartSession(context.Context, string) (AgentSession, error) {
+	return a.session, nil
+}
+func (a *answerProfileCUJAgent) ListSessions(context.Context) ([]AgentSessionInfo, error) {
+	return nil, nil
+}
+func (a *answerProfileCUJAgent) Stop() error                { return nil }
+func (a *answerProfileCUJAgent) GetModel() string           { return "balanced-model" }
+func (a *answerProfileCUJAgent) GetReasoningEffort() string { return "medium" }
+func (a *answerProfileCUJAgent) GetServiceTier() string     { return "default" }
+
+type answerProfileCUJSession struct {
+	events chan Event
+	closed atomic_bool
+}
+
+func (s *answerProfileCUJSession) Send(prompt string, _ []ImageAttachment, _ []FileAttachment) error {
+	return s.SendWithTurnOptions(prompt, nil, nil, TurnOptions{})
+}
+func (s *answerProfileCUJSession) SendWithTurnOptions(prompt string, _ []ImageAttachment, _ []FileAttachment, options TurnOptions) error {
+	profile := "default"
+	if options.AnswerProfile != "" {
+		profile = string(options.AnswerProfile)
+	}
+	s.events <- Event{Type: EventResult, Content: profile + ":" + prompt, Done: true}
+	return nil
+}
+func (s *answerProfileCUJSession) RespondPermission(string, PermissionResult) error { return nil }
+func (s *answerProfileCUJSession) Events() <-chan Event                             { return s.events }
+func (s *answerProfileCUJSession) CurrentSessionID() string                         { return "answer-profile-cuj-session" }
+func (s *answerProfileCUJSession) Alive() bool                                      { return !s.closed.Get() }
+func (s *answerProfileCUJSession) Close() error {
+	s.closed.Set(true)
+	return nil
 }

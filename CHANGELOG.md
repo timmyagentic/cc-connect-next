@@ -60,6 +60,17 @@ See `changelogs/v0.1.6.md` for the bilingual release notes.
   the required esbuild install step without mutating project configuration.
 - The full golangci-lint configuration passes with zero findings; no linter
   was disabled or excluded to create the baseline.
+### One-shot answer profiles
+
+- Codex projects can configure `fast` and `quality` answer profiles and apply
+  them to one message with `/fast <task>`, `/quality <task>`, or conservative
+  Chinese leading phrases such as “用快速模式……” and “用高质量模式……”.
+- Ordinary messages always reuse the existing project defaults. Profiled turns
+  pass model, reasoning effort, and service tier through both Codex backends;
+  the next ordinary turn explicitly restores the defaults.
+- A profiled message received while a turn is busy stays in the FIFO as its own
+  turn because `turn/steer` cannot carry profile settings. There is no
+  `/balanced` or default-mode command.
 
 ### Review hardening
 

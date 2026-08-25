@@ -194,6 +194,9 @@ const (
 	MsgPreviousProcessing        MsgKey = "previous_processing"
 	MsgQueueFull                 MsgKey = "queue_full"
 	MsgMessageQueued             MsgKey = "message_queued"
+	MsgProfileUsage              MsgKey = "answer_profile_usage"
+	MsgProfileNotConfigured      MsgKey = "answer_profile_not_configured"
+	MsgProfileNotSupported       MsgKey = "answer_profile_not_supported"
 	MsgNoToolsAllowed            MsgKey = "no_tools_allowed"
 	MsgCurrentTools              MsgKey = "current_tools"
 	MsgCurrentSession            MsgKey = "current_session"
@@ -994,6 +997,27 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前 Agent 不支援權限模式切換。",
 		LangJapanese:           "このエージェントは権限モードの切り替えをサポートしていません。",
 		LangSpanish:            "Este agente no soporta el cambio de modo de permisos.",
+	},
+	MsgProfileUsage: {
+		LangEnglish:            "Add a task after the profile, for example: `/fast check this quickly` or `/quality analyze this deeply`.",
+		LangChinese:            "请在档位后写出任务，例如：`/fast 快速检查这个问题` 或 `/quality 深入分析这个问题`。",
+		LangTraditionalChinese: "請在檔位後寫出任務，例如：`/fast 快速檢查這個問題` 或 `/quality 深入分析這個問題`。",
+		LangJapanese:           "プロファイルの後にタスクを入力してください。例: `/fast すばやく確認` または `/quality 詳しく分析`。",
+		LangSpanish:            "Añade una tarea después del perfil, por ejemplo: `/fast revisa esto rápido` o `/quality analízalo a fondo`.",
+	},
+	MsgProfileNotConfigured: {
+		LangEnglish:            "Answer profile `%s` is not configured for this project.",
+		LangChinese:            "当前项目尚未配置 `%s` 回答档位。",
+		LangTraditionalChinese: "目前專案尚未配置 `%s` 回答檔位。",
+		LangJapanese:           "このプロジェクトには回答プロファイル `%s` が設定されていません。",
+		LangSpanish:            "El perfil de respuesta `%s` no está configurado para este proyecto.",
+	},
+	MsgProfileNotSupported: {
+		LangEnglish:            "The current agent session does not support one-shot answer profiles.",
+		LangChinese:            "当前 Agent 会话不支持单条消息回答档位。",
+		LangTraditionalChinese: "目前 Agent 會話不支援單則訊息回答檔位。",
+		LangJapanese:           "現在のエージェントセッションは単発の回答プロファイルをサポートしていません。",
+		LangSpanish:            "La sesión actual del agente no admite perfiles de respuesta de un solo turno.",
 	},
 	MsgSessionRestarting: {
 		LangEnglish:            "🔄 Session process exited, restarting...",
