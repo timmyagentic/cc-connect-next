@@ -24,6 +24,31 @@ func TestParseDaemonInstallArgs_ConfigSetsWorkDir(t *testing.T) {
 	}
 }
 
+func TestResolveDaemonDataDirUsesDaemonWorkDir(t *testing.T) {
+	t.Setenv("HOME", "/Users/demo")
+	for _, tt := range []struct {
+		name     string
+		dataDir  string
+		workDir  string
+		expected string
+	}{
+		{name: "relative", dataDir: "state", workDir: "/srv/cc", expected: "/srv/cc/state"},
+		{name: "absolute", dataDir: "/var/lib/cc-next", workDir: "/srv/cc", expected: "/var/lib/cc-next"},
+		{name: "home", dataDir: "~/state", workDir: "/srv/cc", expected: "/Users/demo/state"},
+		{name: "empty", dataDir: "", workDir: "/srv/cc", expected: ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			expected := tt.expected
+			if expected != "" {
+				expected = filepath.Clean(expected)
+			}
+			if got := resolveDaemonDataDir(tt.dataDir, tt.workDir); got != expected {
+				t.Fatalf("resolveDaemonDataDir(%q, %q) = %q, want %q", tt.dataDir, tt.workDir, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestParseDaemonInstallArgs_ConfigEqualsFormSetsWorkDir(t *testing.T) {
 	cfg, _, err := parseDaemonInstallArgs([]string{"--config=/tmp/example/config.toml"})
 	if err != nil {

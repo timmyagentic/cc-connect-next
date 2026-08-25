@@ -82,7 +82,7 @@ func daemonInstall(args []string) {
 
 	dataDir := ""
 	if loaded, loadErr := config.LoadPermissive(cfg.ConfigPath); loadErr == nil {
-		dataDir = loaded.DataDir
+		dataDir = resolveDaemonDataDir(loaded.DataDir, cfg.WorkDir)
 	}
 	if err := daemon.SaveMeta(&daemon.Meta{
 		LogFile:     cfg.LogFile,
@@ -337,12 +337,12 @@ func daemonStatus() {
 	if meta, err := daemon.LoadMeta(); err == nil {
 		fmt.Printf("  Log:       %s\n", meta.LogFile)
 		fmt.Printf("  WorkDir:   %s\n", meta.WorkDir)
-		dataDir = meta.DataDir
+		dataDir = resolveDaemonDataDir(meta.DataDir, meta.WorkDir)
 		if meta.ConfigPath != "" {
 			fmt.Printf("  Config:    %s\n", meta.ConfigPath)
 			if dataDir == "" {
 				if loaded, loadErr := config.LoadPermissive(meta.ConfigPath); loadErr == nil {
-					dataDir = loaded.DataDir
+					dataDir = resolveDaemonDataDir(loaded.DataDir, meta.WorkDir)
 				}
 			}
 		}
@@ -367,6 +367,22 @@ func daemonStatus() {
 	} else {
 		fmt.Println("  Runtime:   Stopped")
 	}
+}
+
+func resolveDaemonDataDir(dataDir, workDir string) string {
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		return ""
+	}
+	dataDir = config.ExpandUserPath(dataDir)
+	if filepath.IsAbs(dataDir) {
+		return filepath.Clean(dataDir)
+	}
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		return filepath.Clean(dataDir)
+	}
+	return filepath.Clean(filepath.Join(workDir, dataDir))
 }
 
 // ── logs ────────────────────────────────────────────────────

@@ -60,6 +60,9 @@ func TestSystemdUninstallKeepsUnitWhenDisableFails(t *testing.T) {
 	orig := runSystemctl
 	t.Cleanup(func() { runSystemctl = orig })
 	runSystemctl = func(args ...string) (string, error) {
+		if strings.Contains(strings.Join(args, " "), " show ") {
+			return "LoadState=loaded\nActiveState=inactive\nMainPID=0", nil
+		}
 		return "permission denied", errors.New("exit status 1")
 	}
 
@@ -106,6 +109,47 @@ func TestSystemdUninstallIsIdempotentWhenUnitIsVerifiedAbsent(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("systemctl calls = %d, want only the absence probe", calls)
+	}
+}
+
+func TestSystemdUninstallStopsLoadedUnitWithoutUnitFile(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	mgr := &systemdManager{system: false}
+	orig := runSystemctl
+	t.Cleanup(func() { runSystemctl = orig })
+	var calls []string
+	reloaded := false
+	runSystemctl = func(args ...string) (string, error) {
+		call := strings.Join(args, " ")
+		calls = append(calls, call)
+		switch {
+		case strings.Contains(call, " show ") && !reloaded:
+			return "LoadState=loaded\nActiveState=active\nMainPID=4321", nil
+		case strings.Contains(call, " stop "):
+			return "", nil
+		case strings.Contains(call, " reset-failed "):
+			return "", nil
+		case strings.Contains(call, " daemon-reload"):
+			reloaded = true
+			return "", nil
+		case strings.Contains(call, " show ") && reloaded:
+			return "LoadState=not-found\nActiveState=inactive\nMainPID=0", nil
+		default:
+			return "unexpected", errors.New(call)
+		}
+	}
+
+	if err := mgr.Uninstall(); err != nil {
+		t.Fatalf("Uninstall() error = %v, calls=%v", err, calls)
+	}
+	joined := strings.Join(calls, "\n")
+	for _, want := range []string{" stop ", " reset-failed ", " daemon-reload"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in calls:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, " disable ") {
+		t.Fatalf("loaded unit without file used disable:\n%s", joined)
 	}
 }
 

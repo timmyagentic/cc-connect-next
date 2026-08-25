@@ -94,17 +94,40 @@ func (m *systemdManager) Uninstall() error {
 	if !status.Installed && !status.Running {
 		return nil
 	}
-	if out, err := runSystemctl(m.sysArgs("disable", "--now", systemdServiceName)...); err != nil {
-		return fmt.Errorf("systemctl %s: %s (%w)", strings.Join(m.sysArgs("disable", "--now", systemdServiceName), " "), out, err)
-	}
-
 	unitPath := m.unitPath()
-	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove unit: %w", err)
+	unitFileExists := false
+	if _, err := os.Stat(unitPath); err == nil {
+		unitFileExists = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect unit before uninstall: %w", err)
+	}
+	if unitFileExists {
+		args := m.sysArgs("disable", "--now", systemdServiceName)
+		if out, err := runSystemctl(args...); err != nil {
+			return fmt.Errorf("systemctl %s: %s (%w)", strings.Join(args, " "), out, err)
+		}
+		if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove unit: %w", err)
+		}
+	} else {
+		for _, action := range []string{"stop", "reset-failed"} {
+			args := m.sysArgs(action, systemdServiceName)
+			if out, err := runSystemctl(args...); err != nil {
+				return fmt.Errorf("systemctl %s: %s (%w)", strings.Join(args, " "), out, err)
+			}
+		}
 	}
 
-	if out, err := runSystemctl(m.sysArgs("daemon-reload")...); err != nil {
-		return fmt.Errorf("systemctl %s: %s (%w)", strings.Join(m.sysArgs("daemon-reload"), " "), out, err)
+	reloadArgs := m.sysArgs("daemon-reload")
+	if out, err := runSystemctl(reloadArgs...); err != nil {
+		return fmt.Errorf("systemctl %s: %s (%w)", strings.Join(reloadArgs, " "), out, err)
+	}
+	after, err := m.Status()
+	if err != nil {
+		return fmt.Errorf("verify service removal: %w", err)
+	}
+	if after.Installed || after.Running {
+		return fmt.Errorf("service is still loaded after uninstall: %+v", after)
 	}
 	return nil
 }
