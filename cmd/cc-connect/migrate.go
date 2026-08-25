@@ -66,8 +66,12 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 	notifyProject := flags.String("notify-project", "", "project whose Feishu/Lark bot sends the private completion message")
 	notifyPlatform := flags.String("notify-platform", "", "choose feishu or lark when both are configured")
 	notifyUser := flags.String("notify-user", "", "Feishu/Lark open_id to receive the private completion message")
+	withLarkCLI := flags.Bool("lark-cli", false, "install/bind official lark-cli after migration and make the selected bot its default bot profile")
+	withoutLarkCLI := flags.Bool("no-lark-cli", false, "skip lark-cli installation/binding without asking")
+	larkCLIProject := flags.String("lark-cli-project", "", "project whose Feishu/Lark bot should become the default lark-cli profile")
+	larkCLIPlatformIndex := flags.Int("lark-cli-platform-index", 0, "1-based index among Feishu/Lark platforms in the selected project")
 	flags.Usage = func() {
-		_, _ = fmt.Fprintln(flags.Output(), "Usage: cc-connect-next migrate [--source DIR] [--target DIR] [--source-version RELEASE] [--runtime-work-dir DIR] [--dry-run] [--force] [--switch] [--notify-project NAME] [--notify-platform TYPE] [--notify-user OPEN_ID] [--skip-project-data]")
+		_, _ = fmt.Fprintln(flags.Output(), "Usage: cc-connect-next migrate [--source DIR] [--target DIR] [--source-version RELEASE] [--runtime-work-dir DIR] [--dry-run] [--force] [--switch] [--notify-project NAME] [--notify-platform TYPE] [--notify-user OPEN_ID] [--lark-cli] [--no-lark-cli] [--lark-cli-project NAME] [--lark-cli-platform-index N] [--skip-project-data]")
 		_, _ = fmt.Fprintln(flags.Output(), "Copies configuration, the effective data_dir, and project-local state while excluding daemon, logs, locks, and sockets.")
 		flags.PrintDefaults()
 	}
@@ -79,6 +83,14 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	if *switchOver && *dryRun {
 		_, _ = fmt.Fprintln(stderr, "migrate: --switch cannot be combined with --dry-run (the switchover stops a live daemon)")
+		return 2
+	}
+	if _, _, err := resolveLarkCLICompanionFlags(*withLarkCLI, *withoutLarkCLI); err != nil {
+		_, _ = fmt.Fprintf(stderr, "migrate: %v\n", err)
+		return 2
+	}
+	if *larkCLIPlatformIndex < 0 {
+		_, _ = fmt.Fprintln(stderr, "migrate: --lark-cli-platform-index must be >= 0")
 		return 2
 	}
 	if *switchOver && strings.TrimSpace(os.Getenv("CC_SESSION_KEY")) != "" {
@@ -261,6 +273,41 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 			if !writeOutput("Daemon work_dir: %s\n", report.SourceWorkDir) {
 				return 1
 			}
+		}
+	}
+
+	larkConfigPath := filepath.Join(expandMigrationPath(*target, home), "config.toml")
+	if *switchOver {
+		larkConfigPath = cutover.ConfigPath
+	}
+	larkProjectHint := strings.TrimSpace(*larkCLIProject)
+	if larkProjectHint == "" {
+		larkProjectHint = strings.TrimSpace(*notifyProject)
+	}
+	if err := maybeSetupMigratedLarkCLI(
+		stdout,
+		os.Stdin,
+		*withLarkCLI,
+		*withoutLarkCLI,
+		stdinIsInteractive(),
+		report.DryRun,
+		larkConfigPath,
+		larkProjectHint,
+		*larkCLIPlatformIndex,
+		func(target larkCLITarget) error {
+			result, err := setupLarkCLICompanion(context.Background(), target, larkCLISetupOptions{InstallIfMissing: true}, realLarkCLIProcess{})
+			if err != nil {
+				return err
+			}
+			reportLarkCLISetupResult(stdout, result)
+			return nil
+		},
+	); err != nil {
+		if !writeOutput("Migration succeeded, but the lark-cli companion was not configured: %v\n", err) {
+			return 1
+		}
+		if !writeOutput("Run `cc-connect-next lark-cli setup --config %s --project <name>` after choosing the intended bot.\n", larkConfigPath) {
+			return 1
 		}
 	}
 	return 0

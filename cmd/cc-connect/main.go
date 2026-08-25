@@ -289,6 +289,11 @@ func main() {
 		case "feishu":
 			runFeishu(os.Args[2:])
 			return
+		case "lark-cli":
+			if code := runLarkCLI(os.Args[2:]); code != 0 {
+				os.Exit(code)
+			}
+			return
 		case "weixin":
 			runWeixin(os.Args[2:])
 			return
@@ -304,7 +309,7 @@ func main() {
 			// would silently do the wrong thing. Flags fall through to
 			// flag.Parse below unchanged.
 			if !strings.HasPrefix(os.Args[1], "-") {
-				fmt.Fprintf(os.Stderr, "unknown command %q\n\nSubcommands: config, config-example, update, check-update, migrate, provider,\n  send, cron, timer, at, relay, sessions, agent-sid, daemon, feishu, weixin,\n  doctor, web\nRun 'cc-connect-next --help' for flags.\n", os.Args[1])
+				fmt.Fprintf(os.Stderr, "unknown command %q\n\nSubcommands: config, config-example, update, check-update, migrate, provider,\n  send, cron, timer, at, relay, sessions, agent-sid, daemon, feishu, lark-cli, weixin,\n  doctor, web\nRun 'cc-connect-next --help' for flags.\n", os.Args[1])
 				os.Exit(2)
 			}
 		}
@@ -1732,6 +1737,9 @@ Commands:
     new              Force QR onboarding to create a new bot
     bind             Bind existing app_id/app_secret
 
+  lark-cli           Install and bind the official lark-cli companion
+    setup            Reuse a Feishu/Lark bot as the default bot profile
+
   weixin             Setup Weixin personal (ilink) via QR or token
     setup            QR login, or bind when --token is provided
     new              Force QR login
@@ -1759,6 +1767,7 @@ Examples:
   cc-connect-next send -m "hello"          Send a message to the active session
   cc-connect-next cron list                List all scheduled tasks
   cc-connect-next feishu setup             Setup Feishu/Lark bot credentials
+  cc-connect-next lark-cli setup           Bind the bot as the default bot profile
   cc-connect-next doctor                   Diagnose the configured setup
   cc-connect-next weixin setup             Setup Weixin (ilink) with QR or --token
   cc-connect-next update                   Update to the latest stable version

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -120,11 +121,17 @@ func runFeishuSetup(args []string, requestedMode string) {
 	setAllowFromEmpty := fs.Bool("set-allow-from-empty", false, "merge owner open_id into allow_from when onboarding returns it (preserves *)")
 	recommended := fs.Bool("recommended", false, "apply the recommended Feishu configuration without asking")
 	noRecommended := fs.Bool("no-recommended", false, "skip the recommended Feishu configuration without asking")
+	withLarkCLI := fs.Bool("lark-cli", false, "install/bind official lark-cli and make this bot its default bot profile")
+	withoutLarkCLI := fs.Bool("no-lark-cli", false, "skip lark-cli installation/binding without asking")
 	debug := fs.Bool("debug", false, "print debug logs for onboarding requests")
 	_ = fs.Parse(args)
 
 	profileDecided, profileApply, err := resolveRecommendedProfileFlags(*recommended, *noRecommended)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	if _, _, err := resolveLarkCLICompanionFlags(*withLarkCLI, *withoutLarkCLI); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
@@ -247,6 +254,37 @@ func runFeishuSetup(args []string, requestedMode string) {
 		profileApply,
 		stdinIsInteractive(),
 	)
+
+	larkPlatformIndex := *platformIndex
+	if larkPlatformIndex == 0 {
+		larkPlatformIndex = 1
+	}
+	larkTarget := larkCLITarget{
+		ProjectName:   saveResult.ProjectName,
+		PlatformType:  saveResult.PlatformType,
+		PlatformIndex: larkPlatformIndex,
+		AppID:         resolvedAppID,
+		AppSecret:     resolvedAppSecret,
+	}
+	if err := maybeSetupLarkCLICompanion(
+		os.Stdout,
+		os.Stdin,
+		*withLarkCLI,
+		*withoutLarkCLI,
+		stdinIsInteractive(),
+		larkTarget,
+		func(target larkCLITarget) error {
+			result, err := setupLarkCLICompanion(context.Background(), target, larkCLISetupOptions{InstallIfMissing: true}, realLarkCLIProcess{})
+			if err != nil {
+				return err
+			}
+			reportLarkCLISetupResult(os.Stdout, result)
+			return nil
+		},
+	); err != nil {
+		fmt.Printf("⚠️  飞书机器人已配置，但 lark-cli companion 未完成：%v\n", err)
+		fmt.Printf("   稍后运行：cc-connect-next lark-cli setup --config %s --project %s\n\n", config.ConfigPath, saveResult.ProjectName)
+	}
 
 	printBotMenuGuidance(saveResult.PlatformType)
 
@@ -495,12 +533,16 @@ Options:
   --set-allow-from-empty      Merge owner open_id into allow_from when available (default: false)
   --recommended               Apply the recommended Feishu configuration without asking
   --no-recommended            Skip the recommended Feishu configuration without asking
+  --lark-cli                  Install/bind official lark-cli and make this bot its default bot profile
+  --no-lark-cli               Skip lark-cli installation/binding without asking
   --debug                     Print onboarding debug logs
 
 After the credentials are saved, setup shows the recommended Feishu
 configuration and asks whether to apply it. Credentials, allow_from, allow_chat,
 and work_dir are never changed by it. With neither --recommended nor
---no-recommended and a non-interactive stdin, nothing is applied.
+--no-recommended and a non-interactive stdin, nothing is applied. Interactive
+setup also offers the official lark-cli companion; non-interactive setup only
+enables it with --lark-cli. Existing lark-cli profiles and OAuth logins remain.
 
 Examples:
   # Recommended: one command for both flows
@@ -511,7 +553,7 @@ Examples:
   cc-connect-next feishu bind --project my-project --app cli_xxx:sec_xxx
 
   # Unattended install with the recommended configuration
-  cc-connect-next feishu setup --project my-project --app cli_xxx:sec_xxx --recommended
+  cc-connect-next feishu setup --project my-project --app cli_xxx:sec_xxx --recommended --lark-cli
 
   # Use only when you must force QR onboarding
   cc-connect-next feishu new --project my-project --platform-type lark`)

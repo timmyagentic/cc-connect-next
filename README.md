@@ -28,6 +28,7 @@
 - 🔒 **隐私优先的飞书 Card 2.0 生命周期** —— 一次 Agent 回合始终是同一张引用原始提问的原生卡片：`⏳ 正在思考` → `⏳ 正在调用工具` → `✍️ 正在回答`（CardKit 打字机流式）→ `✅ 已完成`。处理中只渲染匿名进度计数；推理文本、工具名称、参数、结果、模型、token、工作目录在**两层**被丢弃，卡片中不存在可展开面板。最终回答正文会正常发送到飞书，因此其中引用的代码或 patch 也会经过飞书。
 - 🎛️ **并入正在执行的回合（steer）** —— 忙时消息默认直接并入**正在运行**的任务（Codex 原生 `turn/steer`），进度卡片同步交接到最新消息；不支持该能力的 agent 透明回退到 FIFO 队列，`busy_message_mode = "queue"` 可恢复始终排队。`/ps` 在任何模式下都是显式 steer。
 - 🚚 **可审计的一键迁移** —— `cc-connect-next migrate` 清点官方安装、对每个源文件计算哈希、staging 构建校验后原子启用，附带时间戳备份和完整 SHA-256 manifest；宁可安全失败也绝不启用不完整的目标。
+- 🪶 **同一个机器人，开箱即用的官方 lark-cli** —— 新装与迁移可直接安装官方 `lark-cli`，复用 Next 已验证的飞书机器人，创建或复用隔离 profile，并把它设为默认 bot profile；旧 profile、用户 OAuth 与密钥边界完整保留。
 - 🔔 **自我维护的安装** —— `cc-connect-next update` 只走稳定通道并校验 checksums（npm 与独立二进制都支持）；运行中的 daemon 会在新稳定版发布后向每个项目最近活跃的会话**每版本提醒一次**（`update_notice = false` 可关）。提醒卡片带**[立即更新]按钮**，回复「更新」这样的自然语言即可完成升级——不需要输入任何指令。
 - 🤖 **14 种 Agent × 15 个平台** —— 单进程承载多个项目，每个项目把一个代码目录绑定到独立的 Agent 与平台，各自拥有权限、provider、模型与展示配置。
 - 🌍 **生产级配套** —— `doctor` 诊断、launchd/systemd/Windows daemon、Web 管理台（Beta）、定时任务与 webhook、机器人间 relay、语音输入/输出（STT/TTS）、多工作区路由，五语言 i18n（en、zh、zh-TW、ja、es）。
@@ -49,7 +50,7 @@
 - **卡片是工程出来的** —— CardKit 打字机流式带单调序号（迟到的帧永远覆盖不了更新的内容），一次性吐出的答案也有 ≥900ms 的「正在回答」停留，让流式动画可感知；CardKit 不可用时自动回退为原地卡片更新；超出飞书组件预算的表格在同一张卡片里降级为代码块，而不是溢出成多条消息；终态更新失败时回退为一张可追踪的替换卡——绝不退化成不可管理的多段回复。`NO_REPLY` 会撤回乐观卡片；你撤回提问时卡片静默删除、半成品不进入会话历史；`done_emoji` 只在可见的成功回答之后才给你的消息贴表情。
 - **@ 是真的能通知到人** —— 回答中的 `@显示名` 解析为飞书原生 at（懒加载群成员、缓存 1 小时、按名字长度优先匹配；`mention_map` 支持 @ 其他机器人并校验 `ou_` ID）。而卡片里的 at 只展示、不通知——所以含已解析 at 的最终答案会改用可追踪的引用文本消息发出（真正触发通知），再删除过程卡。
 - **话题与群聊做对了** —— `thread_isolation` 给每个话题独立的工作区绑定；在已有话题里第一次 @ 机器人会按顺序回填触发消息的有界 parent/reply 链（最多 5 条，不包含完整话题或兄弟回复历史）。`group_reply_all_chats` 支持按群指定免 @ 名单，并把 `im:message.group_msg` 权限的确切边界写清楚。引用文件下载有双重门禁：必须显式 @ 机器人，且被引用文件的上传者就是当前提问的人。话题里发起的 Relay 提示留在原话题，不泄漏到群根会话。
-- **运维不添乱** —— WebSocket 长连接（不需要公网 IP、域名、证书）自动重连；权限确认、provider/模型切换都用交互卡片完成；远程 markdown 图片上传一次按 URL 复用、失败进入一分钟退避，连续多图自动合批；`cc-connect-next feishu setup` 交互式配置内置推荐档；每回合快照语言环境，五种语言完整 i18n。
+- **运维不添乱** —— WebSocket 长连接（不需要公网 IP、域名、证书）自动重连；权限确认、provider/模型切换都用交互卡片完成；远程 markdown 图片上传一次按 URL 复用、失败进入一分钟退避，连续多图自动合批；`cc-connect-next feishu setup` 交互式配置内置推荐档并可绑定官方 `lark-cli`；每回合快照语言环境，五种语言完整 i18n。
 
 以上每一条，要么是[飞书指南](docs/feishu.md)里有文档的配置项，要么是[卡片契约](docs/feishu-card-contract.md)里有测试保障的行为——不是营销话术。
 
@@ -61,7 +62,7 @@ npm install -g cc-connect-next
 
 # 2. 生成启动配置并填入 REPLACE 值
 cc-connect-next                # 生成 ~/.cc-connect-next/config.toml 并给出指引
-cc-connect-next feishu setup   # 交互式飞书应用配置，套用推荐预设
+cc-connect-next feishu setup   # 配置飞书，并可复用机器人安装/默认绑定官方 lark-cli
 
 # 3. 校验并运行
 cc-connect-next doctor
@@ -129,11 +130,11 @@ core 从不硬编码任何 Agent 或平台名称；富卡片、steer、模型切
 
 ```bash
 cc-connect-next migrate --dry-run   # 先查看完整迁移计划
-cc-connect-next migrate --switch    # 停官方服务、最终同步并启动 Next
+cc-connect-next migrate --switch    # 停官方服务、最终同步并启动 Next；交互式提供 lark-cli
 cc-connect-next daemon status
 ```
 
-不需要申请第二个飞书应用。`--switch` 从官方 daemon 生命周期之外的终端执行；已连接的 CC Agent 会话会在停服前拒绝。命令要求没有已安装的 Next 服务，随后停止并禁用官方 daemon、完成最终一致性迁移，再用迁移配置与官方原运行目录安装并启动 Next。它会继续等待本地 API 和所有配置平台真实 Ready，之后才由 CLI 用迁移后的飞书/Lark 机器人向唯一或显式操作者私聊“迁移完成，cc-connect-next 已运行”。激活失败时，只有 Next 服务已解除注册、runtime socket 不再应答且迁移配置锁已释放，才恢复官方服务；否则保持官方禁用，避免双消费者。目标有歧义或发送失败不会误发群聊，也不会回滚成功迁移。`daemon status` 会分别显示 Service 与 Runtime/Platforms。官方 binary 和数据始终保留。
+不需要申请第二个飞书应用。`--switch` 从官方 daemon 生命周期之外的终端执行；已连接的 CC Agent 会话会在停服前拒绝。命令要求没有已安装的 Next 服务，随后停止并禁用官方 daemon、完成最终一致性迁移，再用迁移配置与官方原运行目录安装并启动 Next。它会继续等待本地 API 和所有配置平台真实 Ready，之后才由 CLI 用迁移后的飞书/Lark 机器人向唯一或显式操作者私聊“迁移完成，cc-connect-next 已运行”。激活失败时，只有 Next 服务已解除注册、runtime socket 不再应答且迁移配置锁已释放，才恢复官方服务；否则保持官方禁用，避免双消费者。目标有歧义或发送失败不会误发群聊，也不会回滚成功迁移。`daemon status` 会分别显示 Service 与 Runtime/Platforms。交互终端随后提供官方 `lark-cli` companion，脚本使用 `--lark-cli` 显式启用；多个机器人用 `--lark-cli-project` 选择，迁移 dry-run 永不写入 lark-cli。官方 binary 和数据始终保留。
 
 双跑冲突由产品层兜底：官方 daemon 还在使用相同飞书凭证时，cc-connect-next 会**拒绝启动**而不是重复消费消息；`doctor` 也会报告共存状态。只复制、不切换服务的 `cc-connect-next migrate` 仍保留给备份和高级并行试用场景。
 

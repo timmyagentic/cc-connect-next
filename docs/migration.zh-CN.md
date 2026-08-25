@@ -19,6 +19,12 @@ cc-connect-next daemon status
 应答且迁移配置锁已释放，才恢复官方服务；否则保持官方禁用，避免双消费者。官方
 binary 与数据目录始终保留。
 
+迁移成功后，交互终端会提供官方 `lark-cli` companion：复用迁移后的机器人创建或
+复用独立 profile，将它设为默认 profile 和默认 bot 身份，旧 profile 与用户 OAuth
+完整保留。脚本模式不会隐式写入，使用 `--lark-cli` 明确启用；若配置中有多个不同
+机器人，再加 `--lark-cli-project <项目名>`（同一项目内多个平台用
+`--lark-cli-platform-index`）。`--dry-run --lark-cli` 只报告计划，绝不安装或改 profile。
+
 不带 `--switch` 的 `cc-connect-next migrate` 仍是只复制、不切换流量的高级操作，
 适用于备份或主动配置的并行试用，不是默认用户旅程。
 
@@ -56,7 +62,7 @@ cc-connect-next migrate \
 | Linux 服务 | `cc-connect.service` | `cc-connect-next.service` |
 | API socket | `~/.cc-connect/run/api.sock` | `~/.cc-connect-next/run/api.sock` |
 
-两者可以同时安装，但不要让它们同时使用同一个飞书应用凭证建立 WebSocket：两个消费者可能争抢或重复处理消息。默认 `--switch` 会在启动 Next 前停止并禁用官方 daemon，所以直接复用迁移过来的原凭证，不需要测试应用。只有主动选择高级并行试用时才需要单独应用。
+两者可以同时安装，但不要让它们同时使用同一个飞书应用凭证建立 WebSocket：两个消费者可能争抢或重复处理消息。默认 `--switch` 会在启动 Next 前停止并禁用官方 daemon，所以直接复用迁移过来的原凭证，不需要测试应用。只有主动选择高级并行试用时才需要单独应用。普通 `lark-cli` HTTP API 命令可以共用同一机器人；不要在 Next 运行时用该 profile 执行 `lark-cli event consume`，因为它会再建立一条事件连接。
 
 这条规则由产品层强制执行，而不只是写在文档里：
 
@@ -99,4 +105,7 @@ cc-connect daemon start
 	第二个飞书应用，也不要手工并行启动两套同凭证服务。确认命令报告官方 daemon 已
 	停止并禁用、最终 migration-manifest.json 与备份可读、cc-connect-next daemon 已
 	安装并 Running，配置路径和 work_dir 精确，并确认机器人私聊完成消息已发送或如实报告跳过原因。若已有 `CC_SESSION_KEY`，只交付外部终端命令，不在该 Agent 会话内执行割接。
+	在交互终端确认安装官方 lark-cli companion；脚本执行时使用 `--lark-cli`，多个机器人
+	显式传 `--lark-cli-project`。确认 profile 默认身份是 bot、原 profile 未删除、密钥只走
+	stdin；不要执行 auth login、真实测试消息或 event consume。
 ```
