@@ -89,6 +89,7 @@ func cutoverTestDeps(t *testing.T, events *[]string, mgr *cutoverTestDaemonManag
 				ManifestPath:  "/next/data/migration-manifest.json",
 			}, nil
 		},
+		CheckNextUnits: func(string) error { return nil },
 		NewDaemonManager: func() (daemon.Manager, error) {
 			*events = append(*events, "next-manager")
 			return mgr, nil
@@ -174,6 +175,51 @@ func TestRunDirectMigrationCutover_RejectsExistingSuccessorBeforeOfficialMutatio
 	joined := strings.Join(events, "\n")
 	if strings.Contains(joined, "official-probe") || strings.Contains(joined, "official-stop-disable") {
 		t.Fatalf("official service was touched:\n%s", joined)
+	}
+}
+
+func TestRunDirectMigrationCutover_RejectsOppositeSystemdScopeBeforeOfficialMutation(t *testing.T) {
+	var events []string
+	mgr := &cutoverTestDaemonManager{events: &events, status: daemon.Status{Platform: "test"}}
+	deps := cutoverTestDeps(t, &events, mgr)
+	deps.CheckNextUnits = func(string) error {
+		events = append(events, "next-registration-check")
+		return errors.New("existing system-scope cc-connect-next service")
+	}
+
+	_, err := runDirectMigrationCutover(migrationOptions{}, deps, func(string, ...any) bool { return true })
+	if err == nil || !strings.Contains(err.Error(), "existing system-scope") {
+		t.Fatalf("error = %v", err)
+	}
+	if got := strings.Join(events, "\n"); got != "prepare\nnext-registration-check" {
+		t.Fatalf("cutover continued after registration preflight:\n%s", got)
+	}
+}
+
+func TestCheckMigrationSuccessorUnitPaths_RejectsEitherSystemdScope(t *testing.T) {
+	for _, scope := range []string{"user", "system"} {
+		t.Run(scope, func(t *testing.T) {
+			root := t.TempDir()
+			paths := []string{
+				filepath.Join(root, "user", "cc-connect-next.service"),
+				filepath.Join(root, "system", "cc-connect-next.service"),
+			}
+			index := 0
+			if scope == "system" {
+				index = 1
+			}
+			if err := os.MkdirAll(filepath.Dir(paths[index]), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(paths[index], []byte("[Unit]\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			err := checkMigrationSuccessorUnitPaths(paths)
+			if err == nil || !strings.Contains(err.Error(), paths[index]) || !strings.Contains(err.Error(), "daemon uninstall") {
+				t.Fatalf("error = %v", err)
+			}
+		})
 	}
 }
 

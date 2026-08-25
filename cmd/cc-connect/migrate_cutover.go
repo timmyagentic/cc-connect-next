@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/timmyagentic/cc-connect-next/daemon"
@@ -21,6 +23,7 @@ const (
 type migrationCutoverDeps struct {
 	PrepareMigration     func(migrationOptions) (*preparedMigration, error)
 	RunMigration         func(migrationOptions) (migrationReport, error)
+	CheckNextUnits       func(string) error
 	NewDaemonManager     func() (daemon.Manager, error)
 	ResolveDaemonConfig  func(*daemon.Config) error
 	SaveDaemonMeta       func(*daemon.Meta) error
@@ -42,6 +45,7 @@ func defaultMigrationCutoverDeps() migrationCutoverDeps {
 	return migrationCutoverDeps{
 		PrepareMigration:     prepareLegacyMigration,
 		RunMigration:         migrateLegacyDataWithOptions,
+		CheckNextUnits:       checkMigrationSuccessorRegistrations,
 		NewDaemonManager:     daemon.NewManager,
 		ResolveDaemonConfig:  daemon.Resolve,
 		SaveDaemonMeta:       daemon.SaveMeta,
@@ -77,6 +81,9 @@ func runDirectMigrationCutover(opts migrationOptions, deps migrationCutoverDeps,
 	}
 	if plan.Main == nil {
 		return result, fmt.Errorf("migration preflight: main target is missing")
+	}
+	if err := deps.CheckNextUnits(opts.Home); err != nil {
+		return result, fmt.Errorf("inspect cc-connect-next service registrations: %w", err)
 	}
 
 	mgr, err := deps.NewDaemonManager()
@@ -149,6 +156,38 @@ func runDirectMigrationCutover(opts migrationOptions, deps migrationCutoverDeps,
 	}
 	result.DaemonStatus = status
 	return result, nil
+}
+
+func checkMigrationSuccessorRegistrations(home string) error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	if strings.TrimSpace(home) == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("resolve home directory: %w", err)
+		}
+	}
+	return checkMigrationSuccessorUnitPaths([]string{
+		filepath.Join(home, ".config", "systemd", "user", "cc-connect-next.service"),
+		"/etc/systemd/system/cc-connect-next.service",
+	})
+}
+
+func checkMigrationSuccessorUnitPaths(paths []string) error {
+	var registered []string
+	for _, path := range paths {
+		if _, err := os.Lstat(path); err == nil {
+			registered = append(registered, path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect %s: %w", path, err)
+		}
+	}
+	if len(registered) == 0 {
+		return nil
+	}
+	return fmt.Errorf("an existing cc-connect-next service is registered at %s; run `cc-connect-next daemon uninstall` in each registration's owning scope, verify it is removed, then rerun the migration", strings.Join(registered, ", "))
 }
 
 func recoverAfterMigration(deps migrationCutoverDeps, mgr daemon.Manager, officialBefore officialInstallState, out func(string, ...any) bool) error {
