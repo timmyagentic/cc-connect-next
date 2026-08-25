@@ -79,7 +79,30 @@ func (m *launchdManager) Install(cfg Config) error {
 }
 
 func (m *launchdManager) Uninstall() error {
-	bootoutLaunchdTargets()
+	jobs, err := loadedLaunchdJobsStrict()
+	if err != nil {
+		return err
+	}
+	for _, job := range jobs {
+		out, err := runLaunchctl("bootout", job.target)
+		if err != nil {
+			return fmt.Errorf("launchctl bootout %s: %s (%w)", job.target, out, err)
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		jobs, err = loadedLaunchdJobsStrict()
+		if err != nil {
+			return err
+		}
+		if len(jobs) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("launchd job is still loaded after bootout")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	plistPath := launchdPlistPath()
 	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
@@ -163,26 +186,33 @@ func (*launchdManager) Status() (*Status, error) {
 	st := &Status{Platform: "launchd"}
 
 	plistPath := launchdPlistPath()
-	if _, err := os.Stat(plistPath); err != nil {
+	if _, err := os.Stat(plistPath); err == nil {
+		st.Installed = true
+	} else if !os.IsNotExist(err) {
+		return st, fmt.Errorf("inspect launchd plist %s: %w", plistPath, err)
+	}
+
+	jobs, err := loadedLaunchdJobsStrict()
+	if err != nil {
+		return st, err
+	}
+	if len(jobs) == 0 {
 		return st, nil
 	}
 	st.Installed = true
 
-	_, _, out, ok := loadedLaunchdTarget()
-	if !ok {
-		return st, nil
-	}
-
-	for _, line := range strings.Split(out, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "pid = ") {
-			if pid, err := strconv.Atoi(strings.TrimPrefix(trimmed, "pid = ")); err == nil && pid > 0 {
-				st.PID = pid
+	for _, job := range jobs {
+		for _, line := range strings.Split(job.output, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "pid = ") {
+				if pid, err := strconv.Atoi(strings.TrimPrefix(trimmed, "pid = ")); err == nil && pid > 0 {
+					st.PID = pid
+					st.Running = true
+				}
+			}
+			if strings.Contains(trimmed, "state = running") {
 				st.Running = true
 			}
-		}
-		if strings.Contains(trimmed, "state = running") {
-			st.Running = true
 		}
 	}
 	return st, nil
@@ -234,13 +264,52 @@ func launchdTargets() []string {
 	return targets
 }
 
-func loadedLaunchdTarget() (string, string, string, bool) {
+type loadedLaunchdJob struct {
+	domain string
+	target string
+	output string
+}
+
+func loadedLaunchdJobs() []loadedLaunchdJob {
+	jobs, _ := loadedLaunchdJobsStrict()
+	return jobs
+}
+
+func loadedLaunchdJobsStrict() ([]loadedLaunchdJob, error) {
+	var jobs []loadedLaunchdJob
 	for _, domain := range launchdDomains() {
 		target := launchdTarget(domain)
 		out, err := runLaunchctl("print", target)
 		if err == nil {
-			return domain, target, out, true
+			jobs = append(jobs, loadedLaunchdJob{domain: domain, target: target, output: out})
+			continue
 		}
+		if !launchdTargetAbsent(out) {
+			return nil, fmt.Errorf("launchctl print %s: %s (%w)", target, out, err)
+		}
+	}
+	return jobs, nil
+}
+
+func launchdTargetAbsent(out string) bool {
+	out = strings.ToLower(strings.TrimSpace(out))
+	for _, marker := range []string{
+		"could not find service",
+		"no such process",
+		"service not found",
+		"domain does not support specified action",
+	} {
+		if strings.Contains(out, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func loadedLaunchdTarget() (string, string, string, bool) {
+	jobs := loadedLaunchdJobs()
+	if len(jobs) > 0 {
+		return jobs[0].domain, jobs[0].target, jobs[0].output, true
 	}
 	return "", "", "", false
 }

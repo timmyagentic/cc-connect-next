@@ -87,8 +87,15 @@ func (m *systemdManager) Install(cfg Config) error {
 }
 
 func (m *systemdManager) Uninstall() error {
-	if _, err := runSystemctl(m.sysArgs("disable", "--now", systemdServiceName)...); err != nil {
-		slog.Warn("systemd: disable failed", "error", err)
+	status, err := m.Status()
+	if err != nil {
+		return fmt.Errorf("inspect service before uninstall: %w", err)
+	}
+	if !status.Installed && !status.Running {
+		return nil
+	}
+	if out, err := runSystemctl(m.sysArgs("disable", "--now", systemdServiceName)...); err != nil {
+		return fmt.Errorf("systemctl %s: %s (%w)", strings.Join(m.sysArgs("disable", "--now", systemdServiceName), " "), out, err)
 	}
 
 	unitPath := m.unitPath()
@@ -96,8 +103,8 @@ func (m *systemdManager) Uninstall() error {
 		return fmt.Errorf("remove unit: %w", err)
 	}
 
-	if _, err := runSystemctl(m.sysArgs("daemon-reload")...); err != nil {
-		slog.Warn("systemd: daemon-reload failed", "error", err)
+	if out, err := runSystemctl(m.sysArgs("daemon-reload")...); err != nil {
+		return fmt.Errorf("systemctl %s: %s (%w)", strings.Join(m.sysArgs("daemon-reload"), " "), out, err)
 	}
 	return nil
 }
@@ -130,18 +137,25 @@ func (m *systemdManager) Status() (*Status, error) {
 	st := &Status{Platform: m.Platform()}
 
 	unitPath := m.unitPath()
-	if _, err := os.Stat(unitPath); err != nil {
-		return st, nil
+	unitFileExists := false
+	if _, err := os.Stat(unitPath); err == nil {
+		unitFileExists = true
+	} else if !os.IsNotExist(err) {
+		return st, fmt.Errorf("inspect systemd unit %s: %w", unitPath, err)
 	}
-	st.Installed = true
 
 	out, err := runSystemctl(m.sysArgs("show", systemdServiceName,
-		"--no-page", "--property", "ActiveState,MainPID")...)
+		"--no-page", "--property", "LoadState,ActiveState,MainPID")...)
 	if err != nil {
-		return st, nil
+		return st, fmt.Errorf("systemctl show %s: %s (%w)", systemdServiceName, out, err)
 	}
 
 	props := parseKeyValue(out)
+	loadState := strings.TrimSpace(props["LoadState"])
+	st.Installed = unitFileExists || (loadState != "" && !strings.EqualFold(loadState, "not-found"))
+	if !st.Installed {
+		return st, nil
+	}
 	if strings.EqualFold(props["ActiveState"], "active") {
 		st.Running = true
 	}

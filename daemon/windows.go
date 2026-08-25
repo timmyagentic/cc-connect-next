@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	windowsTaskName   = ServiceName
-	windowsScriptName = "cc-connect-next-daemon.ps1"
+	windowsTaskName                 = ServiceName
+	windowsScriptName               = "cc-connect-next-daemon.ps1"
+	windowsTaskNotInstalledSentinel = "__CC_CONNECT_NEXT_TASK_NOT_INSTALLED__"
 )
 
 var runPowerShell = func(script string) (string, error) {
@@ -86,10 +87,17 @@ func (m *schtasksManager) Install(cfg Config) error {
 
 func (*schtasksManager) Uninstall() error {
 	if err := stopWindowsTask(); err != nil {
-		slog.Warn("schtasks: stop task failed", "error", err)
+		return err
 	}
 	if err := deleteWindowsTask(); err != nil {
 		return err
+	}
+	status, err := (&schtasksManager{}).Status()
+	if err != nil {
+		return fmt.Errorf("verify scheduled task removal: %w", err)
+	}
+	if status.Installed || status.Running {
+		return fmt.Errorf("scheduled task is still registered after delete")
 	}
 	if err := os.Remove(windowsTaskScriptPath()); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove task script: %w", err)
@@ -118,17 +126,22 @@ func (*schtasksManager) Restart() error {
 func (*schtasksManager) Status() (*Status, error) {
 	st := &Status{Platform: "schtasks"}
 
-	out, err := runPowerShell(fmt.Sprintf(`
-$task = Get-ScheduledTask -TaskName %s -ErrorAction SilentlyContinue
-if ($null -eq $task) { exit 1 }
+	out, err := runPowerShell(windowsTaskLookupScript() + fmt.Sprintf(`
+if ($null -eq $task) { Write-Output %s; exit 0 }
 Write-Output $task.State
-`, powerShellLiteral(windowsTaskName)))
+`, powerShellLiteral(windowsTaskNotInstalledSentinel)))
 	if err != nil {
+		return st, fmt.Errorf("query scheduled task: %s (%w)", out, err)
+	}
+	taskStatus := strings.TrimSpace(out)
+	if taskStatus == windowsTaskNotInstalledSentinel {
 		return st, nil
+	}
+	if taskStatus == "" {
+		return st, fmt.Errorf("query scheduled task returned an empty state")
 	}
 	st.Installed = true
 
-	taskStatus := strings.TrimSpace(out)
 	if strings.EqualFold(taskStatus, "Running") {
 		st.Running = true
 	}
@@ -225,20 +238,19 @@ func powerShellLiteral(value string) string {
 }
 
 func stopWindowsTask() error {
-	out, err := runPowerShell(fmt.Sprintf(`
-$task = Get-ScheduledTask -TaskName %s -ErrorAction SilentlyContinue
+	out, err := runPowerShell(windowsTaskLookupScript() + fmt.Sprintf(`
 if ($null -eq $task) { exit 0 }
 if ($task.State -eq 'Running') {
 	Stop-ScheduledTask -TaskName %s
 }
 for ($i = 0; $i -lt 20; $i++) {
-	$task = Get-ScheduledTask -TaskName %s -ErrorAction SilentlyContinue
-	if ($null -eq $task -or $task.State -ne 'Running') { exit 0 }
+	$task = Get-ScheduledTask -TaskName %s -ErrorAction Stop
+	if ($task.State -ne 'Running') { exit 0 }
 	Start-Sleep -Milliseconds 500
 }
 Write-Error 'scheduled task did not stop within timeout'
 exit 1
-`, powerShellLiteral(windowsTaskName), powerShellLiteral(windowsTaskName), powerShellLiteral(windowsTaskName)))
+`, powerShellLiteral(windowsTaskName), powerShellLiteral(windowsTaskName)))
 	if err != nil {
 		return fmt.Errorf("stop scheduled task: %s (%w)", out, err)
 	}
@@ -258,15 +270,23 @@ if ($task.State -ne 'Running') { Start-ScheduledTask -TaskName %s }
 }
 
 func deleteWindowsTask() error {
-	out, err := runPowerShell(fmt.Sprintf(`
-$task = Get-ScheduledTask -TaskName %s -ErrorAction SilentlyContinue
+	out, err := runPowerShell(windowsTaskLookupScript() + fmt.Sprintf(`
 if ($null -eq $task) { exit 0 }
 Unregister-ScheduledTask -TaskName %s -Confirm:$false
-`, powerShellLiteral(windowsTaskName), powerShellLiteral(windowsTaskName)))
+`, powerShellLiteral(windowsTaskName)))
 	if err != nil {
 		return fmt.Errorf("delete scheduled task: %s (%w)", out, err)
 	}
 	return nil
+}
+
+func windowsTaskLookupScript() string {
+	return fmt.Sprintf(`
+$matches = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskName -eq %s })
+if ($matches.Count -gt 1) { throw 'multiple cc-connect-next scheduled tasks found' }
+$task = $null
+if ($matches.Count -eq 1) { $task = $matches[0] }
+`, powerShellLiteral(windowsTaskName))
 }
 
 // CheckLinger is a no-op on Windows (always returns false).

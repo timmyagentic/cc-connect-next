@@ -518,3 +518,95 @@ func TestInstallLaunchd_TightensExistingPlistFrom0644(t *testing.T) {
 		t.Errorf("plist mode after reinstall = %o, want 0600", info.Mode().Perm())
 	}
 }
+
+func TestLaunchdStatusDetectsLoadedJobWithoutPlist(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	orig := runLaunchctl
+	t.Cleanup(func() { runLaunchctl = orig })
+
+	guiDomain := launchdGUIDomain()
+	guiTarget := launchdTarget(guiDomain)
+	runLaunchctl = func(args ...string) (string, error) {
+		if len(args) < 2 || args[0] != "print" {
+			return "", fmt.Errorf("unexpected launchctl call: %v", args)
+		}
+		switch args[1] {
+		case guiDomain:
+			return "subsystem", nil
+		case guiTarget:
+			return "pid = 4321\nstate = running", nil
+		default:
+			return "service not found", fmt.Errorf("exit status 113")
+		}
+	}
+
+	st, err := (&launchdManager{}).Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Installed || !st.Running || st.PID != 4321 {
+		t.Fatalf("Status() = %+v, want loaded job without plist to remain visible", st)
+	}
+}
+
+func TestLaunchdUninstallKeepsPlistWhenBootoutFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(launchdPlistPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(launchdPlistPath(), []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := runLaunchctl
+	t.Cleanup(func() { runLaunchctl = orig })
+	guiDomain := launchdGUIDomain()
+	guiTarget := launchdTarget(guiDomain)
+	runLaunchctl = func(args ...string) (string, error) {
+		if len(args) < 2 {
+			return "", fmt.Errorf("unexpected launchctl call: %v", args)
+		}
+		switch args[0] + " " + args[1] {
+		case "print " + guiDomain:
+			return "subsystem", nil
+		case "print " + guiTarget:
+			return "pid = 4321\nstate = running", nil
+		case "bootout " + guiTarget:
+			return "operation not permitted", fmt.Errorf("exit status 1")
+		default:
+			return "service not found", fmt.Errorf("exit status 113")
+		}
+	}
+
+	err := (&launchdManager{}).Uninstall()
+	if err == nil || !strings.Contains(err.Error(), "bootout") {
+		t.Fatalf("Uninstall() error = %v, want strict bootout failure", err)
+	}
+	if _, statErr := os.Stat(launchdPlistPath()); statErr != nil {
+		t.Fatalf("plist removed after failed bootout: %v", statErr)
+	}
+}
+
+func TestLaunchdStatusPropagatesUnexpectedPrintFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	orig := runLaunchctl
+	t.Cleanup(func() { runLaunchctl = orig })
+	guiDomain := launchdGUIDomain()
+	guiTarget := launchdTarget(guiDomain)
+	runLaunchctl = func(args ...string) (string, error) {
+		if len(args) < 2 || args[0] != "print" {
+			return "", fmt.Errorf("unexpected launchctl call: %v", args)
+		}
+		if args[1] == guiDomain {
+			return "subsystem", nil
+		}
+		if args[1] == guiTarget {
+			return "operation not permitted", fmt.Errorf("exit status 1")
+		}
+		return "service not found", fmt.Errorf("exit status 113")
+	}
+
+	if _, err := (&launchdManager{}).Status(); err == nil || !strings.Contains(err.Error(), "launchctl print") {
+		t.Fatalf("Status() error = %v, want unexpected query failure", err)
+	}
+}
