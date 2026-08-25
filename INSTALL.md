@@ -110,11 +110,13 @@ cc-connect-next migrate --switch
 `--switch` must run outside a connected CC Agent session and rejects an installed
 Next service before touching official. It stops and disables official CC Connect, performs the
 final migration against a quiet source, then installs and starts cc-connect-next
-with the migrated config and the detected official runtime work directory. If
-the final sync or successor activation fails, it disarms the successor service
-and makes a best-effort restoration of official CC Connect's previous running
-and autostart state. On success it privately notifies one unique or explicit
-Feishu/Lark operator. Official binaries and data are never deleted.
+with the migrated config and the detected official runtime work directory. The
+cutover waits for the local API and every configured platform to report Ready;
+only then does it privately notify one unique or explicit Feishu/Lark operator.
+If final sync or activation/readiness fails, official is restored only after
+Next is unregistered, its runtime socket no longer answers, and the migrated
+config lock is free. Otherwise official stays disabled to prevent duplicate
+consumers. Official binaries and data are never deleted.
 
 Plain `cc-connect-next migrate` remains a copy-only advanced operation. It does
 not switch traffic or start a daemon and is useful for backups or a deliberately
@@ -274,9 +276,11 @@ cc-connect-next daemon status
 ```
 
 The command requires no installed Next service, then stops/disables official,
-final-syncs, installs/starts Next, waits for Running, and directly sends the
-private completion message. Use `--notify-project` and `--notify-user` when the
-operator is not unique. Notification failure does not roll back a successful cutover.
+final-syncs, installs/starts Next, waits for the local API plus every configured
+platform to report Ready, and directly sends the private completion message.
+`daemon status` shows Service separately from Runtime/Platforms. Use
+`--notify-project` and `--notify-user` when the operator is not unique.
+Notification failure does not roll back a successful cutover.
 
 Rollback leaves official data intact:
 

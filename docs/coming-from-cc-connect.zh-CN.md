@@ -70,7 +70,7 @@ cc-connect-next migrate --switch
 cc-connect-next daemon status
 ```
 
-`--switch` 从已连接 CC Agent 之外的终端执行，并要求没有已安装的 Next 服务。它停止并禁用官方服务、最终同步、安装启动 Next，再私聊唯一或显式飞书/Lark 操作者。手工回滚先解除 Next 服务注册，再恢复官方自启：
+`--switch` 从已连接 CC Agent 之外的终端执行，并要求没有已安装的 Next 服务。它停止并禁用官方服务、最终同步、安装启动 Next，等待本地 API 与所有配置平台真实 Ready，再私聊唯一或显式飞书/Lark 操作者。激活失败时，只有 Next 已被证明解除注册并停止才恢复官方服务。手工回滚先解除 Next 服务注册，再恢复官方自启：
 
 ```bash
 cc-connect-next daemon uninstall

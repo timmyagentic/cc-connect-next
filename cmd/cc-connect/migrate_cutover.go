@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -9,47 +10,53 @@ import (
 	"strings"
 	"time"
 
+	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/timmyagentic/cc-connect-next/daemon"
 )
 
 const (
-	migrationDaemonStateTimeout = 10 * time.Second
-	migrationDaemonPollInterval = 100 * time.Millisecond
+	migrationRuntimeReadyTimeout  = 45 * time.Second
+	migrationRuntimeDisarmTimeout = 10 * time.Second
+	migrationDaemonPollInterval   = 100 * time.Millisecond
+	migrationHealthProbeTimeout   = 500 * time.Millisecond
 )
 
 // migrationCutoverDeps keeps service mutation behind testable boundaries. A
 // production --switch creates a fresh value, so the probe captured by the
 // closures is scoped to one cutover and cannot leak between concurrent calls.
 type migrationCutoverDeps struct {
-	PrepareMigration     func(migrationOptions) (*preparedMigration, error)
-	RunMigration         func(migrationOptions) (migrationReport, error)
-	CheckNextUnits       func(string) error
-	NewDaemonManager     func() (daemon.Manager, error)
-	ResolveDaemonConfig  func(*daemon.Config) error
-	SaveDaemonMeta       func(*daemon.Meta) error
-	WaitForDaemonRunning func(daemon.Manager) (*daemon.Status, error)
-	ProbeOfficial        func(*preparedMigration) officialInstallState
-	SwitchOfficial       func(officialInstallState, func(string, ...any) bool) error
-	RestoreOfficial      func(officialInstallState, func(string, ...any) bool) error
+	PrepareMigration    func(migrationOptions) (*preparedMigration, error)
+	RunMigration        func(migrationOptions) (migrationReport, error)
+	CheckNextUnits      func(string) error
+	NewDaemonManager    func() (daemon.Manager, error)
+	ResolveDaemonConfig func(*daemon.Config) error
+	SaveDaemonMeta      func(*daemon.Meta) error
+	WaitRuntimeReady    func(daemon.Manager, string) (*daemon.Status, core.RuntimeHealth, error)
+	WaitRuntimeDisarmed func(daemon.Manager, string) error
+	ProbeOfficial       func(*preparedMigration) officialInstallState
+	SwitchOfficial      func(officialInstallState, func(string, ...any) bool) error
+	RestoreOfficial     func(officialInstallState, func(string, ...any) bool) error
 }
 
 type migrationCutoverResult struct {
-	Report       migrationReport
-	DaemonStatus *daemon.Status
-	ConfigPath   string
-	WorkDir      string
+	Report        migrationReport
+	DaemonStatus  *daemon.Status
+	RuntimeHealth core.RuntimeHealth
+	ConfigPath    string
+	WorkDir       string
 }
 
 func defaultMigrationCutoverDeps() migrationCutoverDeps {
 	probe := defaultOfficialProbe()
 	return migrationCutoverDeps{
-		PrepareMigration:     prepareLegacyMigration,
-		RunMigration:         migrateLegacyDataWithOptions,
-		CheckNextUnits:       checkMigrationSuccessorRegistrations,
-		NewDaemonManager:     daemon.NewManager,
-		ResolveDaemonConfig:  daemon.Resolve,
-		SaveDaemonMeta:       daemon.SaveMeta,
-		WaitForDaemonRunning: waitForMigrationDaemonRunning,
+		PrepareMigration:    prepareLegacyMigration,
+		RunMigration:        migrateLegacyDataWithOptions,
+		CheckNextUnits:      checkMigrationSuccessorRegistrations,
+		NewDaemonManager:    daemon.NewManager,
+		ResolveDaemonConfig: daemon.Resolve,
+		SaveDaemonMeta:      daemon.SaveMeta,
+		WaitRuntimeReady:    waitForMigrationRuntimeReady,
+		WaitRuntimeDisarmed: waitForMigrationRuntimeDisarmed,
 		ProbeOfficial: func(plan *preparedMigration) officialInstallState {
 			probe = officialProbeForMigration(probe, plan)
 			return probeOfficialInstall(probe)
@@ -128,13 +135,13 @@ func runDirectMigrationCutover(opts migrationOptions, deps migrationCutoverDeps,
 		NoCaptureSecrets: isTruthyEnv(os.Getenv("CC_DAEMON_NO_CAPTURE_SECRETS")),
 	}
 	if err := deps.ResolveDaemonConfig(&cfg); err != nil {
-		recoveryErr := recoverAfterMigration(deps, mgr, officialBefore, out)
+		recoveryErr := recoverAfterMigration(deps, mgr, officialBefore, result.ConfigPath, out)
 		return result, errors.Join(fmt.Errorf("prepare cc-connect-next daemon config: %w", err), recoveryErr)
 	}
 
 	out("Installing and starting cc-connect-next with config %s and work_dir %s…\n", cfg.ConfigPath, cfg.WorkDir)
 	if err := mgr.Install(cfg); err != nil {
-		recoveryErr := recoverAfterMigration(deps, mgr, officialBefore, out)
+		recoveryErr := recoverAfterMigration(deps, mgr, officialBefore, result.ConfigPath, out)
 		return result, errors.Join(fmt.Errorf("install and start cc-connect-next daemon: %w", err), recoveryErr)
 	}
 	if err := deps.SaveDaemonMeta(&daemon.Meta{
@@ -143,18 +150,20 @@ func runDirectMigrationCutover(opts migrationOptions, deps migrationCutoverDeps,
 		LogMaxBackups: cfg.LogMaxBackups,
 		WorkDir:       cfg.WorkDir,
 		ConfigPath:    cfg.ConfigPath,
+		DataDir:       filepath.Dir(cfg.ConfigPath),
 		BinaryPath:    cfg.BinaryPath,
 		InstalledAt:   daemon.NowISO(),
 	}); err != nil {
 		out("Warning: cc-connect-next is installed, but daemon metadata could not be saved: %v\n", err)
 	}
 
-	status, err := deps.WaitForDaemonRunning(mgr)
+	status, health, err := deps.WaitRuntimeReady(mgr, filepath.Dir(result.ConfigPath))
 	if err != nil {
-		recoveryErr := recoverAfterMigration(deps, mgr, officialBefore, out)
-		return result, errors.Join(fmt.Errorf("wait for cc-connect-next daemon to run: %w", err), recoveryErr)
+		recoveryErr := recoverAfterMigration(deps, mgr, officialBefore, result.ConfigPath, out)
+		return result, errors.Join(fmt.Errorf("wait for cc-connect-next runtime readiness: %w", err), recoveryErr)
 	}
 	result.DaemonStatus = status
+	result.RuntimeHealth = health
 	return result, nil
 }
 
@@ -190,7 +199,7 @@ func checkMigrationSuccessorUnitPaths(paths []string) error {
 	return fmt.Errorf("an existing cc-connect-next service is registered at %s; run `cc-connect-next daemon uninstall` in each registration's owning scope, verify it is removed, then rerun the migration", strings.Join(registered, ", "))
 }
 
-func recoverAfterMigration(deps migrationCutoverDeps, mgr daemon.Manager, officialBefore officialInstallState, out func(string, ...any) bool) error {
+func recoverAfterMigration(deps migrationCutoverDeps, mgr daemon.Manager, officialBefore officialInstallState, configPath string, out func(string, ...any) bool) error {
 	var recoveryErrors []error
 	out("cc-connect-next activation failed; disarming the successor before restoring official CC Connect…\n")
 	if err := mgr.Stop(); err != nil {
@@ -203,32 +212,97 @@ func recoverAfterMigration(deps migrationCutoverDeps, mgr daemon.Manager, offici
 			errors.New("official CC Connect remains disabled because the failed successor could not be disarmed"))
 		return errors.Join(recoveryErrors...)
 	}
+	if err := deps.WaitRuntimeDisarmed(mgr, configPath); err != nil {
+		recoveryErrors = append(recoveryErrors,
+			fmt.Errorf("prove failed successor is disarmed: %w", err),
+			errors.New("official CC Connect remains disabled because the failed successor could not be proven disarmed"))
+		return errors.Join(recoveryErrors...)
+	}
 	if err := deps.RestoreOfficial(officialBefore, out); err != nil {
 		recoveryErrors = append(recoveryErrors, fmt.Errorf("restore official CC Connect: %w", err))
 	}
 	return errors.Join(recoveryErrors...)
 }
 
-func waitForMigrationDaemonRunning(mgr daemon.Manager) (*daemon.Status, error) {
-	deadline := time.Now().Add(migrationDaemonStateTimeout)
+func waitForMigrationRuntimeReady(mgr daemon.Manager, dataDir string) (*daemon.Status, core.RuntimeHealth, error) {
+	return waitForMigrationRuntimeReadyWithin(mgr, dataDir, migrationRuntimeReadyTimeout, migrationDaemonPollInterval)
+}
+
+func waitForMigrationRuntimeReadyWithin(mgr daemon.Manager, dataDir string, timeout, poll time.Duration) (*daemon.Status, core.RuntimeHealth, error) {
+	deadline := time.Now().Add(timeout)
 	var last *daemon.Status
+	var lastHealth core.RuntimeHealth
 	var lastErr error
 	for {
 		status, err := mgr.Status()
 		if err == nil && status != nil {
 			last = status
 			if status.Installed && status.Running {
-				return status, nil
+				ctx, cancel := context.WithTimeout(context.Background(), migrationHealthProbeTimeout)
+				health, healthErr := readRuntimeHealth(ctx, resolveSocketPath(dataDir))
+				cancel()
+				if healthErr == nil {
+					lastHealth = health
+					if health.Ready {
+						return status, health, nil
+					}
+					state, platforms := summarizeRuntimeHealth(health)
+					lastErr = fmt.Errorf("runtime is %s: %s", strings.ToLower(state), strings.Join(platforms, "; "))
+				} else {
+					lastErr = healthErr
+				}
 			}
 		} else if err != nil {
 			lastErr = err
 		}
 		if time.Now().After(deadline) {
 			if lastErr != nil {
-				return last, lastErr
+				return last, lastHealth, lastErr
 			}
-			return last, fmt.Errorf("timed out after %s waiting for a running installed service (last status: %+v)", migrationDaemonStateTimeout, last)
+			return last, lastHealth, fmt.Errorf("timed out after %s waiting for a ready runtime (last status: %+v)", timeout, last)
 		}
-		time.Sleep(migrationDaemonPollInterval)
+		time.Sleep(poll)
+	}
+}
+
+func waitForMigrationRuntimeDisarmed(mgr daemon.Manager, configPath string) error {
+	return waitForMigrationRuntimeDisarmedWithin(mgr, configPath, migrationRuntimeDisarmTimeout, migrationDaemonPollInterval)
+}
+
+func waitForMigrationRuntimeDisarmedWithin(mgr daemon.Manager, configPath string, timeout, poll time.Duration) error {
+	if strings.TrimSpace(configPath) == "" {
+		return fmt.Errorf("migrated config path is empty")
+	}
+	deadline := time.Now().Add(timeout)
+	dataDir := filepath.Dir(configPath)
+	var lastErr error
+	for {
+		status, err := mgr.Status()
+		switch {
+		case err != nil:
+			lastErr = err
+		case status == nil:
+			lastErr = fmt.Errorf("daemon status is unavailable")
+		case status.Installed || status.Running:
+			lastErr = fmt.Errorf("service is still installed or running: %+v", status)
+		default:
+			ctx, cancel := context.WithTimeout(context.Background(), migrationHealthProbeTimeout)
+			reachable, socketErr := runtimeAPIReachable(ctx, resolveSocketPath(dataDir))
+			cancel()
+			if socketErr != nil {
+				lastErr = socketErr
+			} else if reachable {
+				lastErr = fmt.Errorf("runtime API socket still answers")
+			} else if lock, lockErr := AcquireInstanceLock(configPath); lockErr != nil {
+				lastErr = lockErr
+			} else {
+				lock.Release()
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %s: %w", timeout, lastErr)
+		}
+		time.Sleep(poll)
 	}
 }

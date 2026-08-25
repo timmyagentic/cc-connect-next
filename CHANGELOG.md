@@ -77,10 +77,17 @@ See `changelogs/v0.1.6.md` for the bilingual release notes.
 - `migrate --switch` is now a complete first-time production cutover: it
   rejects an installed successor, stops and disables official CC Connect, performs the
   final consistent migration, installs/starts Next with the exact migrated
-  config and original work directory, and waits for the service manager to
-  report Running. It must run outside a connected CC Agent session. On success
+  config and original work directory, then waits for the local API and every
+  configured platform to report Ready. It must run outside a connected CC Agent session. On success
   the CLI directly sends one private Feishu/Lark completion message; ambiguous
   targets and send failures are reported without group fallback or rollback.
+- Activation recovery is fail-closed across systemd, launchd, and Windows:
+  service-manager query/stop/uninstall errors propagate, and official CC Connect
+  is restored only after Next is unregistered, its runtime socket is silent,
+  and the migrated config lock is free. Windows treats only a successful empty
+  Task Scheduler enumeration as not installed.
+- Feishu/Lark now use the official SDK's connection lifecycle callbacks, and
+  `daemon status` reports Service separately from Runtime/Platforms.
 - Exact migration provenance now accepts official `v1.5.0-beta.4`,
   `v1.5.0-beta.5`, and stable `v1.5.0`; the same strict plugin/config gates
   still reject unsupported behavior before any target write.

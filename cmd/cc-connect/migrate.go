@@ -223,6 +223,15 @@ func runMigrateCommand(args []string, stdout, stderr io.Writer) int {
 			if !writeOutput("Daemon config: %s\nDaemon work_dir: %s\n", cutover.ConfigPath, cutover.WorkDir) {
 				return 1
 			}
+			runtimeState, runtimePlatforms := summarizeRuntimeHealth(cutover.RuntimeHealth)
+			if !writeOutput("cc-connect-next runtime: %s.\n", runtimeState) {
+				return 1
+			}
+			for _, platform := range runtimePlatforms {
+				if !writeOutput("  - %s\n", platform) {
+					return 1
+				}
+			}
 			if notifyTarget != nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 				notifyErr := sendMigrationComplete(ctx, notifyTarget, filepath.Dir(cutover.ConfigPath))
