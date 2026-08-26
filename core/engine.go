@@ -634,6 +634,10 @@ type interactiveState struct {
 	// currentTurnUserMessageTimeMs is the UserMessageTimeMs for the in-flight
 	// foreground turn (including a queued turn after EventResult).
 	currentTurnUserMessageTimeMs int64
+	// activeAnswerProfile is the one-shot profile of the in-flight foreground
+	// turn. Empty means project defaults. turn/steer cannot change turn options,
+	// so a busy message that would cross this boundary must start a queued turn.
+	activeAnswerProfile AnswerProfileName
 
 	// Steer presentation handoff (issue #27). When a busy-session message is
 	// appended to the in-flight turn via SteerableSession, the visible
@@ -3291,6 +3295,10 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		state.mu.Unlock()
 		return false
 	}
+	if state.activeAnswerProfile != "" {
+		state.mu.Unlock()
+		return false
+	}
 	if e.isStaleUserMessageLocked(state, msg.UserMessageTimeMs) {
 		snap := userMessageWatermarkSnapshotLocked(state)
 		state.mu.Unlock()
@@ -4152,6 +4160,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.currentMessageID = msg.MessageID
 	state.fromVoice = msg.FromVoice
 	state.sideText = ""
+	state.activeAnswerProfile = msg.AnswerProfile
 	as := state.agentSession // capture under lock to avoid race with cleanup
 	state.mu.Unlock()
 
@@ -5250,6 +5259,11 @@ func (t *turnProcessor) run() {
 	stopTypingFn := t.stopTypingFn
 	sendDone := t.sendDone
 	replyCtx := t.replyCtx
+	defer func() {
+		state.mu.Lock()
+		state.activeAnswerProfile = ""
+		state.mu.Unlock()
+	}()
 
 	if !e.beginInteractiveTurn(state) {
 		state.markStopped()
@@ -6660,6 +6674,7 @@ func (queue *turnQueue) handle() {
 		state.currentMessageID = queued.messageID
 		state.fromVoice = queued.fromVoice
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
+		state.activeAnswerProfile = queued.answerProfile
 		// Re-open the steer adoption window for the queued turn.
 		state.presentationOpen = true
 		state.mu.Unlock()
@@ -8209,6 +8224,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.currentMessageID = queued.messageID
 		state.fromVoice = queued.fromVoice
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
+		state.activeAnswerProfile = queued.answerProfile
 		state.mu.Unlock()
 
 		queuedRichCardCopy := e.i18n.RichCardCopyForText(queued.content)
