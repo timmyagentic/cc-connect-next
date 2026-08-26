@@ -2357,6 +2357,60 @@ func TestCUJ_F5_OneShotAnswerProfilesReturnToDefault(t *testing.T) {
 	if got := platform.getSent(); !reflect.DeepEqual(got, wantReplies) {
 		t.Fatalf("visible profile journey = %#v, want %#v", got, wantReplies)
 	}
+
+	t.Run("busy profiled turn queues ordinary follow-up", func(t *testing.T) {
+		releaseFirst := make(chan struct{})
+		session := &answerProfileCUJSession{
+			events:       make(chan Event, 16),
+			releaseFirst: releaseFirst,
+		}
+		released := false
+
+		agent := &answerProfileCUJAgent{session: session}
+		platform := &stubPlatformEngine{n: "test"}
+		engine := NewEngine("test", agent, []Platform{platform}, filepath.Join(t.TempDir(), "sessions.json"), LangChinese)
+		engine.SetBusyMessageMode(BusyMessageModeSteer)
+		engine.SetAnswerProfiles(AnswerProfiles{
+			Fast: &AnswerProfileOptions{Model: "fast-model", ReasoningEffort: "low", ServiceTier: "fast"},
+		})
+		t.Cleanup(func() { _ = engine.Stop() })
+		t.Cleanup(func() {
+			if !released {
+				close(releaseFirst)
+			}
+		})
+
+		engine.ReceiveMessage(platform, answerProfileCUJMessage("busy-profile-1", "/fast 先分析"))
+		waitAnswerProfileCUJ(t, "profiled turn starts", func() bool {
+			return session.snapshot().calls == 1
+		})
+
+		engine.ReceiveMessage(platform, answerProfileCUJMessage("busy-profile-2", "继续普通处理"))
+		waitAnswerProfileCUJ(t, "ordinary follow-up is visibly queued", func() bool {
+			return len(platform.getSent()) > 0
+		})
+		if got := session.snapshot().steerCalls; got != 0 {
+			t.Fatalf("steer calls = %d, want 0 across the one-shot profile boundary", got)
+		}
+
+		close(releaseFirst)
+		released = true
+		waitAnswerProfileCUJ(t, "queued ordinary turn completes with defaults", func() bool {
+			return reflect.DeepEqual(answerProfileCUJReplies(platform.getSent()), []string{
+				"fast:先分析",
+				"default:继续普通处理",
+			}) && !engine.sessions.GetOrCreateActive("test:user").Busy()
+		})
+
+		engine.ReceiveMessage(platform, answerProfileCUJMessage("busy-profile-3", "最后普通确认"))
+		waitAnswerProfileCUJ(t, "later ordinary turn stays on defaults", func() bool {
+			return reflect.DeepEqual(answerProfileCUJReplies(platform.getSent()), []string{
+				"fast:先分析",
+				"default:继续普通处理",
+				"default:最后普通确认",
+			}) && !engine.sessions.GetOrCreateActive("test:user").Busy()
+		})
+	})
 }
 
 type answerProfileCUJAgent struct {
@@ -2376,8 +2430,12 @@ func (a *answerProfileCUJAgent) GetReasoningEffort() string { return "medium" }
 func (a *answerProfileCUJAgent) GetServiceTier() string     { return "default" }
 
 type answerProfileCUJSession struct {
-	events chan Event
-	closed atomic_bool
+	events       chan Event
+	closed       atomic_bool
+	mu           sync.Mutex
+	calls        int
+	steerCalls   int
+	releaseFirst <-chan struct{}
 }
 
 func (s *answerProfileCUJSession) Send(prompt string, _ []ImageAttachment, _ []FileAttachment) error {
@@ -2388,7 +2446,23 @@ func (s *answerProfileCUJSession) SendWithTurnOptions(prompt string, _ []ImageAt
 	if options.AnswerProfile != "" {
 		profile = string(options.AnswerProfile)
 	}
-	s.events <- Event{Type: EventResult, Content: profile + ":" + prompt, Done: true}
+	s.mu.Lock()
+	callIndex := s.calls
+	s.calls++
+	releaseFirst := s.releaseFirst
+	s.mu.Unlock()
+	go func() {
+		if callIndex == 0 && releaseFirst != nil {
+			<-releaseFirst
+		}
+		s.events <- Event{Type: EventResult, Content: profile + ":" + prompt, Done: true}
+	}()
+	return nil
+}
+func (s *answerProfileCUJSession) Steer(string, []ImageAttachment, []FileAttachment) error {
+	s.mu.Lock()
+	s.steerCalls++
+	s.mu.Unlock()
 	return nil
 }
 func (s *answerProfileCUJSession) RespondPermission(string, PermissionResult) error { return nil }
@@ -2398,4 +2472,48 @@ func (s *answerProfileCUJSession) Alive() bool                                  
 func (s *answerProfileCUJSession) Close() error {
 	s.closed.Set(true)
 	return nil
+}
+
+type answerProfileCUJSnapshot struct {
+	calls      int
+	steerCalls int
+}
+
+func (s *answerProfileCUJSession) snapshot() answerProfileCUJSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return answerProfileCUJSnapshot{calls: s.calls, steerCalls: s.steerCalls}
+}
+
+func answerProfileCUJMessage(messageID, content string) *Message {
+	return &Message{
+		SessionKey: "test:user",
+		Platform:   "test",
+		MessageID:  messageID,
+		UserID:     "user",
+		Content:    content,
+		ReplyCtx:   messageID,
+	}
+}
+
+func answerProfileCUJReplies(messages []string) []string {
+	var replies []string
+	for _, message := range messages {
+		if strings.HasPrefix(message, "default:") || strings.HasPrefix(message, "fast:") || strings.HasPrefix(message, "quality:") {
+			replies = append(replies, message)
+		}
+	}
+	return replies
+}
+
+func waitAnswerProfileCUJ(t *testing.T, reason string, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", reason)
 }
