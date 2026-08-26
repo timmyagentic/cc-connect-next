@@ -51,7 +51,8 @@ const (
 	updateAskConsentTTL = 10 * time.Minute
 	// updateIntentMaxRunes bounds matching to short messages; anything
 	// longer is a real instruction for the agent.
-	updateIntentMaxRunes = 24
+	updateIntentMaxRunes          = 24
+	updateReleaseBodyPreviewRunes = 3000
 )
 
 var (
@@ -183,6 +184,14 @@ func withUpdateHint(body, hint string) string {
 		return body
 	}
 	return body + "\n\n" + hint
+}
+
+func previewReleaseBody(body string) string {
+	runes := []rune(body)
+	if len(runes) > updateReleaseBodyPreviewRunes {
+		return string(runes[:updateReleaseBodyPreviewRunes]) + "…"
+	}
+	return body
 }
 
 // replyUpdateActionable delivers the release details with an [update now]

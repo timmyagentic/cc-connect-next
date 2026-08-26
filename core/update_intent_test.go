@@ -263,6 +263,16 @@ func cardButtonLabels(c *Card) []string {
 	return out
 }
 
+func TestPreviewReleaseBodyKeeps3000Runes(t *testing.T) {
+	want := strings.Repeat("界", updateReleaseBodyPreviewRunes)
+	if got := previewReleaseBody(want); got != want {
+		t.Fatalf("exact-limit preview changed: got %d runes, want %d", len([]rune(got)), len([]rune(want)))
+	}
+	if got := previewReleaseBody(want + "尾"); got != want+"…" {
+		t.Fatalf("over-limit preview = %q", got)
+	}
+}
+
 // A message must carry exactly one call to action: when a button is present
 // the copy must not also instruct the user to type a reply, or they cannot
 // tell which one is expected.
