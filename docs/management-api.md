@@ -445,7 +445,7 @@ Updates project settings. Only provided fields are updated.
 
 ### 5.3 Sessions
 
-Sessions are conversation contexts within a project. A session is identified by a `session_key` (format: `platform:chatId:userId`) and optionally by an internal `id` for named sessions (e.g. `/new work` creates a named session).
+Sessions are conversation contexts within a project. A session is identified by a `session_key` (format: `platform:chatId:userId`) and optionally by an internal `id` for named sessions (e.g. `/name work` names the current started session).
 
 #### GET /api/v1/projects/{name}/sessions
 

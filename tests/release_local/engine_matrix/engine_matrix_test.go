@@ -222,13 +222,13 @@ func TestSessionLifecycleCommandsThroughReceiveMessage(t *testing.T) {
 	platform.waitTextContaining(t, "matrix response")
 	platform.clear()
 
-	receive(engine, platform, "/new release-named")
-	platform.waitTextContaining(t, "release-named")
-	platform.clear()
-
-	receive(engine, platform, "second user turn")
+	receive(engine, platform, "/new second user turn")
 	agent.waitRecords(t, 2)
 	platform.waitTextContaining(t, "matrix response")
+	platform.clear()
+
+	receive(engine, platform, "/name release-named")
+	platform.waitTextContaining(t, "release-named")
 	platform.clear()
 
 	receive(engine, platform, "/list")

@@ -139,6 +139,35 @@ func TestEngineAnswerProfileSequenceRestoresDefault(t *testing.T) {
 	}
 }
 
+func TestEngineNewWithAnswerProfileStartsFreshProfiledTurn(t *testing.T) {
+	session := newAnswerProfileTestSession()
+	agent := &answerProfileTestAgent{session: session}
+	platform := &stubPlatformEngine{n: "test"}
+	engine := NewEngine("test", agent, []Platform{platform}, "", LangEnglish)
+	engine.SetAnswerProfiles(AnswerProfiles{
+		Fast: &AnswerProfileOptions{Model: "fast-model", ReasoningEffort: "low", ServiceTier: "fast"},
+	})
+	t.Cleanup(func() { _ = engine.Stop() })
+
+	oldID := engine.sessions.GetOrCreateActive("test:user").ID
+	engine.ReceiveMessage(platform, answerProfileMessage("m-new-fast", "/new /fast inspect from scratch"))
+	waitAnswerProfileTest(t, "fresh profiled turn", func() bool {
+		calls, _ := session.snapshot()
+		return len(calls) == 1
+	})
+
+	if activeID := engine.sessions.GetOrCreateActive("test:user").ID; activeID == oldID {
+		t.Fatalf("/new /fast kept old session %s active", oldID)
+	}
+	calls, _ := session.snapshot()
+	if got := calls[0].prompt; got != "inspect from scratch" {
+		t.Fatalf("fresh fast prompt = %q, want directive and /new stripped", got)
+	}
+	if got := calls[0].options; got.AnswerProfile != AnswerProfileFast || got.Model != "fast-model" || got.ReasoningEffort != "low" || got.ServiceTier != "fast" {
+		t.Fatalf("fresh fast turn options = %+v", got)
+	}
+}
+
 func TestEngineBusyProfileQueuesInsteadOfSteering(t *testing.T) {
 	session := newAnswerProfileTestSession()
 	session.releaseFirst = make(chan struct{})

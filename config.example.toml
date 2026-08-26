@@ -708,8 +708,10 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 # word), it is automatically replaced with the target command.
 # 当用户发送的消息首词匹配别名触发词时，自动替换为目标命令。
 #
-# Example: typing "帮助" triggers "/help", typing "新建 测试" triggers "/new 测试".
-# 示例：输入"帮助"触发 "/help"，输入"新建 测试"触发 "/new 测试"。
+# Example: typing "帮助" triggers "/help"; "新建 检查日志" starts a fresh
+# session and handles "检查日志" as its first prompt via "/new 检查日志".
+# 示例：输入"帮助"触发 "/help"；输入"新建 检查日志"会通过 "/new 检查日志"
+# 新建会话，并立即把"检查日志"作为首个问题处理。
 
 # [[aliases]]
 # name = "帮助"

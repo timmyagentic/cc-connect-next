@@ -181,15 +181,14 @@ func runE2E_FullSessionCommands(t *testing.T, project string) {
 	}
 	t.Logf("[3] /current OK")
 
-	// ────── 4. /new with custom name ──────
-	t.Log("[4] /new my-named-session")
-	h.sendAndWait("/new my-named-session", 10*time.Second)
-	t.Log("[4] /new done")
+	// ────── 4. /new with the first prompt in the same message ──────
+	t.Log("[4] /new + first prompt")
+	reply4 := h.sendAndWait("/new respond with exactly: E2E_PONG", 90*time.Second)
+	t.Logf("[4] reply: %.120s", reply4)
 
-	// ────── 5. Chat in new session → agent replies ──────
-	t.Log("[5] message in new session")
-	reply5 := h.sendAndWait("respond with exactly: E2E_PONG", 90*time.Second)
-	t.Logf("[5] reply: %.120s", reply5)
+	// ────── 5. Name the now-started session explicitly ──────
+	t.Log("[5] /name my-named-session")
+	h.sendAndWait("/name my-named-session", 10*time.Second)
 
 	// ────── 6. /list → 2 sessions, name visible ──────
 	t.Log("[6] /list (should show 2 sessions)")
@@ -235,15 +234,14 @@ func runE2E_FullSessionCommands(t *testing.T, project string) {
 	}
 	t.Logf("[11] /list → %d sessions", c4)
 
-	// ────── 12. /new → third session ──────
-	t.Log("[12] /new third-session")
-	h.sendAndWait("/new third-session", 10*time.Second)
-	t.Log("[12] /new done")
+	// ────── 12. /new + first prompt → third session ──────
+	t.Log("[12] /new + third-session prompt")
+	h.sendAndWait("/new respond with exactly: THIRD_OK", 90*time.Second)
+	t.Log("[12] reply received")
 
-	// ────── 13. Chat in third session ──────
-	t.Log("[13] message in third session")
-	h.sendAndWait("respond with exactly: THIRD_OK", 90*time.Second)
-	t.Log("[13] reply received")
+	// ────── 13. Name the third session ──────
+	t.Log("[13] /name third-session")
+	h.sendAndWait("/name third-session", 10*time.Second)
 
 	// ────── 14. /delete third session ──────
 	t.Log("[14] /delete 3")
@@ -404,11 +402,9 @@ func runE2E_SessionPersistence(t *testing.T, project string) {
 	t.Log("[phase1] sending first message")
 	h1.sendAndWait("respond with exactly: PERSIST_S1", 90*time.Second)
 
-	t.Log("[phase1] /new persist-session-2")
-	h1.sendAndWait("/new persist-session-2", 10*time.Second)
-
-	t.Log("[phase1] message in session 2")
-	h1.sendAndWait("respond with exactly: PERSIST_S2", 90*time.Second)
+	t.Log("[phase1] /new + message in session 2")
+	h1.sendAndWait("/new respond with exactly: PERSIST_S2", 90*time.Second)
+	h1.sendAndWait("/name persist-session-2", 10*time.Second)
 
 	t.Log("[phase1] /list")
 	list1 := h1.sendAndWait("/list", 10*time.Second)

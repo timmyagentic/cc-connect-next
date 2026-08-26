@@ -6,7 +6,7 @@ package p1
 //
 // These tests reproduce bugs from v1.3.1:
 //   - /list lost sessions after /new
-//   - /new xxx names didn't persist
+//   - /new required a second message before it could start work
 //   - /switch caused sessions to disappear
 //
 // Per checklist: ALL P1-30..40 tests must run on BOTH claudecode AND codex.
@@ -79,31 +79,33 @@ func testNewThenListComplete(t *testing.T, agentType string) {
 	t.Logf("P1-31 OK: %d sessions after /new + message", count)
 }
 
-// ── P1-32: /new xxx 命名生效 ─────────────────────────────────────────────────
+// ── P1-32: /new xxx 同条消息开始处理 ─────────────────────────────────────────
 
-func TestP1_32_NewWithNaming_ClaudeCode(t *testing.T) {
+func TestP1_32_NewWithPrompt_ClaudeCode(t *testing.T) {
 	t.Parallel()
-	testNewWithNaming(t, "claudecode")
+	testNewWithPrompt(t, "claudecode")
 }
 
-func TestP1_32_NewWithNaming_Codex(t *testing.T) {
+func TestP1_32_NewWithPrompt_Codex(t *testing.T) {
 	t.Parallel()
-	testNewWithNaming(t, "codex")
+	testNewWithPrompt(t, "codex")
 }
 
-func testNewWithNaming(t *testing.T, agentType string) {
+func testNewWithPrompt(t *testing.T, agentType string) {
 	t.Helper()
 	env := helper.NewEnv(t, agentType)
 
-	const sessionName = "regression-name-test"
-	env.SendWithTimeout("/new "+sessionName, cmdTimeout)
-	env.SendComplete("say ok briefly")
-
-	listReply := env.SendWithTimeout("/list", cmdTimeout)
-	if !strings.Contains(listReply.Text(), sessionName) {
-		t.Errorf("P1-32: /new %q name missing in /list\n/list: %q", sessionName, listReply.Text())
+	const marker = "NEW_WITH_PROMPT_OK"
+	replies := env.SendComplete("/new respond with exactly: " + marker)
+	var combined strings.Builder
+	for _, reply := range replies {
+		combined.WriteString(reply.Text())
+		combined.WriteByte('\n')
 	}
-	t.Logf("P1-32 OK: session name %q appears in /list", sessionName)
+	if !strings.Contains(combined.String(), marker) {
+		t.Errorf("P1-32: /new prompt was not handled in the same message\nreplies: %q", combined.String())
+	}
+	t.Logf("P1-32 OK: /new handled the first prompt in one send")
 }
 
 // ── P1-33: /name 重命名 ──────────────────────────────────────────────────────
@@ -250,8 +252,8 @@ func testRestartPreservesNames(t *testing.T, agentType string) {
 	env := helper.NewEnv(t, agentType)
 
 	const sessionName = "persisted-name-99"
-	env.SendWithTimeout("/new "+sessionName, cmdTimeout)
-	env.SendComplete("say ok briefly")
+	env.SendComplete("/new say ok briefly")
+	env.SendWithTimeout("/name "+sessionName, cmdTimeout)
 
 	pre := env.SendWithTimeout("/list", cmdTimeout)
 	if !strings.Contains(pre.Text(), sessionName) {

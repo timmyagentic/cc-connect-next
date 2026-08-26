@@ -4839,6 +4839,33 @@ func TestEngine_Alias(t *testing.T) {
 	}
 }
 
+func TestSplitCommandArgsPreservesUnicode(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{name: "CJK argument", raw: "/name 你好", want: []string{"/name", "你好"}},
+		{name: "Unicode whitespace", raw: "/name\u3000中文标题", want: []string{"/name", "中文标题"}},
+		{name: "newline separator", raw: "/new\n检查日志", want: []string{"/new", "检查日志"}},
+		{name: "quoted CJK group", raw: `/name "中文 标题"`, want: []string{"/name", "中文 标题"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitCommandArgs(tt.raw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("splitCommandArgs(%q) = %#v, want %#v", tt.raw, got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("splitCommandArgs(%q) = %#v, want %#v", tt.raw, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func TestEngine_ClearAliases(t *testing.T) {
 	e := newTestEngine()
 	e.AddAlias("帮助", "/help")
@@ -8257,6 +8284,92 @@ func TestHandleMessage_ExtraContentOnlyIsProcessed(t *testing.T) {
 
 	if msg.Content != "> quoted reply context" {
 		t.Fatalf("Content = %q, want ExtraContent to become message content", msg.Content)
+	}
+}
+
+func TestHandleMessage_NewWithPromptProcessesRemainderInFreshSession(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	agentSession := newResultAgentSession("fresh answer")
+	e := NewEngine("test", &resultAgent{session: agentSession}, []Platform{p}, "", LangEnglish)
+	key := "test:user1"
+
+	old := e.sessions.GetOrCreateActive(key)
+	old.SetAgentSessionID("old-agent-session", "stub")
+	old.AddHistory("user", "old context must not leak")
+	oldID := old.ID
+
+	msg := &Message{
+		SessionKey:   key,
+		Platform:     "test",
+		MessageID:    "msg-new-with-prompt",
+		UserID:       "user1",
+		UserName:     "User One",
+		Content:      "/new\ninvestigate \"quoted value\"\nsecond line",
+		ExtraContent: "> quoted reply context",
+		Images: []ImageAttachment{{
+			MimeType: "image/png",
+			Data:     []byte("fake image"),
+			FileName: "evidence.png",
+		}},
+		ReplyCtx: "reply-new-with-prompt",
+	}
+
+	e.ReceiveMessage(p, msg)
+
+	sent := waitForPlatformSend(p, 1, 2*time.Second)
+	if len(sent) == 0 || sent[len(sent)-1] != "fresh answer" {
+		t.Fatalf("sent = %v, want the agent's fresh answer", sent)
+	}
+	for _, line := range sent {
+		if strings.Contains(line, "New session created") {
+			t.Fatalf("prompted /new sent a redundant creation acknowledgement: %v", sent)
+		}
+	}
+
+	active := e.sessions.GetOrCreateActive(key)
+	if active.ID == oldID {
+		t.Fatalf("prompted /new kept old session %s active", oldID)
+	}
+	history := active.GetHistory(0)
+	if len(history) != 2 {
+		t.Fatalf("fresh session history = %#v, want one user turn and one answer", history)
+	}
+	wantContent := "> quoted reply context\ninvestigate \"quoted value\"\nsecond line"
+	if history[0].Role != "user" || history[0].Content != wantContent {
+		t.Fatalf("fresh user history = %#v, want %q", history[0], wantContent)
+	}
+	if got := agentSession.sentPrompts; len(got) != 1 || !strings.Contains(got[0], wantContent) {
+		t.Fatalf("agent prompts = %#v, want exact command remainder and quoted context", got)
+	}
+}
+
+func TestHandleMessage_NewWithPromptRedispatchesResolvedAlias(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	agentSession := newResultAgentSession("agent should not receive alias command")
+	e := NewEngine("test", &resultAgent{session: agentSession}, []Platform{p}, "", LangEnglish)
+	e.AddAlias("帮助", "/help")
+	key := "test:user1"
+	oldID := e.sessions.GetOrCreateActive(key).ID
+
+	e.ReceiveMessage(p, &Message{
+		SessionKey: key,
+		Platform:   "test",
+		MessageID:  "msg-new-alias",
+		UserID:     "user1",
+		UserName:   "User One",
+		Content:    "/new 帮助",
+		ReplyCtx:   "reply-new-alias",
+	})
+
+	sent := waitForPlatformSend(p, 1, 2*time.Second)
+	if !strings.Contains(strings.Join(sent, "\n"), "Available Commands") {
+		t.Fatalf("/new alias replies = %v, want /help output", sent)
+	}
+	if activeID := e.sessions.GetOrCreateActive(key).ID; activeID == oldID {
+		t.Fatalf("/new alias kept old session %s active", oldID)
+	}
+	if got := agentSession.sentPrompts; len(got) != 0 {
+		t.Fatalf("resolved alias command reached the agent: %#v", got)
 	}
 }
 
@@ -17130,12 +17243,12 @@ func TestCmdList_ProviderSwitchThenNewDoesNotHideSessions(t *testing.T) {
 //   - 1 active session (s15) with a valid AgentSessionID
 //   - 37 codex sessions on disk
 //
-// Steps (matching user's exact reproduction):
+// Steps (matching the legacy-data reproduction with current commands):
 //  1. /list → must show all 37 sessions (legacy data, no filtering)
-//  2. /new "我的新会话" → create named session
+//  2. /new → create a blank session
 //  3. send message (agent hasn't replied yet) → /list → must STILL show all sessions
 //  4. agent replies with SessionID → /list → must show all sessions + new one
-//  5. session name "我的新会话" must appear in the list
+//  5. /name "我的新会话" → the explicit name must appear in the list
 func TestCmdList_RealWorldLegacyDataFullFlow(t *testing.T) {
 	dir := t.TempDir()
 	sessPath := filepath.Join(dir, "sessions.json")
@@ -17199,8 +17312,8 @@ func TestCmdList_RealWorldLegacyDataFullFlow(t *testing.T) {
 		t.Fatalf("step1: /list should show first page (20 sessions), got %d", step1Count)
 	}
 
-	// ── Step 2: /new "我的新会话" ──────────────────────────────
-	e.cmdNew(p, msg, []string{"我的新会话"})
+	// ── Step 2: blank /new ─────────────────────────────────────
+	e.cmdNew(p, msg, "")
 
 	// ── Step 3: send message, agent not yet replied → /list ────
 	// (agent process started but hasn't returned SessionID yet)
@@ -17219,11 +17332,6 @@ func TestCmdList_RealWorldLegacyDataFullFlow(t *testing.T) {
 	newSession := e.sessions.GetOrCreateActive(userKey)
 	newThreadID := "codex-thread-new-038"
 	newSession.CompareAndSetAgentSessionID(newThreadID, "codex")
-	// Engine maps the pending name to the new agent session ID
-	pendingName := newSession.GetName()
-	if pendingName != "" && pendingName != "session" && pendingName != "default" {
-		e.sessions.SetSessionName(newThreadID, pendingName)
-	}
 	e.sessions.Save()
 
 	// Agent now reports this new session in ListSessions
@@ -17233,6 +17341,7 @@ func TestCmdList_RealWorldLegacyDataFullFlow(t *testing.T) {
 		MessageCount: 2,
 		ModifiedAt:   time.Now(),
 	})
+	e.cmdName(p, msg, []string{"我的新会话"})
 
 	p.sent = nil
 	e.cmdList(p, msg, nil)
@@ -17252,7 +17361,7 @@ func TestCmdList_RealWorldLegacyDataFullFlow(t *testing.T) {
 	if len(p.sent) != 1 {
 		t.Fatalf("step5: expected 1 reply for page 2, got %d", len(p.sent))
 	}
-	// The new session should show "我的新会话" (the name from /new), not the message content
+	// The new session should show the explicit /name value, not the message content.
 	if !strings.Contains(p.sent[0], "我的新会话") {
 		t.Errorf("step5: /list page 2 should display session name '我的新会话' but it's missing:\n%s", p.sent[0])
 	}
@@ -17540,9 +17649,8 @@ func (s *codexLikeSession) Alive() bool  { return s.alive }
 func (s *codexLikeSession) Close() error { s.alive = false; return nil }
 
 // TestSessionName_CodexLikeFlow does an end-to-end test simulating real codex
-// behavior: CurrentSessionID()="" initially, thread ID only available after Send().
-// This is the exact bug: /new xxx → send message → agent replies with SessionID
-// in EventResult → name "xxx" must appear in /list.
+// behavior: CurrentSessionID()="" initially, thread ID only available after
+// Send(). After `/new <prompt>` finishes, `/name` must name that new session.
 func TestSessionName_CodexLikeFlow(t *testing.T) {
 	sess := newCodexLikeSession("codex-thread-new-001")
 	listSessions := []AgentSessionInfo{
@@ -17563,20 +17671,20 @@ func TestSessionName_CodexLikeFlow(t *testing.T) {
 	initial.SetAgentSessionID("codex-thread-old", "codex")
 	e.sessions.Save()
 
-	// Step 1: /new "我的新会话"
-	e.cmdNew(p, &Message{SessionKey: userKey, ReplyCtx: "ctx"}, []string{"我的新会话"})
-
-	// Step 2: send a message (this triggers startOrResumeSession + processInteractiveEvents)
+	// Step 1: reset and send the first prompt in one message.
 	e.ReceiveMessage(p, &Message{
 		SessionKey: userKey,
-		Content:    "请帮我做个功能",
+		Content:    "/new 请帮我做个功能",
 		ReplyCtx:   "ctx2",
 	})
 
 	// Wait for the event loop to complete
 	time.Sleep(200 * time.Millisecond)
 
-	// Step 3: verify session name was mapped
+	// Step 2: name the now-started session explicitly.
+	e.cmdName(p, &Message{SessionKey: userKey, ReplyCtx: "ctx"}, []string{"我的新会话"})
+
+	// Step 3: verify session name was mapped.
 	newSession := e.sessions.GetOrCreateActive(userKey)
 	agentID := newSession.GetAgentSessionID()
 	if agentID != "codex-thread-new-001" {
@@ -17659,16 +17767,14 @@ func TestSessionName_ClaudeCodeLikeFlow(t *testing.T) {
 	initial.SetAgentSessionID("claude-session-old", "claudecode")
 	e.sessions.Save()
 
-	// /new with a custom name
-	e.cmdNew(p, &Message{SessionKey: userKey, ReplyCtx: "ctx"}, []string{"Claude任务"})
-
-	// Send message
+	// Reset and send the first prompt in one message.
 	e.ReceiveMessage(p, &Message{
 		SessionKey: userKey,
-		Content:    "帮我重构代码",
+		Content:    "/new 帮我重构代码",
 		ReplyCtx:   "ctx2",
 	})
 	time.Sleep(200 * time.Millisecond)
+	e.cmdName(p, &Message{SessionKey: userKey, ReplyCtx: "ctx"}, []string{"Claude任务"})
 
 	// Verify session name mapped via EventText path
 	gotName := e.sessions.GetSessionName("claude-session-001")
@@ -17715,16 +17821,15 @@ func TestSessionName_ACPLikeFlow(t *testing.T) {
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 	userKey := "test:user1"
 
-	// /new with a custom name
-	e.cmdNew(p, &Message{SessionKey: userKey, ReplyCtx: "ctx"}, []string{"ACP任务"})
-
-	// Send message — startOrResumeSession should map the name immediately
+	// Reset and send the first prompt in one message. ACP exposes its ID
+	// immediately, so /name can target it as soon as the turn completes.
 	e.ReceiveMessage(p, &Message{
 		SessionKey: userKey,
-		Content:    "帮我部署",
+		Content:    "/new 帮我部署",
 		ReplyCtx:   "ctx2",
 	})
 	time.Sleep(200 * time.Millisecond)
+	e.cmdName(p, &Message{SessionKey: userKey, ReplyCtx: "ctx"}, []string{"ACP任务"})
 
 	gotName := e.sessions.GetSessionName("acp-session-001")
 	if gotName != "ACP任务" {

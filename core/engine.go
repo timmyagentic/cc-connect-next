@@ -2910,6 +2910,61 @@ func (e *Engine) startMessageRecallMonitor(sessionKey string) context.CancelFunc
 	return cancel
 }
 
+// normalizeIncomingContent prepares the user-authored portion of a message for
+// routing while preserving platform-enriched context on msg.Content. It is
+// intentionally reusable: `/new <prompt>` first resets the session, then runs
+// the command remainder through the same profile, alias, and quote handling as
+// an ordinary message without re-counting the inbound message or re-emitting
+// receive hooks.
+func (e *Engine) normalizeIncomingContent(p Platform, msg *Message) (string, bool) {
+	content := strings.TrimSpace(msg.Content)
+	if content == "" && msg.ExtraContent == "" && len(msg.Images) == 0 && len(msg.Files) == 0 && msg.Location == nil {
+		return "", false
+	}
+	if profile, prompt, matched := parseAnswerProfilePrefix(content); matched {
+		if prompt == "" {
+			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgProfileUsage, msg.Content))
+			return "", false
+		}
+		if _, configured := e.answerProfile(profile); !configured {
+			e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.TForText(MsgProfileNotConfigured, msg.Content), profile))
+			return "", false
+		}
+		msg.AnswerProfile = profile
+		content = prompt
+	}
+
+	// Resolve aliases on user text BEFORE merging ExtraContent, so reply
+	// quotes and platform context survive alias resolution (PR #420 fix).
+	content = e.resolveAlias(content)
+	if msg.ExtraContent != "" {
+		if content == "" {
+			msg.Content = msg.ExtraContent
+		} else {
+			msg.Content = msg.ExtraContent + "\n" + content
+		}
+	} else {
+		msg.Content = content
+	}
+	return content, true
+}
+
+func (e *Engine) rejectBannedContent(p Platform, msg *Message, content string) bool {
+	// Commands and the shell shortcut keep their existing command-specific
+	// authorization paths. A `/new` continuation is checked again after the
+	// command prefix has been removed.
+	if strings.HasPrefix(content, "/") || strings.HasPrefix(content, "!") {
+		return false
+	}
+	word := e.matchBannedWord(content)
+	if word == "" {
+		return false
+	}
+	slog.Info("message blocked by banned word", "word", word, "user", msg.UserName)
+	e.reply(p, msg.ReplyCtx, e.i18n.T(MsgBannedWordBlocked))
+	return true
+}
+
 func (e *Engine) handleMessage(p Platform, msg *Message) {
 	if msg.Recalled {
 		e.handleMessageRecall(p, msg)
@@ -2972,34 +3027,9 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		// Continue processing with the platform-provided text content
 	}
 
-	content := strings.TrimSpace(msg.Content)
-	if content == "" && msg.ExtraContent == "" && len(msg.Images) == 0 && len(msg.Files) == 0 && msg.Location == nil {
+	content, ok := e.normalizeIncomingContent(p, msg)
+	if !ok {
 		return
-	}
-	if profile, prompt, matched := parseAnswerProfilePrefix(content); matched {
-		if prompt == "" {
-			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgProfileUsage, msg.Content))
-			return
-		}
-		if _, configured := e.answerProfile(profile); !configured {
-			e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.TForText(MsgProfileNotConfigured, msg.Content), profile))
-			return
-		}
-		msg.AnswerProfile = profile
-		content = prompt
-	}
-
-	// Resolve aliases on user text BEFORE merging ExtraContent, so reply
-	// quotes and platform context survive alias resolution (PR #420 fix).
-	content = e.resolveAlias(content)
-	if msg.ExtraContent != "" {
-		if content == "" {
-			msg.Content = msg.ExtraContent
-		} else {
-			msg.Content = msg.ExtraContent + "\n" + content
-		}
-	} else {
-		msg.Content = content
 	}
 
 	// Rate limit check (per-user role-based, then global fallback)
@@ -3010,13 +3040,8 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		return
 	}
 
-	// Banned words check (skip for slash commands and ! shell shortcut)
-	if !strings.HasPrefix(content, "/") && !strings.HasPrefix(content, "!") {
-		if word := e.matchBannedWord(content); word != "" {
-			slog.Info("message blocked by banned word", "word", word, "user", msg.UserName)
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgBannedWordBlocked))
-			return
-		}
+	if e.rejectBannedContent(p, msg, content) {
+		return
 	}
 
 	// Multi-workspace resolution
@@ -3089,11 +3114,24 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		interactiveKey = resolvedWorkspace + ":" + msg.SessionKey
 	}
 
-	if len(msg.Images) == 0 && strings.HasPrefix(content, "/") {
+	// A `/new <prompt>` continuation may resolve an alias into another slash
+	// command (for example, 帮助 -> /help). Give that normalized result the
+	// same command semantics as an ordinary message, but cap dispatch at two
+	// passes so nested `/new` input can never recurse indefinitely.
+	for commandPass := 0; commandPass < 2 && strings.HasPrefix(content, "/") && (len(msg.Images) == 0 || isNewCommand(content)); commandPass++ {
+		beforeCommandContent := msg.Content
 		if e.handleCommand(p, msg, content) {
 			return
 		}
-		// Unrecognized slash command — fall through to agent as normal message
+		// Unknown slash commands leave msg.Content unchanged and retain their
+		// existing fall-through-to-agent behavior.
+		if msg.Content == beforeCommandContent {
+			break
+		}
+		content, ok = e.normalizeIncomingContent(p, msg)
+		if !ok || e.rejectBannedContent(p, msg, content) {
+			return
+		}
 	}
 
 	// Permission responses bypass the session lock.
@@ -8497,26 +8535,46 @@ func splitCommandArgs(s string) []string {
 	var cur strings.Builder
 	inSingle := false
 	inDouble := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
+	for _, c := range s {
 		switch {
 		case c == '\'' && !inDouble:
 			inSingle = !inSingle
 		case c == '"' && !inSingle:
 			inDouble = !inDouble
-		case (c == ' ' || c == '\t') && !inSingle && !inDouble:
+		case unicode.IsSpace(rune(c)) && !inSingle && !inDouble:
 			if cur.Len() > 0 {
 				tokens = append(tokens, cur.String())
 				cur.Reset()
 			}
 		default:
-			cur.WriteByte(c)
+			cur.WriteRune(c)
 		}
 	}
 	if cur.Len() > 0 {
 		tokens = append(tokens, cur.String())
 	}
 	return tokens
+}
+
+func isNewCommand(raw string) bool {
+	parts := splitCommandArgs(raw)
+	if len(parts) == 0 {
+		return false
+	}
+	cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
+	return matchPrefix(cmd, builtinCommands) == "new"
+}
+
+// commandRemainder returns everything after the command token without
+// tokenizing or stripping quotes. For `/new`, the remainder is user prose, not
+// command arguments, so preserving whitespace inside the prompt matters.
+func commandRemainder(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	idx := strings.IndexFunc(trimmed, unicode.IsSpace)
+	if idx < 0 {
+		return ""
+	}
+	return strings.TrimSpace(trimmed[idx:])
 }
 
 func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
@@ -8561,7 +8619,7 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 
 	switch cmdID {
 	case "new":
-		e.cmdNew(p, msg, args)
+		return e.cmdNew(p, msg, commandRemainder(raw))
 	case "list":
 		e.cmdList(p, msg, args)
 	case "switch":
@@ -8931,11 +8989,15 @@ func (e *Engine) handleWorkspaceCommand(p Platform, msg *Message, args []string)
 	}
 }
 
-func (e *Engine) cmdNew(p Platform, msg *Message, args []string) {
+// cmdNew resets the active session. It returns true when the command is fully
+// consumed. When prompt or another message payload is present, it places the
+// prompt back on msg and returns false so handleMessage processes that same
+// inbound message as the first turn of the fresh session.
+func (e *Engine) cmdNew(p Platform, msg *Message, prompt string) bool {
 	_, sessions, interactiveKey, err := e.commandContext(p, msg)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgWsResolutionError, err))
-		return
+		return true
 	}
 
 	slog.Info("cmdNew: cleaning up old session", "session_key", msg.SessionKey)
@@ -8948,16 +9010,17 @@ func (e *Engine) cmdNew(p Platform, msg *Message, args []string) {
 	old.ClearHistory()
 	sessions.Save()
 
-	name := ""
-	if len(args) > 0 {
-		name = strings.Join(args, " ")
+	sessions.NewSession(msg.SessionKey, "")
+	prompt = strings.TrimSpace(prompt)
+	hasFollowUpPayload := prompt != "" || msg.ExtraContent != "" || len(msg.Images) > 0 ||
+		len(msg.Files) > 0 || msg.Location != nil
+	if hasFollowUpPayload {
+		msg.Content = prompt
+		return false
 	}
-	sessions.NewSession(msg.SessionKey, name)
-	if name != "" {
-		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgNewSessionCreatedName), name))
-	} else {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgNewSessionCreated))
-	}
+
+	e.reply(p, msg.ReplyCtx, e.i18n.T(MsgNewSessionCreated))
+	return true
 }
 
 // applySessionFilter conditionally filters agent sessions based on the

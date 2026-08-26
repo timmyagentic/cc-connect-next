@@ -526,7 +526,6 @@ const (
 	MsgAliasUsage      MsgKey = "alias_usage"
 
 	MsgNewSessionCreated      MsgKey = "new_session_created"
-	MsgNewSessionCreatedName  MsgKey = "new_session_created_name"
 	MsgSessionAutoResetIdle   MsgKey = "session_auto_reset_idle"
 	MsgSessionClosingGraceful MsgKey = "session_closing_graceful"
 
@@ -1078,7 +1077,7 @@ var messages = map[MsgKey]map[Language]string{
 	},
 	MsgHelp: {
 		LangEnglish: "📖 Available Commands\n\n" +
-			"/new [name]\n  Start a new session\n\n" +
+			"/new [prompt]\n  Start a new session and optionally handle its first prompt\n\n" +
 			"/list\n  List agent sessions\n\n" +
 			"/search <keyword>\n  Search sessions by name or ID\n\n" +
 			"/switch <number>\n  Resume a session by its list number\n\n" +
@@ -1122,7 +1121,7 @@ var messages = map[MsgKey]map[Language]string{
 			"Agent skills: auto-discovered from .claude/skills/<name>/SKILL.md etc.\n\n" +
 			"Permission modes: default / edit / plan / yolo",
 		LangChinese: "📖 可用命令\n\n" +
-			"/new [名称]\n  创建新会话\n\n" +
+			"/new [问题]\n  创建新会话，并可立即处理首个问题\n\n" +
 			"/list\n  列出 Agent 会话列表\n\n" +
 			"/search <关键词>\n  搜索会话名称或 ID\n\n" +
 			"/switch <序号>\n  按列表序号切换会话\n\n" +
@@ -1166,7 +1165,7 @@ var messages = map[MsgKey]map[Language]string{
 			"Agent Skills：自动发现自 .claude/skills/<name>/SKILL.md 等目录。\n\n" +
 			"权限模式：default / edit / plan / yolo",
 		LangTraditionalChinese: "📖 可用命令\n\n" +
-			"/new [名稱]\n  建立新會話\n\n" +
+			"/new [問題]\n  建立新會話，並可立即處理第一個問題\n\n" +
 			"/list\n  列出 Agent 會話列表\n\n" +
 			"/search <關鍵詞>\n  搜尋會話名稱或 ID\n\n" +
 			"/switch <序號>\n  按列表序號切換會話\n\n" +
@@ -1209,7 +1208,7 @@ var messages = map[MsgKey]map[Language]string{
 			"Agent Skills：自動發現自 .claude/skills/<name>/SKILL.md 等目錄。\n\n" +
 			"權限模式：default / edit / plan / yolo",
 		LangJapanese: "📖 利用可能なコマンド\n\n" +
-			"/new [名前]\n  新しいセッションを開始\n\n" +
+			"/new [プロンプト]\n  新しいセッションを開始し、最初のプロンプトを任意で処理\n\n" +
 			"/list\n  エージェントセッション一覧\n\n" +
 			"/switch <番号>\n  リスト番号でセッションを切り替え\n\n" +
 			"/delete <番号>|1,2,3|3-7|1,3-5,8\n  リスト番号でセッションを単体/複数削除\n\n" +
@@ -1251,7 +1250,7 @@ var messages = map[MsgKey]map[Language]string{
 			"エージェントスキル: .claude/skills/<name>/SKILL.md などから自動検出。\n\n" +
 			"権限モード: default / edit / plan / yolo",
 		LangSpanish: "📖 Comandos disponibles\n\n" +
-			"/new [nombre]\n  Iniciar una nueva sesión\n\n" +
+			"/new [mensaje]\n  Iniciar una sesión y procesar opcionalmente su primer mensaje\n\n" +
 			"/list\n  Listar sesiones del agente\n\n" +
 			"/switch <número>\n  Reanudar sesión por su número en la lista\n\n" +
 			"/delete <número>|1,2,3|3-7|1,3-5,8\n  Eliminar una o varias sesiones por número de lista\n\n" +
@@ -1302,7 +1301,7 @@ var messages = map[MsgKey]map[Language]string{
 	},
 	MsgHelpSessionSection: {
 		LangEnglish: "**Session Management**\n" +
-			"/new [name] — Start a new session\n" +
+			"/new [prompt] — Start a session and optionally handle its first prompt\n" +
 			"/list — List agent sessions\n" +
 			"/search <keyword> — Search sessions\n" +
 			"/switch <number> — Resume a session\n" +
@@ -1311,7 +1310,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/current — Show active session\n" +
 			"/history [n] — Show last n messages",
 		LangChinese: "**会话管理**\n" +
-			"/new [名称] — 创建新会话\n" +
+			"/new [问题] — 创建会话并可立即处理首个问题\n" +
 			"/list — 列出会话列表\n" +
 			"/search <关键词> — 搜索会话\n" +
 			"/switch <序号> — 切换会话\n" +
@@ -1320,7 +1319,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/current — 查看当前会话\n" +
 			"/history [n] — 查看最近 n 条消息",
 		LangTraditionalChinese: "**會話管理**\n" +
-			"/new [名稱] — 建立新會話\n" +
+			"/new [問題] — 建立會話並可立即處理第一個問題\n" +
 			"/list — 列出會話列表\n" +
 			"/search <關鍵詞> — 搜尋會話\n" +
 			"/switch <序號> — 切換會話\n" +
@@ -1329,7 +1328,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/current — 查看當前會話\n" +
 			"/history [n] — 查看最近 n 條訊息",
 		LangJapanese: "**セッション管理**\n" +
-			"/new [名前] — 新しいセッションを開始\n" +
+			"/new [プロンプト] — セッションを開始し最初のプロンプトを任意で処理\n" +
 			"/list — セッション一覧\n" +
 			"/search <キーワード> — セッション検索\n" +
 			"/switch <番号> — セッション切り替え\n" +
@@ -1338,7 +1337,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/current — 現在のセッションを表示\n" +
 			"/history [n] — 直近 n 件のメッセージを表示",
 		LangSpanish: "**Gestión de sesiones**\n" +
-			"/new [nombre] — Iniciar nueva sesión\n" +
+			"/new [mensaje] — Iniciar sesión y procesar el primer mensaje opcional\n" +
 			"/list — Listar sesiones\n" +
 			"/search <keyword> — Buscar sesiones\n" +
 			"/switch <número> — Reanudar sesión\n" +
@@ -3355,13 +3354,6 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese:           "✅ 新しいセッションを作成しました",
 		LangSpanish:            "✅ Nueva sesión creada",
 	},
-	MsgNewSessionCreatedName: {
-		LangEnglish:            "✅ New session created: **%s**",
-		LangChinese:            "✅ 新会话已创建：**%s**",
-		LangTraditionalChinese: "✅ 新會話已建立：**%s**",
-		LangJapanese:           "✅ 新しいセッションを作成しました：**%s**",
-		LangSpanish:            "✅ Nueva sesión creada: **%s**",
-	},
 	MsgSessionAutoResetIdle: {
 		LangEnglish:            "⏰ Session auto-reset after %d minute(s) of inactivity.",
 		LangChinese:            "⏰ 因空闲超过 %d 分钟，已自动切换到新会话。",
@@ -3914,11 +3906,11 @@ var messages = map[MsgKey]map[Language]string{
 	},
 	// Builtin command descriptions
 	MsgBuiltinCmdNew: {
-		LangEnglish:            "Start a new session, arg: [name]",
-		LangChinese:            "创建新会话，参数: [名称]",
-		LangTraditionalChinese: "建立新會話，參數: [名稱]",
-		LangJapanese:           "新しいセッションを開始、引数: [名前]",
-		LangSpanish:            "Iniciar una nueva sesión, arg: [nombre]",
+		LangEnglish:            "Start a new session, optional first prompt: [prompt]",
+		LangChinese:            "创建新会话，可选首个问题: [问题]",
+		LangTraditionalChinese: "建立新會話，可選第一個問題: [問題]",
+		LangJapanese:           "新しいセッションを開始、任意の最初のプロンプト: [プロンプト]",
+		LangSpanish:            "Iniciar una sesión, primer mensaje opcional: [mensaje]",
 	},
 	MsgBuiltinCmdList: {
 		LangEnglish:            "List agent sessions",
