@@ -11,9 +11,10 @@ import (
 )
 
 type fakeLarkCLICall struct {
-	name  string
-	args  []string
-	stdin string
+	name        string
+	args        []string
+	stdin       string
+	hasDeadline bool
 }
 
 type fakeLarkCLIResult struct {
@@ -38,8 +39,9 @@ func (f *fakeLarkCLIProcess) LookPath(string) (string, error) {
 	return path, err
 }
 
-func (f *fakeLarkCLIProcess) Run(_ context.Context, name string, args []string, stdin string, _ ...string) (string, string, error) {
-	f.calls = append(f.calls, fakeLarkCLICall{name: name, args: slices.Clone(args), stdin: stdin})
+func (f *fakeLarkCLIProcess) Run(ctx context.Context, name string, args []string, stdin string, _ ...string) (string, string, error) {
+	_, hasDeadline := ctx.Deadline()
+	f.calls = append(f.calls, fakeLarkCLICall{name: name, args: slices.Clone(args), stdin: stdin, hasDeadline: hasDeadline})
 	if len(f.results) == 0 {
 		return "", "", errors.New("unexpected command")
 	}
@@ -131,6 +133,7 @@ func TestSetupLarkCLICompanionCreatesDefaultBotProfileWithoutSecretInArgs(t *tes
 			{},
 			{},
 			{stdout: `{"profile":"cc-connect-next-alpha","appId":"cli_alpha","identity":"bot","available":true,"tokenStatus":"ready"}`},
+			{},
 		},
 	}
 
@@ -143,15 +146,18 @@ func TestSetupLarkCLICompanionCreatesDefaultBotProfileWithoutSecretInArgs(t *tes
 	if result.ProfileName != "cc-connect-next-alpha" || result.PreviousProfile != "personal" || result.Reused {
 		t.Fatalf("result = %+v", result)
 	}
-	if len(process.calls) != 4 {
+	if len(process.calls) != 5 {
 		t.Fatalf("calls = %#v", process.calls)
 	}
 	for _, call := range process.calls {
+		if !call.hasDeadline {
+			t.Fatalf("lark-cli call had no deadline: %#v", call)
+		}
 		if strings.Contains(strings.Join(call.args, " "), secret) || strings.Contains(call.name, secret) {
 			t.Fatalf("secret leaked into argv: %#v", call)
 		}
 	}
-	if got := process.calls[1]; got.stdin != secret+"\n" || !slices.Contains(got.args, "--app-secret-stdin") || !slices.Contains(got.args, "--use") {
+	if got := process.calls[1]; got.stdin != secret+"\n" || !slices.Contains(got.args, "--app-secret-stdin") || slices.Contains(got.args, "--use") {
 		t.Fatalf("profile add call = %#v", got)
 	}
 	if got := process.calls[2]; !slices.Equal(got.args, []string{"--profile", "cc-connect-next-alpha", "config", "default-as", "bot"}) {
@@ -159,6 +165,9 @@ func TestSetupLarkCLICompanionCreatesDefaultBotProfileWithoutSecretInArgs(t *tes
 	}
 	if got := process.calls[3]; !slices.Equal(got.args, []string{"--profile", "cc-connect-next-alpha", "whoami", "--as", "bot"}) {
 		t.Fatalf("verification call = %#v", got)
+	}
+	if got := process.calls[4]; !slices.Equal(got.args, []string{"profile", "use", "cc-connect-next-alpha"}) {
+		t.Fatalf("profile use call = %#v", got)
 	}
 }
 
@@ -196,8 +205,8 @@ func TestSetupLarkCLICompanionMakesExistingSameAppProfileDefault(t *testing.T) {
 		results: []fakeLarkCLIResult{
 			{stdout: `[{"name":"personal","appId":"cli_personal","active":true,"effective":true},{"name":"next-bot","appId":"cli_alpha"}]`},
 			{},
-			{},
 			{stdout: `{"profile":"next-bot","appId":"cli_alpha","identity":"bot","available":true,"tokenStatus":"ready"}`},
+			{},
 		},
 	}
 
@@ -210,7 +219,7 @@ func TestSetupLarkCLICompanionMakesExistingSameAppProfileDefault(t *testing.T) {
 	if !result.Reused || result.ProfileName != "next-bot" || result.PreviousProfile != "personal" {
 		t.Fatalf("result = %+v", result)
 	}
-	if got := process.calls[1]; !slices.Equal(got.args, []string{"profile", "use", "next-bot"}) {
+	if got := process.calls[3]; !slices.Equal(got.args, []string{"profile", "use", "next-bot"}) {
 		t.Fatalf("profile use call = %#v", got)
 	}
 }
@@ -224,6 +233,7 @@ func TestSetupLarkCLICompanionDoesNotOverwriteSameNameForDifferentApp(t *testing
 			{},
 			{},
 			{stdout: `{"profile":"cc-connect-next-alpha-cli-alpha","appId":"cli_alpha","identity":"bot","available":true,"tokenStatus":"ready"}`},
+			{},
 		},
 	}
 
@@ -252,6 +262,7 @@ func TestSetupLarkCLICompanionInstallsOnlyWhenExplicitlyAllowed(t *testing.T) {
 			{},
 			{},
 			{stdout: `{"profile":"cc-connect-next-alpha","appId":"cli_alpha","identity":"bot","available":true,"tokenStatus":"ready"}`},
+			{},
 		},
 	}
 
@@ -282,6 +293,31 @@ func TestSetupLarkCLICompanionRedactsSecretFromCommandFailure(t *testing.T) {
 	}, larkCLISetupOptions{InstallIfMissing: true}, process)
 	if err == nil || strings.Contains(err.Error(), secret) {
 		t.Fatalf("error = %v, want redacted failure", err)
+	}
+}
+
+func TestSetupLarkCLICompanionDoesNotSwitchBeforeBotVerification(t *testing.T) {
+	process := &fakeLarkCLIProcess{
+		lookPaths: []string{"/usr/local/bin/lark-cli"},
+		lookErrs:  []error{nil},
+		results: []fakeLarkCLIResult{
+			{stdout: `[{"name":"personal","appId":"cli_personal","active":true,"effective":true}]`},
+			{},
+			{},
+			{stdout: `{"profile":"cc-connect-next-alpha","appId":"cli_alpha","identity":"bot","available":false,"tokenStatus":"missing"}`},
+		},
+	}
+
+	_, err := setupLarkCLICompanion(context.Background(), larkCLITarget{
+		ProjectName: "alpha", PlatformType: "feishu", AppID: "cli_alpha", AppSecret: "secret",
+	}, larkCLISetupOptions{InstallIfMissing: true}, process)
+	if err == nil {
+		t.Fatal("verification failure was accepted")
+	}
+	for _, call := range process.calls {
+		if slices.Contains(call.args, "--use") || slices.Equal(call.args, []string{"profile", "use", "cc-connect-next-alpha"}) {
+			t.Fatalf("profile switched before successful verification: %#v", call)
+		}
 	}
 }
 
@@ -399,6 +435,7 @@ app_secret = "secret-alpha"
 			{},
 			{},
 			{stdout: `{"profile":"cc-connect-next-alpha","appId":"cli_alpha","identity":"bot","available":true,"tokenStatus":"ready"}`},
+			{},
 		},
 	}
 	var stdout, stderr bytes.Buffer
@@ -408,6 +445,17 @@ app_secret = "secret-alpha"
 	}
 	if !strings.Contains(stdout.String(), "设为默认") || !strings.Contains(stdout.String(), "不要用这个 profile") {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunLarkCLISetupRejectsUnexpectedPositionalArgument(t *testing.T) {
+	process := &fakeLarkCLIProcess{}
+	var stdout, stderr bytes.Buffer
+	if code := runLarkCLICommand([]string{"setup", "unexpected"}, &stdout, &stderr, process); code != 2 {
+		t.Fatalf("code = %d, want 2", code)
+	}
+	if len(process.calls) != 0 || !strings.Contains(stderr.String(), "unexpected argument") {
+		t.Fatalf("calls=%#v stderr=%q", process.calls, stderr.String())
 	}
 }
 
