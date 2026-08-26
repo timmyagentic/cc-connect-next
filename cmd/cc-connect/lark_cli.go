@@ -13,16 +13,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	ccconfig "github.com/timmyagentic/cc-connect-next/config"
 )
 
-const (
-	larkCLIProfilePrefix = "cc-connect-next-"
-	larkCLISetupTimeout  = 10 * time.Minute
-)
+const larkCLIProfilePrefix = "cc-connect-next-"
 
 type larkCLITarget struct {
 	ProjectName   string
@@ -203,14 +199,6 @@ func setupLarkCLICompanion(ctx context.Context, target larkCLITarget, opts larkC
 	if strings.TrimSpace(target.AppID) == "" || strings.TrimSpace(target.AppSecret) == "" {
 		return larkCLISetupResult{}, errors.New("app_id/app_secret are required")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, larkCLISetupTimeout)
-		defer cancel()
-	}
 
 	binary, err := process.LookPath("lark-cli")
 	installed := false
@@ -240,7 +228,6 @@ func setupLarkCLICompanion(ctx context.Context, target larkCLITarget, opts larkC
 
 	profileName, reused := chooseLarkCLIProfileName(profiles, target, opts.ProfileName)
 	previousProfile := activeLarkCLIProfileName(profiles)
-	activateProfile := !larkCLIProfileIsActive(profiles, profileName)
 	if previousProfile == profileName {
 		previousProfile = ""
 	}
@@ -252,10 +239,16 @@ func setupLarkCLICompanion(ctx context.Context, target larkCLITarget, opts larkC
 			"--app-id", target.AppID,
 			"--app-secret-stdin",
 			"--brand", target.PlatformType,
+			"--use",
 		}
 		_, stderr, err = process.Run(ctx, binary, args, target.AppSecret+"\n", target.AppSecret)
 		if err != nil {
 			return larkCLISetupResult{}, larkCLICommandError("profile add", stderr, err, target.AppSecret)
+		}
+	} else if !larkCLIProfileIsActive(profiles, profileName) {
+		_, stderr, err = process.Run(ctx, binary, []string{"profile", "use", profileName}, "", target.AppSecret)
+		if err != nil {
+			return larkCLISetupResult{}, larkCLICommandError("profile use", stderr, err, target.AppSecret)
 		}
 	}
 
@@ -270,12 +263,6 @@ func setupLarkCLICompanion(ctx context.Context, target larkCLITarget, opts larkC
 	}
 	if err := verifyLarkCLIBotIdentity(stdout, profileName, target.AppID); err != nil {
 		return larkCLISetupResult{}, err
-	}
-	if activateProfile {
-		_, stderr, err = process.Run(ctx, binary, []string{"profile", "use", profileName}, "", target.AppSecret)
-		if err != nil {
-			return larkCLISetupResult{}, larkCLICommandError("profile use", stderr, err, target.AppSecret)
-		}
 	}
 
 	return larkCLISetupResult{
@@ -545,10 +532,6 @@ func runLarkCLICommand(args []string, stdout, stderr io.Writer, process larkCLIP
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
-		return 2
-	}
-	if fs.NArg() != 0 {
-		_, _ = fmt.Fprintf(stderr, "lark-cli setup: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 
