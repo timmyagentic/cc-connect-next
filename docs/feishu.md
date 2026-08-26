@@ -51,7 +51,9 @@ cc-connect-next feishu bind --project my-project --app cli_xxx:sec_xxx
 确认后，cc-connect-next 会在缺失时运行官方安装器，为这个 App 创建或复用独立
 profile，并将它设为默认 profile、默认身份设为 `bot`。已有 profile 和用户 OAuth
 不会删除；同 App profile 直接复用，同名但属于其他 App 的 profile 不会被覆盖。
-App Secret 只通过 `--app-secret-stdin` 传递，不进入 argv、日志或新文件。
+companion 只通过 `--app-secret-stdin` 传递 App Secret，不放进 lark-cli 子进程
+argv、继承的环境值、cc-connect-next 输出或临时传递文件；后续由 lark-cli
+持久化到自己的 profile。
 
 也可以稍后独立执行：
 

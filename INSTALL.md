@@ -201,8 +201,10 @@ same-name profile for another App is preserved and a collision-free name is
 created. The previous default profile and every existing user OAuth login remain
 available; `lark-cli profile use -` switches back.
 
-The App Secret is never placed in argv, environment variables, output, or a new
-file: cc-connect-next passes it to `lark-cli profile add --app-secret-stdin`.
+The companion passes the App Secret to
+`lark-cli profile add --app-secret-stdin`, never through a child argv, inherited
+environment value, cc-connect-next output, or temporary handoff file. lark-cli
+then persists it in the profile it owns.
 The companion does not run `auth login`, grant scopes, or send a test message.
 Bot operations use the permissions already published for that Feishu App; user
 calendar, Drive, mail, and other personal resources still require a separate,
