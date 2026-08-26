@@ -19,6 +19,8 @@ type answerProfileTestSession struct {
 	events        chan Event
 	releaseFirst  chan struct{}
 	releaseSecond chan struct{}
+	steerStarted  chan struct{}
+	releaseSteer  chan struct{}
 	steerCalls    int
 	closed        bool
 }
@@ -54,7 +56,18 @@ func (s *answerProfileTestSession) SendWithTurnOptions(prompt string, _ []ImageA
 func (s *answerProfileTestSession) Steer(_ string, _ []ImageAttachment, _ []FileAttachment) error {
 	s.mu.Lock()
 	s.steerCalls++
+	steerStarted := s.steerStarted
+	releaseSteer := s.releaseSteer
 	s.mu.Unlock()
+	if steerStarted != nil {
+		select {
+		case steerStarted <- struct{}{}:
+		default:
+		}
+	}
+	if releaseSteer != nil {
+		<-releaseSteer
+	}
 	return nil
 }
 
@@ -277,6 +290,80 @@ func TestEngineQueuedProfileKeepsOrdinaryFollowUpInFIFO(t *testing.T) {
 	}
 	if got := calls[2].options; got.AnswerProfile != "" || got.Model != "balanced-model" || got.ReasoningEffort != "medium" || got.ServiceTier != "default" {
 		t.Fatalf("ordinary follow-up options = %+v, want project defaults", got)
+	}
+}
+
+func TestEngineProfileTransitionWaitsForInFlightSteer(t *testing.T) {
+	session := newAnswerProfileTestSession()
+	session.releaseFirst = make(chan struct{})
+	session.steerStarted = make(chan struct{}, 1)
+	session.releaseSteer = make(chan struct{})
+	releasedFirst := false
+	releasedSteer := false
+
+	agent := &answerProfileTestAgent{session: session}
+	platform := &stubPlatformEngine{n: "test"}
+	engine := NewEngine("test", agent, []Platform{platform}, "", LangEnglish)
+	engine.SetBusyMessageMode(BusyMessageModeSteer)
+	engine.SetAnswerProfiles(AnswerProfiles{
+		Fast: &AnswerProfileOptions{Model: "fast-model", ReasoningEffort: "low", ServiceTier: "fast"},
+	})
+	t.Cleanup(func() { _ = engine.Stop() })
+	t.Cleanup(func() {
+		if !releasedSteer {
+			close(session.releaseSteer)
+		}
+		if !releasedFirst {
+			close(session.releaseFirst)
+		}
+	})
+
+	engine.ReceiveMessage(platform, answerProfileMessage("m1", "ordinary task"))
+	waitAnswerProfileTest(t, "ordinary turn starts", func() bool {
+		calls, _ := session.snapshot()
+		return len(calls) == 1
+	})
+	engine.ReceiveMessage(platform, answerProfileMessage("m2", "/fast queued profile"))
+	waitAnswerProfileTest(t, "profiled message queues", func() bool {
+		return len(platform.getSent()) > 0
+	})
+
+	steerDone := make(chan struct{})
+	go func() {
+		engine.ReceiveMessage(platform, answerProfileMessage("m3", "ordinary steer before transition"))
+		close(steerDone)
+	}()
+	select {
+	case <-session.steerStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for steer to enter the backend")
+	}
+
+	close(session.releaseFirst)
+	releasedFirst = true
+	transitionedDuringSteer := false
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if calls, _ := session.snapshot(); len(calls) > 1 {
+			transitionedDuringSteer = true
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	close(session.releaseSteer)
+	releasedSteer = true
+	select {
+	case <-steerDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for steer routing to finish")
+	}
+	waitAnswerProfileTest(t, "queued profiled turn starts after steer resolves", func() bool {
+		calls, _ := session.snapshot()
+		return len(calls) == 2 && calls[1].options.AnswerProfile == AnswerProfileFast && !engine.sessions.GetOrCreateActive("test:user").Busy()
+	})
+	if transitionedDuringSteer {
+		t.Fatal("queued profiled turn started while steer was still resolving")
 	}
 }
 

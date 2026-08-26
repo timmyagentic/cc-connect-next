@@ -616,6 +616,11 @@ type interactiveState struct {
 	lastAutoCompressAt       time.Time
 	lastAutoCompressTokens   int
 
+	// steerMu makes a same-turn steer decision atomic with answer-profile
+	// handoff. Code that needs both locks must acquire steerMu before mu; unlike
+	// mu, steerMu may be held across the bounded backend steer RPC.
+	steerMu sync.Mutex
+
 	// Unsolicited event reader: a background goroutine that consumes agent
 	// events between user-initiated turns (e.g. background task completions).
 	// Cancel unsolicitedCancel to stop the reader; wait on unsolicitedDone
@@ -3289,6 +3294,8 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		return false
 	}
 
+	state.steerMu.Lock()
+	defer state.steerMu.Unlock()
 	state.mu.Lock()
 	as := state.agentSession
 	if as == nil || !as.Alive() {
@@ -4156,6 +4163,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	promptContent := e.buildCapabilityPrompt(state, e.buildSenderPrompt(msg.Content, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
 
 	sendStart := time.Now()
+	state.steerMu.Lock()
 	state.mu.Lock()
 	state.currentMessageID = msg.MessageID
 	state.fromVoice = msg.FromVoice
@@ -4163,6 +4171,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.activeAnswerProfile = msg.AnswerProfile
 	as := state.agentSession // capture under lock to avoid race with cleanup
 	state.mu.Unlock()
+	state.steerMu.Unlock()
 
 	// Run Send concurrently with processInteractiveEvents. Some agents block inside
 	// Send until the prompt turn finishes (e.g. ACP session/prompt); they may emit
@@ -6647,6 +6656,7 @@ func (queue *turnQueue) handle() {
 	}()
 	// Check for queued messages — if present, continue the event loop
 	// for the next turn instead of returning.
+	state.steerMu.Lock()
 	state.mu.Lock()
 	droppedStale := 0
 	for len(state.pendingMessages) > 0 && e.isQueuedUserMessageStaleForDrainLocked(state, state.pendingMessages[0].userMessageTimeMs) {
@@ -6662,6 +6672,7 @@ func (queue *turnQueue) handle() {
 	if state.stopped {
 		state.pendingMessages = nil
 		state.mu.Unlock()
+		state.steerMu.Unlock()
 		queue.control = turnReadStop
 		return
 	}
@@ -6678,6 +6689,7 @@ func (queue *turnQueue) handle() {
 		// Re-open the steer adoption window for the queued turn.
 		state.presentationOpen = true
 		state.mu.Unlock()
+		state.steerMu.Unlock()
 
 		// Stop the previous turn's typing indicator
 		if stopTyping != nil {
@@ -6824,6 +6836,7 @@ func (queue *turnQueue) handle() {
 		return
 	}
 	state.mu.Unlock()
+	state.steerMu.Unlock()
 
 	if pendingSend != nil {
 		if err := <-pendingSend; err != nil {
@@ -8189,16 +8202,19 @@ func (e *Engine) notifyDroppedQueuedMessages(state *interactiveState, reason err
 // Returns true if the session was unlocked by this call.
 func (e *Engine) drainPendingMessages(state *interactiveState, session *Session, sessions *SessionManager, sessionKey string) bool {
 	for {
+		state.steerMu.Lock()
 		state.mu.Lock()
 		if state.stopped {
 			state.pendingMessages = nil
 			session.Unlock()
 			state.mu.Unlock()
+			state.steerMu.Unlock()
 			return true
 		}
 		if len(state.pendingMessages) == 0 {
 			session.Unlock()
 			state.mu.Unlock()
+			state.steerMu.Unlock()
 			return true
 		}
 		droppedStale := 0
@@ -8215,6 +8231,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		if len(state.pendingMessages) == 0 {
 			session.Unlock()
 			state.mu.Unlock()
+			state.steerMu.Unlock()
 			return true
 		}
 		queued := state.pendingMessages[0]
@@ -8226,6 +8243,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		state.mu.Unlock()
+		state.steerMu.Unlock()
 
 		queuedRichCardCopy := e.i18n.RichCardCopyForText(queued.content)
 		e.i18n.DetectAndSet(queued.content)
