@@ -16,6 +16,14 @@ cc-connect-next daemon status
 
 `--switch` repeats the full preflight, stops and disables official CC Connect, final-syncs against the quiet source, then installs and starts cc-connect-next with the migrated config and the official runtime's original working directory. It does not treat a service-manager `Running` flag as success: the local API and every configured platform must report Ready before completion is announced or privately messaged. If final sync or activation/readiness fails, official is restored only after the Next service is unregistered, its runtime socket no longer answers, and the migrated config lock is free; otherwise official remains disabled to prevent duplicate consumers. Official binaries and data remain intact.
 
+After success, an interactive terminal offers the official `lark-cli`
+companion. It reuses the migrated bot in an isolated profile, makes that profile
+the default with bot as its default identity, and preserves every old profile
+and user OAuth login. Scripts opt in with `--lark-cli`; when different bots are
+configured, add `--lark-cli-project <name>` (and
+`--lark-cli-platform-index` for multiple Feishu/Lark platforms in one project).
+`--dry-run --lark-cli` reports the plan and never installs or changes a profile.
+
 Plain `cc-connect-next migrate` remains a copy-only advanced operation for backups or an intentionally configured parallel trial; it is not the default user journey.
 
 The one-command migration covers three sources before writing anything: exactly the official `config.toml`, the effective `data_dir` (including a custom path), and every project-local `.cc-connect` directory discoverable from configured work directories, multi-workspace roots, project state, or workspace bindings. When the config file lives outside the effective data directory, no sibling file or directory beside it is inventoried. The command therefore preserves configuration, sessions, project overrides, cron/timer and heartbeat state, bindings, local provider configuration, and staged images/attachments without accidentally copying a repository, `.env`, backup tree, or service home. External Agent stores such as Codex or Claude sessions stay in place and their existing IDs remain valid.
@@ -54,7 +62,7 @@ Official CC Connect and cc-connect-next can be installed side by side:
 | Linux service | `cc-connect.service` | `cc-connect-next.service` |
 | API socket | `~/.cc-connect/run/api.sock` | `~/.cc-connect-next/run/api.sock` |
 
-Do not run both against the same Feishu app credentials at the same time: two WebSocket consumers can race or duplicate handling. Default `--switch` stops and disables the official daemon before starting Next with the migrated credentials, so no test app is needed. Only an advanced parallel trial needs separate credentials.
+Do not run both against the same Feishu app credentials at the same time: two WebSocket consumers can race or duplicate handling. Default `--switch` stops and disables the official daemon before starting Next with the migrated credentials, so no test app is needed. Only an advanced parallel trial needs separate credentials. Ordinary `lark-cli` HTTP API commands may share the bot; do not run `lark-cli event consume` with that profile while Next is running, because it opens another event connection.
 
 This rule is enforced by the product, not just documented:
 
@@ -100,4 +108,8 @@ Paste this into a coding agent:
 	two same-credential services in parallel. Verify the command reports official stopped
 	and disabled, a readable final manifest/backups, and cc-connect-next installed and
 	Running with exact config/work-dir and whether the private completion message was sent or skipped. If `CC_SESSION_KEY` is present, hand the command to an external terminal instead of running the cutover in that Agent session.
+	In an interactive terminal, confirm the official lark-cli companion; for a script use
+	`--lark-cli` and select multiple bots with `--lark-cli-project`. Verify the profile defaults
+	to bot, old profiles remain, and the secret used stdin only. Do not run auth login, a real
+	test message, or event consume.
 ```

@@ -9,6 +9,20 @@
   send. Plain `/new` still creates an empty session, and explicit titles remain
   available through `/name`.
 
+### Official lark-cli companion
+
+- `feishu setup`, completed migrations, and the standalone
+  `cc-connect-next lark-cli setup` command can install the official `lark-cli`
+  when missing and reuse the selected Feishu/Lark bot as an isolated named
+  profile. The profile becomes the default with bot as its default identity;
+  existing profiles and user OAuth logins are preserved.
+- App secrets reach `lark-cli` only through stdin. Same-App profiles are reused,
+  same-name profiles for another App are never overwritten, multiple bots
+  require an explicit project, and migration dry-runs never change `lark-cli`.
+  The companion does not run user OAuth, send a test message, or open an event
+  consumer; operators are warned not to run `lark-cli event consume` with the
+  same App while cc-connect-next owns its event connection.
+
 ## v0.1.6 (2026-08-24)
 
 Stable release focused on Codex app-server isolation, safer migration and

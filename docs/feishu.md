@@ -42,7 +42,29 @@ cc-connect-next feishu bind --project my-project --app cli_xxx:sec_xxx
 - `--project` 不存在时会自动创建该项目；若项目存在但没有 `feishu/lark` 平台，也会自动补一个。
 - 写回配置时仅定点更新目标字段（`app_id`、`app_secret`、`allow_from` 等），尽量保留原有注释与排版。
 - 该流程会回填凭证；通过扫码新建时，飞书通常会同时预配权限与事件订阅。
+- 交互式 setup 会询问是否安装官方 `lark-cli` 并复用这个机器人；脚本使用
+  `--lark-cli` 显式启用，`--no-lark-cli` 显式跳过。
 - 仍建议在开放平台核验：应用已发布、权限状态正常、可用范围符合预期。
+
+### 可选：把同一个机器人设为 lark-cli 默认 profile
+
+确认后，cc-connect-next 会在缺失时运行官方安装器，为这个 App 创建或复用独立
+profile，并将它设为默认 profile、默认身份设为 `bot`。已有 profile 和用户 OAuth
+不会删除；同 App profile 直接复用，同名但属于其他 App 的 profile 不会被覆盖。
+companion 只通过 `--app-secret-stdin` 传递 App Secret，不放进 lark-cli 子进程
+argv、继承的环境值、cc-connect-next 输出或临时传递文件；后续由 lark-cli
+持久化到自己的 profile。
+
+也可以稍后独立执行：
+
+```bash
+cc-connect-next lark-cli setup --project my-project
+```
+
+如果有多个不同飞书机器人，必须用 `--project` 选一个；同一项目有多个 Feishu/Lark
+平台时再加 `--platform-index`。这个流程不会执行用户 `auth login`、扩张权限或发送
+测试消息。普通 `lark-cli` API 命令可以共用机器人，但 Next 运行时不要用该 profile
+执行 `lark-cli event consume`，否则第二条事件连接会与 Next 争抢事件。
 
 ---
 

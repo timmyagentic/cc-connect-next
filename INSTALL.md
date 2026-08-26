@@ -94,7 +94,10 @@ The generated file already carries the [recommended Feishu configuration](#the-r
 
 Startup refuses to run while any `REPLACE` value is still in place, and names both the key and the step that resolves it. That refusal is deliberate: with placeholder credentials the process would otherwise print `platform ready`, `engine started` and `cc-connect-next is running`, and only then fail to connect.
 
-For Feishu, `cc-connect-next feishu setup` fills the credentials for you and then offers the recommended configuration — see [section 4](#4-configure-feishu).
+For Feishu, `cc-connect-next feishu setup` fills the credentials for you, offers
+the recommended configuration, and then offers the official `lark-cli`
+companion — see [section 4](#4-configure-feishu). In unattended setup, add
+`--lark-cli` explicitly; otherwise no external CLI is installed or configured.
 
 ### Migrate official CC Connect
 
@@ -106,6 +109,19 @@ a read-only dry run, then authorize the switch explicitly:
 cc-connect-next migrate --dry-run
 cc-connect-next migrate --switch
 ```
+
+After a real migration, an interactive terminal also offers to install and bind
+the official `lark-cli` with the migrated bot. For unattended migration, make
+that write explicit:
+
+```bash
+cc-connect-next migrate --switch --lark-cli
+# When different bots exist:
+cc-connect-next migrate --switch --lark-cli --lark-cli-project my-project
+```
+
+`--dry-run --lark-cli` only reports what a real migration would do; it never
+installs `lark-cli` or changes a profile.
 
 `--switch` must run outside a connected CC Agent session and rejects an installed
 Next service before touching official. It stops and disables official CC Connect, performs the
@@ -170,7 +186,41 @@ Connect the bot and let setup offer the recommended configuration:
 cc-connect-next feishu setup --project my-project --app cli_xxx:sec_xxx
 ```
 
-After the credentials are saved, setup prints the recommended Feishu configuration and asks whether to apply it. Answer `--recommended` or `--no-recommended` on the command line to decide in advance; with neither flag and a non-interactive stdin, nothing is applied.
+After the credentials are saved, setup prints the recommended Feishu
+configuration and asks whether to apply it. It then offers the official
+`lark-cli` companion. Answer `--recommended` / `--no-recommended` and
+`--lark-cli` / `--no-lark-cli` on the command line to decide in advance; with
+neither pair and a non-interactive stdin, neither optional write is performed.
+
+### Reuse the same bot in the official lark-cli
+
+The companion uses the bot already selected by cc-connect-next. It creates an
+isolated profile such as `cc-connect-next-my-project`, makes it the default, and
+sets its default identity to `bot`. A profile for the same App is reused. A
+same-name profile for another App is preserved and a collision-free name is
+created. The previous default profile and every existing user OAuth login remain
+available; `lark-cli profile use -` switches back.
+
+The companion passes the App Secret to
+`lark-cli profile add --app-secret-stdin`, never through a child argv, inherited
+environment value, cc-connect-next output, or temporary handoff file. lark-cli
+then persists it in the profile it owns.
+The companion does not run `auth login`, grant scopes, or send a test message.
+Bot operations use the permissions already published for that Feishu App; user
+calendar, Drive, mail, and other personal resources still require a separate,
+explicit user OAuth flow.
+
+Run or repair the companion independently at any time:
+
+```bash
+cc-connect-next lark-cli setup --project my-project
+```
+
+If several different Feishu/Lark bots are configured, `--project` is required;
+use `--platform-index` when that project itself has more than one. Do not run
+`lark-cli event consume` with this same profile while cc-connect-next is
+running: normal HTTP API commands can share the App, but a second event
+connection can compete for the bot's events.
 
 ### The recommended Feishu configuration
 
