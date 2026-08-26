@@ -194,6 +194,28 @@ func previewReleaseBody(body string) string {
 	return body
 }
 
+func releaseBodyForLanguage(body string, lang Language) string {
+	heading := "English"
+	if lang == LangChinese || lang == LangTraditionalChinese {
+		heading = "中文"
+	}
+	marker := "\n## " + heading + "\n"
+	content := "\n" + strings.ReplaceAll(body, "\r\n", "\n")
+	start := strings.Index(content, marker)
+	if start < 0 {
+		return body
+	}
+	section := content[start+len(marker):]
+	if end := strings.Index(section, "\n## "); end >= 0 {
+		section = section[:end]
+	}
+	return strings.TrimSpace(section)
+}
+
+func localizedReleaseBodyPreview(body string, lang Language) string {
+	return previewReleaseBody(releaseBodyForLanguage(body, lang))
+}
+
 // replyUpdateActionable delivers the release details with an [update now]
 // action on platforms that support cards or inline buttons, falling back to
 // plain text elsewhere. The buttons reuse the cmd:/ scheme, so a tap goes

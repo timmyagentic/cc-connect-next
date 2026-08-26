@@ -273,6 +273,32 @@ func TestPreviewReleaseBodyKeeps3000Runes(t *testing.T) {
 	}
 }
 
+func TestReleaseBodyForLanguageSelectsBilingualSection(t *testing.T) {
+	body := "# release\n\n## 中文\n\n中文说明\n\n## English\n\nEnglish notes\n"
+	tests := []struct {
+		lang Language
+		want string
+	}{
+		{LangChinese, "中文说明"},
+		{LangTraditionalChinese, "中文说明"},
+		{LangEnglish, "English notes"},
+		{LangJapanese, "English notes"},
+		{LangSpanish, "English notes"},
+	}
+	for _, tt := range tests {
+		if got := releaseBodyForLanguage(body, tt.lang); got != tt.want {
+			t.Errorf("releaseBodyForLanguage(%q) = %q, want %q", tt.lang, got, tt.want)
+		}
+	}
+}
+
+func TestReleaseBodyForLanguageFallsBackToOriginal(t *testing.T) {
+	const body = "single-language release notes"
+	if got := releaseBodyForLanguage(body, LangChinese); got != body {
+		t.Fatalf("fallback = %q, want original body", got)
+	}
+}
+
 // A message must carry exactly one call to action: when a button is present
 // the copy must not also instruct the user to type a reply, or they cannot
 // tell which one is expected.
@@ -388,6 +414,33 @@ func TestUpgradePrompt_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
 	note := cardNotes(cards[0])
 	if !strings.Contains(note, "回复") || !strings.Contains(note, "确认") {
 		t.Fatalf("prompt card must hint the natural-language reply in a note, got %q", note)
+	}
+}
+
+func TestUpgradePrompt_CardUsesConfiguredReleaseLanguage(t *testing.T) {
+	p := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	e.SetAdminFrom("user1")
+	oldVersion := CurrentVersion
+	CurrentVersion = "v1.0.0"
+	t.Cleanup(func() { CurrentVersion = oldVersion })
+	e.updateCheckFn = func(string, bool) (*ReleaseInfo, error) {
+		return &ReleaseInfo{
+			TagName: "v9.9.9",
+			Body:    "# release\n\n## 中文\n\n中文说明\n\n## English\n\nEnglish notes",
+		}, nil
+	}
+
+	e.cmdUpgrade(p, &Message{SessionKey: "feishu:user1", Platform: "feishu", UserID: "user1", ReplyCtx: "rc"}, nil)
+	p.mu.Lock()
+	cards := append([]*Card(nil), p.repliedCards...)
+	p.mu.Unlock()
+	if len(cards) != 1 {
+		t.Fatalf("got %d reply cards, want 1", len(cards))
+	}
+	body := cardMarkdown(cards[0])
+	if !strings.Contains(body, "English notes") || strings.Contains(body, "中文说明") {
+		t.Fatalf("English card used the wrong release section:\n%s", body)
 	}
 }
 
