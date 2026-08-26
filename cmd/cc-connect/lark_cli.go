@@ -206,11 +206,8 @@ func setupLarkCLICompanion(ctx context.Context, target larkCLITarget, opts larkC
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, larkCLISetupTimeout)
-		defer cancel()
-	}
+	ctx, cancel := context.WithTimeout(ctx, larkCLISetupTimeout)
+	defer cancel()
 
 	binary, err := process.LookPath("lark-cli")
 	installed := false
