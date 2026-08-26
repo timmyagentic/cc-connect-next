@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v0.2.0 (2026-08-26)
+
+Stable release focused on Codex app-server isolation, safer migration and
+update flows, session/runtime correctness, one-shot answer profiles, streamlined
+session creation, the official lark-cli companion, and a clean security and
+quality baseline for both Go and Web dependencies.
+
+See `changelogs/v0.2.0.md` for the bilingual release notes.
+
 ### Session UX
 
 - `/new <prompt>` now starts a fresh session and immediately handles `<prompt>`
@@ -22,14 +31,6 @@
   The companion does not run user OAuth, send a test message, or open an event
   consumer; operators are warned not to run `lark-cli event consume` with the
   same App while cc-connect-next owns its event connection.
-
-## v0.1.6 (2026-08-24)
-
-Stable release focused on Codex app-server isolation, safer migration and
-update flows, session/runtime correctness, and a clean security and quality
-baseline for both Go and Web dependencies.
-
-See `changelogs/v0.1.6.md` for the bilingual release notes.
 
 ### Codex app-server correctness
 
