@@ -15428,10 +15428,7 @@ func (e *Engine) renderUpgradeCard() *Card {
 		} else if res.release == nil {
 			content = fmt.Sprintf(e.i18n.T(MsgUpgradeUpToDate), cur)
 		} else {
-			body := res.release.Body
-			if len([]rune(body)) > 300 {
-				body = string([]rune(body)[:300]) + "…"
-			}
+			body := previewReleaseBody(res.release.Body)
 			content = fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, res.release.TagName, body)
 		}
 	case <-time.After(8 * time.Second):
@@ -16878,10 +16875,7 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 		return
 	}
 
-	body := release.Body
-	if len([]rune(body)) > 300 {
-		body = string([]rune(body)[:300]) + "…"
-	}
+	body := previewReleaseBody(release.Body)
 
 	// The prompt opens a short natural-language consent window: a following
 	// "确认" / "yes" (or the button) installs without further syntax. The
