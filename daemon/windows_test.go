@@ -3,6 +3,7 @@
 package daemon
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -15,6 +16,52 @@ func TestStrictPowerShellStopsOnCmdletErrors(t *testing.T) {
 	}
 	if !strings.Contains(script, "Write-Output 'ok'") {
 		t.Fatalf("strictPowerShell() missing original script:\n%s", script)
+	}
+}
+
+func TestSchtasksStatusPropagatesQueryFailure(t *testing.T) {
+	orig := runPowerShell
+	t.Cleanup(func() { runPowerShell = orig })
+	runPowerShell = func(string) (string, error) {
+		return "Task Scheduler unavailable", errors.New("exit status 1")
+	}
+
+	if _, err := (&schtasksManager{}).Status(); err == nil || !strings.Contains(err.Error(), "query scheduled task") {
+		t.Fatalf("Status() error = %v, want propagated query failure", err)
+	}
+}
+
+func TestSchtasksStatusUsesExplicitNotInstalledSentinel(t *testing.T) {
+	orig := runPowerShell
+	t.Cleanup(func() { runPowerShell = orig })
+	runPowerShell = func(string) (string, error) {
+		return "__CC_CONNECT_NEXT_TASK_NOT_INSTALLED__", nil
+	}
+
+	st, err := (&schtasksManager{}).Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Installed || st.Running {
+		t.Fatalf("Status() = %+v, want successfully verified absence", st)
+	}
+}
+
+func TestSchtasksUninstallStopsBeforeDeleting(t *testing.T) {
+	orig := runPowerShell
+	t.Cleanup(func() { runPowerShell = orig })
+	var calls int
+	runPowerShell = func(string) (string, error) {
+		calls++
+		return "stop failed", errors.New("exit status 1")
+	}
+
+	err := (&schtasksManager{}).Uninstall()
+	if err == nil || !strings.Contains(err.Error(), "stop scheduled task") {
+		t.Fatalf("Uninstall() error = %v, want stop failure", err)
+	}
+	if calls != 1 {
+		t.Fatalf("PowerShell calls = %d, want no delete after stop failure", calls)
 	}
 }
 

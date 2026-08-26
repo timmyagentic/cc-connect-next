@@ -285,6 +285,7 @@ type Platform struct {
 	replayClientMu   sync.Mutex
 	wsClient         *larkws.Client
 	handler          core.MessageHandler
+	lifecycleHandler core.PlatformLifecycleHandler
 	cardNavHandler   core.CardNavigationHandler
 	cancel           context.CancelFunc
 	dedup            *core.MessageDedup
@@ -407,6 +408,8 @@ type imageBatchEntry struct {
 
 var _ core.RelayGroupVisibilityTarget = (*Platform)(nil)
 var _ core.RelayGroupVisibilitySender = (*Platform)(nil)
+var _ core.AsyncRecoverablePlatform = (*Platform)(nil)
+var _ core.AsyncRecoverablePlatform = (*interactivePlatform)(nil)
 
 type interactivePlatform struct {
 	*Platform
@@ -584,6 +587,12 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 
 func (p *Platform) Name() string { return p.platformName }
 
+func (p *Platform) SetLifecycleHandler(handler core.PlatformLifecycleHandler) {
+	p.mu.Lock()
+	p.lifecycleHandler = handler
+	p.mu.Unlock()
+}
+
 // SendDirectUser opens a private bot conversation with one app-scoped open_id.
 func (p *Platform) SendDirectUser(ctx context.Context, userID, content string) error {
 	userID = strings.TrimSpace(userID)
@@ -591,7 +600,7 @@ func (p *Platform) SendDirectUser(ctx context.Context, userID, content string) e
 		return fmt.Errorf("%s: direct user ID is empty", p.tag())
 	}
 	msgType, body := buildReplyContentWithResolvedMention(content, false)
-	_, err := p.createMessageToReceiveID(ctx, userID, larkim.ReceiveIdTypeOpenId, msgType, body, "send direct user")
+	_, err := p.createMessageToReceiveID(ctx, userID, larkim.CreateMessageV1ReceiveIDTypeOpenId, msgType, body, "send direct user")
 	return err
 }
 
@@ -678,6 +687,7 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 	// Secondary platforms skip connection creation — the primary's connection
 	// fans out events to all platforms in the shared group.
 	if !isPrimary {
+		p.syncSharedConnectionState()
 		return nil
 	}
 
@@ -761,6 +771,15 @@ func (p *Platform) startWebSocketMode() error {
 		larkws.WithEventHandler(p.eventHandler),
 		larkws.WithLogLevel(larkcore.LogLevelInfo),
 		larkws.WithLogger(&sanitizingLogger{inner: larkcore.NewEventLogger()}),
+		larkws.WithOnReady(p.markConnectionReady),
+		larkws.WithOnReconnected(p.markConnectionReady),
+		larkws.WithOnError(p.markConnectionUnavailable),
+		larkws.WithOnReconnecting(func() {
+			p.markConnectionUnavailable(fmt.Errorf("%s websocket reconnecting", p.tag()))
+		}),
+		larkws.WithOnDisconnected(func() {
+			p.markConnectionUnavailable(fmt.Errorf("%s websocket disconnected", p.tag()))
+		}),
 	}
 	if p.domain != lark.FeishuBaseUrl {
 		wsOpts = append(wsOpts, larkws.WithDomain(p.domain))
@@ -777,7 +796,7 @@ func (p *Platform) startWebSocketMode() error {
 		if err := p.wsClient.Start(ctx); err != nil {
 			slog.Error(p.tag()+": websocket error", "error", err)
 			if ctx.Err() == nil {
-				p.recordConnectionError(err)
+				p.markConnectionUnavailable(err)
 			}
 		}
 	}()
@@ -799,6 +818,57 @@ func (p *Platform) recordConnectionError(err error) {
 		target.mu.Lock()
 		target.connErr = err
 		target.mu.Unlock()
+	}
+}
+
+func (p *Platform) applyConnectionState(ready bool, err error) {
+	p.mu.Lock()
+	p.connErr = err
+	handler := p.lifecycleHandler
+	p.mu.Unlock()
+	if handler == nil {
+		return
+	}
+	platform := p.dispatchPlatform()
+	if ready {
+		handler.OnPlatformReady(platform)
+		return
+	}
+	handler.OnPlatformUnavailable(platform, err)
+}
+
+func (p *Platform) markConnectionReady() {
+	targets := []*Platform{p}
+	if p.sharedGroup != nil {
+		targets = p.sharedGroup.setConnectionState(true, nil)
+	}
+	for _, target := range targets {
+		target.applyConnectionState(true, nil)
+	}
+}
+
+func (p *Platform) markConnectionUnavailable(err error) {
+	if err == nil {
+		err = fmt.Errorf("%s connection unavailable", p.tag())
+	}
+	targets := []*Platform{p}
+	if p.sharedGroup != nil {
+		targets = p.sharedGroup.setConnectionState(false, err)
+	}
+	for _, target := range targets {
+		target.applyConnectionState(false, err)
+	}
+}
+
+func (p *Platform) syncSharedConnectionState() {
+	if p.sharedGroup == nil {
+		return
+	}
+	ready, err := p.sharedGroup.connectionState()
+	if ready {
+		p.applyConnectionState(true, nil)
+	} else if err != nil {
+		p.applyConnectionState(false, err)
 	}
 }
 
@@ -825,14 +895,19 @@ func (p *Platform) startWebhookMode() error {
 	p.cancel = cancel
 	p.mu.Unlock()
 
+	listener, err := net.Listen("tcp", p.server.Addr)
+	if err != nil {
+		return fmt.Errorf("%s: listen webhook %s: %w", p.tag(), p.server.Addr, err)
+	}
 	p.recordConnectionError(nil)
 	go func() {
 		slog.Info(p.tag()+": webhook server listening", "port", p.port, "path", p.callbackPath)
-		if err := p.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := p.server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			slog.Error(p.tag()+": webhook server error", "error", err)
-			p.recordConnectionError(err)
+			p.markConnectionUnavailable(err)
 		}
 	}()
+	p.markConnectionReady()
 
 	return nil
 }
@@ -1250,7 +1325,7 @@ func (p *Platform) IsMessageRecalled(ctx context.Context, rctx any) (bool, error
 
 	req := larkim.NewGetMessageReqBuilder().
 		MessageId(messageID).
-		UserIdType(larkim.UserIdTypeGetMessageOpenId).
+		UserIdType(larkim.GetMessageContentV1UserIDTypeOpenId).
 		Build()
 
 	var resp *larkim.GetMessageResp
@@ -3758,13 +3833,13 @@ func detectFeishuFileType(mimeType, fileName string) string {
 	name := strings.ToLower(fileName)
 	switch {
 	case mimeType == "application/pdf" || strings.HasSuffix(name, ".pdf"):
-		return larkim.FileTypePdf
+		return larkim.CreateFileFileTypePdf
 	case strings.HasSuffix(name, ".doc") || strings.HasSuffix(name, ".docx"):
-		return larkim.FileTypeDoc
+		return larkim.CreateFileFileTypeDoc
 	case strings.HasSuffix(name, ".xls") || strings.HasSuffix(name, ".xlsx") || strings.HasSuffix(name, ".csv"):
-		return larkim.FileTypeXls
+		return larkim.CreateFileFileTypeXls
 	case strings.HasSuffix(name, ".ppt") || strings.HasSuffix(name, ".pptx"):
-		return larkim.FileTypePpt
+		return larkim.CreateFileFileTypePpt
 	// Feishu's file API only has "mp4" as the video type. We map all common
 	// video MIME types and extensions to FileTypeMp4 so the message renders
 	// as a native video player bubble rather than a generic file download.
@@ -3774,19 +3849,19 @@ func detectFeishuFileType(mimeType, fileName string) string {
 		strings.HasSuffix(name, ".mp4") || strings.HasSuffix(name, ".mov") ||
 		strings.HasSuffix(name, ".avi") || strings.HasSuffix(name, ".m4v") ||
 		strings.HasSuffix(name, ".mkv") || strings.HasSuffix(name, ".webm"):
-		return larkim.FileTypeMp4
+		return larkim.CreateFileFileTypeMp4
 	case mimeType == "audio/ogg" || mimeType == "audio/opus" || mimeType == "application/ogg" || strings.HasSuffix(name, ".ogg") || strings.HasSuffix(name, ".opus"):
-		return larkim.FileTypeOpus
+		return larkim.CreateFileFileTypeOpus
 	default:
-		return larkim.FileTypeStream
+		return larkim.CreateFileFileTypeStream
 	}
 }
 
 func detectFeishuFileMessageType(fileType string) string {
 	switch fileType {
-	case larkim.FileTypeOpus:
+	case larkim.CreateFileFileTypeOpus:
 		return larkim.MsgTypeAudio
-	case larkim.FileTypeMp4:
+	case larkim.CreateFileFileTypeMp4:
 		return larkim.MsgTypeMedia
 	default:
 		return larkim.MsgTypeFile
@@ -4498,7 +4573,7 @@ func (p *Platform) createMessage(ctx context.Context, chatID, msgType, content, 
 }
 
 func (p *Platform) createMessageWithID(ctx context.Context, chatID, msgType, content, op string) (string, error) {
-	return p.createMessageToReceiveID(ctx, chatID, larkim.ReceiveIdTypeChatId, msgType, content, op)
+	return p.createMessageToReceiveID(ctx, chatID, larkim.CreateMessageV1ReceiveIDTypeChatId, msgType, content, op)
 }
 
 func (p *Platform) createMessageToReceiveID(ctx context.Context, receiveID, receiveIDType, msgType, content, op string) (string, error) {
@@ -5380,7 +5455,7 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 		}
 	} else {
 		req := larkim.NewCreateMessageReqBuilder().
-			ReceiveIdType(larkim.ReceiveIdTypeChatId).
+			ReceiveIdType(larkim.CreateMessageV1ReceiveIDTypeChatId).
 			Body(larkim.NewCreateMessageReqBodyBuilder().
 				ReceiveId(chatID).
 				MsgType(larkim.MsgTypeInteractive).
@@ -5678,6 +5753,7 @@ func (p *Platform) updateCardEntity(ctx context.Context, h *feishuPreviewHandle,
 
 func (p *Platform) Stop() error {
 	if p.isWSPrimary {
+		p.markConnectionUnavailable(fmt.Errorf("%s stopped", p.tag()))
 		remaining := unregisterSharedWS(p)
 		if remaining > 0 {
 			slog.Warn(p.tag()+": primary shutting down, secondary platforms will lose event source",
@@ -5754,7 +5830,7 @@ func (p *Platform) SendAudio(ctx context.Context, rctx any, audio []byte, format
 		return p.withFreshTenantAccessTokenRetry(ctx, "upload audio", func(client *lark.Client, options ...larkcore.RequestOptionFunc) error {
 			req := larkim.NewCreateFileReqBuilder().
 				Body(larkim.NewCreateFileReqBodyBuilder().
-					FileType(larkim.FileTypeOpus).
+					FileType(larkim.CreateFileFileTypeOpus).
 					FileName("tts_audio.opus").
 					File(bytes.NewReader(audio)).
 					Build()).
@@ -5829,7 +5905,7 @@ func (p *Platform) SendVideo(ctx context.Context, rctx any, video []byte, format
 		return p.withFreshTenantAccessTokenRetry(ctx, "upload video", func(client *lark.Client, options ...larkcore.RequestOptionFunc) error {
 			req := larkim.NewCreateFileReqBuilder().
 				Body(larkim.NewCreateFileReqBodyBuilder().
-					FileType(larkim.FileTypeMp4).
+					FileType(larkim.CreateFileFileTypeMp4).
 					FileName(fileName).
 					File(bytes.NewReader(video)).
 					Build()).

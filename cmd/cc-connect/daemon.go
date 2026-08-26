@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/timmyagentic/cc-connect-next/config"
 	"github.com/timmyagentic/cc-connect-next/daemon"
 )
 
@@ -78,11 +80,16 @@ func daemonInstall(args []string) {
 		os.Exit(1)
 	}
 
+	dataDir := ""
+	if loaded, loadErr := config.LoadPermissive(cfg.ConfigPath); loadErr == nil {
+		dataDir = resolveDaemonDataDir(loaded.DataDir, cfg.WorkDir)
+	}
 	if err := daemon.SaveMeta(&daemon.Meta{
 		LogFile:     cfg.LogFile,
 		LogMaxSize:  cfg.LogMaxSize,
 		WorkDir:     cfg.WorkDir,
 		ConfigPath:  cfg.ConfigPath,
+		DataDir:     dataDir,
 		BinaryPath:  cfg.BinaryPath,
 		InstalledAt: daemon.NowISO(),
 	}); err != nil {
@@ -326,16 +333,56 @@ func daemonStatus() {
 		fmt.Printf("  PID:       %d\n", st.PID)
 	}
 
+	dataDir := ""
 	if meta, err := daemon.LoadMeta(); err == nil {
 		fmt.Printf("  Log:       %s\n", meta.LogFile)
 		fmt.Printf("  WorkDir:   %s\n", meta.WorkDir)
+		dataDir = resolveDaemonDataDir(meta.DataDir, meta.WorkDir)
 		if meta.ConfigPath != "" {
 			fmt.Printf("  Config:    %s\n", meta.ConfigPath)
+			if dataDir == "" {
+				if loaded, loadErr := config.LoadPermissive(meta.ConfigPath); loadErr == nil {
+					dataDir = resolveDaemonDataDir(loaded.DataDir, meta.WorkDir)
+				}
+			}
 		}
 		if t, err := time.Parse(time.RFC3339, meta.InstalledAt); err == nil {
 			fmt.Printf("  Installed: %s\n", t.Format("2006-01-02 15:04:05"))
 		}
 	}
+
+	if st.Running {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		health, healthErr := readRuntimeHealth(ctx, resolveSocketPath(dataDir))
+		cancel()
+		if healthErr != nil {
+			fmt.Printf("  Runtime:   Unavailable (%v)\n", healthErr)
+			return
+		}
+		runtimeState, platforms := summarizeRuntimeHealth(health)
+		fmt.Printf("  Runtime:   %s\n", runtimeState)
+		for _, platform := range platforms {
+			fmt.Printf("  Platform:  %s\n", platform)
+		}
+	} else {
+		fmt.Println("  Runtime:   Stopped")
+	}
+}
+
+func resolveDaemonDataDir(dataDir, workDir string) string {
+	dataDir = strings.TrimSpace(dataDir)
+	if dataDir == "" {
+		return ""
+	}
+	dataDir = config.ExpandUserPath(dataDir)
+	if filepath.IsAbs(dataDir) {
+		return filepath.Clean(dataDir)
+	}
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		return filepath.Clean(dataDir)
+	}
+	return filepath.Clean(filepath.Join(workDir, dataDir))
 }
 
 // ── logs ────────────────────────────────────────────────────

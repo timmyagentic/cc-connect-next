@@ -87,17 +87,47 @@ func (m *systemdManager) Install(cfg Config) error {
 }
 
 func (m *systemdManager) Uninstall() error {
-	if _, err := runSystemctl(m.sysArgs("disable", "--now", systemdServiceName)...); err != nil {
-		slog.Warn("systemd: disable failed", "error", err)
+	status, err := m.Status()
+	if err != nil {
+		return fmt.Errorf("inspect service before uninstall: %w", err)
 	}
-
+	if !status.Installed && !status.Running {
+		return nil
+	}
 	unitPath := m.unitPath()
-	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove unit: %w", err)
+	unitFileExists := false
+	if _, err := os.Stat(unitPath); err == nil {
+		unitFileExists = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect unit before uninstall: %w", err)
+	}
+	if unitFileExists {
+		args := m.sysArgs("disable", "--now", systemdServiceName)
+		if out, err := runSystemctl(args...); err != nil {
+			return fmt.Errorf("systemctl %s: %s (%w)", strings.Join(args, " "), out, err)
+		}
+		if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove unit: %w", err)
+		}
+	} else {
+		for _, action := range []string{"stop", "reset-failed"} {
+			args := m.sysArgs(action, systemdServiceName)
+			if out, err := runSystemctl(args...); err != nil {
+				return fmt.Errorf("systemctl %s: %s (%w)", strings.Join(args, " "), out, err)
+			}
+		}
 	}
 
-	if _, err := runSystemctl(m.sysArgs("daemon-reload")...); err != nil {
-		slog.Warn("systemd: daemon-reload failed", "error", err)
+	reloadArgs := m.sysArgs("daemon-reload")
+	if out, err := runSystemctl(reloadArgs...); err != nil {
+		return fmt.Errorf("systemctl %s: %s (%w)", strings.Join(reloadArgs, " "), out, err)
+	}
+	after, err := m.Status()
+	if err != nil {
+		return fmt.Errorf("verify service removal: %w", err)
+	}
+	if after.Installed || after.Running {
+		return fmt.Errorf("service is still loaded after uninstall: %+v", after)
 	}
 	return nil
 }
@@ -130,18 +160,25 @@ func (m *systemdManager) Status() (*Status, error) {
 	st := &Status{Platform: m.Platform()}
 
 	unitPath := m.unitPath()
-	if _, err := os.Stat(unitPath); err != nil {
-		return st, nil
+	unitFileExists := false
+	if _, err := os.Stat(unitPath); err == nil {
+		unitFileExists = true
+	} else if !os.IsNotExist(err) {
+		return st, fmt.Errorf("inspect systemd unit %s: %w", unitPath, err)
 	}
-	st.Installed = true
 
 	out, err := runSystemctl(m.sysArgs("show", systemdServiceName,
-		"--no-page", "--property", "ActiveState,MainPID")...)
+		"--no-page", "--property", "LoadState,ActiveState,MainPID")...)
 	if err != nil {
-		return st, nil
+		return st, fmt.Errorf("systemctl show %s: %s (%w)", systemdServiceName, out, err)
 	}
 
 	props := parseKeyValue(out)
+	loadState := strings.TrimSpace(props["LoadState"])
+	st.Installed = unitFileExists || (loadState != "" && !strings.EqualFold(loadState, "not-found"))
+	if !st.Installed {
+		return st, nil
+	}
 	if strings.EqualFold(props["ActiveState"], "active") {
 		st.Running = true
 	}

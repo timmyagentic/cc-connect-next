@@ -13,6 +13,8 @@ import (
 type sharedWSGroup struct {
 	mu        sync.RWMutex
 	platforms []*Platform
+	ready     bool
+	err       error
 }
 
 var (
@@ -81,4 +83,20 @@ func (g *sharedWSGroup) allPlatforms() []*Platform {
 	result := make([]*Platform, len(g.platforms))
 	copy(result, g.platforms)
 	return result
+}
+
+func (g *sharedWSGroup) setConnectionState(ready bool, err error) []*Platform {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.ready = ready
+	g.err = err
+	result := make([]*Platform, len(g.platforms))
+	copy(result, g.platforms)
+	return result
+}
+
+func (g *sharedWSGroup) connectionState() (bool, error) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.ready, g.err
 }

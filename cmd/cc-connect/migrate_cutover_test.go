@@ -1,14 +1,53 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/timmyagentic/cc-connect-next/daemon"
 )
+
+func migrationRuntimeFixture(t *testing.T, ready *atomic.Bool) (string, func()) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix socket fixture")
+	}
+	dataDir, err := os.MkdirTemp("/tmp", "ccn-runtime-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dataDir, "run"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dataDir) })
+	listener, err := net.Listen("unix", resolveSocketPath(dataDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		health := core.RuntimeHealth{Ready: ready.Load()}
+		if !health.Ready {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		_ = json.NewEncoder(w).Encode(health)
+	})}
+	go func() { _ = server.Serve(listener) }()
+	cleanup := func() {
+		_ = server.Close()
+		_ = os.RemoveAll(dataDir)
+	}
+	return dataDir, cleanup
+}
 
 type cutoverTestDaemonManager struct {
 	events       *[]string
@@ -106,9 +145,13 @@ func cutoverTestDeps(t *testing.T, events *[]string, mgr *cutoverTestDaemonManag
 			*events = append(*events, "next-save-meta:"+meta.ConfigPath+":"+meta.WorkDir)
 			return nil
 		},
-		WaitForDaemonRunning: func(daemon.Manager) (*daemon.Status, error) {
-			*events = append(*events, "wait-next-running")
-			return &daemon.Status{Installed: true, Running: true, PID: 4242, Platform: "test"}, nil
+		WaitRuntimeReady: func(daemon.Manager, string) (*daemon.Status, core.RuntimeHealth, error) {
+			*events = append(*events, "wait-runtime-ready")
+			return &daemon.Status{Installed: true, Running: true, PID: 4242, Platform: "test"}, core.RuntimeHealth{Ready: true}, nil
+		},
+		WaitRuntimeDisarmed: func(daemon.Manager, string) error {
+			*events = append(*events, "wait-runtime-disarmed")
+			return nil
 		},
 		ProbeOfficial: func(_ *preparedMigration) officialInstallState {
 			*events = append(*events, "official-probe")
@@ -140,6 +183,9 @@ func TestRunDirectMigrationCutover_SwitchesAndStartsSuccessor(t *testing.T) {
 	if result.DaemonStatus == nil || !result.DaemonStatus.Running || result.DaemonStatus.PID != 4242 {
 		t.Fatalf("daemon status = %+v, want running PID 4242", result.DaemonStatus)
 	}
+	if !result.RuntimeHealth.Ready {
+		t.Fatalf("runtime health = %+v, want ready", result.RuntimeHealth)
+	}
 	if result.ConfigPath != "/next/data/config.toml" || result.WorkDir != "/official/runtime" {
 		t.Fatalf("result paths = config %q work %q", result.ConfigPath, result.WorkDir)
 	}
@@ -154,7 +200,7 @@ func TestRunDirectMigrationCutover_SwitchesAndStartsSuccessor(t *testing.T) {
 		"next-resolve",
 		"next-install:/next/data/config.toml:/official/runtime",
 		"next-save-meta:/next/data/config.toml:/official/runtime",
-		"wait-next-running",
+		"wait-runtime-ready",
 	}
 	if got := strings.Join(events, "\n"); got != strings.Join(want, "\n") {
 		t.Fatalf("cutover order:\n%s\nwant:\n%s", got, strings.Join(want, "\n"))
@@ -264,13 +310,56 @@ func TestRunDirectMigrationCutover_ActivationFailureDisarmsNextAndRestoresOffici
 		t.Fatalf("error = %v, want successor activation failure", err)
 	}
 	joined := strings.Join(events, "\n")
-	for _, want := range []string{"migrate", "next-install", "next-stop", "next-uninstall", "official-enable-start"} {
+	for _, want := range []string{"migrate", "next-install", "next-stop", "next-uninstall", "wait-runtime-disarmed", "official-enable-start"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("activation recovery missing %q:\n%s", want, joined)
 		}
 	}
 	if strings.Contains(joined, "next-start") {
 		t.Fatalf("old successor must not restart after the target config was replaced:\n%s", joined)
+	}
+}
+
+func TestRunDirectMigrationCutover_ActivationFailureKeepsOfficialDisabledWhenDisarmProofFails(t *testing.T) {
+	var events []string
+	mgr := &cutoverTestDaemonManager{
+		events:     &events,
+		status:     daemon.Status{Platform: "test"},
+		installErr: errors.New("launch failed"),
+	}
+	deps := cutoverTestDeps(t, &events, mgr)
+	deps.WaitRuntimeDisarmed = func(daemon.Manager, string) error {
+		events = append(events, "disarm-proof-failed")
+		return errors.New("config lock remains held")
+	}
+
+	_, err := runDirectMigrationCutover(migrationOptions{}, deps, func(string, ...any) bool { return true })
+	if err == nil || !strings.Contains(err.Error(), "official CC Connect remains disabled") || !strings.Contains(err.Error(), "config lock remains held") {
+		t.Fatalf("error = %v", err)
+	}
+	if strings.Contains(strings.Join(events, "\n"), "official-enable-start") {
+		t.Fatalf("official restored without disarm proof: %v", events)
+	}
+}
+
+func TestRunDirectMigrationCutover_ReadinessFailureDisarmsNextAndRestoresOfficial(t *testing.T) {
+	var events []string
+	mgr := &cutoverTestDaemonManager{events: &events, status: daemon.Status{Platform: "test"}}
+	deps := cutoverTestDeps(t, &events, mgr)
+	deps.WaitRuntimeReady = func(daemon.Manager, string) (*daemon.Status, core.RuntimeHealth, error) {
+		events = append(events, "runtime-unavailable")
+		return &daemon.Status{Installed: true, Running: true, Platform: "test"}, core.RuntimeHealth{}, errors.New("alpha/feishu unavailable")
+	}
+
+	_, err := runDirectMigrationCutover(migrationOptions{}, deps, func(string, ...any) bool { return true })
+	if err == nil || !strings.Contains(err.Error(), "alpha/feishu unavailable") {
+		t.Fatalf("error = %v", err)
+	}
+	joined := strings.Join(events, "\n")
+	for _, want := range []string{"runtime-unavailable", "next-stop", "next-uninstall", "wait-runtime-disarmed", "official-enable-start"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("readiness recovery missing %q:\n%s", want, joined)
+		}
 	}
 }
 
@@ -403,5 +492,66 @@ func TestRunDirectMigrationCutover_OfficialProbeFailureRestoresNextAndDoesNotMut
 	joined := strings.Join(events, "\n")
 	if strings.Contains(joined, "next-start") || strings.Contains(joined, "official-stop-disable") || strings.Contains(joined, "migrate") {
 		t.Fatalf("cutover mutated services after probe failure:\n%s", joined)
+	}
+}
+
+func TestWaitForMigrationRuntimeReadyRequiresHealthEndpointReady(t *testing.T) {
+	var ready atomic.Bool
+	dataDir, cleanup := migrationRuntimeFixture(t, &ready)
+	defer cleanup()
+	var events []string
+	mgr := &cutoverTestDaemonManager{events: &events, status: daemon.Status{Installed: true, Running: true, Platform: "test"}}
+
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		ready.Store(true)
+	}()
+	status, health, err := waitForMigrationRuntimeReadyWithin(mgr, dataDir, time.Second, 10*time.Millisecond)
+	if err != nil || status == nil || !status.Running || !health.Ready {
+		t.Fatalf("status=%+v health=%+v err=%v", status, health, err)
+	}
+}
+
+func TestWaitForMigrationRuntimeDisarmedRequiresFreeConfigLock(t *testing.T) {
+	var events []string
+	mgr := &cutoverTestDaemonManager{events: &events, status: daemon.Status{Platform: "test"}}
+	root, err := os.MkdirTemp("/tmp", "ccn-lock-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	configPath := filepath.Join(root, "config.toml")
+	if err := os.WriteFile(configPath, []byte("language = \"zh\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := AcquireInstanceLock(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForMigrationRuntimeDisarmedWithin(mgr, configPath, 40*time.Millisecond, 5*time.Millisecond); err == nil || !strings.Contains(err.Error(), "another cc-connect-next instance") {
+		t.Fatalf("held-lock disarm error = %v", err)
+	}
+	lock.Release()
+	if err := waitForMigrationRuntimeDisarmedWithin(mgr, configPath, time.Second, 5*time.Millisecond); err != nil {
+		t.Fatalf("disarm after lock release: %v", err)
+	}
+}
+
+func TestWaitForMigrationRuntimeDisarmedRejectsAnsweringSocket(t *testing.T) {
+	var ready atomic.Bool
+	ready.Store(true)
+	dataDir, cleanup := migrationRuntimeFixture(t, &ready)
+	var events []string
+	mgr := &cutoverTestDaemonManager{events: &events, status: daemon.Status{Platform: "test"}}
+	configPath := filepath.Join(dataDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte("language = \"zh\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForMigrationRuntimeDisarmedWithin(mgr, configPath, 40*time.Millisecond, 5*time.Millisecond); err == nil || !strings.Contains(err.Error(), "runtime API socket still answers") {
+		t.Fatalf("answering-socket disarm error = %v", err)
+	}
+	cleanup()
+	if err := waitForMigrationRuntimeDisarmedWithin(mgr, configPath, time.Second, 5*time.Millisecond); err != nil {
+		t.Fatalf("disarm after socket close: %v", err)
 	}
 }

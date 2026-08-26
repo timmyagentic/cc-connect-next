@@ -80,6 +80,7 @@ type Meta struct {
 	LogMaxBackups int    `json:"log_max_backups"`
 	WorkDir       string `json:"work_dir"`
 	ConfigPath    string `json:"config_path,omitempty"`
+	DataDir       string `json:"data_dir,omitempty"`
 	BinaryPath    string `json:"binary_path"`
 	InstalledAt   string `json:"installed_at"`
 }

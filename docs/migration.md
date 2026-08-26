@@ -14,7 +14,7 @@ cc-connect-next migrate --switch
 cc-connect-next daemon status
 ```
 
-`--switch` repeats the full preflight, stops any old Next daemon that could write the target, stops and disables official CC Connect, final-syncs against the quiet source, then installs and starts cc-connect-next with the migrated config and the official runtime's original working directory. If final sync or successor activation fails, it disarms the successor service and makes a best-effort restoration of the official service's prior running/autostart state. Official binaries and data remain intact.
+`--switch` repeats the full preflight, stops and disables official CC Connect, final-syncs against the quiet source, then installs and starts cc-connect-next with the migrated config and the official runtime's original working directory. It does not treat a service-manager `Running` flag as success: the local API and every configured platform must report Ready before completion is announced or privately messaged. If final sync or activation/readiness fails, official is restored only after the Next service is unregistered, its runtime socket no longer answers, and the migrated config lock is free; otherwise official remains disabled to prevent duplicate consumers. Official binaries and data remain intact.
 
 Plain `cc-connect-next migrate` remains a copy-only advanced operation for backups or an intentionally configured parallel trial; it is not the default user journey.
 
@@ -61,7 +61,7 @@ This rule is enforced by the product, not just documented:
 - **Startup guard.** `cc-connect-next` refuses to start while an official daemon is running with a platform credential the loaded config also uses, and names the exact stop/disarm commands. A merely *armed* autostart (service registered with `RunAtLoad`/`enabled`, daemon not currently running) logs a prominent warning instead, because the conflict is one reboot away. `CC_NEXT_ALLOW_OFFICIAL_CONFLICT=1` overrides the refusal (not recommended).
 - **Migration guidance.** After a copy-only migration, the report inspects the official binary, autostart registration, live daemon, and credential overlap, and makes direct `migrate --switch` the default next step; parallel trial is advanced.
 - **`doctor`.** A dedicated *official CC Connect coexistence* section reports binary, autostart, daemon, and shared-credential state; a running daemon with shared credentials is a failure, an armed autostart is a warning. Credential values are redacted.
-- **`migrate --switch`.** One command performs a first-time cutover: it rejects an installed Next service before touching official, then stops/disables official, final-syncs, installs/starts Next, and directly sends one private completion message to a unique or explicit operator. `--switch` cannot be combined with `--dry-run`.
+- **`migrate --switch`.** One command performs a first-time cutover: it rejects an installed Next service before touching official, then stops/disables official, final-syncs, installs/starts Next, waits for local runtime and platform readiness, and directly sends one private completion message to a unique or explicit operator. `--switch` cannot be combined with `--dry-run`.
 
 No test instance or manual config/work-dir assembly is required. After the dry run succeeds:
 

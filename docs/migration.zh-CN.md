@@ -12,10 +12,12 @@ cc-connect-next migrate --switch
 cc-connect-next daemon status
 ```
 
-`--switch` 会重新执行完整预检，停止可能写入迁移目标的旧 Next，停止并禁用官方
-CC Connect，确认源已静止后完成最终迁移，再以迁移配置和官方原运行目录安装、启动
-cc-connect-next。最终同步或 Next 启动失败时，命令会解除 Next 服务并尽力把官方
-服务恢复到切换前的运行和自启状态。官方 binary 与数据目录始终保留。
+`--switch` 会重新执行完整预检，停止并禁用官方 CC Connect，确认源已静止后完成
+最终迁移，再以迁移配置和官方原运行目录安装、启动 cc-connect-next。它不会把服务
+管理器的 `Running` 当作成功：本地 API 与所有配置平台都必须真实 Ready，才宣布完成
+并发送私聊。最终同步或激活/就绪失败时，只有 Next 已解除注册、runtime socket 不再
+应答且迁移配置锁已释放，才恢复官方服务；否则保持官方禁用，避免双消费者。官方
+binary 与数据目录始终保留。
 
 不带 `--switch` 的 `cc-connect-next migrate` 仍是只复制、不切换流量的高级操作，
 适用于备份或主动配置的并行试用，不是默认用户旅程。
@@ -61,7 +63,7 @@ cc-connect-next migrate \
 - **启动守卫。** 官方 daemon 正在运行且与当前配置共用平台凭证时，`cc-connect-next` 拒绝启动，并给出确切的停止/解除自启命令。官方自启只是"待命"（服务已注册 `RunAtLoad`/`enabled` 但 daemon 未运行）时记录显著警告——冲突离触发只差一次重启。`CC_NEXT_ALLOW_OFFICIAL_CONFLICT=1` 可跳过拒绝（不推荐）。
 - **迁移收尾引导。** 只复制迁移结束后，报告会检测官方 binary、自启注册、运行态和凭证重叠，并把直接 `migrate --switch` 作为默认下一步；并行试用降为高级选项。
 - **`doctor`。** 新增"official CC Connect coexistence"检查区，报告 binary/自启/运行态/共享凭证四项；官方 daemon 运行且凭证重叠记为失败，自启待命记为警告。凭证值一律脱敏。
-- **`migrate --switch`。** 一条命令完成首次割接：若已有 Next 服务则在变更官方服务前拒绝；否则停止并禁用官方 daemon，执行最终 `--force` 同步，用迁移配置和原运行目录安装启动 Next，再由 CLI 直接私聊唯一或显式操作者。`--switch` 不能与 `--dry-run` 同用。
+- **`migrate --switch`。** 一条命令完成首次割接：若已有 Next 服务则在变更官方服务前拒绝；否则停止并禁用官方 daemon，执行最终 `--force` 同步，用迁移配置和原运行目录安装启动 Next，等待本地 runtime 与平台真实 Ready，再由 CLI 直接私聊唯一或显式操作者。`--switch` 不能与 `--dry-run` 同用。
 
 正式切换不要求先运行测试实例，也不要求手工拼接配置路径和工作目录。预检成功后直接执行：
 

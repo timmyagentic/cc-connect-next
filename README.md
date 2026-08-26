@@ -133,7 +133,7 @@ cc-connect-next migrate --switch    # 停官方服务、最终同步并启动 Ne
 cc-connect-next daemon status
 ```
 
-不需要申请第二个飞书应用。`--switch` 从官方 daemon 生命周期之外的终端执行；已连接的 CC Agent 会话会在停服前拒绝。命令要求没有已安装的 Next 服务，随后停止并禁用官方 daemon、完成最终一致性迁移，再用迁移配置与官方原运行目录安装并启动 Next。成功后 CLI 直接用迁移后的飞书/Lark 机器人向唯一或显式操作者私聊“迁移完成，cc-connect-next 已运行”；目标有歧义或发送失败不会误发群聊，也不会回滚成功迁移。官方 binary 和数据始终保留。
+不需要申请第二个飞书应用。`--switch` 从官方 daemon 生命周期之外的终端执行；已连接的 CC Agent 会话会在停服前拒绝。命令要求没有已安装的 Next 服务，随后停止并禁用官方 daemon、完成最终一致性迁移，再用迁移配置与官方原运行目录安装并启动 Next。它会继续等待本地 API 和所有配置平台真实 Ready，之后才由 CLI 用迁移后的飞书/Lark 机器人向唯一或显式操作者私聊“迁移完成，cc-connect-next 已运行”。激活失败时，只有 Next 服务已解除注册、runtime socket 不再应答且迁移配置锁已释放，才恢复官方服务；否则保持官方禁用，避免双消费者。目标有歧义或发送失败不会误发群聊，也不会回滚成功迁移。`daemon status` 会分别显示 Service 与 Runtime/Platforms。官方 binary 和数据始终保留。
 
 双跑冲突由产品层兜底：官方 daemon 还在使用相同飞书凭证时，cc-connect-next 会**拒绝启动**而不是重复消费消息；`doctor` 也会报告共存状态。只复制、不切换服务的 `cc-connect-next migrate` 仍保留给备份和高级并行试用场景。
 

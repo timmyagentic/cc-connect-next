@@ -70,7 +70,7 @@ cc-connect-next migrate --switch
 cc-connect-next daemon status
 ```
 
-Run `--switch` outside a connected CC Agent session and with no installed Next service. It stops/disables official, final-syncs, installs/starts Next, then privately sends the completion message to one unique or explicit Feishu/Lark operator. For manual rollback, unregister Next before restoring official autostart:
+Run `--switch` outside a connected CC Agent session and with no installed Next service. It stops/disables official, final-syncs, installs/starts Next, waits for the local API and every configured platform to report Ready, then privately sends the completion message to one unique or explicit Feishu/Lark operator. Failed activation restores official only after Next is proven unregistered and stopped. For manual rollback, unregister Next before restoring official autostart:
 
 ```bash
 cc-connect-next daemon uninstall
