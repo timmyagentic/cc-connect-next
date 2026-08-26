@@ -445,7 +445,7 @@ GET /api/v1/status?token=mgmt-secret
 
 ### 5.3 会话
 
-会话是项目内的对话上下文。会话由 `session_key`（格式：`platform:chatId:userId`）标识，命名会话还可通过内部 `id` 标识（例如 `/new work` 会创建命名会话）。
+会话是项目内的对话上下文。会话由 `session_key`（格式：`platform:chatId:userId`）标识，命名会话还可通过内部 `id` 标识（例如 `/name 工作` 会命名当前已启动的会话）。
 
 #### GET /api/v1/projects/{name}/sessions
 

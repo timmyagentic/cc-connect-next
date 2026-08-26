@@ -1297,6 +1297,8 @@ func TestCUJ_A6_A7_CoveredByPlatformLayer(t *testing.T) {
 // ===========================================================================
 
 // CUJ-B1 · /new creates a fresh session independent from the previous one.
+// When text follows the command, that text is the first prompt of the new
+// session so the user can reset context and start work in one message.
 func TestCUJ_B1_NewCreatesIndependentSession(t *testing.T) {
 	env := newCUJEnv(t)
 	key := "test:b1"
@@ -1314,6 +1316,43 @@ func TestCUJ_B1_NewCreatesIndependentSession(t *testing.T) {
 	}
 	if len(s2.GetHistory(0)) != 0 {
 		t.Fatalf("/new session should start with empty history, got %d entries", len(s2.GetHistory(0)))
+	}
+
+	env.plat.clearSent()
+	env.userSends("b1", "/new investigate the fresh failure")
+	env.waitFor("prompted /new reply", 2*time.Second, func() bool {
+		return env.sentContains("ok")
+	})
+
+	s3 := env.activeSession(key)
+	if s3.ID == s2.ID || s3.ID == s1ID {
+		t.Fatalf("prompted /new should create another independent session; got %s", s3.ID)
+	}
+	env.waitFor("prompted /new history", 2*time.Second, func() bool {
+		return len(s3.GetHistory(0)) >= 2
+	})
+	history := s3.GetHistory(0)
+	if history[0].Role != "user" || history[0].Content != "investigate the fresh failure" {
+		t.Fatalf("prompted /new first history entry = %#v, want the command remainder", history[0])
+	}
+	for _, entry := range history {
+		if strings.Contains(entry.Content, "first message") {
+			t.Fatalf("prompted /new leaked old context into the fresh session: %#v", history)
+		}
+	}
+	for _, sent := range env.plat.getSent() {
+		if strings.Contains(sent, "New session created") {
+			t.Fatalf("prompted /new should answer the problem directly, got extra confirmation %q", sent)
+		}
+	}
+
+	env.plat.clearSent()
+	env.userSends("b1", "/history")
+	env.waitFor("fresh session history reply", 2*time.Second, func() bool {
+		return env.sentContains("investigate the fresh failure")
+	})
+	if env.sentContains("first message") {
+		t.Fatalf("/history after prompted /new exposed the previous session: %v", env.plat.getSent())
 	}
 }
 

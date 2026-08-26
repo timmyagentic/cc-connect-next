@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Session UX
+
+- `/new <prompt>` now starts a fresh session and immediately handles `<prompt>`
+  as its first user message, so resetting context no longer requires a second
+  send. Plain `/new` still creates an empty session, and explicit titles remain
+  available through `/name`.
+
 ## v0.1.6 (2026-08-24)
 
 Stable release focused on Codex app-server isolation, safer migration and
