@@ -224,6 +224,32 @@ func TestSetupLarkCLICompanionMakesExistingSameAppProfileDefault(t *testing.T) {
 	}
 }
 
+func TestSetupLarkCLICompanionPersistsEffectiveOverrideAsDefault(t *testing.T) {
+	process := &fakeLarkCLIProcess{
+		lookPaths: []string{"/usr/local/bin/lark-cli"},
+		lookErrs:  []error{nil},
+		results: []fakeLarkCLIResult{
+			{stdout: `[{"name":"personal","appId":"cli_personal","active":true},{"name":"next-bot","appId":"cli_alpha","effective":true}]`},
+			{},
+			{stdout: `{"profile":"next-bot","appId":"cli_alpha","identity":"bot","available":true,"tokenStatus":"ready"}`},
+			{},
+		},
+	}
+
+	result, err := setupLarkCLICompanion(context.Background(), larkCLITarget{
+		ProjectName: "alpha", PlatformType: "feishu", AppID: "cli_alpha", AppSecret: "unused",
+	}, larkCLISetupOptions{InstallIfMissing: true}, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Reused || result.ProfileName != "next-bot" || result.PreviousProfile != "personal" {
+		t.Fatalf("result = %+v", result)
+	}
+	if got := process.calls[3]; !slices.Equal(got.args, []string{"profile", "use", "next-bot"}) {
+		t.Fatalf("effective override was not persisted as default: %#v", got)
+	}
+}
+
 func TestSetupLarkCLICompanionDoesNotOverwriteSameNameForDifferentApp(t *testing.T) {
 	process := &fakeLarkCLIProcess{
 		lookPaths: []string{"/usr/local/bin/lark-cli"},

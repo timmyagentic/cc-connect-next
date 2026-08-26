@@ -311,7 +311,12 @@ func decodeLarkCLIProfiles(raw string) ([]larkCLIProfile, error) {
 
 func chooseLarkCLIProfileName(profiles []larkCLIProfile, target larkCLITarget, requested string) (string, bool) {
 	for _, profile := range profiles {
-		if profile.AppID == target.AppID && (profile.Active || profile.Effective) {
+		if profile.AppID == target.AppID && profile.Active {
+			return profile.Name, true
+		}
+	}
+	for _, profile := range profiles {
+		if profile.AppID == target.AppID && profile.Effective {
 			return profile.Name, true
 		}
 	}
@@ -374,11 +379,6 @@ func larkCLIProfileNameExists(profiles []larkCLIProfile, name string) bool {
 
 func activeLarkCLIProfileName(profiles []larkCLIProfile) string {
 	for _, profile := range profiles {
-		if profile.Effective {
-			return profile.Name
-		}
-	}
-	for _, profile := range profiles {
 		if profile.Active {
 			return profile.Name
 		}
@@ -389,7 +389,7 @@ func activeLarkCLIProfileName(profiles []larkCLIProfile) string {
 func larkCLIProfileIsActive(profiles []larkCLIProfile, name string) bool {
 	for _, profile := range profiles {
 		if profile.Name == name {
-			return profile.Active || profile.Effective
+			return profile.Active
 		}
 	}
 	return false
