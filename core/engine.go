@@ -3114,23 +3114,24 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		interactiveKey = resolvedWorkspace + ":" + msg.SessionKey
 	}
 
-	if strings.HasPrefix(content, "/") && (len(msg.Images) == 0 || isNewCommand(content)) {
+	// A `/new <prompt>` continuation may resolve an alias into another slash
+	// command (for example, 帮助 -> /help). Give that normalized result the
+	// same command semantics as an ordinary message, but cap dispatch at two
+	// passes so nested `/new` input can never recurse indefinitely.
+	for commandPass := 0; commandPass < 2 && strings.HasPrefix(content, "/") && (len(msg.Images) == 0 || isNewCommand(content)); commandPass++ {
 		beforeCommandContent := msg.Content
 		if e.handleCommand(p, msg, content) {
 			return
 		}
-		// `/new <prompt>` deliberately returns unconsumed after replacing
-		// msg.Content with the command remainder. Normalize that remainder once
-		// more, then continue below as the first ordinary turn of the new session.
 		// Unknown slash commands leave msg.Content unchanged and retain their
-		// existing fall-through behavior.
-		if msg.Content != beforeCommandContent {
-			content, ok = e.normalizeIncomingContent(p, msg)
-			if !ok || e.rejectBannedContent(p, msg, content) {
-				return
-			}
+		// existing fall-through-to-agent behavior.
+		if msg.Content == beforeCommandContent {
+			break
 		}
-		// Unrecognized slash command — fall through to agent as normal message
+		content, ok = e.normalizeIncomingContent(p, msg)
+		if !ok || e.rejectBannedContent(p, msg, content) {
+			return
+		}
 	}
 
 	// Permission responses bypass the session lock.
@@ -8534,8 +8535,7 @@ func splitCommandArgs(s string) []string {
 	var cur strings.Builder
 	inSingle := false
 	inDouble := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
+	for _, c := range s {
 		switch {
 		case c == '\'' && !inDouble:
 			inSingle = !inSingle
@@ -8547,7 +8547,7 @@ func splitCommandArgs(s string) []string {
 				cur.Reset()
 			}
 		default:
-			cur.WriteByte(c)
+			cur.WriteRune(c)
 		}
 	}
 	if cur.Len() > 0 {

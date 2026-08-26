@@ -4839,6 +4839,33 @@ func TestEngine_Alias(t *testing.T) {
 	}
 }
 
+func TestSplitCommandArgsPreservesUnicode(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{name: "CJK argument", raw: "/name 你好", want: []string{"/name", "你好"}},
+		{name: "Unicode whitespace", raw: "/name\u3000中文标题", want: []string{"/name", "中文标题"}},
+		{name: "newline separator", raw: "/new\n检查日志", want: []string{"/new", "检查日志"}},
+		{name: "quoted CJK group", raw: `/name "中文 标题"`, want: []string{"/name", "中文 标题"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitCommandArgs(tt.raw)
+			if len(got) != len(tt.want) {
+				t.Fatalf("splitCommandArgs(%q) = %#v, want %#v", tt.raw, got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("splitCommandArgs(%q) = %#v, want %#v", tt.raw, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func TestEngine_ClearAliases(t *testing.T) {
 	e := newTestEngine()
 	e.AddAlias("帮助", "/help")
@@ -8313,6 +8340,36 @@ func TestHandleMessage_NewWithPromptProcessesRemainderInFreshSession(t *testing.
 	}
 	if got := agentSession.sentPrompts; len(got) != 1 || !strings.Contains(got[0], wantContent) {
 		t.Fatalf("agent prompts = %#v, want exact command remainder and quoted context", got)
+	}
+}
+
+func TestHandleMessage_NewWithPromptRedispatchesResolvedAlias(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	agentSession := newResultAgentSession("agent should not receive alias command")
+	e := NewEngine("test", &resultAgent{session: agentSession}, []Platform{p}, "", LangEnglish)
+	e.AddAlias("帮助", "/help")
+	key := "test:user1"
+	oldID := e.sessions.GetOrCreateActive(key).ID
+
+	e.ReceiveMessage(p, &Message{
+		SessionKey: key,
+		Platform:   "test",
+		MessageID:  "msg-new-alias",
+		UserID:     "user1",
+		UserName:   "User One",
+		Content:    "/new 帮助",
+		ReplyCtx:   "reply-new-alias",
+	})
+
+	sent := waitForPlatformSend(p, 1, 2*time.Second)
+	if !strings.Contains(strings.Join(sent, "\n"), "Available Commands") {
+		t.Fatalf("/new alias replies = %v, want /help output", sent)
+	}
+	if activeID := e.sessions.GetOrCreateActive(key).ID; activeID == oldID {
+		t.Fatalf("/new alias kept old session %s active", oldID)
+	}
+	if got := agentSession.sentPrompts; len(got) != 0 {
+		t.Fatalf("resolved alias command reached the agent: %#v", got)
 	}
 }
 
