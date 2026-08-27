@@ -281,7 +281,7 @@ type DisplayConfig struct {
 	ToolMessages         *bool   `toml:"tool_messages"`          // whether tool progress messages are shown; default false unless mode = "full" is spelled out
 	HistoryMaxLen        *int    `toml:"history_max_len"`        // max chars per /history entry; 0 = no truncation; default 1000
 	ShowContextIndicator *bool   `toml:"show_context_indicator"` // DEPRECATED no-op: the footer no longer renders token/ctx metadata
-	ReplyFooter          *bool   `toml:"reply_footer"`           // whether the "model · effort" footer is shown; default false
+	ReplyFooter          *bool   `toml:"reply_footer"`           // whether the "model · effort · elapsed" footer is shown; default false
 	HideAgentFooter      *bool   `toml:"hide_agent_footer"`      // strip agent-emitted model/token footer lines; default false
 }
 
@@ -592,7 +592,7 @@ type ProjectConfig struct {
 	// ShowWorkdirIndicator: DEPRECATED no-op, kept so existing configs parse.
 	// The footer no longer renders the workspace directory.
 	ShowWorkdirIndicator *bool `toml:"show_workdir_indicator,omitempty"`
-	// ReplyFooter: true = render the "model · effort" footer under finished
+	// ReplyFooter: true = render the "model · effort · elapsed" footer under finished
 	// replies (plain replies and rich cards alike); nil/false = no footer.
 	ReplyFooter      *bool        `toml:"reply_footer,omitempty"`
 	InjectSender     *bool        `toml:"inject_sender,omitempty"`     // prepend sender identity (platform + user ID) to each message sent to the agent

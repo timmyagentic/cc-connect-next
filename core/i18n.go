@@ -319,18 +319,22 @@ const (
 	MsgCronBtnUnmute          MsgKey = "cron_btn_unmute"
 	MsgCronBtnDelete          MsgKey = "cron_btn_delete"
 
-	MsgStatusTitle           MsgKey = "status_title"
-	MsgReplyFooterRemaining  MsgKey = "reply_footer_remaining"
-	MsgModelCurrent          MsgKey = "model_current"
-	MsgModelChanged          MsgKey = "model_changed"
-	MsgModelChangeFailed     MsgKey = "model_change_failed"
-	MsgModelCardSwitching    MsgKey = "model_card_switching"
-	MsgModelCardSwitched     MsgKey = "model_card_switched"
-	MsgModelCardSwitchFailed MsgKey = "model_card_switch_failed"
-	MsgModelNotSupported     MsgKey = "model_not_supported"
-	MsgReasoningCurrent      MsgKey = "reasoning_current"
-	MsgReasoningChanged      MsgKey = "reasoning_changed"
-	MsgReasoningNotSupported MsgKey = "reasoning_not_supported"
+	MsgStatusTitle                      MsgKey = "status_title"
+	MsgReplyFooterRemaining             MsgKey = "reply_footer_remaining"
+	MsgReplyFooterElapsedLessThanSecond MsgKey = "reply_footer_elapsed_less_than_second"
+	MsgReplyFooterElapsedSeconds        MsgKey = "reply_footer_elapsed_seconds"
+	MsgReplyFooterElapsedMinutes        MsgKey = "reply_footer_elapsed_minutes"
+	MsgReplyFooterElapsedHours          MsgKey = "reply_footer_elapsed_hours"
+	MsgModelCurrent                     MsgKey = "model_current"
+	MsgModelChanged                     MsgKey = "model_changed"
+	MsgModelChangeFailed                MsgKey = "model_change_failed"
+	MsgModelCardSwitching               MsgKey = "model_card_switching"
+	MsgModelCardSwitched                MsgKey = "model_card_switched"
+	MsgModelCardSwitchFailed            MsgKey = "model_card_switch_failed"
+	MsgModelNotSupported                MsgKey = "model_not_supported"
+	MsgReasoningCurrent                 MsgKey = "reasoning_current"
+	MsgReasoningChanged                 MsgKey = "reasoning_changed"
+	MsgReasoningNotSupported            MsgKey = "reasoning_not_supported"
 
 	MsgCompressNotSupported MsgKey = "compress_not_supported"
 	MsgCompressing          MsgKey = "compressing"
@@ -2301,6 +2305,34 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "剩餘 %d%%",
 		LangJapanese:           "残り %d%%",
 		LangSpanish:            "%d%% restante",
+	},
+	MsgReplyFooterElapsedLessThanSecond: {
+		LangEnglish:            "<1s",
+		LangChinese:            "<1秒",
+		LangTraditionalChinese: "<1秒",
+		LangJapanese:           "<1秒",
+		LangSpanish:            "<1 s",
+	},
+	MsgReplyFooterElapsedSeconds: {
+		LangEnglish:            "%.1fs",
+		LangChinese:            "%.1f秒",
+		LangTraditionalChinese: "%.1f秒",
+		LangJapanese:           "%.1f秒",
+		LangSpanish:            "%.1f s",
+	},
+	MsgReplyFooterElapsedMinutes: {
+		LangEnglish:            "%dm %02ds",
+		LangChinese:            "%d分 %02d秒",
+		LangTraditionalChinese: "%d分 %02d秒",
+		LangJapanese:           "%d分 %02d秒",
+		LangSpanish:            "%d min %02d s",
+	},
+	MsgReplyFooterElapsedHours: {
+		LangEnglish:            "%dh %02dm",
+		LangChinese:            "%d小时 %02d分",
+		LangTraditionalChinese: "%d小時 %02d分",
+		LangJapanese:           "%d時間 %02d分",
+		LangSpanish:            "%d h %02d min",
 	},
 	MsgModelCurrent: {
 		LangEnglish:            "Current model: %s",
@@ -4630,26 +4662,36 @@ func (i *I18n) languageForText(text string) Language {
 func richCardCopyForLanguage(lang Language) RichCardCopy {
 	t := func(key MsgKey) string { return translateMessage(key, lang) }
 	return RichCardCopy{
-		Thinking:          t(MsgRichCardThinking),
-		CallingTools:      t(MsgRichCardCallingTools),
-		Answering:         t(MsgRichCardAnswering),
-		Done:              t(MsgRichCardDone),
-		Error:             t(MsgRichCardError),
-		CompletedBody:     t(MsgRichCardCompletedBody),
-		ErrorBody:         t(MsgRichCardErrorBody),
-		PrivacyNotice:     t(MsgRichCardPrivacyNotice),
-		ProgressFormat:    t(MsgRichCardProgressFormat),
-		ThinkingSummary:   t(MsgRichCardThinkingSummary),
-		ToolSummary:       t(MsgRichCardToolSummary),
-		AnswerSummary:     t(MsgRichCardAnswerSummary),
-		ErrorSummary:      t(MsgRichCardErrorSummary),
-		UsageLimit:        t(MsgRichCardUsageLimit),
-		UsageLimitBody:    t(MsgRichCardUsageLimitBody),
-		UsageLimitSummary: t(MsgRichCardUsageLimitSummary),
-		Steering:          t(MsgRichCardSteering),
-		Redirected:        t(MsgRichCardRedirected),
-		RedirectedBody:    t(MsgRichCardRedirectedBody),
-		RedirectedSummary: t(MsgRichCardRedirectedSummary),
+		Thinking:            t(MsgRichCardThinking),
+		CallingTools:        t(MsgRichCardCallingTools),
+		Answering:           t(MsgRichCardAnswering),
+		Done:                t(MsgRichCardDone),
+		Error:               t(MsgRichCardError),
+		CompletedBody:       t(MsgRichCardCompletedBody),
+		ErrorBody:           t(MsgRichCardErrorBody),
+		PrivacyNotice:       t(MsgRichCardPrivacyNotice),
+		ProgressFormat:      t(MsgRichCardProgressFormat),
+		ThinkingSummary:     t(MsgRichCardThinkingSummary),
+		ToolSummary:         t(MsgRichCardToolSummary),
+		AnswerSummary:       t(MsgRichCardAnswerSummary),
+		ErrorSummary:        t(MsgRichCardErrorSummary),
+		UsageLimit:          t(MsgRichCardUsageLimit),
+		UsageLimitBody:      t(MsgRichCardUsageLimitBody),
+		UsageLimitSummary:   t(MsgRichCardUsageLimitSummary),
+		Steering:            t(MsgRichCardSteering),
+		Redirected:          t(MsgRichCardRedirected),
+		RedirectedBody:      t(MsgRichCardRedirectedBody),
+		RedirectedSummary:   t(MsgRichCardRedirectedSummary),
+		ReplyFooterDuration: replyFooterDurationCopyForLanguage(lang),
+	}
+}
+
+func replyFooterDurationCopyForLanguage(lang Language) ReplyFooterDurationCopy {
+	return ReplyFooterDurationCopy{
+		LessThanSecond: translateMessage(MsgReplyFooterElapsedLessThanSecond, lang),
+		SecondsFormat:  translateMessage(MsgReplyFooterElapsedSeconds, lang),
+		MinutesFormat:  translateMessage(MsgReplyFooterElapsedMinutes, lang),
+		HoursFormat:    translateMessage(MsgReplyFooterElapsedHours, lang),
 	}
 }
 

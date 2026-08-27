@@ -1138,14 +1138,14 @@ func TestBuildRichCard_StreamingShowsOnlyAnswer(t *testing.T) {
 	cardJSON := buildRichCard(core.CardStatusWorking, "answer", []core.ToolStep{
 		{Kind: core.ToolStepKindThinking, Summary: "private reasoning"},
 		{Kind: core.ToolStepKindTool, Name: "Bash", Summary: "secret command"},
-	}, "正在生成的答案", true, "model · token · ctx")
+	}, "正在生成的答案", true, "model · effort:max · ⏱ 12.3s")
 
 	for _, want := range []string{"✍️ 正在回答", "正在生成的答案", `"streaming_mode":true`, `"streaming_config"`} {
 		if !strings.Contains(cardJSON, want) {
 			t.Fatalf("streaming rich card should contain %q, got %q", want, cardJSON)
 		}
 	}
-	for _, forbidden := range []string{"private reasoning", "secret command", "推理 1 次", "model · token · ctx", "collapsible_panel"} {
+	for _, forbidden := range []string{"private reasoning", "secret command", "推理 1 次", "model · effort:max · ⏱ 12.3s", "collapsible_panel"} {
 		if strings.Contains(cardJSON, forbidden) {
 			t.Fatalf("streaming rich card leaked %q: %q", forbidden, cardJSON)
 		}
@@ -1157,8 +1157,8 @@ func TestBuildRichCard_CompletedAndErrorStatesAreClean(t *testing.T) {
 		{Kind: core.ToolStepKindThinking, Summary: "private reasoning"},
 		{Kind: core.ToolStepKindTool, Name: "Bash", Summary: "secret command"},
 	}
-	done := buildRichCard(core.CardStatusDone, "done", steps, "最终答案", false, "model · token · ctx")
-	failed := buildRichCard(core.CardStatusError, "error", steps, "", false, "model · token · ctx")
+	done := buildRichCard(core.CardStatusDone, "done", steps, "最终答案", false, "model · effort:max · ⏱ 12.3s")
+	failed := buildRichCard(core.CardStatusError, "error", steps, "", false, "model · effort:max · ⏱ 12.3s")
 
 	for _, want := range []string{"✅ 已完成", "最终答案"} {
 		if !strings.Contains(done, want) {
@@ -1168,7 +1168,7 @@ func TestBuildRichCard_CompletedAndErrorStatesAreClean(t *testing.T) {
 	if !strings.Contains(failed, "⚠️ 未完成") || !strings.Contains(failed, "本次处理未能完成") {
 		t.Fatalf("failed card should contain a safe visible fallback, got %q", failed)
 	}
-	usageLimit := buildRichCard(core.CardStatusError, "usage_limit", steps, "", false, "model · token · ctx")
+	usageLimit := buildRichCard(core.CardStatusError, "usage_limit", steps, "", false, "model · effort:max · ⏱ 12.3s")
 	for _, want := range []string{"⚠️ 额度已用完", "Token 使用额度已用完", "当前 token 使用额度已用完"} {
 		if !strings.Contains(usageLimit, want) {
 			t.Fatalf("usage-limit card should contain %q, got %q", want, usageLimit)
@@ -1177,10 +1177,10 @@ func TestBuildRichCard_CompletedAndErrorStatesAreClean(t *testing.T) {
 	if strings.Contains(usageLimit, "本次处理未能完成") {
 		t.Fatalf("usage-limit card should not use generic failure copy: %q", usageLimit)
 	}
-	// The reply footer (model · effort) is rendered on terminal cards since
+	// The reply footer (model · effort · elapsed) is rendered on terminal cards since
 	// the rich-footer change; only reasoning/tool details stay private.
 	for _, cardJSON := range []string{done, failed} {
-		if !strings.Contains(cardJSON, "model · token · ctx") {
+		if !strings.Contains(cardJSON, "model · effort:max · ⏱ 12.3s") {
 			t.Fatalf("terminal rich card should render the status footer, got %q", cardJSON)
 		}
 		for _, forbidden := range []string{"private reasoning", "secret command", "推理 1 次", "collapsible_panel"} {

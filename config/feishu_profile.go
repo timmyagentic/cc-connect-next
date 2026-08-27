@@ -71,7 +71,7 @@ func RecommendedFeishuProfile(agentType string) []RecommendedFeishuSetting {
 		{feishuProfileTableDisplay, "show_context_indicator", "false",
 			"deprecated no-op, kept for config compatibility"},
 		{feishuProfileTableDisplay, "reply_footer", "false",
-			"keep the \"model · effort\" footer out of the chat"},
+			"keep the \"model · effort · elapsed\" footer out of the chat"},
 		{feishuProfileTableDisplay, "hide_agent_footer", "true",
 			"strip the equivalent model/token/context lines the agent emits itself"},
 

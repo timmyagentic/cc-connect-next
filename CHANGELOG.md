@@ -4,6 +4,13 @@
 
 ### Session UX
 
+- `reply_footer = true` now shows the processing time of each completed turn,
+  alongside the existing model and reasoning effort, on plain replies, rich
+  cards, and native streaming cards (for example,
+  `gpt-5.6-sol · effort:max · ⏱ 12.3s`). Duration units follow the turn's
+  language. Queued turns start timing when their processing actually begins
+  rather than while waiting behind an in-flight turn, and presentation-only
+  rich-card dwell is excluded.
 - Fresh Codex app-server sessions now receive a concise Codex App title from
   the first real user request immediately after `thread/start` returns and
   before the first turn starts. Capability briefs,

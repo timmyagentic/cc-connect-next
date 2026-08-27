@@ -7408,7 +7408,7 @@ func buildRichCardJSONBytes(status core.CardStatus, phase string, steps []core.T
 		"text_align": "left",
 		"text_size":  "normal",
 	}}
-	// Reply footer (model · effort): rendered as a dim notation block after
+	// Reply footer (model · effort · elapsed): rendered as a dim notation block after
 	// the answer body, mirroring the legacy buildCardJSONWithStatusFooter
 	// styling. Only on settled cards — during streaming the footer is noise
 	// and the engine passes "" anyway.
