@@ -530,7 +530,7 @@ func (p *Platform) dispatchInbound(ctx context.Context, m *weixinMessage, h core
 	if strings.TrimSpace(body) == "" && len(images) == 0 && len(files) == 0 && audio == nil && mediaOnlyItems(m.ItemList) {
 		body = "[收到媒体消息：CDN 下载或解密失败，或未配置 cdn_base_url；请改用文字说明。]"
 	}
-	if strings.TrimSpace(body) == "" && len(images) == 0 && len(files) == 0 && audio == nil {
+	if strings.TrimSpace(body) == "" && strings.TrimSpace(extraContent) == "" && len(images) == 0 && len(files) == 0 && audio == nil {
 		return
 	}
 

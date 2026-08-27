@@ -4687,6 +4687,9 @@ func (e *Engine) initializeFreshSessionTitle(ctx context.Context, agentSession A
 	if ctx.Err() != nil {
 		return
 	}
+	if strings.TrimSpace(prompt) == "" {
+		prompt = e.i18n.T(MsgNewConversationTitle)
+	}
 	var err error
 	if setter, ok := agentSession.(ContextInitialSessionTitleSetter); ok {
 		err = setter.SetInitialSessionTitleContext(ctx, prompt)

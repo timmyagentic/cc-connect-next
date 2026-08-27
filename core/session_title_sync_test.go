@@ -157,6 +157,29 @@ func TestGetOrCreateInteractiveStateWith_TitlesFreshSessionAtCreation(t *testing
 	}
 }
 
+func TestInitializeFreshSessionTitle_LocalizesEmptyFallback(t *testing.T) {
+	for _, tt := range []struct {
+		lang Language
+		want string
+	}{
+		{lang: LangEnglish, want: "New conversation"},
+		{lang: LangChinese, want: "新会话"},
+		{lang: LangTraditionalChinese, want: "新會話"},
+		{lang: LangJapanese, want: "新しい会話"},
+		{lang: LangSpanish, want: "Nueva conversación"},
+	} {
+		t.Run(string(tt.lang), func(t *testing.T) {
+			live := &titleSyncAgentSession{controllableAgentSession: newControllableSession("thread-fresh")}
+			e := NewEngine("test", &controllableAgent{nextSession: live}, nil, "", tt.lang)
+
+			e.initializeFreshSessionTitle(context.Background(), live, "")
+			if live.initialCalls != 1 || live.initialPrompt != tt.want {
+				t.Fatalf("fallback calls = %d prompt = %q, want %q", live.initialCalls, live.initialPrompt, tt.want)
+			}
+		})
+	}
+}
+
 func TestProcessInteractiveMessage_CreatesThenTitlesBeforeFirstSend(t *testing.T) {
 	live := &orderedTitleSession{controllableAgentSession: newControllableSession("thread-fresh")}
 	agent := &controllableAgent{
