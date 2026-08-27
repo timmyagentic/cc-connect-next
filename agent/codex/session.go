@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/timmyagentic/cc-connect-next/agent/internal/processgroup"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
@@ -180,7 +181,7 @@ func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files
 
 	cmd := exec.CommandContext(cs.ctx, bin, args...)
 	cmd.Dir = cs.workDir
-	prepareCmdForKill(cmd)
+	processgroup.Prepare(cmd)
 	if len(cs.extraEnv) > 0 {
 		cmd.Env = core.MergeEnv(os.Environ(), cs.extraEnv)
 	}
@@ -709,7 +710,7 @@ func loadCodexRuntimeConfig(ctx context.Context, cliBin string, cliExtraArgs []s
 	args := append(append([]string(nil), cliExtraArgs...), "app-server")
 	cmd := exec.CommandContext(ctx, cliBin, args...)
 	cmd.Dir = workDir
-	prepareCmdForKill(cmd)
+	processgroup.Prepare(cmd)
 	if len(extraEnv) > 0 {
 		cmd.Env = core.MergeEnv(os.Environ(), extraEnv)
 	}
@@ -1037,7 +1038,7 @@ func (cs *codexSession) activeCmds() []*exec.Cmd {
 func forceKillAllCmds(cmds []*exec.Cmd) error {
 	var errs []error
 	for _, cmd := range cmds {
-		if err := forceKillCmd(cmd); err != nil {
+		if err := processgroup.Kill(cmd); err != nil {
 			errs = append(errs, err)
 		}
 	}

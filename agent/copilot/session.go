@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/timmyagentic/cc-connect-next/agent/internal/processgroup"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
@@ -88,7 +89,7 @@ func newCopilotSession(ctx context.Context, workDir, cliBin string, extraArgs []
 
 	child := exec.CommandContext(sessionCtx, cliBin, args...)
 	child.Dir = workDir
-	prepareCmdForKill(child)
+	processgroup.Prepare(child)
 
 	env := os.Environ()
 	if len(extraEnv) > 0 {
@@ -839,7 +840,7 @@ func (cs *copilotSession) Close() error {
 		slog.Warn("copilotSession: graceful stop timed out, sending SIGTERM")
 	}
 
-	terminateCmd(cs.cmd)
+	_ = processgroup.Terminate(cs.cmd)
 
 	select {
 	case <-cs.done:
@@ -850,7 +851,7 @@ func (cs *copilotSession) Close() error {
 	}
 
 	cs.cancel()
-	_ = forceKillCmd(cs.cmd)
+	_ = processgroup.Kill(cs.cmd)
 	<-cs.done
 	return nil
 }
