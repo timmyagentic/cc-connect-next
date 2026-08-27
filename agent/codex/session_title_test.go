@@ -65,6 +65,16 @@ func TestInitialCodexThreadTitle(t *testing.T) {
 			want:   "请使用 token=[secret] 和 api_key=[secret]",
 		},
 		{
+			name:   "short password assignments",
+			prompt: "password=hunter2 pwd=x",
+			want:   "password=[secret] pwd=[secret]",
+		},
+		{
+			name:   "one-character token assignment",
+			prompt: "token=x",
+			want:   "token=[secret]",
+		},
+		{
 			name:   "quoted passphrase",
 			prompt: `请使用 password="correct horse battery staple!" 连接服务`,
 			want:   "请使用 password=[secret] 连接服务",

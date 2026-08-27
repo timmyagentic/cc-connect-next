@@ -17,7 +17,7 @@ var (
 	threadTitleMarkdownLink   = regexp.MustCompile(`\[([^]]+)\]\([^)]+\)`)
 	threadTitleEmail          = regexp.MustCompile(`(?i)[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}`)
 	threadTitleURL            = regexp.MustCompile(`(?i)https?://\S+`)
-	threadTitleAssignedSecret = regexp.MustCompile(`(?i)["']?\b(api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|token|secret|password|passwd|pwd)\b["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[A-Z0-9_./+=-]{8,})`)
+	threadTitleAssignedSecret = regexp.MustCompile(`(?i)["']?\b(api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|token|secret|password|passwd|pwd)\b["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[A-Z0-9_./+=-]+)`)
 	threadTitlePrefixedSecret = regexp.MustCompile(`(?i)\b(?:sk|sess|ghp|gho|ghu|ghs|ghr|github_pat|xox[baprs]|pat)[-_][A-Z0-9_-]{8,}\b`)
 	threadTitleJWT            = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b`)
 	threadTitleAWSKey         = regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`)
