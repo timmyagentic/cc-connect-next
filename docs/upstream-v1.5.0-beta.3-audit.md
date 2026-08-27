@@ -66,6 +66,23 @@ adapted to Next's code shape.
 | `cc869faa` — WeCom quoted messages | Already covered | Next's WeCom adapter already collects main + quote + mixed inbound parts (`wsQuoteBlock`, `wsCollectInboundParts`). |
 | `760079b` / `44c07b61` P1-C — agent idle close timer | Not applicable (re-verified) | Next has no per-process idle-close timer; its idle mechanisms (event-gap turn timeout, workspace reaper, `reset_on_idle_mins`) do not share upstream's arming-order bug shape. |
 
+## Post-v1.5.0 correctness sync (audited 2026-08-27)
+
+This follow-up re-read current upstream `main` after the 2026-08-22 pass and
+ported the three highest-priority correctness fixes. The changes are adapted
+to Next's existing readiness, Feishu lifecycle, and session persistence
+contracts rather than cherry-picked mechanically.
+
+| Upstream change | Decision | Reason / implementation |
+|---|---|---|
+| `1e4c4b2e` — fail closed when Feishu bot `open_id` discovery fails | Adapted | Next already has `PlatformHealth`, async readiness callbacks, shared WebSocket state, and `/healthz`. Identity failure is therefore composed into that health path instead of adding upstream's parallel health interface. Mention-gated group traffic is dropped while degraded, transient startup failures are retried, a five-minute supervisor self-heals, and webhook/private plus explicit reply-all behavior stays compatible. |
+| `ab85b513` — remove Claude Code `--replay-user-messages` | Adapted | Current Claude Code keeps the bidirectional `stream-json` process alive without this flag; retaining it exits after a turn and makes `/compact`, `/clear`, and `/resume` unreachable. A protocol-argument regression test pins its absence while retaining output/input stream-json and stdio permission flags. |
+| `866c180e` — protect an explicit session switch from immediate idle reset | Reimplemented | `Session.ExplicitActivatedAt` is persisted automatically by Next's declared-field JSON snapshot. `/switch`, management/Bridge selection, and agent-session selection mark it; idle reset uses the newer of real user activity and explicit activation. Unlike upstream's extra seven-day ceiling, Next reuses the configured `reset_on_idle_mins` window, so the exemption expires under the operator's existing policy. |
+
+The remaining current-main additions (localized agent tool prompts, Cursor
+image delivery, plugin skill roots, and configurable Weixin inbound dedup)
+remain outside this focused correctness batch.
+
 ## Full-history gap audit v1.4.1 → v1.5.0 (audited 2026-08-22)
 
 The release-gate tables above decided a curated subset. This pass enumerated

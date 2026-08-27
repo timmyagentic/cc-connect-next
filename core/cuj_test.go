@@ -54,6 +54,7 @@ type cujAgent struct {
 	mu       sync.Mutex
 	sessions []*cujAgentSession
 	nextID   int
+	listed   []AgentSessionInfo
 
 	// failStartCount lets tests simulate "agent process won't start" — the
 	// next N StartSession calls return failStartErr. Set both > 0 to use.
@@ -165,9 +166,17 @@ func (a *cujAgent) StartSession(_ context.Context, _ string) (AgentSession, erro
 }
 
 func (a *cujAgent) ListSessions(_ context.Context) ([]AgentSessionInfo, error) {
-	return nil, nil
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]AgentSessionInfo(nil), a.listed...), nil
 }
 func (a *cujAgent) Stop() error { return nil }
+
+func (a *cujAgent) setListedSessions(sessions ...AgentSessionInfo) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.listed = append([]AgentSessionInfo(nil), sessions...)
+}
 
 // cujAgentSession is an AgentSession whose reply is controllable per-Send.
 // Tests can set reply (and optionally toolEvent) before each Send to drive
@@ -394,6 +403,13 @@ func TestCUJ_B3_SwitchPreservesHistoryEndToEnd(t *testing.T) {
 	env.waitFor("s1 history has user+assistant", 2*time.Second, func() bool {
 		return len(s1.GetHistory(0)) >= 2
 	})
+	s1.SetAgentInfo("agent-s1", "cuj", "s1 session")
+	staleAt := time.Now().Add(-2 * time.Hour)
+	s1.mu.Lock()
+	s1.LastUserActivity = staleAt
+	s1.UpdatedAt = staleAt
+	s1.mu.Unlock()
+	env.engine.SetResetOnIdle(30 * time.Minute)
 
 	// 2. User creates s2 manually.
 	s2 := env.engine.sessions.NewSession(key, "s2-name")
@@ -407,31 +423,58 @@ func TestCUJ_B3_SwitchPreservesHistoryEndToEnd(t *testing.T) {
 	env.waitFor("s2 first reply", 2*time.Second, func() bool {
 		return len(env.plat.getSent()) >= 1
 	})
+	s2.SetAgentInfo("agent-s2", "cuj", "s2 session")
+	env.agent.setListedSessions(
+		AgentSessionInfo{ID: "agent-s1", Summary: "s1 session", MessageCount: 2, ModifiedAt: staleAt},
+		AgentSessionInfo{ID: "agent-s2", Summary: "s2 session", MessageCount: 2, ModifiedAt: time.Now()},
+	)
 
-	// 4. User switches back to s1.
-	switched, err := env.engine.sessions.SwitchSession(key, s1ID)
-	if err != nil {
-		t.Fatalf("SwitchSession back to s1: %v", err)
-	}
-	if switched.ID != s1ID {
-		t.Fatalf("switched to %s, want %s", switched.ID, s1ID)
+	// 4. User switches back to the long-idle s1 through the same public entry
+	// point a real platform uses. This must record explicit activation before
+	// the next ordinary message reaches idle-reset handling.
+	env.plat.clearSent()
+	env.userSends("alice", "/switch agent-s1")
+	env.waitFor("switch acknowledgement", 2*time.Second, func() bool {
+		return env.sentContains("Switched")
+	})
+	if active := env.activeSession(key); active.ID != s1ID {
+		t.Fatalf("active session after /switch = %s, want %s", active.ID, s1ID)
 	}
 
-	// 5. /history should show original 2 entries (regression of the
-	// cmdSwitch.ClearHistory bug — if it returns, this test fails).
-	got := switched.GetHistory(0)
-	if len(got) < 2 {
-		t.Fatalf("after switching back to s1, history has %d entries; want ≥2. History was wiped — cmdSwitch regression?", len(got))
+	// 5. The first ordinary message after /switch must remain in s1 even though
+	// s1's prior user activity is older than reset_on_idle_mins.
+	env.plat.clearSent()
+	env.userSends("alice", "continue in s1")
+	env.waitFor("post-switch reply", 2*time.Second, func() bool {
+		return len(env.plat.getSent()) >= 1
+	})
+	if env.sentContains("Session auto-reset") {
+		t.Fatalf("post-switch output unexpectedly auto-reset the selected session: %v", env.plat.getSent())
 	}
-	foundUserMsg := false
+	if active := env.activeSession(key); active.ID != s1ID {
+		t.Fatalf("post-switch message routed to %s, want selected s1 %s", active.ID, s1ID)
+	}
+
+	// 6. The selected session keeps both its original conversation and the new
+	// post-switch turn; this also preserves the original B3 history contract.
+	env.waitFor("post-switch history persisted", 2*time.Second, func() bool {
+		return len(s1.GetHistory(0)) >= 4
+	})
+	got := s1.GetHistory(0)
+	if len(got) < 4 {
+		t.Fatalf("after switching back to s1, history has %d entries; want ≥4", len(got))
+	}
+	foundOriginal, foundFollowUp := false, false
 	for _, h := range got {
 		if h.Role == "user" && strings.Contains(h.Content, "hello from s1") {
-			foundUserMsg = true
-			break
+			foundOriginal = true
+		}
+		if h.Role == "user" && strings.Contains(h.Content, "continue in s1") {
+			foundFollowUp = true
 		}
 	}
-	if !foundUserMsg {
-		t.Fatalf("history after switch back is missing the original user message. Got: %+v", got)
+	if !foundOriginal || !foundFollowUp {
+		t.Fatalf("history after switch back missing original=%v follow-up=%v: %+v", foundOriginal, foundFollowUp, got)
 	}
 }
 

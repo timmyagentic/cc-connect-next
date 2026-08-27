@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Correctness and upstream compatibility
+
+- Feishu/Lark WebSocket projects now fail closed for mention-gated group
+  traffic when startup cannot resolve the bot `open_id`. The degraded identity
+  reaches the existing runtime health/readiness surface, transient discovery
+  is retried, and a background supervisor restores normal filtering after
+  recovery. Webhook/private deployments and explicit `group_reply_all` remain
+  unchanged.
+- Claude Code sessions no longer pass `--replay-user-messages`, which made
+  current Claude CLI processes exit after each turn and prevented native
+  commands such as `/compact` from reaching the live session. The existing
+  bidirectional `stream-json` and stdio permission protocol is preserved.
+- Explicit `/switch`, management, and Bridge session selection records a
+  persisted activation timestamp. The first message stays in the selected
+  conversation even when its prior activity is older than
+  `reset_on_idle_mins`; the normal idle window applies again afterward.
+
 ### Session UX
 
 - `reply_footer = true` now shows the processing time of each completed turn,

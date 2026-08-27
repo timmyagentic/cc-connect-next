@@ -39,6 +39,12 @@ type Session struct {
 	// processes an actual incoming user message. It is used by reset_on_idle_mins
 	// so that automated activity cannot prevent idle session rotation.
 	LastUserActivity time.Time `json:"last_user_activity,omitempty"`
+	// ExplicitActivatedAt records when a user deliberately selected this
+	// session. The idle-reset baseline uses the newer of this value and the
+	// last real user activity, so the first message after /switch stays in the
+	// requested conversation. The normal reset_on_idle_mins window naturally
+	// expires this exemption; no separate long-lived grace period is needed.
+	ExplicitActivatedAt time.Time `json:"explicit_activated_at,omitempty"`
 
 	mu   sync.Mutex `json:"-"`
 	busy bool       `json:"-"`
@@ -185,6 +191,18 @@ func (s *Session) GetLastUserActivity() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.LastUserActivity
+}
+
+func (s *Session) MarkExplicitlyActivated() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ExplicitActivatedAt = time.Now()
+}
+
+func (s *Session) GetExplicitActivatedAt() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ExplicitActivatedAt
 }
 
 func (s *Session) GetUpdatedAt() time.Time {
@@ -414,6 +432,7 @@ func (sm *SessionManager) SwitchSession(userKey, target string) (*Session, error
 		s := sm.sessions[sid]
 		if s != nil && (s.ID == target || s.Name == target) {
 			sm.activeSession[userKey] = s.ID
+			s.MarkExplicitlyActivated()
 			sm.saveLocked()
 			return s, nil
 		}
@@ -439,6 +458,7 @@ func (sm *SessionManager) SwitchToAgentSession(userKey, agentSID, agentName, sum
 		s.mu.Unlock()
 		if aid == agentSID {
 			sm.activeSession[userKey] = s.ID
+			s.MarkExplicitlyActivated()
 			sm.saveLocked()
 			return s
 		}
@@ -446,6 +466,7 @@ func (sm *SessionManager) SwitchToAgentSession(userKey, agentSID, agentName, sum
 
 	s := sm.createLocked(userKey, summary)
 	s.SetAgentInfo(agentSID, agentName, summary)
+	s.MarkExplicitlyActivated()
 	sm.saveLocked()
 	return s
 }
