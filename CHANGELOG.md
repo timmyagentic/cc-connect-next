@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Session UX
+
+- Fresh Codex app-server sessions now receive a concise Codex App title from
+  the first real user request immediately after `thread/start` returns and
+  before the first turn starts. Capability briefs,
+  sender metadata, quoted context, links, emails, and token-like secrets are
+  excluded or redacted; explicit `/name` updates are also synchronized when a
+  compatible live Codex session is available.
+
 ## v0.2.0 (2026-08-26)
 
 Stable release focused on Codex app-server isolation, safer migration and

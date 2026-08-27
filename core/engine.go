@@ -4112,7 +4112,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	if agent != e.agent {
 		agentOverride = agent
 	}
-	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, sessions, agentOverride, ccSessionKey)
+	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, sessions, agentOverride, ccSessionKey, msg.Content)
 
 	// Set workspaceDir on the state for idle reaper identification
 	if workspaceDir != "" {
@@ -4392,7 +4392,8 @@ func adoptPendingFromPlaceholder(existing, newState *interactiveState) {
 
 // When agentOverride is non-nil it is used instead of e.agent to start the session.
 // ccSessionKey, when non-empty, is used for CC_SESSION_KEY env injection; otherwise sessionKey is used.
-func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey string) *interactiveState {
+// initialTitlePrompt is the real request that triggered a fresh backend session.
+func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey, initialTitlePrompt string) *interactiveState {
 	e.interactiveMu.Lock()
 	defer e.interactiveMu.Unlock()
 
@@ -4507,6 +4508,7 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 		}
 	}
 	isResume := startSessionID != ""
+	createdFresh := !isResume
 	startAt := time.Now()
 	agentSession, err := agent.StartSession(e.ctx, startSessionID)
 	startElapsed := time.Since(startAt)
@@ -4524,6 +4526,7 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 			agentSession, err = agent.StartSession(e.ctx, "")
 			startElapsed = time.Since(startAt)
 			if err == nil {
+				createdFresh = true
 				slog.Info("fresh session started after resume failure",
 					"session_key", sessionKey, "elapsed", startElapsed)
 			}
@@ -4542,6 +4545,9 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 			e.interactiveStates[sessionKey] = state
 			return state
 		}
+	}
+	if createdFresh {
+		e.initializeFreshSessionTitle(agentSession, initialTitlePrompt)
 	}
 	if startElapsed >= slowAgentStart {
 		slog.Warn("slow agent session start", "elapsed", startElapsed, "agent", agent.Name(), "session_id", startSessionID)
@@ -4597,6 +4603,17 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 	})
 
 	return state
+}
+
+func (e *Engine) initializeFreshSessionTitle(agentSession AgentSession, prompt string) {
+	setter, ok := agentSession.(InitialSessionTitleSetter)
+	if !ok {
+		return
+	}
+	if err := setter.SetInitialSessionTitle(prompt); err != nil {
+		slog.Warn("failed to initialize agent session title",
+			"session_id", agentSession.CurrentSessionID(), "error", err)
+	}
 }
 
 // cleanupInteractiveState removes the interactive state for the given session key
@@ -10115,7 +10132,7 @@ func (e *Engine) cmdName(p Platform, msg *Message, args []string) {
 		return
 	}
 
-	agent, sessions, _, err := e.commandContext(p, msg)
+	agent, sessions, interactiveKey, err := e.commandContext(p, msg)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgWsResolutionError, err))
 		return
@@ -10161,12 +10178,34 @@ func (e *Engine) cmdName(p Platform, msg *Message, args []string) {
 	}
 
 	sessions.SetSessionName(targetID, name)
+	e.syncLiveSessionTitle(interactiveKey, targetID, name)
 
 	shortID := targetID
 	if len(shortID) > 12 {
 		shortID = shortID[:12]
 	}
 	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgNameSet), name, shortID))
+}
+
+func (e *Engine) syncLiveSessionTitle(interactiveKey, targetID, title string) {
+	e.interactiveMu.Lock()
+	state := e.interactiveStates[interactiveKey]
+	e.interactiveMu.Unlock()
+	if state == nil {
+		return
+	}
+
+	state.mu.Lock()
+	agentSession := state.agentSession
+	state.mu.Unlock()
+	setter, ok := agentSession.(SessionTitleSetter)
+	if !ok {
+		return
+	}
+	if err := setter.SetSessionTitle(targetID, title); err != nil {
+		slog.Warn("failed to sync agent session title",
+			"session_id", targetID, "error", err)
+	}
 }
 
 func (e *Engine) cmdCurrent(p Platform, msg *Message) {
@@ -17485,7 +17524,9 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 	// Use the engine context (not the relay timeout context) so that the
 	// agent process is not killed when the relay deadline fires. The relay
 	// timeout only controls how long we *wait* for the response.
-	agentSession, err := agent.StartSession(e.ctx, session.GetAgentSessionID())
+	startSessionID := session.GetAgentSessionID()
+	createdFresh := startSessionID == ""
+	agentSession, err := agent.StartSession(e.ctx, startSessionID)
 	if err != nil {
 		// Resume failed — fall back to a fresh session so the relay is not
 		// permanently broken by a corrupted/stale session ID.
@@ -17495,10 +17536,16 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 			session.SetAgentSessionID("", agent.Name())
 			sessions.Save()
 			agentSession, err = agent.StartSession(e.ctx, "")
+			if err == nil {
+				createdFresh = true
+			}
 		}
 		if err != nil {
 			return "", fmt.Errorf("start relay session: %w", err)
 		}
+	}
+	if createdFresh {
+		e.initializeFreshSessionTitle(agentSession, message)
 	}
 	saveRelaySessionID := func(id string, force bool) {
 		if id == "" {

@@ -222,6 +222,9 @@ type appServerSession struct {
 	pendingMsgs  []string
 	currentTurn  string
 	preambleSent bool
+	// initialTitleHandled prevents later turns from replacing a fresh thread's
+	// first user-facing title. Resumed threads start with this already set.
+	initialTitleHandled bool
 
 	runtimeMu   sync.RWMutex
 	usage       *core.UsageReport
@@ -233,6 +236,7 @@ const (
 	appServerRequestTimeout       = 120 * time.Second
 	appServerResponseWriteTimeout = 1500 * time.Millisecond
 	appServerUsageRefreshTimeout  = 1500 * time.Millisecond
+	appServerTitleUpdateTimeout   = 1500 * time.Millisecond
 )
 
 // appServerSessionParams bundles the launch configuration for a Codex
@@ -265,26 +269,27 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 	}
 	sessionCtx, cancel := context.WithCancel(ctx)
 	s := &appServerSession{
-		url:              p.url,
-		cliBin:           cliBin,
-		cliExtraArgs:     append([]string(nil), p.cliExtraArgs...),
-		workDir:          p.workDir,
-		model:            p.model,
-		contextWindow:    p.contextWindow,
-		effort:           p.effort,
-		serviceTier:      p.serviceTier,
-		mode:             p.mode,
-		baseURL:          p.baseURL,
-		modelProvider:    p.modelProvider,
-		extraEnv:         append([]string(nil), p.extraEnv...),
-		codexHome:        strings.TrimSpace(p.codexHome),
-		promptPreamble:   buildCodexPromptPreamble(p.systemPrompt, p.appendPrompt),
-		events:           make(chan core.Event, 128),
-		ctx:              sessionCtx,
-		cancel:           cancel,
-		pending:          make(map[int64]chan rpcResponseEnvelope),
-		pendingApprovals: make(map[string]chan core.PermissionResult),
-		preambleSent:     p.resumeID != "" && p.resumeID != core.ContinueSession,
+		url:                 p.url,
+		cliBin:              cliBin,
+		cliExtraArgs:        append([]string(nil), p.cliExtraArgs...),
+		workDir:             p.workDir,
+		model:               p.model,
+		contextWindow:       p.contextWindow,
+		effort:              p.effort,
+		serviceTier:         p.serviceTier,
+		mode:                p.mode,
+		baseURL:             p.baseURL,
+		modelProvider:       p.modelProvider,
+		extraEnv:            append([]string(nil), p.extraEnv...),
+		codexHome:           strings.TrimSpace(p.codexHome),
+		promptPreamble:      buildCodexPromptPreamble(p.systemPrompt, p.appendPrompt),
+		events:              make(chan core.Event, 128),
+		ctx:                 sessionCtx,
+		cancel:              cancel,
+		pending:             make(map[int64]chan rpcResponseEnvelope),
+		pendingApprovals:    make(map[string]chan core.PermissionResult),
+		preambleSent:        p.resumeID != "" && p.resumeID != core.ContinueSession,
+		initialTitleHandled: p.resumeID != "" && p.resumeID != core.ContinueSession,
 	}
 	s.alive.Store(true)
 
@@ -598,6 +603,59 @@ func (s *appServerSession) send(prompt string, images []core.ImageAttachment, fi
 	s.storeActiveTurnOptions(options)
 
 	return nil
+}
+
+// SetSessionTitle persists a user-facing Codex thread name. Naming is
+// metadata-only and intentionally separate from turn input.
+func (s *appServerSession) SetSessionTitle(sessionID, title string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	title = strings.TrimSpace(title)
+	if sessionID == "" {
+		return fmt.Errorf("codex app-server thread id is empty")
+	}
+	if title == "" {
+		return fmt.Errorf("codex app-server thread title is empty")
+	}
+	if !s.alive.Load() {
+		return fmt.Errorf("session is closed")
+	}
+
+	if sessionID == s.CurrentSessionID() {
+		s.stateMu.Lock()
+		s.initialTitleHandled = true
+		s.stateMu.Unlock()
+	}
+
+	var resp struct{}
+	if err := s.requestWithTimeout("thread/name/set", map[string]any{
+		"threadId": sessionID,
+		"name":     title,
+	}, &resp, appServerTitleUpdateTimeout); err != nil {
+		return fmt.Errorf("codex app-server thread/name/set: %w", err)
+	}
+	return nil
+}
+
+// SetInitialSessionTitle names a fresh app-server thread at the creation
+// boundary. Send intentionally does not own this lifecycle step.
+func (s *appServerSession) SetInitialSessionTitle(prompt string) error {
+	threadID := s.CurrentSessionID()
+	if threadID == "" {
+		return fmt.Errorf("codex app-server thread id is empty")
+	}
+	title := initialCodexThreadTitle(prompt)
+
+	s.stateMu.Lock()
+	if s.initialTitleHandled {
+		s.stateMu.Unlock()
+		return nil
+	}
+	// Consume the one-shot attempt even when an older app-server rejects the
+	// method; repeated metadata failures must not tax every later turn.
+	s.initialTitleHandled = true
+	s.stateMu.Unlock()
+
+	return s.SetSessionTitle(threadID, title)
 }
 
 func (s *appServerSession) turnStartParams(threadID string, input []map[string]any, options *core.TurnOptions) map[string]any {
