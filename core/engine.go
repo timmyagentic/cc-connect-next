@@ -1736,12 +1736,14 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 	}
 
 	content := job.Prompt
+	initialTitlePrompt := content
 	if strings.HasPrefix(content, "/") {
 		parts := strings.Fields(content)
 		if len(parts) > 0 {
 			cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
 			if skill := e.skills.Resolve(cmd); skill != nil {
 				content = BuildSkillInvocationPrompt(skill, parts[1:])
+				initialTitlePrompt = BuildSkillInvocationTitle(skill, parts[1:])
 			}
 		}
 	}
@@ -1807,7 +1809,7 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 			iKey = workspaceDir + ":" + iKey
 		}
 		prevHistLen := session.HistoryLen()
-		e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, runSessionKey, msg.Content)
+		e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, runSessionKey, initialTitlePrompt)
 		e.cleanupInteractiveState(iKey)
 		// Empty-response detection via session history delta: processInteractiveMessageWith
 		// always adds a "user" entry (prevHistLen+1), then an "assistant" entry on success
@@ -1830,7 +1832,7 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 		iKey = workspaceDir + ":" + sessionKey
 	}
 	prevHistLen := session.HistoryLen()
-	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey, msg.Content)
+	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey, initialTitlePrompt)
 	// Same empty-response detection as the useNewSession path above.
 	if !job.Mute && session.HistoryLen() < prevHistLen+2 {
 		return fmt.Errorf("cron job %q produced an empty response", job.ID)
@@ -1939,12 +1941,14 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 	}
 
 	content := job.Prompt
+	initialTitlePrompt := content
 	if strings.HasPrefix(content, "/") {
 		parts := strings.Fields(content)
 		if len(parts) > 0 {
 			cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
 			if skill := e.skills.Resolve(cmd); skill != nil {
 				content = BuildSkillInvocationPrompt(skill, parts[1:])
+				initialTitlePrompt = BuildSkillInvocationTitle(skill, parts[1:])
 			}
 		}
 	}
@@ -2007,7 +2011,7 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 		if workspaceDir != "" {
 			iKey = workspaceDir + ":" + iKey
 		}
-		e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, runSessionKey, msg.Content)
+		e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, runSessionKey, initialTitlePrompt)
 		e.cleanupInteractiveState(iKey)
 		return nil
 	}
@@ -2021,7 +2025,7 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 	if workspaceDir != "" {
 		iKey = workspaceDir + ":" + sessionKey
 	}
-	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey, msg.Content)
+	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey, initialTitlePrompt)
 	return nil
 }
 
@@ -4397,7 +4401,7 @@ func adoptPendingFromPlaceholder(existing, newState *interactiveState) {
 func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey, initialTitlePrompt string) *interactiveState {
 	state, freshSession := e.getOrCreateInteractiveState(sessionKey, p, replyCtx, session, sessions, agentOverride, ccSessionKey)
 	if freshSession != nil {
-		e.initializeFreshSessionTitle(freshSession, initialTitlePrompt)
+		e.initializeFreshSessionTitle(e.ctx, freshSession, initialTitlePrompt)
 	}
 	return state
 }
@@ -4617,12 +4621,22 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	return state, nil
 }
 
-func (e *Engine) initializeFreshSessionTitle(agentSession AgentSession, prompt string) {
-	setter, ok := agentSession.(InitialSessionTitleSetter)
-	if !ok {
+func (e *Engine) initializeFreshSessionTitle(ctx context.Context, agentSession AgentSession, prompt string) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil {
 		return
 	}
-	if err := setter.SetInitialSessionTitle(prompt); err != nil {
+	var err error
+	if setter, ok := agentSession.(ContextInitialSessionTitleSetter); ok {
+		err = setter.SetInitialSessionTitleContext(ctx, prompt)
+	} else if setter, ok := agentSession.(InitialSessionTitleSetter); ok {
+		err = setter.SetInitialSessionTitle(prompt)
+	} else {
+		return
+	}
+	if err != nil {
 		slog.Warn("failed to initialize agent session title",
 			"session_id", agentSession.CurrentSessionID(), "error", err)
 	}
@@ -16301,7 +16315,8 @@ func (e *Engine) executeCustomCommand(p Platform, msg *Message, cmd *CustomComma
 	)
 
 	msg.Content = prompt
-	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey, prompt)
+	titlePrompt := commandInvocationTitle(cmd.Name, args)
+	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey, titlePrompt)
 }
 
 // executeShellCommand runs a shell command and sends the output to the user.
@@ -16529,7 +16544,8 @@ func (e *Engine) executeSkill(p Platform, msg *Message, skill *Skill, args []str
 	)
 
 	msg.Content = prompt
-	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey, prompt)
+	titlePrompt := BuildSkillInvocationTitle(skill, args)
+	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey, titlePrompt)
 }
 
 func (e *Engine) cmdSkills(p Platform, msg *Message) {
@@ -17513,6 +17529,9 @@ func (e *Engine) relayContextForSourceSessionKey(fromProject, sourceSessionKey s
 // dedicated relay session, sends the message to the agent, and blocks until
 // the complete response is collected (or the relay context times out).
 func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey, message string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	agent, sessions, relaySessionKey, err := e.relayContextForSourceSessionKey(fromProject, sourceSessionKey)
 	if err != nil {
 		return "", err
@@ -17543,6 +17562,9 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 		// Resume failed — fall back to a fresh session so the relay is not
 		// permanently broken by a corrupted/stale session ID.
 		if session.GetAgentSessionID() != "" {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return "", ctxErr
+			}
 			slog.Warn("relay: session resume failed, trying fresh session",
 				"relay_key", relaySessionKey, "error", err)
 			session.SetAgentSessionID("", agent.Name())
@@ -17556,8 +17578,16 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 			return "", fmt.Errorf("start relay session: %w", err)
 		}
 	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		closeRelayAgentSession(agentSession, relaySessionKey)
+		return "", ctxErr
+	}
 	if createdFresh {
-		e.initializeFreshSessionTitle(agentSession, message)
+		e.initializeFreshSessionTitle(ctx, agentSession, message)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			closeRelayAgentSession(agentSession, relaySessionKey)
+			return "", ctxErr
+		}
 	}
 	saveRelaySessionID := func(id string, force bool) {
 		if id == "" {
@@ -17582,6 +17612,10 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 
 	saveRelaySessionID(agentSession.CurrentSessionID(), false)
 
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		closeRelayAgentSession(agentSession, relaySessionKey)
+		return "", ctxErr
+	}
 	if err := e.sendAgentTurn(agent, agentSession, message, nil, nil, ""); err != nil {
 		closeRelayAgentSession(agentSession, relaySessionKey)
 		return "", fmt.Errorf("send relay message: %w", err)

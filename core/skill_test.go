@@ -200,6 +200,19 @@ func TestSkillRegistryListAll_IgnoresRootSkillFile(t *testing.T) {
 	}
 }
 
+func TestBuildSkillInvocationTitle_PreservesSkillAndUserArguments(t *testing.T) {
+	skill := &Skill{
+		Name:        "imagegen",
+		DisplayName: "Image Generator",
+		Prompt:      "The generic wrapper must not become the title.",
+	}
+
+	got := BuildSkillInvocationTitle(skill, []string{"生成", "一张产品图"})
+	if got != "/imagegen 生成 一张产品图" {
+		t.Fatalf("BuildSkillInvocationTitle() = %q, want invocation-derived title", got)
+	}
+}
+
 func writeSkillFile(t *testing.T, path, description string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

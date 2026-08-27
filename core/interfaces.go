@@ -677,6 +677,13 @@ type InitialSessionTitleSetter interface {
 	SetInitialSessionTitle(prompt string) error
 }
 
+// ContextInitialSessionTitleSetter lets bounded callers cancel optional title
+// generation before a backend turn starts. Implementations should keep the
+// non-context method for callers whose lifecycle is owned by the session.
+type ContextInitialSessionTitleSetter interface {
+	SetInitialSessionTitleContext(ctx context.Context, prompt string) error
+}
+
 // WorkDirSwitcher is an optional interface for agents that support runtime
 // work directory switching. The change takes effect on the next session start;
 // the current running session is terminated automatically by the engine.

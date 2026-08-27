@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/timmyagentic/cc-connect-next/core"
 )
@@ -62,6 +63,16 @@ func TestInitialCodexThreadTitle(t *testing.T) {
 			name:   "assignment credential",
 			prompt: "请使用 token=abcdefghijklmnop 和 api_key=zyxwvutsrqponmlk",
 			want:   "请使用 token=[secret] 和 api_key=[secret]",
+		},
+		{
+			name:   "quoted passphrase",
+			prompt: `请使用 password="correct horse battery staple!" 连接服务`,
+			want:   "请使用 password=[secret] 连接服务",
+		},
+		{
+			name:   "json client secret",
+			prompt: `检查 "client_secret": "value with spaces & punctuation!" 是否有效`,
+			want:   "检查 client_secret=[secret] 是否有效",
 		},
 		{
 			name:   "github pat",
@@ -230,6 +241,67 @@ func TestAppServerSession_OptionalTitleModel(t *testing.T) {
 	}
 }
 
+func TestAppServerSession_ExplicitRenameWinsDuringInitialGeneration(t *testing.T) {
+	stdin := &steerFakeStdin{}
+	s := newSteerTestSession(t, stdin, "thread-1", "")
+	s.sessionTitleModel = "gpt-5.3-codex-spark"
+	started := make(chan struct{})
+	release := make(chan struct{})
+	s.titleGenerator = func(context.Context, string) (string, error) {
+		close(started)
+		<-release
+		return "自动生成标题", nil
+	}
+	stdin.respond = respondSuccess(s, `{}`)
+
+	initialDone := make(chan error, 1)
+	go func() {
+		initialDone <- s.SetInitialSessionTitle("首个真实问题")
+	}()
+	<-started
+	if err := s.SetSessionTitle("thread-1", "用户显式标题"); err != nil {
+		t.Fatalf("SetSessionTitle() error = %v", err)
+	}
+	close(release)
+	if err := <-initialDone; err != nil {
+		t.Fatalf("SetInitialSessionTitle() error = %v", err)
+	}
+
+	stdin.mu.Lock()
+	requests := append([]map[string]any(nil), stdin.requests...)
+	stdin.mu.Unlock()
+	if len(requests) != 1 {
+		t.Fatalf("thread/name/set request count = %d, want only explicit rename", len(requests))
+	}
+	params, _ := requests[0]["params"].(map[string]any)
+	if params["name"] != "[飞书] 用户显式标题" {
+		t.Fatalf("final title request = %#v, want explicit rename", params)
+	}
+}
+
+func TestAppServerSession_ContextDeadlineStopsTitleBeforeRPC(t *testing.T) {
+	stdin := &steerFakeStdin{}
+	s := newSteerTestSession(t, stdin, "thread-1", "")
+	s.sessionTitleModel = "gpt-5.3-codex-spark"
+	s.titleGenerator = func(ctx context.Context, _ string) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	err := s.SetInitialSessionTitleContext(ctx, "首个真实问题")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("SetInitialSessionTitleContext() error = %v, want context deadline exceeded", err)
+	}
+	stdin.mu.Lock()
+	requestCount := len(stdin.requests)
+	stdin.mu.Unlock()
+	if requestCount != 0 {
+		t.Fatalf("thread/name/set request count = %d, want 0 after deadline", requestCount)
+	}
+}
+
 func TestSessionTitleGenerationArgsAreEphemeralAndPromptFree(t *testing.T) {
 	s := &appServerSession{
 		cliExtraArgs:      []string{"--profile", "work", "--dangerously-bypass-approvals-and-sandbox"},
@@ -370,3 +442,4 @@ func TestAppServerSession_SetSessionTitleUsesOfficialRPC(t *testing.T) {
 
 var _ core.SessionTitleSetter = (*appServerSession)(nil)
 var _ core.InitialSessionTitleSetter = (*appServerSession)(nil)
+var _ core.ContextInitialSessionTitleSetter = (*appServerSession)(nil)

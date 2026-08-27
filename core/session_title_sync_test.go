@@ -81,6 +81,30 @@ type blockingTitleSession struct {
 	release chan struct{}
 }
 
+type relayDeadlineTitleSession struct {
+	*controllableAgentSession
+	sendMu    sync.Mutex
+	sendCalls int
+}
+
+func (s *relayDeadlineTitleSession) SetInitialSessionTitleContext(ctx context.Context, _ string) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (s *relayDeadlineTitleSession) Send(string, []ImageAttachment, []FileAttachment) error {
+	s.sendMu.Lock()
+	s.sendCalls++
+	s.sendMu.Unlock()
+	return nil
+}
+
+func (s *relayDeadlineTitleSession) sendCount() int {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	return s.sendCalls
+}
+
 func (s *blockingTitleSession) SetInitialSessionTitle(string) error {
 	close(s.started)
 	<-s.release
@@ -262,6 +286,48 @@ func TestHandleRelay_TitlesFreshSessionAtCreation(t *testing.T) {
 	}
 	if live.initialCalls != 1 || live.initialPrompt != "relay first request" {
 		t.Fatalf("relay title calls = %d, prompt = %q", live.initialCalls, live.initialPrompt)
+	}
+}
+
+func TestHandleRelay_DeadlineDuringTitleGenerationSkipsTurn(t *testing.T) {
+	live := &relayDeadlineTitleSession{controllableAgentSession: newControllableSession("relay-thread")}
+	e := newTestEngine()
+	e.agent = &controllableAgent{nextSession: live}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	response, err := e.HandleRelay(ctx, "source", "test:chat-1:user", "relay first request")
+	if response != "" {
+		t.Fatalf("HandleRelay() response = %q, want empty on title deadline", response)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("HandleRelay() error = %v, want context deadline exceeded", err)
+	}
+	if got := live.sendCount(); got != 0 {
+		t.Fatalf("agent turn send count = %d, want 0 after relay deadline", got)
+	}
+	select {
+	case <-live.closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay session was not closed after title deadline")
+	}
+}
+
+func TestExecuteSkill_TitlesFreshSessionFromInvocation(t *testing.T) {
+	live := &orderedTitleSession{controllableAgentSession: newControllableSession("skill-thread")}
+	agent := &controllableAgent{nextSession: live}
+	p := &stubPlatformEngine{n: "test"}
+	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	msg := &Message{SessionKey: "test:user", Platform: "test", Content: "/imagegen 生成 产品图", ReplyCtx: "ctx"}
+	skill := &Skill{Name: "imagegen", Prompt: "The generic skill wrapper must not become the title."}
+
+	e.executeSkill(p, msg, skill, []string{"生成", "产品图"})
+	deadline := time.Now().Add(2 * time.Second)
+	for live.prompt() == "" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := live.prompt(); got != "/imagegen 生成 产品图" {
+		t.Fatalf("skill title prompt = %q, want invocation-derived title", got)
 	}
 }
 
