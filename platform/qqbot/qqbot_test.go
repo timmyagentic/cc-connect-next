@@ -220,10 +220,13 @@ func TestHandleC2CMessage_WithMessageReference(t *testing.T) {
 	if got == nil {
 		t.Fatal("expected message")
 	}
-	want := "[引用消息]\n被引用的那条\n\n现在这条"
-	if got.Content != want {
-		t.Fatalf("content = %q want %q", got.Content, want)
+	if got.Content != "现在这条" {
+		t.Fatalf("content = %q want platform-neutral user text", got.Content)
 	}
+	if got.ExtraContent != "[引用消息]\n被引用的那条\n" {
+		t.Fatalf("extra content = %q want quoted context", got.ExtraContent)
+	}
+	want := "[引用消息]\n被引用的那条\n\n现在这条"
 	if cached := p.messageCache["msg-new"].Content; cached != want {
 		t.Fatalf("cached content = %q want %q", cached, want)
 	}
@@ -543,9 +546,11 @@ func TestHandleC2CMessage_QuoteFromMsgElements(t *testing.T) {
 	if got == nil {
 		t.Fatal("expected message")
 	}
-	want := "[引用消息]\n这是被引用的消息内容\n\n我的回复"
-	if got.Content != want {
-		t.Fatalf("content = %q, want %q", got.Content, want)
+	if got.Content != "我的回复" {
+		t.Fatalf("content = %q, want user-authored reply", got.Content)
+	}
+	if got.ExtraContent != "[引用消息]\n这是被引用的消息内容\n" {
+		t.Fatalf("extra content = %q, want quoted context", got.ExtraContent)
 	}
 }
 
@@ -585,9 +590,11 @@ func TestHandleGroupMessage_QuoteFromMsgElements(t *testing.T) {
 	if got == nil {
 		t.Fatal("expected message")
 	}
-	want := "[引用消息]\n之前的讨论内容\n\n看看这个"
-	if got.Content != want {
-		t.Fatalf("content = %q, want %q", got.Content, want)
+	if got.Content != "看看这个" {
+		t.Fatalf("content = %q, want user-authored reply", got.Content)
+	}
+	if got.ExtraContent != "[引用消息]\n之前的讨论内容\n" {
+		t.Fatalf("extra content = %q, want quoted context", got.ExtraContent)
 	}
 }
 

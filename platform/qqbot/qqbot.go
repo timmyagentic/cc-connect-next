@@ -1225,12 +1225,13 @@ func (p *Platform) handleGroupMessage(data json.RawMessage) {
 	if quotedText == "" && d.MessageType != nil && *d.MessageType == msgTypeQuote {
 		quotedText = quotedTextFromElements(d.MsgElements)
 	}
-	content = prependQuotedMessage(quotedText, content)
+	extraContent := quotedMessageExtra(quotedText, content)
+	enrichedContent := prependQuotedMessage(quotedText, content)
 	images := downloadAttachmentImages(d.Attachments)
 	files := downloadAttachmentFiles(d.Attachments)
-	p.cacheMessage(d.ID, contentOrAttachmentSummary(content, d.Attachments))
+	p.cacheMessage(d.ID, contentOrAttachmentSummary(enrichedContent, d.Attachments))
 
-	if content == "" && len(images) == 0 && len(files) == 0 {
+	if content == "" && extraContent == "" && len(images) == 0 && len(files) == 0 {
 		return
 	}
 
@@ -1250,16 +1251,17 @@ func (p *Platform) handleGroupMessage(data json.RawMessage) {
 	}
 
 	msg := &core.Message{
-		SessionKey: sessionKey,
-		Platform:   "qqbot",
-		MessageID:  d.ID,
-		UserID:     d.Author.MemberOpenID,
-		UserName:   d.Author.MemberOpenID, // official API only provides openid, no nickname
-		ChatName:   d.GroupOpenID,         // group openid as fallback (no group name API)
-		Content:    content,
-		Images:     images,
-		Files:      files,
-		ReplyCtx:   rctx,
+		SessionKey:   sessionKey,
+		Platform:     "qqbot",
+		MessageID:    d.ID,
+		UserID:       d.Author.MemberOpenID,
+		UserName:     d.Author.MemberOpenID, // official API only provides openid, no nickname
+		ChatName:     d.GroupOpenID,         // group openid as fallback (no group name API)
+		Content:      content,
+		ExtraContent: extraContent,
+		Images:       images,
+		Files:        files,
+		ReplyCtx:     rctx,
 	}
 
 	slog.Debug("qqbot: group message received", "group", d.GroupOpenID, "user", d.Author.MemberOpenID, "len", len(content), "images", len(images), "files", len(files))
@@ -1310,14 +1312,15 @@ func (p *Platform) handleC2CMessage(data json.RawMessage) {
 	if quotedText == "" && d.MessageType != nil && *d.MessageType == msgTypeQuote {
 		quotedText = quotedTextFromElements(d.MsgElements)
 	}
-	content = prependQuotedMessage(quotedText, content)
+	extraContent := quotedMessageExtra(quotedText, content)
+	enrichedContent := prependQuotedMessage(quotedText, content)
 
 	// Download image and file attachments
 	images := downloadAttachmentImages(d.Attachments)
 	files := downloadAttachmentFiles(d.Attachments)
-	p.cacheMessage(d.ID, contentOrAttachmentSummary(content, d.Attachments))
+	p.cacheMessage(d.ID, contentOrAttachmentSummary(enrichedContent, d.Attachments))
 
-	if content == "" && len(images) == 0 && len(files) == 0 {
+	if content == "" && extraContent == "" && len(images) == 0 && len(files) == 0 {
 		return
 	}
 
@@ -1331,15 +1334,16 @@ func (p *Platform) handleC2CMessage(data json.RawMessage) {
 	}
 
 	msg := &core.Message{
-		SessionKey: sessionKey,
-		Platform:   "qqbot",
-		MessageID:  d.ID,
-		UserID:     d.Author.UserOpenID,
-		UserName:   d.Author.UserOpenID,
-		Content:    content,
-		Images:     images,
-		Files:      files,
-		ReplyCtx:   rctx,
+		SessionKey:   sessionKey,
+		Platform:     "qqbot",
+		MessageID:    d.ID,
+		UserID:       d.Author.UserOpenID,
+		UserName:     d.Author.UserOpenID,
+		Content:      content,
+		ExtraContent: extraContent,
+		Images:       images,
+		Files:        files,
+		ReplyCtx:     rctx,
 	}
 
 	slog.Debug("qqbot: c2c message received", "user", d.Author.UserOpenID, "len", len(content), "images", len(images), "files", len(files))
@@ -1776,15 +1780,28 @@ func quotedTextFromElements(elements []msgElement) string {
 }
 
 func prependQuotedMessage(quoted, content string) string {
-	quoted = strings.TrimSpace(quoted)
+	extra := quotedMessageExtra(quoted, content)
 	content = strings.TrimSpace(content)
-	if quoted == "" {
+	if extra == "" {
 		return content
 	}
 	if content == "" {
-		return "[引用消息]\n" + quoted
+		return extra
 	}
-	return "[引用消息]\n" + quoted + "\n\n" + content
+	return extra + "\n" + content
+}
+
+func quotedMessageExtra(quoted, content string) string {
+	quoted = strings.TrimSpace(quoted)
+	content = strings.TrimSpace(content)
+	if quoted == "" {
+		return ""
+	}
+	extra := "[引用消息]\n" + quoted
+	if content == "" {
+		return extra
+	}
+	return extra + "\n"
 }
 
 func contentOrAttachmentSummary(content string, attachments []attachment) string {

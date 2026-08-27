@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 )
 
 type titleSyncAgentSession struct {
@@ -37,8 +38,9 @@ type titleInitializingResultSession struct {
 
 type orderedTitleSession struct {
 	*controllableAgentSession
-	mu    sync.Mutex
-	order []string
+	mu          sync.Mutex
+	order       []string
+	titlePrompt string
 }
 
 func (s *orderedTitleSession) record(step string) {
@@ -47,8 +49,11 @@ func (s *orderedTitleSession) record(step string) {
 	s.mu.Unlock()
 }
 
-func (s *orderedTitleSession) SetInitialSessionTitle(string) error {
-	s.record("title")
+func (s *orderedTitleSession) SetInitialSessionTitle(prompt string) error {
+	s.mu.Lock()
+	s.order = append(s.order, "title")
+	s.titlePrompt = prompt
+	s.mu.Unlock()
 	return nil
 }
 
@@ -62,6 +67,24 @@ func (s *orderedTitleSession) snapshot() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.order...)
+}
+
+func (s *orderedTitleSession) prompt() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.titlePrompt
+}
+
+type blockingTitleSession struct {
+	*controllableAgentSession
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingTitleSession) SetInitialSessionTitle(string) error {
+	close(s.started)
+	<-s.release
+	return nil
 }
 
 func (s *titleInitializingResultSession) SetInitialSessionTitle(prompt string) error {
@@ -120,13 +143,21 @@ func TestProcessInteractiveMessage_CreatesThenTitlesBeforeFirstSend(t *testing.T
 
 	e.processInteractiveMessageWith(
 		p,
-		&Message{SessionKey: key, Platform: "test", MessageID: "msg-1", Content: "首个真实问题", ReplyCtx: "ctx"},
+		&Message{
+			SessionKey:   key,
+			Platform:     "test",
+			MessageID:    "msg-1",
+			Content:      "[Reply to Alice]: 不应进入标题\n首个真实问题",
+			ExtraContent: "[Reply to Alice]: 不应进入标题",
+			ReplyCtx:     "ctx",
+		},
 		managed,
 		agent,
 		e.sessions,
 		key,
 		"",
 		key,
+		"首个真实问题",
 	)
 
 	got := live.snapshot()
@@ -138,6 +169,43 @@ func TestProcessInteractiveMessage_CreatesThenTitlesBeforeFirstSend(t *testing.T
 		if got[i] != want[i] {
 			t.Fatalf("lifecycle order = %v, want %v", got, want)
 		}
+	}
+	if got := live.prompt(); got != "首个真实问题" {
+		t.Fatalf("title prompt = %q, want platform-neutral user content", got)
+	}
+}
+
+func TestGetOrCreateInteractiveStateWith_TitleGenerationReleasesGlobalLock(t *testing.T) {
+	live := &blockingTitleSession{
+		controllableAgentSession: newControllableSession("thread-fresh"),
+		started:                  make(chan struct{}),
+		release:                  make(chan struct{}),
+	}
+	e := NewEngine("test", &controllableAgent{nextSession: live}, []Platform{&stubPlatformEngine{n: "test"}}, "", LangEnglish)
+	managed := &Session{}
+	done := make(chan struct{})
+
+	go func() {
+		e.getOrCreateInteractiveStateWith("test:user", e.platforms[0], "ctx", managed, e.sessions, nil, "", "首个问题")
+		close(done)
+	}()
+
+	select {
+	case <-live.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("title generation did not start")
+	}
+	if !e.interactiveMu.TryLock() {
+		close(live.release)
+		<-done
+		t.Fatal("interactiveMu remained locked during title generation")
+	}
+	e.interactiveMu.Unlock()
+	close(live.release)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("session creation did not finish after title generation")
 	}
 }
 

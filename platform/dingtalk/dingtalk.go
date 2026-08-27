@@ -334,21 +334,23 @@ func (p *Platform) onMessage(data *chatbot.BotCallbackDataModel, richText *richT
 
 	// Extract message content, recovering quoted/reply info from richText.
 	messageContent := data.Text.Content
+	replyExtraContent := ""
 	if richText != nil && richText.IsReplyMsg && richText.RepliedMsg != nil {
 		slog.Debug("dingtalk: reply message detected", "msgType", richText.RepliedMsg.MsgType)
-		messageContent = p.formatReplyContent(richText, messageContent)
+		messageContent, replyExtraContent = p.splitReplyContent(richText, messageContent)
 	}
 
 	// Handle text messages (default)
 	msg := &core.Message{
-		SessionKey: sessionKey,
-		Platform:   "dingtalk",
-		UserID:     data.SenderStaffId,
-		UserName:   data.SenderNick,
-		ChatName:   data.ConversationTitle,
-		Content:    messageContent,
-		MessageID:  data.MsgId,
-		ChannelKey: data.ConversationId,
+		SessionKey:   sessionKey,
+		Platform:     "dingtalk",
+		UserID:       data.SenderStaffId,
+		UserName:     data.SenderNick,
+		ChatName:     data.ConversationTitle,
+		Content:      messageContent,
+		ExtraContent: replyExtraContent,
+		MessageID:    data.MsgId,
+		ChannelKey:   data.ConversationId,
 		ReplyCtx: replyContext{
 			sessionWebhook: data.SessionWebhook,
 			conversationId: data.ConversationId,
@@ -1419,21 +1421,38 @@ func (p *Platform) Stop() error {
 // replies to / quotes a previous message. richText is parsed from the raw JSON
 // "text" object which the SDK's BotCallbackDataTextModel silently drops.
 func (p *Platform) formatReplyContent(richText *richTextContent, fallback string) string {
+	content, extra := p.splitReplyContent(richText, fallback)
+	if extra == "" {
+		return content
+	}
+	if content == "" {
+		return extra
+	}
+	return extra + "\n" + content
+}
+
+// splitReplyContent keeps the user's own text separate from quoted context so
+// core can use the former for platform-neutral metadata such as session titles.
+func (p *Platform) splitReplyContent(richText *richTextContent, fallback string) (string, string) {
 	content := richText.Content
 	if content == "" {
 		content = fallback
 	}
 
 	if richText.RepliedMsg == nil {
-		return content
+		return content, ""
 	}
 
 	quotedText := p.extractQuotedMessageText(richText.RepliedMsg)
 	if quotedText == "" {
-		return content
+		return content, ""
 	}
 
-	return fmt.Sprintf("引用: \"%s\"\n\n%s", quotedText, content)
+	extra := fmt.Sprintf("引用: \"%s\"", quotedText)
+	if content != "" {
+		extra += "\n"
+	}
+	return content, extra
 }
 
 func (p *Platform) extractQuotedMessageText(msg *repliedMessage) string {

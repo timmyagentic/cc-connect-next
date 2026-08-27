@@ -10883,7 +10883,7 @@ func TestReapIdleWorkspaces_SkipsWorkspaceWithActiveTurn(t *testing.T) {
 			UserID:     "user1",
 			Content:    "long running task",
 			ReplyCtx:   "ctx",
-		}, session, e.agent, e.sessions, sessionKey, workspaceDir, sessionKey)
+		}, session, e.agent, e.sessions, sessionKey, workspaceDir, sessionKey, "long running task")
 		close(done)
 	}()
 
@@ -10936,7 +10936,7 @@ func TestReapIdleWorkspaces_SkipsWorkspaceWaitingForPermission(t *testing.T) {
 			UserID:     "user2",
 			Content:    "needs approval",
 			ReplyCtx:   "ctx",
-		}, session, e.agent, e.sessions, sessionKey, workspaceDir, sessionKey)
+		}, session, e.agent, e.sessions, sessionKey, workspaceDir, sessionKey, "needs approval")
 		close(done)
 	}()
 
@@ -12086,7 +12086,7 @@ func TestProcessInteractiveMessageWith_NilAgentSession_NoPanic(t *testing.T) {
 			UserID:     "user-nil",
 			Content:    "trigger nil guard",
 			ReplyCtx:   "ctx-nil",
-		}, session, e.agent, e.sessions, sessionKey, "", sessionKey)
+		}, session, e.agent, e.sessions, sessionKey, "", sessionKey, "trigger nil guard")
 	}()
 
 	select {
