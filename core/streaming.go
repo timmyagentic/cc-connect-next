@@ -76,8 +76,8 @@ type ToolStep struct {
 // native rich cards combining tool steps, markdown content, and a multi-line
 // status footer.
 //
-// statusFooter is a pre-composed multi-line string assembled by the engine
-// (typically one line per: elapsed time, model · effort · ctx, workdir).
+// statusFooter is a pre-composed string assembled by the engine (currently a
+// single `model · effort · ⏱ elapsed` line).
 // Pass empty string to hide the footer entirely. Lines are separated by '\n';
 // the platform implementation is expected to render each line as its own
 // dim-styled element so they don't visually merge with the body markdown.

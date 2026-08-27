@@ -74,6 +74,7 @@ func TestProcessInteractiveEventsRichCardUsesTrackableTextForNativeMention(t *te
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
 	e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: "rich"})
 	e.SetStreamPreviewCfg(StreamPreviewCfg{Enabled: false})
+	e.SetReplyFooterEnabled(true)
 
 	sessionKey := "feishu:user-rich-native-mention"
 	session := e.sessions.GetOrCreateActive(sessionKey)
@@ -90,7 +91,7 @@ func TestProcessInteractiveEventsRichCardUsesTrackableTextForNativeMention(t *te
 	if len(prepared) != 1 || prepared[0] != answer {
 		t.Fatalf("terminal preparations = %v", prepared)
 	}
-	if len(sent) != 1 || !strings.Contains(sent[0], `user_id="ou_bot"`) {
+	if len(sent) != 1 || !strings.Contains(sent[0], `user_id="ou_bot"`) || !strings.Contains(sent[0], "\n\n⏱ ") || strings.Contains(sent[0], "*⏱ ") {
 		t.Fatalf("terminal text sends = %v", sent)
 	}
 	if len(deleted) != 1 || deleted[0] != "handle-1" {

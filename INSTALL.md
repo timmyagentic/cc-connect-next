@@ -232,7 +232,7 @@ card_mode = "rich"               # Feishu Card 2.0 answer card: counts only, nev
 thinking_messages = false        # keep reasoning out of the chat
 tool_messages = false            # keep tool calls and their arguments out of the chat
 show_context_indicator = false   # deprecated no-op, kept for config compatibility
-reply_footer = false             # keep the "model · effort" footer out of the chat
+reply_footer = false             # keep the "model · effort · elapsed" footer out of the chat
 hide_agent_footer = true         # strip the equivalent lines the agent emits itself
 
 [projects.references]

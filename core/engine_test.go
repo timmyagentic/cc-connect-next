@@ -1161,6 +1161,13 @@ func TestProcessInteractiveEvents_NonTerminalResultContinuesTurn(t *testing.T) {
 	}
 }
 
+func assertReplyWithElapsedFooter(t *testing.T, got, wantPrefix string) {
+	t.Helper()
+	if !strings.HasPrefix(got, wantPrefix) || !strings.HasSuffix(got, "*") {
+		t.Fatalf("final reply = %q, want prefix %q and a complete italic footer", got, wantPrefix)
+	}
+}
+
 func TestProcessInteractiveEvents_AppendsReplyFooterWhenEnabled(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
@@ -1208,10 +1215,7 @@ func TestProcessInteractiveEvents_AppendsReplyFooterWhenEnabled(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("sent = %#v, want one final reply", sent)
 	}
-	want := "answer\n\n*gpt-5.4 · effort:xhigh*"
-	if sent[0] != want {
-		t.Fatalf("final reply = %q, want %q", sent[0], want)
-	}
+	assertReplyWithElapsedFooter(t, sent[0], "answer\n\n*gpt-5.4 · effort:xhigh · ⏱ ")
 }
 
 func TestProcessInteractiveEvents_FooterOmitsContextIndicator(t *testing.T) {
@@ -1246,10 +1250,7 @@ func TestProcessInteractiveEvents_FooterOmitsContextIndicator(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("sent = %#v, want one final reply", sent)
 	}
-	want := "answer\n\n*glm-5.1*"
-	if sent[0] != want {
-		t.Fatalf("final reply = %q, want %q", sent[0], want)
-	}
+	assertReplyWithElapsedFooter(t, sent[0], "answer\n\n*glm-5.1 · ⏱ ")
 }
 
 func TestProcessInteractiveEvents_ToolSegmentsKeepFinalFooter(t *testing.T) {
@@ -1289,10 +1290,7 @@ func TestProcessInteractiveEvents_ToolSegmentsKeepFinalFooter(t *testing.T) {
 		t.Fatal("sent = nil, want final reply")
 	}
 	final := sent[len(sent)-1]
-	want := "已处理完成。\n\n*glm-5.1*"
-	if final != want {
-		t.Fatalf("final reply = %q, want %q\nall sent = %#v", final, want, sent)
-	}
+	assertReplyWithElapsedFooter(t, final, "已处理完成。\n\n*glm-5.1 · ⏱ ")
 }
 
 func TestProcessInteractiveEvents_DropsStandaloneEllipsisProgress(t *testing.T) {
@@ -1461,17 +1459,13 @@ func TestProcessInteractiveEvents_ReplyFooterPrefersSessionRuntimeState(t *testi
 	if len(sent) != 1 {
 		t.Fatalf("sent = %#v, want one final reply", sent)
 	}
-	want := "answer\n\n*gpt-5.4 · effort:xhigh*"
-	if sent[0] != want {
-		t.Fatalf("final reply = %q, want %q", sent[0], want)
-	}
+	assertReplyWithElapsedFooter(t, sent[0], "answer\n\n*gpt-5.4 · effort:xhigh · ⏱ ")
 }
 
-// Regression: an agent that only exposes a workdir (no model/effort/usage)
-// must not emit a footer at all. Previously this produced a footer like
-// "*~*" when the agent was running in the user's home directory, which
-// rendered as a bare "~" on Feishu/Weixin.
-func TestProcessInteractiveEvents_SuppressesReplyFooterWhenOnlyWorkDir(t *testing.T) {
+// An agent with no model/effort metadata still gets the elapsed-time footer.
+// The old workdir-only "*~*" regression remains impossible because workdir
+// metadata is no longer part of the generated footer.
+func TestProcessInteractiveEvents_ElapsedFooterWhenOnlyWorkDir(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 
@@ -1498,9 +1492,7 @@ func TestProcessInteractiveEvents_SuppressesReplyFooterWhenOnlyWorkDir(t *testin
 	if len(sent) != 1 {
 		t.Fatalf("sent = %#v, want one final reply", sent)
 	}
-	if sent[0] != "answer" {
-		t.Fatalf("final reply = %q, want plain answer without footer", sent[0])
-	}
+	assertReplyWithElapsedFooter(t, sent[0], "answer\n\n*⏱ ")
 }
 
 func TestProcessInteractiveEvents_HiddenToolProgressKeepsPreviewOnFinalize(t *testing.T) {
@@ -11186,6 +11178,57 @@ func TestProcessInteractiveEvents_DrainsQueuedMessages(t *testing.T) {
 	}
 	if len(userMsgs) < 2 {
 		t.Fatalf("user history entries = %d, want >= 2", len(userMsgs))
+	}
+}
+
+func TestProcessInteractiveEvents_QueuedTurnElapsedStartsWhenProcessingBegins(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	sess := newQueuingSession("qs-footer-elapsed")
+	agent := &controllableAgent{nextSession: sess}
+	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	e.SetReplyFooterEnabled(true)
+
+	key := "test:user-footer-elapsed"
+	session := e.sessions.GetOrCreateActive(key)
+	state := &interactiveState{
+		agentSession: sess,
+		platform:     p,
+		replyCtx:     "ctx-turn1",
+		pendingMessages: []queuedMessage{
+			{platform: p, replyCtx: "ctx-turn2", content: "queued-msg"},
+		},
+	}
+	e.interactiveMu.Lock()
+	e.interactiveStates[key] = state
+	e.interactiveMu.Unlock()
+
+	go func() {
+		sess.events <- Event{Type: EventResult, Content: "response1", Done: true}
+		for {
+			sess.sendMu.Lock()
+			sent := len(sess.sendCalls) > 0
+			sess.sendMu.Unlock()
+			if sent {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		sess.events <- Event{Type: EventResult, Content: "response2", Done: true}
+	}()
+
+	sendDone := make(chan error, 1)
+	sendDone <- nil
+	e.processInteractiveEvents(state, session, e.sessions, key, "msg1", time.Now().Add(-2*time.Hour), nil, sendDone, "ctx-turn1")
+
+	sent := p.getSent()
+	if len(sent) != 2 {
+		t.Fatalf("sent = %#v, want two final replies", sent)
+	}
+	if !strings.Contains(sent[0], "⏱ 2h 00m") {
+		t.Fatalf("first reply = %q, want elapsed time from its original turn start", sent[0])
+	}
+	if !strings.Contains(sent[1], "⏱ ") || strings.Contains(sent[1], "2h") {
+		t.Fatalf("queued reply = %q, want a fresh elapsed timer after queue drain", sent[1])
 	}
 }
 

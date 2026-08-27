@@ -27,14 +27,14 @@ func richFooterElements(t *testing.T, cardJSON string) []map[string]any {
 
 func TestBuildRichCard_DoneRendersStatusFooter(t *testing.T) {
 	copy := core.RichCardCopy{Done: "Done"}
-	card := buildRichCardWithCopy(core.CardStatusDone, "done", nil, "answer body", false, "gpt-5.6-sol · effort:max", copy)
+	card := buildRichCardWithCopy(core.CardStatusDone, "done", nil, "answer body", false, "gpt-5.6-sol · effort:max · ⏱ <1s", copy)
 
 	elements := richFooterElements(t, card)
 	var footerFound bool
 	for _, el := range elements {
 		if el["text_size"] == "notation" {
 			content, _ := el["content"].(string)
-			if strings.Contains(content, "gpt-5.6-sol · effort:max") {
+			if strings.Contains(content, "gpt-5.6-sol · effort:max · ⏱ <1s") {
 				footerFound = true
 			}
 		}
@@ -57,7 +57,7 @@ func TestBuildRichCard_EmptyFooterAddsNoElement(t *testing.T) {
 
 func TestBuildRichCard_StreamingCardHasNoFooter(t *testing.T) {
 	copy := core.RichCardCopy{Done: "Done"}
-	card := buildRichCardWithCopy(core.CardStatusWorking, "answer", nil, "partial", true, "gpt-5.6-sol · effort:max", copy)
+	card := buildRichCardWithCopy(core.CardStatusWorking, "answer", nil, "partial", true, "gpt-5.6-sol · effort:max · ⏱ <1s", copy)
 
 	for _, el := range richFooterElements(t, card) {
 		if el["text_size"] == "notation" {

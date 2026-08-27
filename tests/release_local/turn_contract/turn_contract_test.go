@@ -319,8 +319,8 @@ func TestBasicUserTurnContractAcrossInputModalities(t *testing.T) {
 			if len(texts) != 1 {
 				t.Fatalf("texts = %#v, want exactly one final reply", texts)
 			}
-			if strings.Count(texts[0], "*turn-model*") != 1 {
-				t.Fatalf("final reply = %q, want exactly one model-effort footer", texts[0])
+			if strings.Count(texts[0], "turn-model") != 1 || strings.Count(texts[0], "⏱") != 1 {
+				t.Fatalf("final reply = %q, want exactly one model/elapsed footer", texts[0])
 			}
 		})
 	}
@@ -635,16 +635,16 @@ func TestStreamingPreviewConfigurationMatrix(t *testing.T) {
 				if len(texts) != 0 || len(starts) != 1 || len(updates) == 0 || len(deletes) != 0 {
 					t.Fatalf("preview lifecycle = texts:%#v starts:%#v updates:%#v deletes:%#v, want in-place preview finalize", texts, starts, updates, deletes)
 				}
-				if !strings.Contains(updates[len(updates)-1], "*turn-model*") {
-					t.Fatalf("final preview update = %q, want model-effort footer", updates[len(updates)-1])
+				if final := updates[len(updates)-1]; strings.Count(final, "turn-model") != 1 || strings.Count(final, "⏱") != 1 {
+					t.Fatalf("final preview update = %q, want model/elapsed footer", final)
 				}
 				return
 			}
 			if len(starts) != 0 || len(updates) != 0 || len(deletes) != 0 {
 				t.Fatalf("preview lifecycle = starts:%#v updates:%#v deletes:%#v, want no preview when disabled", starts, updates, deletes)
 			}
-			if len(texts) != 1 || !strings.Contains(texts[0], strings.TrimSpace(body)) || strings.Count(texts[0], "*turn-model*") != 1 {
-				t.Fatalf("texts = %#v, want one final send with model-effort footer", texts)
+			if len(texts) != 1 || !strings.Contains(texts[0], strings.TrimSpace(body)) || strings.Count(texts[0], "turn-model") != 1 || strings.Count(texts[0], "⏱") != 1 {
+				t.Fatalf("texts = %#v, want one final send with model/elapsed footer", texts)
 			}
 		})
 	}
@@ -696,21 +696,21 @@ func TestReplyMetadataConfigurationMatrix(t *testing.T) {
 		want       []string
 		forbid     []string
 	}{
-		// The footer carries model + effort only; the deprecated
+		// The footer carries model + effort + elapsed processing time; the deprecated
 		// show_context_indicator flag no longer influences it, and token/ctx/
 		// workdir metadata never appear.
 		{
 			name:       "footer_on_renders_model_footer",
 			showCtx:    true,
 			showFooter: true,
-			want:       []string{"answer", "*glm-5.1*"},
+			want:       []string{"answer", "glm-5.1", "⏱"},
 			forbid:     []string{"[ctx:", "/tmp/release-agent"},
 		},
 		{
 			name:       "deprecated_context_flag_is_noop",
 			showCtx:    false,
 			showFooter: true,
-			want:       []string{"answer", "*glm-5.1*"},
+			want:       []string{"answer", "glm-5.1", "⏱"},
 			forbid:     []string{"[ctx:", "/tmp/release-agent"},
 		},
 		{
@@ -718,14 +718,14 @@ func TestReplyMetadataConfigurationMatrix(t *testing.T) {
 			showCtx:    true,
 			showFooter: false,
 			want:       []string{"answer"},
-			forbid:     []string{"[ctx:", "glm-5.1", "/tmp/release-agent"},
+			forbid:     []string{"[ctx:", "glm-5.1", "⏱", "/tmp/release-agent"},
 		},
 		{
 			name:       "context_and_footer_off_plain_answer",
 			showCtx:    false,
 			showFooter: false,
 			want:       []string{"answer"},
-			forbid:     []string{"[ctx:", "glm-5.1", "/tmp/release-agent"},
+			forbid:     []string{"[ctx:", "glm-5.1", "⏱", "/tmp/release-agent"},
 		},
 	}
 
@@ -775,10 +775,10 @@ func TestLongFinalResponseKeepsMetadataOnceAtTail(t *testing.T) {
 		texts, _, _, _ := platform.snapshot()
 		if len(texts) >= 2 {
 			joined := strings.Join(texts, "")
-			if strings.Count(joined, "glm-5.1") != 1 || strings.Contains(joined, "[ctx:") {
-				t.Fatalf("chunks = %#v, want the model footer exactly once and no ctx metadata", texts)
+			if strings.Count(joined, "glm-5.1") != 1 || strings.Count(joined, "⏱") != 1 || strings.Contains(joined, "[ctx:") {
+				t.Fatalf("chunks = %#v, want the model/elapsed footer exactly once and no ctx metadata", texts)
 			}
-			if !strings.Contains(texts[len(texts)-1], "*glm-5.1*") {
+			if !strings.Contains(texts[len(texts)-1], "glm-5.1 · ⏱") {
 				t.Fatalf("last chunk = %q, want the footer at the tail", texts[len(texts)-1])
 			}
 			return

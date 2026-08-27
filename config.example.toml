@@ -155,8 +155,8 @@ thinking_messages = false   # Rich cards expose counts only, never reasoning tex
 tool_messages = false       # Rich cards expose counts only, never tool details
 show_context_indicator = false  # Deprecated no-op, kept for config compatibility
 #                                # 已废弃（无效果），仅为兼容保留
-reply_footer = false             # Keep the "model · effort" footer out of chat
-#                                # 在助手回复底部显示「model · effort」状态行（默认 false 隐藏）
+reply_footer = false             # Keep the "model · effort · ⏱ elapsed" footer out of chat
+#                                # 在助手回复底部显示「model · effort · ⏱ 处理时间」状态行（默认 false 隐藏）
 hide_agent_footer = true         # Strip equivalent model/token/context lines emitted by the Agent itself
 #                                # 隐藏 Agent 自己输出的模型、token、上下文状态行（默认 false）
 
@@ -766,9 +766,9 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 
 [[projects]]
 name = "my-backend"
-# reply_footer = true              # Show "model · effort:x" under each finished reply, on plain replies
+# reply_footer = true              # Show "model · effort:x · ⏱ 12.3s" under each finished reply, on plain replies
 #                                   # and rich cards alike (default: false / hidden)
-#                                   # 在每条完成的回复底部显示「model · effort:x」，普通回复与 rich 卡片
+#                                   # 在每条完成的回复底部显示「model · effort:x · ⏱ 12.3s」，普通回复与 rich 卡片
 #                                   # 均生效（默认 false 隐藏）
 # show_context_indicator = true    # DEPRECATED no-op: the footer no longer renders token/ctx metadata
 #                                   # 已废弃（无效果）：footer 不再渲染 token/上下文信息
