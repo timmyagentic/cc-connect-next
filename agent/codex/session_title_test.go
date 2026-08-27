@@ -338,6 +338,36 @@ func TestSessionTitleGenerationArgsAreEphemeralAndPromptFree(t *testing.T) {
 	}
 }
 
+func TestSessionTitleGenerationEnvInheritsConfiguredCodexEnv(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://daemon-proxy.invalid")
+	s := &appServerSession{
+		extraEnv: []string{
+			"HTTPS_PROXY=http://project-proxy.invalid",
+			"SSL_CERT_FILE=/project/cert.pem",
+			"PROVIDER_API_KEY=test-provider-key",
+			"CODEX_HOME=/wrong/home",
+		},
+		codexHome: "/configured/codex-home",
+	}
+
+	got := make(map[string]string)
+	for _, entry := range s.sessionTitleGenerationEnv() {
+		if key, value, ok := strings.Cut(entry, "="); ok {
+			got[key] = value
+		}
+	}
+	for key, want := range map[string]string{
+		"HTTPS_PROXY":      "http://project-proxy.invalid",
+		"SSL_CERT_FILE":    "/project/cert.pem",
+		"PROVIDER_API_KEY": "test-provider-key",
+		"CODEX_HOME":       "/configured/codex-home",
+	} {
+		if got[key] != want {
+			t.Errorf("%s = %q, want %q", key, got[key], want)
+		}
+	}
+}
+
 func TestParseSessionTitleGenerationOutput(t *testing.T) {
 	input := strings.NewReader(strings.Join([]string{
 		`{"type":"thread.started","thread_id":"ephemeral"}`,

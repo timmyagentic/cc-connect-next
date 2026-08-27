@@ -124,7 +124,9 @@ through the locally installed Codex CLI. CC Connect sends only the already
 sanitized 48-character title candidate over stdin to an isolated
 `codex exec --ephemeral` process. The call is read-only, ignores project/user
 rules and plugins, has a 10-second timeout, and never enters the user thread
-history. It adds Codex latency and usage; any unavailable model, timeout,
+history. It inherits the agent's configured `env` for proxy, certificate, and
+authentication parity, but not project CLI extra args or the project cwd. It
+adds Codex latency and usage; any unavailable model, timeout,
 non-zero exit, or invalid output falls back to the deterministic title. The
 option is intentionally disabled by default.
 

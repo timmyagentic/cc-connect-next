@@ -119,7 +119,9 @@ session_title_model = ""        # 默认：确定性本地标题
 设置 `session_title_model = "gpt-5.3-codex-spark"` 后，可选择使用本机 Codex CLI
 生成标题。CC Connect 只会通过 stdin 传入已经清洗、最长 48 字的标题候选，并在隔离的
 `codex exec --ephemeral` 进程中执行。该调用使用只读沙箱，忽略项目/用户规则和插件，
-超时为 10 秒，不会进入用户 thread 历史。它会增加 Codex 延迟与用量；模型不可用、
+超时为 10 秒，不会进入用户 thread 历史。它会继承 agent 已配置的 `env`，确保代理、
+证书和认证环境与主 Codex 会话一致，但不继承项目 CLI extra args 或项目 cwd。它会增加
+Codex 延迟与用量；模型不可用、
 超时、非零退出或输出无效时都会回退到确定性标题。该选项默认关闭。
 
 steer 通过 `turn/steer` 发送，并用 `expectedTurnId` 锁定当前回合，不会与回合完成产生竞态。steer 确定不可用时（后端不支持、回合刚好结束），消息安全回退到队列。

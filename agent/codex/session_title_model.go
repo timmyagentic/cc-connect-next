@@ -62,9 +62,7 @@ func (s *appServerSession) generateSessionTitleWithCodex(parent context.Context,
 	cmd.Dir = cwd
 	cmd.Stdin = strings.NewReader(sessionTitleGenerationPrompt(candidate))
 	cmd.Stderr = io.Discard
-	if s.codexHome != "" {
-		cmd.Env = core.MergeEnv(os.Environ(), []string{"CODEX_HOME=" + s.codexHome})
-	}
+	cmd.Env = s.sessionTitleGenerationEnv()
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -85,6 +83,14 @@ func (s *appServerSession) generateSessionTitleWithCodex(parent context.Context,
 		return "", parseErr
 	}
 	return title, nil
+}
+
+func (s *appServerSession) sessionTitleGenerationEnv() []string {
+	env := core.MergeEnv(os.Environ(), s.extraEnv)
+	if s.codexHome != "" {
+		env = core.MergeEnv(env, []string{"CODEX_HOME=" + s.codexHome})
+	}
+	return env
 }
 
 func sessionTitleGenerationPrompt(candidate string) string {
