@@ -1,21 +1,8 @@
 package core
 
-import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"log/slog"
-	"net/http"
-	"sync"
-	"time"
-)
-
 const (
-	defaultSkillPresetsURL          = "https://raw.githubusercontent.com/timmyagentic/cc-connect-next/main/skill-presets.json"
-	fallbackSkillPresetsURL         = "https://raw.githubusercontent.com/chenhg5/cc-connect/main/skill-presets.json"
-	skillPresetsCacheTTL            = 6 * time.Hour
-	skillPresetsHTTPTimeout         = 15 * time.Second
-	skillPresetsFallbackHTTPTimeout = 10 * time.Second
+	defaultSkillPresetsURL  = "https://raw.githubusercontent.com/timmyagentic/cc-connect-next/main/skill-presets.json"
+	fallbackSkillPresetsURL = "https://raw.githubusercontent.com/chenhg5/cc-connect/main/skill-presets.json"
 )
 
 // SkillPreset describes a recommended skill available from the remote presets list.
@@ -55,87 +42,21 @@ type SkillPresetsResponse struct {
 	Skills    []SkillPreset `json:"skills"`
 }
 
-type skillPresetsCache struct {
-	mu        sync.RWMutex
-	data      *SkillPresetsResponse
-	fetchedAt time.Time
-	url       string
-}
-
-var globalSkillPresetsCache = &skillPresetsCache{}
+var globalSkillPresetsCache = newRemoteJSONCache[SkillPresetsResponse](remoteJSONCacheConfig{
+	name:            "skill presets",
+	defaultURL:      defaultSkillPresetsURL,
+	fallbackURL:     fallbackSkillPresetsURL,
+	ttl:             remotePresetsCacheTTL,
+	timeout:         remotePresetsHTTPTimeout,
+	fallbackTimeout: remotePresetsFallbackTimeout,
+})
 
 // SetSkillPresetsURL overrides the default skill presets URL.
 func SetSkillPresetsURL(url string) {
-	globalSkillPresetsCache.mu.Lock()
-	defer globalSkillPresetsCache.mu.Unlock()
-	globalSkillPresetsCache.url = url
-	globalSkillPresetsCache.data = nil
+	globalSkillPresetsCache.setURL(url)
 }
 
 // FetchSkillPresets returns cached or freshly-fetched skill presets.
 func FetchSkillPresets() (*SkillPresetsResponse, error) {
 	return globalSkillPresetsCache.fetch()
-}
-
-func (c *skillPresetsCache) fetch() (*SkillPresetsResponse, error) {
-	c.mu.RLock()
-	if c.data != nil && time.Since(c.fetchedAt) < skillPresetsCacheTTL {
-		defer c.mu.RUnlock()
-		return c.data, nil
-	}
-	c.mu.RUnlock()
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.data != nil && time.Since(c.fetchedAt) < skillPresetsCacheTTL {
-		return c.data, nil
-	}
-
-	primaryURL := c.url
-	if primaryURL == "" {
-		primaryURL = defaultSkillPresetsURL
-	}
-
-	result, err := fetchSkillPresetsFromURL(primaryURL, skillPresetsHTTPTimeout)
-	if err != nil {
-		slog.Warn("primary skill presets fetch failed, trying fallback", "url", primaryURL, "error", err)
-		result, err = fetchSkillPresetsFromURL(fallbackSkillPresetsURL, skillPresetsFallbackHTTPTimeout)
-	}
-	if err != nil {
-		if c.data != nil {
-			slog.Warn("all skill presets sources failed, using stale cache", "error", err)
-			return c.data, nil
-		}
-		return nil, fmt.Errorf("fetch skill presets: %w", err)
-	}
-
-	c.data = result
-	c.fetchedAt = time.Now()
-	return c.data, nil
-}
-
-func fetchSkillPresetsFromURL(url string, timeout time.Duration) (*SkillPresetsResponse, error) {
-	slog.Debug("fetching skill presets", "url", url)
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("HTTP GET %s: %w", url, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP GET %s: status %d", url, resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, fmt.Errorf("read body from %s: %w", url, err)
-	}
-
-	var result SkillPresetsResponse
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("parse JSON from %s: %w", url, err)
-	}
-	return &result, nil
 }
