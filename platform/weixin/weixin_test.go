@@ -52,6 +52,25 @@ func TestBodyFromItemList_Quote(t *testing.T) {
 	}
 }
 
+func TestBodyPartsFromItemList_SeparatesQuoteFromUserReply(t *testing.T) {
+	ref := &refMessage{
+		Title: "quoted title",
+		MessageItem: &messageItem{
+			Type:     messageItemText,
+			TextItem: &textItem{Text: "another user's content"},
+		},
+	}
+	body, extra := bodyPartsFromItemList([]messageItem{
+		{Type: messageItemText, TextItem: &textItem{Text: "actual request"}, RefMsg: ref},
+	})
+	if body != "actual request" {
+		t.Fatalf("body = %q, want user-authored request", body)
+	}
+	if extra != "[引用: quoted title | another user's content]" {
+		t.Fatalf("extra = %q, want separate quoted context", extra)
+	}
+}
+
 func TestSplitUTF8(t *testing.T) {
 	s := string([]rune{'a', '啊', 'b', '吧', 'c'})
 	parts := splitUTF8(s, 2)

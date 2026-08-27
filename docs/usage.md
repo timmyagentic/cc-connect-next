@@ -109,7 +109,9 @@ model_context_window = 872000
 
 Codex app-server threads receive a user-facing title immediately after
 `thread/start` returns and before the first turn starts. Every Codex App title
-has a configurable source prefix; the default is `[飞书]`:
+has a configurable source prefix; the default is `[飞书]`. A synthetic
+heartbeat that creates the backend first leaves the title pending for the next
+real user request instead of naming it from the heartbeat prompt:
 
 ```toml
 [projects.agent.options]

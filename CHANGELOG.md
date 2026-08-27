@@ -12,7 +12,8 @@
   compatible live Codex session is available. Titles default to the configurable
   `[飞书]` source prefix. Optional `session_title_model` generation runs through
   an isolated local Codex ephemeral process and safely falls back without
-  affecting the user turn.
+  affecting the user turn. Synthetic heartbeat turns defer the one-shot title
+  until the next real user request.
 
 ## v0.2.0 (2026-08-26)
 

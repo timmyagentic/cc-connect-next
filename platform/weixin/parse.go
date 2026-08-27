@@ -16,8 +16,21 @@ func isMediaItemType(t int) bool {
 
 // bodyFromItemList extracts user-visible text from Weixin item_list (text, quotes, voice ASR).
 func bodyFromItemList(items []messageItem) string {
+	body, extra := bodyPartsFromItemList(items)
+	if extra == "" {
+		return body
+	}
+	if body == "" {
+		return extra
+	}
+	return extra + "\n" + body
+}
+
+// bodyPartsFromItemList keeps reply context separate from the current user's
+// text while preserving bodyFromItemList's combined agent prompt.
+func bodyPartsFromItemList(items []messageItem) (string, string) {
 	if len(items) == 0 {
-		return ""
+		return "", ""
 	}
 	for _, item := range items {
 		switch item.Type {
@@ -28,10 +41,10 @@ func bodyFromItemList(items []messageItem) string {
 			text := strings.TrimSpace(item.TextItem.Text)
 			ref := item.RefMsg
 			if ref == nil {
-				return text
+				return text, ""
 			}
 			if ref.MessageItem != nil && isMediaItemType(ref.MessageItem.Type) {
-				return text
+				return text, ""
 			}
 			var parts []string
 			if ref.Title != "" {
@@ -44,14 +57,15 @@ func bodyFromItemList(items []messageItem) string {
 				}
 			}
 			if len(parts) == 0 {
-				return text
+				return text, ""
 			}
-			return fmt.Sprintf("[引用: %s]\n%s", strings.Join(parts, " | "), text)
+			extra := fmt.Sprintf("[引用: %s]", strings.Join(parts, " | "))
+			return text, extra
 		case messageItemVoice:
 			if item.VoiceItem != nil && strings.TrimSpace(item.VoiceItem.Text) != "" {
-				return strings.TrimSpace(item.VoiceItem.Text)
+				return strings.TrimSpace(item.VoiceItem.Text), ""
 			}
 		}
 	}
-	return ""
+	return "", ""
 }

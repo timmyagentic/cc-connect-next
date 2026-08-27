@@ -87,6 +87,14 @@ type relayDeadlineTitleSession struct {
 	sendCalls int
 }
 
+type heartbeatTitlePlatform struct {
+	*stubPlatformEngine
+}
+
+func (*heartbeatTitlePlatform) ReconstructReplyCtx(string) (any, error) {
+	return "heartbeat-ctx", nil
+}
+
 func (s *relayDeadlineTitleSession) SetInitialSessionTitleContext(ctx context.Context, _ string) error {
 	<-ctx.Done()
 	return ctx.Err()
@@ -230,6 +238,52 @@ func TestGetOrCreateInteractiveStateWith_TitleGenerationReleasesGlobalLock(t *te
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("session creation did not finish after title generation")
+	}
+}
+
+func TestExecuteHeartbeat_DefersTitleUntilRealUser(t *testing.T) {
+	live := &orderedTitleSession{controllableAgentSession: newControllableSession("thread-fresh")}
+	agent := &controllableAgent{nextSession: live}
+	p := &heartbeatTitlePlatform{stubPlatformEngine: &stubPlatformEngine{n: "test"}}
+	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	key := "test:user"
+
+	if err := e.ExecuteHeartbeat(key, "This is a periodic heartbeat check", true); err != nil {
+		t.Fatalf("ExecuteHeartbeat() error = %v", err)
+	}
+	if got := live.prompt(); got != "" {
+		t.Fatalf("heartbeat title prompt = %q, want deferred title", got)
+	}
+	e.interactiveMu.Lock()
+	state := e.interactiveStates[key]
+	e.interactiveMu.Unlock()
+	if state == nil {
+		t.Fatal("heartbeat did not create an interactive state")
+	}
+	state.mu.Lock()
+	pending := state.initialTitlePending
+	state.mu.Unlock()
+	if !pending {
+		t.Fatal("fresh heartbeat session did not retain pending title state")
+	}
+
+	managed := e.sessions.GetOrCreateActive(key)
+	if !managed.TryLock() {
+		t.Fatal("heartbeat did not release the managed session")
+	}
+	e.processInteractiveMessageWith(
+		p,
+		&Message{SessionKey: key, Platform: "test", Content: "首个真实用户问题", ReplyCtx: "ctx"},
+		managed,
+		agent,
+		e.sessions,
+		key,
+		"",
+		key,
+		"首个真实用户问题",
+	)
+	if got := live.prompt(); got != "首个真实用户问题" {
+		t.Fatalf("deferred title prompt = %q, want first real user request", got)
 	}
 }
 
