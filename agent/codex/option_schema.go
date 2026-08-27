@@ -21,6 +21,8 @@ func (a *Agent) KnownOptionKeys() []string {
 		"model",
 		"model_context_window",
 		"reasoning_effort",
+		"session_title_model",
+		"session_title_prefix",
 		"service_tier",
 		"system_prompt",
 		"work_dir",

@@ -1,7 +1,10 @@
 package codex
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -41,9 +44,39 @@ func TestInitialCodexThreadTitle(t *testing.T) {
 			want: "看一下这个接口为什么失败",
 		},
 		{
+			name:   "quote only does not expose quoted content",
+			prompt: "[Quoted message from User]:\n另一位用户的敏感内容\n\n",
+			want:   "New conversation",
+		},
+		{
+			name:   "reply chain only does not expose quoted content",
+			prompt: "--- Reply chain (2 messages) ---\n[1] user:\n第一条\n\n[2] assistant:\n第二条\n\n",
+			want:   "New conversation",
+		},
+		{
 			name:   "sensitive fragments",
 			prompt: "给 person@example.com 检查 https://example.com/private/path 和 sk-secretvalue1234567890",
 			want:   "给 [email] 检查 [link] 和 [secret]",
+		},
+		{
+			name:   "assignment credential",
+			prompt: "请使用 token=abcdefghijklmnop 和 api_key=zyxwvutsrqponmlk",
+			want:   "请使用 token=[secret] 和 api_key=[secret]",
+		},
+		{
+			name:   "github pat",
+			prompt: "检查 github_pat_11AA22BB33CC44DD55EE66FF77GG88HH",
+			want:   "检查 [secret]",
+		},
+		{
+			name:   "jwt",
+			prompt: "检查 eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+			want:   "检查 [secret]",
+		},
+		{
+			name:   "aws access key",
+			prompt: "检查 AKIAIOSFODNN7EXAMPLE",
+			want:   "检查 [secret]",
 		},
 		{
 			name:   "unicode length limit",
@@ -66,6 +99,58 @@ func TestInitialCodexThreadTitle(t *testing.T) {
 	}
 }
 
+func TestFormatSessionTitlePrefix(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		prefix string
+		title  string
+		want   string
+	}{
+		{name: "default", title: "检查锁屏状态", want: "[飞书] 检查锁屏状态"},
+		{name: "blank uses default", prefix: "  ", title: "检查锁屏状态", want: "[飞书] 检查锁屏状态"},
+		{name: "custom", prefix: " [Slack] ", title: "检查锁屏状态", want: "[Slack] 检查锁屏状态"},
+		{name: "idempotent", prefix: "[飞书]", title: "[飞书] 检查锁屏状态", want: "[飞书] 检查锁屏状态"},
+		{name: "partial text is not prefix", prefix: "A", title: "Apple", want: "A Apple"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatSessionTitle(tt.prefix, tt.title); got != tt.want {
+				t.Fatalf("formatSessionTitle() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNew_SessionTitleOptions(t *testing.T) {
+	agentValue, err := New(map[string]any{
+		"cmd":                  os.Args[0],
+		"session_title_prefix": " [Slack] ",
+		"session_title_model":  " gpt-5.3-codex-spark ",
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	agent := agentValue.(*Agent)
+	if agent.sessionTitlePrefix != "[Slack]" {
+		t.Fatalf("sessionTitlePrefix = %q", agent.sessionTitlePrefix)
+	}
+	if agent.sessionTitleModel != "gpt-5.3-codex-spark" {
+		t.Fatalf("sessionTitleModel = %q", agent.sessionTitleModel)
+	}
+	opts := agent.WorkspaceAgentOptions()
+	if opts["session_title_prefix"] != "[Slack]" || opts["session_title_model"] != "gpt-5.3-codex-spark" {
+		t.Fatalf("WorkspaceAgentOptions() = %#v", opts)
+	}
+
+	defaultValue, err := New(map[string]any{"cmd": os.Args[0]})
+	if err != nil {
+		t.Fatalf("New(defaults) error = %v", err)
+	}
+	defaults := defaultValue.(*Agent)
+	if defaults.sessionTitlePrefix != "[飞书]" || defaults.sessionTitleModel != "" {
+		t.Fatalf("defaults = prefix %q model %q", defaults.sessionTitlePrefix, defaults.sessionTitleModel)
+	}
+}
+
 func TestAppServerSession_SetInitialSessionTitleNamesFreshThread(t *testing.T) {
 	stdin := &steerFakeStdin{}
 	s := newSteerTestSession(t, stdin, "thread-1", "")
@@ -81,8 +166,123 @@ func TestAppServerSession_SetInitialSessionTitleNamesFreshThread(t *testing.T) {
 		t.Fatalf("request = %#v, want thread/name/set", req)
 	}
 	params, _ := req["params"].(map[string]any)
-	if params["threadId"] != "thread-1" || params["name"] != "你看看电脑有没有锁屏" {
+	if params["threadId"] != "thread-1" || params["name"] != "[飞书] 你看看电脑有没有锁屏" {
 		t.Fatalf("thread/name/set params = %#v", params)
+	}
+}
+
+func TestAppServerSession_OptionalTitleModel(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		model         string
+		generated     string
+		generateErr   error
+		wantTitle     string
+		wantCalls     int
+		wantCandidate string
+	}{
+		{
+			name:      "disabled by default",
+			wantTitle: "[飞书] 你看看电脑有没有锁屏",
+		},
+		{
+			name:          "spark success",
+			model:         "gpt-5.3-codex-spark",
+			generated:     "检查电脑锁屏状态",
+			wantTitle:     "[飞书] 检查电脑锁屏状态",
+			wantCalls:     1,
+			wantCandidate: "你看看电脑有没有锁屏",
+		},
+		{
+			name:          "spark failure falls back",
+			model:         "gpt-5.3-codex-spark",
+			generateErr:   errors.New("title generation unavailable"),
+			wantTitle:     "[飞书] 你看看电脑有没有锁屏",
+			wantCalls:     1,
+			wantCandidate: "你看看电脑有没有锁屏",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stdin := &steerFakeStdin{}
+			s := newSteerTestSession(t, stdin, "thread-1", "")
+			s.sessionTitleModel = tt.model
+			calls := 0
+			candidate := ""
+			s.titleGenerator = func(_ context.Context, input string) (string, error) {
+				calls++
+				candidate = input
+				return tt.generated, tt.generateErr
+			}
+			stdin.respond = respondSuccess(s, `{}`)
+
+			prompt := core.BuildCapabilityBrief("codex", []string{"model"}) + "\n\n你看看电脑有没有锁屏"
+			if err := s.SetInitialSessionTitle(prompt); err != nil {
+				t.Fatalf("SetInitialSessionTitle() error = %v", err)
+			}
+			params, _ := stdin.lastRequest()["params"].(map[string]any)
+			if params["name"] != tt.wantTitle {
+				t.Fatalf("title = %v, want %q", params["name"], tt.wantTitle)
+			}
+			if calls != tt.wantCalls || candidate != tt.wantCandidate {
+				t.Fatalf("generator calls = %d candidate = %q", calls, candidate)
+			}
+		})
+	}
+}
+
+func TestSessionTitleGenerationArgsAreEphemeralAndPromptFree(t *testing.T) {
+	s := &appServerSession{
+		cliExtraArgs:      []string{"--profile", "work", "--dangerously-bypass-approvals-and-sandbox"},
+		sessionTitleModel: "gpt-5.3-codex-spark",
+	}
+	args := s.sessionTitleGenerationArgs("/isolated/title-cwd")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"exec",
+		"--ephemeral",
+		"--ignore-user-config",
+		"--ignore-rules",
+		"--skip-git-repo-check",
+		"-C /isolated/title-cwd",
+		"-m gpt-5.3-codex-spark",
+		"-s read-only",
+		"--disable plugins",
+		"--disable apps",
+		"--disable skill_search",
+		"--disable memories",
+		"--json -",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args = %q, missing %q", joined, want)
+		}
+	}
+	for _, forbidden := range []string{"--profile", "--dangerously-bypass-approvals-and-sandbox"} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("isolated title args = %q, contains inherited %q", joined, forbidden)
+		}
+	}
+	if strings.Contains(joined, "private user request") {
+		t.Fatalf("user request leaked into argv: %q", joined)
+	}
+}
+
+func TestParseSessionTitleGenerationOutput(t *testing.T) {
+	input := strings.NewReader(strings.Join([]string{
+		`{"type":"thread.started","thread_id":"ephemeral"}`,
+		`not-json`,
+		`{"type":"item.completed","item":{"type":"agent_message","text":"检查电脑锁屏状态"}}`,
+		`{"type":"turn.completed","usage":{"input_tokens":10}}`,
+	}, "\n"))
+	title, err := parseSessionTitleGenerationOutput(input)
+	if err != nil {
+		t.Fatalf("parseSessionTitleGenerationOutput() error = %v", err)
+	}
+	if title != "检查电脑锁屏状态" {
+		t.Fatalf("title = %q", title)
+	}
+
+	if _, err := parseSessionTitleGenerationOutput(strings.NewReader(`{"type":"turn.completed"}`)); err == nil {
+		t.Fatal("missing agent message should fail")
 	}
 }
 
@@ -122,6 +322,12 @@ func TestAppServerSession_HandledThreadKeepsExistingTitle(t *testing.T) {
 	stdin := &steerFakeStdin{}
 	s := newSteerTestSession(t, stdin, "thread-1", "")
 	s.initialTitleHandled = true
+	s.sessionTitleModel = "gpt-5.3-codex-spark"
+	generatorCalls := 0
+	s.titleGenerator = func(context.Context, string) (string, error) {
+		generatorCalls++
+		return "不应生成", nil
+	}
 
 	if err := s.SetInitialSessionTitle("不要覆盖已有标题"); err != nil {
 		t.Fatalf("SetInitialSessionTitle() error = %v", err)
@@ -131,6 +337,9 @@ func TestAppServerSession_HandledThreadKeepsExistingTitle(t *testing.T) {
 	stdin.mu.Unlock()
 	if requestCount != 0 {
 		t.Fatalf("request count = %d, want no rename request", requestCount)
+	}
+	if generatorCalls != 0 {
+		t.Fatalf("generator calls = %d, want 0 for handled thread", generatorCalls)
 	}
 }
 
@@ -147,7 +356,7 @@ func TestAppServerSession_SetSessionTitleUsesOfficialRPC(t *testing.T) {
 		t.Fatalf("method = %v, want thread/name/set", req["method"])
 	}
 	params, _ := req["params"].(map[string]any)
-	if params["threadId"] != "persisted-thread" || params["name"] != "Readable title" {
+	if params["threadId"] != "persisted-thread" || params["name"] != "[飞书] Readable title" {
 		t.Fatalf("params = %#v", params)
 	}
 

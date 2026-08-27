@@ -179,20 +179,23 @@ type appServerRequestUserInputAnswer struct {
 }
 
 type appServerSession struct {
-	url            string
-	cliBin         string   // CLI binary from the cmd option, default "codex"
-	cliExtraArgs   []string // extra args from cmd, placed before the app-server subcommand
-	workDir        string
-	model          string
-	contextWindow  int64
-	effort         string
-	serviceTier    string // Codex service tier, e.g. "fast"; catalog-driven, passed through verbatim
-	mode           string
-	baseURL        string
-	modelProvider  string
-	extraEnv       []string
-	codexHome      string
-	promptPreamble string
+	url                string
+	cliBin             string   // CLI binary from the cmd option, default "codex"
+	cliExtraArgs       []string // extra args from cmd, placed before the app-server subcommand
+	workDir            string
+	model              string
+	contextWindow      int64
+	effort             string
+	serviceTier        string // Codex service tier, e.g. "fast"; catalog-driven, passed through verbatim
+	mode               string
+	baseURL            string
+	modelProvider      string
+	extraEnv           []string
+	codexHome          string
+	promptPreamble     string
+	sessionTitlePrefix string
+	sessionTitleModel  string
+	titleGenerator     sessionTitleGenerator
 
 	events chan core.Event
 
@@ -244,22 +247,24 @@ const (
 // silently drop fields — that is exactly how the cmd binary and extra args
 // were lost on this backend (issue #37).
 type appServerSessionParams struct {
-	url           string
-	cliBin        string   // CLI binary from the cmd option, default "codex"
-	cliExtraArgs  []string // extra args from cmd, placed before the app-server subcommand
-	workDir       string
-	model         string
-	contextWindow int64
-	effort        string
-	serviceTier   string
-	mode          string
-	resumeID      string
-	baseURL       string
-	modelProvider string
-	extraEnv      []string
-	codexHome     string
-	systemPrompt  string
-	appendPrompt  string
+	url                string
+	cliBin             string   // CLI binary from the cmd option, default "codex"
+	cliExtraArgs       []string // extra args from cmd, placed before the app-server subcommand
+	workDir            string
+	model              string
+	contextWindow      int64
+	effort             string
+	serviceTier        string
+	mode               string
+	resumeID           string
+	baseURL            string
+	modelProvider      string
+	extraEnv           []string
+	codexHome          string
+	systemPrompt       string
+	appendPrompt       string
+	sessionTitlePrefix string
+	sessionTitleModel  string
 }
 
 func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appServerSession, error) {
@@ -283,6 +288,8 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 		extraEnv:            append([]string(nil), p.extraEnv...),
 		codexHome:           strings.TrimSpace(p.codexHome),
 		promptPreamble:      buildCodexPromptPreamble(p.systemPrompt, p.appendPrompt),
+		sessionTitlePrefix:  normalizeSessionTitlePrefix(p.sessionTitlePrefix),
+		sessionTitleModel:   strings.TrimSpace(p.sessionTitleModel),
 		events:              make(chan core.Event, 128),
 		ctx:                 sessionCtx,
 		cancel:              cancel,
@@ -616,6 +623,7 @@ func (s *appServerSession) SetSessionTitle(sessionID, title string) error {
 	if title == "" {
 		return fmt.Errorf("codex app-server thread title is empty")
 	}
+	title = formatSessionTitle(s.sessionTitlePrefix, title)
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
@@ -643,17 +651,34 @@ func (s *appServerSession) SetInitialSessionTitle(prompt string) error {
 	if threadID == "" {
 		return fmt.Errorf("codex app-server thread id is empty")
 	}
-	title := initialCodexThreadTitle(prompt)
-
 	s.stateMu.Lock()
 	if s.initialTitleHandled {
 		s.stateMu.Unlock()
 		return nil
 	}
-	// Consume the one-shot attempt even when an older app-server rejects the
-	// method; repeated metadata failures must not tax every later turn.
+	// Consume the one-shot attempt before optional generation so concurrent or
+	// duplicate initialization can never launch a second model process.
 	s.initialTitleHandled = true
 	s.stateMu.Unlock()
+
+	title := initialCodexThreadTitle(prompt)
+	if model := strings.TrimSpace(s.sessionTitleModel); model != "" {
+		generator := s.titleGenerator
+		if generator == nil {
+			generator = s.generateSessionTitleWithCodex
+		}
+		ctx := s.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		generated, err := generator(ctx, title)
+		if err != nil {
+			slog.Warn("codex app-server: optional session title generation failed, using local title",
+				"model", model, "error", err)
+		} else if generated = initialCodexThreadTitle(generated); generated != untitledCodexThread {
+			title = generated
+		}
+	}
 
 	return s.SetSessionTitle(threadID, title)
 }

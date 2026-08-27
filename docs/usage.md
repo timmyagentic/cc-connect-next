@@ -107,6 +107,25 @@ both Codex backends; when omitted, Codex keeps its own model/config default:
 model_context_window = 872000
 ```
 
+Codex app-server threads receive a user-facing title immediately after
+`thread/start` returns and before the first turn starts. Every Codex App title
+has a configurable source prefix; the default is `[飞书]`:
+
+```toml
+[projects.agent.options]
+session_title_prefix = "[飞书]" # blank or omitted also uses [飞书]
+session_title_model = ""        # default: deterministic local title
+```
+
+Set `session_title_model = "gpt-5.3-codex-spark"` to opt into title generation
+through the locally installed Codex CLI. CC Connect sends only the already
+sanitized 48-character title candidate over stdin to an isolated
+`codex exec --ephemeral` process. The call is read-only, ignores project/user
+rules and plugins, has a 10-second timeout, and never enters the user thread
+history. It adds Codex latency and usage; any unavailable model, timeout,
+non-zero exit, or invalid output falls back to the deterministic title. The
+option is intentionally disabled by default.
+
 The steer is sent as `turn/steer` with the active turn pinned via `expectedTurnId`, so it can never race a completing turn. When steering is definitively unavailable (unsupported backend, the turn just ended), the message safely falls back to the queue.
 
 **`queue`.** Set `busy_message_mode = "queue"` to always use the per-session FIFO: busy messages are processed as new turns after the current one completes (the pre-v0.1.3 behavior). If the steer outcome is *unknown* (RPC timeout), the message is deliberately **not** re-queued — that could deliver it twice — and you get an explicit warning instead.

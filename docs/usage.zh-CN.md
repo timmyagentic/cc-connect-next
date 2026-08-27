@@ -105,6 +105,21 @@ Codex 模型或自身配置中的默认值：
 model_context_window = 872000
 ```
 
+Codex app-server thread 会在 `thread/start` 返回后、首个 turn 开始前立即获得
+用户可见标题。所有 Codex App 标题都会带可配置的来源前缀，默认是 `[飞书]`：
+
+```toml
+[projects.agent.options]
+session_title_prefix = "[飞书]" # 省略或留空时同样使用 [飞书]
+session_title_model = ""        # 默认：确定性本地标题
+```
+
+设置 `session_title_model = "gpt-5.3-codex-spark"` 后，可选择使用本机 Codex CLI
+生成标题。CC Connect 只会通过 stdin 传入已经清洗、最长 48 字的标题候选，并在隔离的
+`codex exec --ephemeral` 进程中执行。该调用使用只读沙箱，忽略项目/用户规则和插件，
+超时为 10 秒，不会进入用户 thread 历史。它会增加 Codex 延迟与用量；模型不可用、
+超时、非零退出或输出无效时都会回退到确定性标题。该选项默认关闭。
+
 steer 通过 `turn/steer` 发送，并用 `expectedTurnId` 锁定当前回合，不会与回合完成产生竞态。steer 确定不可用时（后端不支持、回合刚好结束），消息安全回退到队列。
 
 **`queue`。** 设置 `busy_message_mode = "queue"` 可始终使用会话级 FIFO：忙时消息在当前回合结束后作为新回合处理（v0.1.3 之前的行为）。若 steer 结果**未知**（RPC 超时），消息刻意**不会**自动重新排队——那可能造成重复投递——你会收到明确的警告提示。
