@@ -1630,226 +1630,101 @@ func (e *Engine) ActiveSessionKeys() []string {
 	return keys
 }
 
-// ExecuteCronJob runs a cron job by injecting a synthetic message into the engine.
-// It finds the platform that owns the session key, reconstructs a reply context,
-// and processes the message as if the user sent it.
-func (e *Engine) ExecuteCronJob(job *CronJob) error {
-	e.hooks.Emit(HookEvent{
-		Event:      HookEventCronTriggered,
-		SessionKey: job.SessionKey,
-		Content:    job.Prompt,
-		Extra:      map[string]any{"job_id": job.ID, "job_description": job.Description},
-	})
-
-	sessionKey := job.SessionKey
-	platformName := ""
-	if idx := strings.Index(sessionKey, ":"); idx > 0 {
-		platformName = sessionKey[:idx]
-	}
-
-	var targetPlatform Platform
-	for _, p := range e.platforms {
-		if p.Name() == platformName {
-			targetPlatform = p
-			break
-		}
-	}
-	// Fallback: in multi-workspace mode the stored session key may be prefixed
-	// with the workspace path (e.g. "/home/user/project:slack:C123:U456").
-	// Search for a known platform name within the key and strip the prefix.
-	if targetPlatform == nil {
-		for _, p := range e.platforms {
-			needle := ":" + p.Name() + ":"
-			if idx := strings.Index(sessionKey, needle); idx >= 0 {
-				targetPlatform = p
-				platformName = p.Name()
-				sessionKey = sessionKey[idx+1:] // strip workspace prefix
-				break
-			}
-		}
-	}
-	if targetPlatform == nil {
-		return fmt.Errorf("platform %q not found for session %q", platformName, sessionKey)
-	}
-
-	rc, ok := targetPlatform.(ReplyContextReconstructor)
-	if !ok {
-		return fmt.Errorf("platform %q does not support proactive messaging (cron)", platformName)
-	}
-
-	runSessionKey := sessionKey
-	var replyCtx any
-	var err error
-	if !job.Mute {
-		if resolver, ok := targetPlatform.(CronReplyTargetResolver); ok {
-			resolvedSessionKey, resolvedReplyCtx, err := resolver.ResolveCronReplyTarget(sessionKey, cronRunTitle(job))
-			if err != nil {
-				if !errors.Is(err, ErrNotSupported) {
-					return fmt.Errorf("resolve cron reply target: %w", err)
-				}
-			} else {
-				if resolvedSessionKey != "" {
-					runSessionKey = resolvedSessionKey
-				}
-				if resolvedReplyCtx != nil {
-					replyCtx = resolvedReplyCtx
-				}
-			}
-		}
-	}
-	if replyCtx == nil {
-		replyCtx, err = rc.ReconstructReplyCtx(runSessionKey)
-		if err != nil {
-			return fmt.Errorf("reconstruct reply context: %w", err)
-		}
-	}
-
-	// Wrap platform to discard all outgoing messages when muted
-	effectivePlatform := targetPlatform
-	if job.Mute {
-		effectivePlatform = &mutePlatform{targetPlatform}
-	}
-
-	// Notify user that a cron job is executing (unless silent/muted)
-	// Note: this notification uses targetPlatform directly, not the tracking wrapper,
-	// so it won't count as a "meaningful delivery" for empty response detection.
-	if !job.Mute {
-		silent := false
-		if e.cronScheduler != nil {
-			silent = e.cronScheduler.IsSilent(job)
-		}
-		if !silent {
-			desc := job.Description
-			if desc == "" {
-				if job.IsShellJob() {
-					desc = truncateStr(job.Exec, 40)
-				} else {
-					desc = truncateStr(job.Prompt, 40)
-				}
-			}
-			e.send(targetPlatform, replyCtx, fmt.Sprintf("⏰ %s", desc))
-		}
-	}
-
-	if job.IsShellJob() {
-		return e.executeCronShell(effectivePlatform, replyCtx, job)
-	}
-
-	content := job.Prompt
-	if strings.HasPrefix(content, "/") {
-		parts := strings.Fields(content)
-		if len(parts) > 0 {
-			cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
-			if skill := e.skills.Resolve(cmd); skill != nil {
-				content = BuildSkillInvocationPrompt(skill, parts[1:])
-			}
-		}
-	}
-
-	msg := &Message{
-		SessionKey:   sessionKey,
-		Platform:     platformName,
-		UserID:       "cron",
-		UserName:     "cron",
-		Content:      content,
-		ReplyCtx:     replyCtx,
-		ModeOverride: job.Mode,
-	}
-
-	// Resolve workspace-specific agent and sessions for multi-workspace mode.
-	// Priority: job.WorkDir (explicit) > workspace binding > global agent fallback.
-	agent := e.agent
-	sessions := e.sessions
-	workspaceDir := ""
-
-	if e.multiWorkspace {
-		channelID := extractChannelID(sessionKey)
-		if channelID != "" {
-			workspace, _, err := e.resolveWorkspace(targetPlatform, channelID)
-			if err == nil && workspace != "" {
-				wsAgent, wsSessions, _, effectiveDir, err := e.workspaceContext(workspace, sessionKey)
-				if err == nil {
-					agent = wsAgent
-					sessions = wsSessions
-					workspaceDir = effectiveDir
-				}
-			}
-		}
-	}
-
-	if job.WorkDir != "" {
-		wsAgent, wsSessions, err := e.getOrCreateWorkspaceAgent(job.WorkDir)
-		if err == nil {
-			agent = wsAgent
-			sessions = wsSessions
-			workspaceDir = job.WorkDir
-		} else {
-			slog.Warn("cron: workspace agent creation failed, using global",
-				"work_dir", job.WorkDir, "session_key", sessionKey, "error", err)
-		}
-	}
-
-	useNewSession := false
-	if e.cronScheduler != nil {
-		useNewSession = e.cronScheduler.UsesNewSession(job)
-	} else {
-		useNewSession = job.UsesNewSessionPerRun()
-	}
-
-	if useNewSession {
-		msg.SessionKey = runSessionKey
-		session := sessions.NewSideSession(runSessionKey, "cron-"+job.ID)
-		if !session.TryLock() {
-			return fmt.Errorf("session %q is busy", runSessionKey)
-		}
-		iKey := fmt.Sprintf("%s#cron:%s", runSessionKey, session.ID)
-		if workspaceDir != "" {
-			iKey = workspaceDir + ":" + iKey
-		}
-		prevHistLen := session.HistoryLen()
-		e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, runSessionKey)
-		e.cleanupInteractiveState(iKey)
-		// Empty-response detection via session history delta: processInteractiveMessageWith
-		// always adds a "user" entry (prevHistLen+1), then an "assistant" entry on success
-		// (prevHistLen+2). This approach correctly detects empty responses across all
-		// delivery modes (plain text, cards, rich cards, DingTalk AI streaming) because
-		// AddHistory("assistant",...) is called before any platform-specific rendering path.
-		if !job.Mute && session.HistoryLen() < prevHistLen+2 {
-			return fmt.Errorf("cron job %q produced an empty response", job.ID)
-		}
-		return nil
-	}
-
-	session := sessions.GetOrCreateActive(sessionKey)
-	if !session.TryLock() {
-		return fmt.Errorf("session %q is busy", sessionKey)
-	}
-
-	iKey := sessionKey
-	if workspaceDir != "" {
-		iKey = workspaceDir + ":" + sessionKey
-	}
-	prevHistLen := session.HistoryLen()
-	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey)
-	// Same empty-response detection as the useNewSession path above.
-	if !job.Mute && session.HistoryLen() < prevHistLen+2 {
-		return fmt.Errorf("cron job %q produced an empty response", job.ID)
-	}
-	return nil
+type scheduledJobSpec struct {
+	kind            string
+	hookEvent       HookEventType
+	id              string
+	sessionKey      string
+	prompt          string
+	workDir         string
+	description     string
+	mode            string
+	mute            bool
+	silent          bool
+	newSession      bool
+	requireResponse bool
+	runTitle        string
+	shell           scheduledShellSpec
 }
 
-// ExecuteTimerJob fires a one-shot timer job: resolves the platform, sends a
-// notification (unless muted), and either runs a shell command or injects a
-// synthetic message into the agent session.
+// ExecuteCronJob runs a recurring job through the shared scheduled-message
+// lifecycle while preserving cron-specific shell, notification, and response
+// requirements.
+func (e *Engine) ExecuteCronJob(job *CronJob) error {
+	silent := false
+	newSession := job.UsesNewSessionPerRun()
+	if e.cronScheduler != nil {
+		silent = e.cronScheduler.IsSilent(job)
+		newSession = e.cronScheduler.UsesNewSession(job)
+	}
+	return e.executeScheduledJob(scheduledJobSpec{
+		kind:            "cron",
+		hookEvent:       HookEventCronTriggered,
+		id:              job.ID,
+		sessionKey:      job.SessionKey,
+		prompt:          job.Prompt,
+		workDir:         job.WorkDir,
+		description:     job.Description,
+		mode:            job.Mode,
+		mute:            job.Mute,
+		silent:          silent,
+		newSession:      newSession,
+		requireResponse: true,
+		runTitle:        cronRunTitle(job),
+		shell: scheduledShellSpec{
+			command:      job.Exec,
+			workDir:      job.WorkDir,
+			timeout:      job.ExecutionTimeout(),
+			shell:        e.shell,
+			shellFlag:    e.shellFlag,
+			shellProfile: e.shellProfile,
+		},
+	})
+}
+
+// ExecuteTimerJob runs a one-shot job through the same scheduled-message
+// lifecycle, with timer-specific shell defaults and no cron response contract.
 func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
+	silent := false
+	newSession := job.UsesNewSessionPerRun()
+	if e.timerScheduler != nil {
+		silent = e.timerScheduler.IsSilent(job)
+		newSession = e.timerScheduler.UsesNewSession(job)
+	}
+	return e.executeScheduledJob(scheduledJobSpec{
+		kind:        "timer",
+		hookEvent:   HookEventTimerTriggered,
+		id:          job.ID,
+		sessionKey:  job.SessionKey,
+		prompt:      job.Prompt,
+		workDir:     job.WorkDir,
+		description: job.Description,
+		mode:        job.Mode,
+		mute:        job.Mute,
+		silent:      silent,
+		newSession:  newSession,
+		runTitle:    timerRunTitle(job),
+		shell: scheduledShellSpec{
+			command:   job.Exec,
+			workDir:   job.WorkDir,
+			timeout:   job.ExecutionTimeout(),
+			shell:     defaultShell(),
+			shellFlag: defaultShellFlag(),
+		},
+	})
+}
+
+// executeScheduledJob owns the shared Cron/Timer platform resolution,
+// proactive target, notification, workspace, session, and prompt lifecycle.
+func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 	e.hooks.Emit(HookEvent{
-		Event:      HookEventTimerTriggered,
-		SessionKey: job.SessionKey,
-		Content:    job.Prompt,
-		Extra:      map[string]any{"job_id": job.ID, "job_description": job.Description},
+		Event:      spec.hookEvent,
+		SessionKey: spec.sessionKey,
+		Content:    spec.prompt,
+		Extra:      map[string]any{"job_id": spec.id, "job_description": spec.description},
 	})
 
-	sessionKey := job.SessionKey
+	sessionKey := spec.sessionKey
 	platformName := ""
 	if idx := strings.Index(sessionKey, ":"); idx > 0 {
 		platformName = sessionKey[:idx]
@@ -1862,7 +1737,6 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 			break
 		}
 	}
-	// Multi-workspace fallback: strip workspace prefix from session key.
 	if targetPlatform == nil {
 		for _, p := range e.platforms {
 			needle := ":" + p.Name() + ":"
@@ -1880,18 +1754,18 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 
 	rc, ok := targetPlatform.(ReplyContextReconstructor)
 	if !ok {
-		return fmt.Errorf("platform %q does not support proactive messaging (timer)", platformName)
+		return fmt.Errorf("platform %q does not support proactive messaging (%s)", platformName, spec.kind)
 	}
 
 	runSessionKey := sessionKey
 	var replyCtx any
 	var err error
-	if !job.Mute {
+	if !spec.mute {
 		if resolver, ok := targetPlatform.(CronReplyTargetResolver); ok {
-			resolvedSessionKey, resolvedReplyCtx, err := resolver.ResolveCronReplyTarget(sessionKey, timerRunTitle(job))
-			if err != nil {
-				if !errors.Is(err, ErrNotSupported) {
-					return fmt.Errorf("resolve timer reply target: %w", err)
+			resolvedSessionKey, resolvedReplyCtx, resolveErr := resolver.ResolveCronReplyTarget(sessionKey, spec.runTitle)
+			if resolveErr != nil {
+				if !errors.Is(resolveErr, ErrNotSupported) {
+					return fmt.Errorf("resolve %s reply target: %w", spec.kind, resolveErr)
 				}
 			} else {
 				if resolvedSessionKey != "" {
@@ -1911,39 +1785,31 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 	}
 
 	effectivePlatform := targetPlatform
-	if job.Mute {
+	if spec.mute {
 		effectivePlatform = &mutePlatform{targetPlatform}
 	}
-
-	// Notify user unless muted or silent
-	if !job.Mute {
-		silent := false
-		if e.timerScheduler != nil {
-			silent = e.timerScheduler.IsSilent(job)
-		}
-		if !silent {
-			desc := job.Description
-			if desc == "" {
-				if job.IsShellJob() {
-					desc = truncateStr(job.Exec, 40)
-				} else {
-					desc = truncateStr(job.Prompt, 40)
-				}
+	if !spec.mute && !spec.silent {
+		description := spec.description
+		if description == "" {
+			if spec.shell.command != "" {
+				description = truncateStr(spec.shell.command, 40)
+			} else {
+				description = truncateStr(spec.prompt, 40)
 			}
-			e.send(targetPlatform, replyCtx, fmt.Sprintf("⏰ %s", desc))
 		}
+		e.send(targetPlatform, replyCtx, fmt.Sprintf("⏰ %s", description))
 	}
 
-	if job.IsShellJob() {
-		return e.executeTimerShell(effectivePlatform, replyCtx, job)
+	if spec.shell.command != "" {
+		return e.executeScheduledShell(effectivePlatform, replyCtx, spec.shell)
 	}
 
-	content := job.Prompt
+	content := spec.prompt
 	if strings.HasPrefix(content, "/") {
 		parts := strings.Fields(content)
 		if len(parts) > 0 {
-			cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
-			if skill := e.skills.Resolve(cmd); skill != nil {
+			command := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
+			if skill := e.skills.Resolve(command); skill != nil {
 				content = BuildSkillInvocationPrompt(skill, parts[1:])
 			}
 		}
@@ -1952,24 +1818,23 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 	msg := &Message{
 		SessionKey:   sessionKey,
 		Platform:     platformName,
-		UserID:       "timer",
-		UserName:     "timer",
+		UserID:       spec.kind,
+		UserName:     spec.kind,
 		Content:      content,
 		ReplyCtx:     replyCtx,
-		ModeOverride: job.Mode,
+		ModeOverride: spec.mode,
 	}
 
 	agent := e.agent
 	sessions := e.sessions
 	workspaceDir := ""
-
 	if e.multiWorkspace {
 		channelID := extractChannelID(sessionKey)
 		if channelID != "" {
-			workspace, _, err := e.resolveWorkspace(targetPlatform, channelID)
-			if err == nil && workspace != "" {
-				wsAgent, wsSessions, _, effectiveDir, err := e.workspaceContext(workspace, sessionKey)
-				if err == nil {
+			workspace, _, resolveErr := e.resolveWorkspace(targetPlatform, channelID)
+			if resolveErr == nil && workspace != "" {
+				wsAgent, wsSessions, _, effectiveDir, contextErr := e.workspaceContext(workspace, sessionKey)
+				if contextErr == nil {
 					agent = wsAgent
 					sessions = wsSessions
 					workspaceDir = effectiveDir
@@ -1977,51 +1842,46 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 			}
 		}
 	}
-
-	if job.WorkDir != "" {
-		wsAgent, wsSessions, err := e.getOrCreateWorkspaceAgent(job.WorkDir)
-		if err == nil {
+	if spec.workDir != "" {
+		wsAgent, wsSessions, workspaceErr := e.getOrCreateWorkspaceAgent(spec.workDir)
+		if workspaceErr == nil {
 			agent = wsAgent
 			sessions = wsSessions
-			workspaceDir = job.WorkDir
+			workspaceDir = spec.workDir
 		} else {
-			slog.Warn("timer: workspace agent creation failed, using global",
-				"work_dir", job.WorkDir, "session_key", sessionKey, "error", err)
+			slog.Warn(spec.kind+": workspace agent creation failed, using global",
+				"work_dir", spec.workDir, "session_key", sessionKey, "error", workspaceErr)
 		}
 	}
 
-	useNewSession := false
-	if e.timerScheduler != nil {
-		useNewSession = e.timerScheduler.UsesNewSession(job)
-	} else {
-		useNewSession = job.UsesNewSessionPerRun()
-	}
-
-	if useNewSession {
+	lockKey := sessionKey
+	interactiveKey := sessionKey
+	ccSessionKey := sessionKey
+	var session *Session
+	if spec.newSession {
 		msg.SessionKey = runSessionKey
-		session := sessions.NewSideSession(runSessionKey, "timer-"+job.ID)
-		if !session.TryLock() {
-			return fmt.Errorf("session %q is busy", runSessionKey)
-		}
-		iKey := fmt.Sprintf("%s#timer:%s", runSessionKey, session.ID)
-		if workspaceDir != "" {
-			iKey = workspaceDir + ":" + iKey
-		}
-		e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, runSessionKey)
-		e.cleanupInteractiveState(iKey)
-		return nil
+		lockKey = runSessionKey
+		ccSessionKey = runSessionKey
+		session = sessions.NewSideSession(runSessionKey, spec.kind+"-"+spec.id)
+		interactiveKey = fmt.Sprintf("%s#%s:%s", runSessionKey, spec.kind, session.ID)
+	} else {
+		session = sessions.GetOrCreateActive(sessionKey)
 	}
-
-	session := sessions.GetOrCreateActive(sessionKey)
 	if !session.TryLock() {
-		return fmt.Errorf("session %q is busy", sessionKey)
+		return fmt.Errorf("session %q is busy", lockKey)
+	}
+	if workspaceDir != "" {
+		interactiveKey = workspaceDir + ":" + interactiveKey
 	}
 
-	iKey := sessionKey
-	if workspaceDir != "" {
-		iKey = workspaceDir + ":" + sessionKey
+	previousHistoryLen := session.HistoryLen()
+	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, interactiveKey, workspaceDir, ccSessionKey)
+	if spec.newSession {
+		e.cleanupInteractiveState(interactiveKey)
 	}
-	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey)
+	if spec.requireResponse && !spec.mute && session.HistoryLen() < previousHistoryLen+2 {
+		return fmt.Errorf("%s job %q produced an empty response", spec.kind, spec.id)
+	}
 	return nil
 }
 
@@ -2047,16 +1907,6 @@ type scheduledShellSpec struct {
 	shellProfile string
 }
 
-func (e *Engine) executeTimerShell(p Platform, replyCtx any, job *TimerJob) error {
-	return e.executeScheduledShell(p, replyCtx, scheduledShellSpec{
-		command:   job.Exec,
-		workDir:   job.WorkDir,
-		timeout:   job.ExecutionTimeout(),
-		shell:     defaultShell(),
-		shellFlag: defaultShellFlag(),
-	})
-}
-
 func cronRunTitle(job *CronJob) string {
 	if job == nil {
 		return "cron"
@@ -2076,20 +1926,9 @@ func cronRunTitle(job *CronJob) string {
 	return "cron"
 }
 
-func (e *Engine) executeCronShell(p Platform, replyCtx any, job *CronJob) error {
-	return e.executeScheduledShell(p, replyCtx, scheduledShellSpec{
-		command:      job.Exec,
-		workDir:      job.WorkDir,
-		timeout:      job.ExecutionTimeout(),
-		shell:        e.shell,
-		shellFlag:    e.shellFlag,
-		shellProfile: e.shellProfile,
-	})
-}
-
 // executeScheduledShell owns the shared Cron/Timer process, progress, timeout,
-// and terminal-delivery lifecycle. Job-specific wrappers only select the shell
-// and resolve their command settings.
+// and terminal-delivery lifecycle. The scheduled job spec selects the shell
+// and resolves the command settings.
 func (e *Engine) executeScheduledShell(p Platform, replyCtx any, spec scheduledShellSpec) error {
 	workDir := spec.workDir
 	if workDir == "" {
