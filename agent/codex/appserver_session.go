@@ -179,20 +179,23 @@ type appServerRequestUserInputAnswer struct {
 }
 
 type appServerSession struct {
-	url            string
-	cliBin         string   // CLI binary from the cmd option, default "codex"
-	cliExtraArgs   []string // extra args from cmd, placed before the app-server subcommand
-	workDir        string
-	model          string
-	contextWindow  int64
-	effort         string
-	serviceTier    string // Codex service tier, e.g. "fast"; catalog-driven, passed through verbatim
-	mode           string
-	baseURL        string
-	modelProvider  string
-	extraEnv       []string
-	codexHome      string
-	promptPreamble string
+	url                string
+	cliBin             string   // CLI binary from the cmd option, default "codex"
+	cliExtraArgs       []string // extra args from cmd, placed before the app-server subcommand
+	workDir            string
+	model              string
+	contextWindow      int64
+	effort             string
+	serviceTier        string // Codex service tier, e.g. "fast"; catalog-driven, passed through verbatim
+	mode               string
+	baseURL            string
+	modelProvider      string
+	extraEnv           []string
+	codexHome          string
+	promptPreamble     string
+	sessionTitlePrefix string
+	sessionTitleModel  string
+	titleGenerator     sessionTitleGenerator
 
 	events chan core.Event
 
@@ -222,6 +225,11 @@ type appServerSession struct {
 	pendingMsgs  []string
 	currentTurn  string
 	preambleSent bool
+	// initialTitleHandled prevents later turns from replacing a fresh thread's
+	// first user-facing title. Resumed threads start with this already set.
+	initialTitleHandled bool
+	titleMu             sync.Mutex
+	explicitTitleRev    uint64
 
 	runtimeMu   sync.RWMutex
 	usage       *core.UsageReport
@@ -233,6 +241,7 @@ const (
 	appServerRequestTimeout       = 120 * time.Second
 	appServerResponseWriteTimeout = 1500 * time.Millisecond
 	appServerUsageRefreshTimeout  = 1500 * time.Millisecond
+	appServerTitleUpdateTimeout   = 1500 * time.Millisecond
 )
 
 // appServerSessionParams bundles the launch configuration for a Codex
@@ -240,22 +249,24 @@ const (
 // silently drop fields — that is exactly how the cmd binary and extra args
 // were lost on this backend (issue #37).
 type appServerSessionParams struct {
-	url           string
-	cliBin        string   // CLI binary from the cmd option, default "codex"
-	cliExtraArgs  []string // extra args from cmd, placed before the app-server subcommand
-	workDir       string
-	model         string
-	contextWindow int64
-	effort        string
-	serviceTier   string
-	mode          string
-	resumeID      string
-	baseURL       string
-	modelProvider string
-	extraEnv      []string
-	codexHome     string
-	systemPrompt  string
-	appendPrompt  string
+	url                string
+	cliBin             string   // CLI binary from the cmd option, default "codex"
+	cliExtraArgs       []string // extra args from cmd, placed before the app-server subcommand
+	workDir            string
+	model              string
+	contextWindow      int64
+	effort             string
+	serviceTier        string
+	mode               string
+	resumeID           string
+	baseURL            string
+	modelProvider      string
+	extraEnv           []string
+	codexHome          string
+	systemPrompt       string
+	appendPrompt       string
+	sessionTitlePrefix string
+	sessionTitleModel  string
 }
 
 func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appServerSession, error) {
@@ -265,26 +276,29 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 	}
 	sessionCtx, cancel := context.WithCancel(ctx)
 	s := &appServerSession{
-		url:              p.url,
-		cliBin:           cliBin,
-		cliExtraArgs:     append([]string(nil), p.cliExtraArgs...),
-		workDir:          p.workDir,
-		model:            p.model,
-		contextWindow:    p.contextWindow,
-		effort:           p.effort,
-		serviceTier:      p.serviceTier,
-		mode:             p.mode,
-		baseURL:          p.baseURL,
-		modelProvider:    p.modelProvider,
-		extraEnv:         append([]string(nil), p.extraEnv...),
-		codexHome:        strings.TrimSpace(p.codexHome),
-		promptPreamble:   buildCodexPromptPreamble(p.systemPrompt, p.appendPrompt),
-		events:           make(chan core.Event, 128),
-		ctx:              sessionCtx,
-		cancel:           cancel,
-		pending:          make(map[int64]chan rpcResponseEnvelope),
-		pendingApprovals: make(map[string]chan core.PermissionResult),
-		preambleSent:     p.resumeID != "" && p.resumeID != core.ContinueSession,
+		url:                 p.url,
+		cliBin:              cliBin,
+		cliExtraArgs:        append([]string(nil), p.cliExtraArgs...),
+		workDir:             p.workDir,
+		model:               p.model,
+		contextWindow:       p.contextWindow,
+		effort:              p.effort,
+		serviceTier:         p.serviceTier,
+		mode:                p.mode,
+		baseURL:             p.baseURL,
+		modelProvider:       p.modelProvider,
+		extraEnv:            append([]string(nil), p.extraEnv...),
+		codexHome:           strings.TrimSpace(p.codexHome),
+		promptPreamble:      buildCodexPromptPreamble(p.systemPrompt, p.appendPrompt),
+		sessionTitlePrefix:  normalizeSessionTitlePrefix(p.sessionTitlePrefix),
+		sessionTitleModel:   strings.TrimSpace(p.sessionTitleModel),
+		events:              make(chan core.Event, 128),
+		ctx:                 sessionCtx,
+		cancel:              cancel,
+		pending:             make(map[int64]chan rpcResponseEnvelope),
+		pendingApprovals:    make(map[string]chan core.PermissionResult),
+		preambleSent:        p.resumeID != "" && p.resumeID != core.ContinueSession,
+		initialTitleHandled: p.resumeID != "" && p.resumeID != core.ContinueSession,
 	}
 	s.alive.Store(true)
 
@@ -598,6 +612,132 @@ func (s *appServerSession) send(prompt string, images []core.ImageAttachment, fi
 	s.storeActiveTurnOptions(options)
 
 	return nil
+}
+
+// SetSessionTitle persists a user-facing Codex thread name. Naming is
+// metadata-only and intentionally separate from turn input.
+func (s *appServerSession) SetSessionTitle(sessionID, title string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	title = strings.TrimSpace(title)
+	if sessionID == "" {
+		return fmt.Errorf("codex app-server thread id is empty")
+	}
+	if title == "" {
+		return fmt.Errorf("codex app-server thread title is empty")
+	}
+	title = formatSessionTitle(s.sessionTitlePrefix, title)
+	if !s.alive.Load() {
+		return fmt.Errorf("session is closed")
+	}
+
+	s.titleMu.Lock()
+	defer s.titleMu.Unlock()
+	if sessionID == s.CurrentSessionID() {
+		s.explicitTitleRev++
+		s.stateMu.Lock()
+		s.initialTitleHandled = true
+		s.stateMu.Unlock()
+	}
+
+	return s.setSessionTitleRPC(sessionID, title)
+}
+
+func (s *appServerSession) setSessionTitleRPC(sessionID, title string) error {
+	return s.setSessionTitleRPCWithTimeout(sessionID, title, appServerTitleUpdateTimeout)
+}
+
+func (s *appServerSession) setSessionTitleRPCWithTimeout(sessionID, title string, timeout time.Duration) error {
+	var resp struct{}
+	if err := s.requestWithTimeout("thread/name/set", map[string]any{
+		"threadId": sessionID,
+		"name":     title,
+	}, &resp, timeout); err != nil {
+		return fmt.Errorf("codex app-server thread/name/set: %w", err)
+	}
+	return nil
+}
+
+// SetInitialSessionTitle names a fresh app-server thread at the creation
+// boundary. Send intentionally does not own this lifecycle step.
+func (s *appServerSession) SetInitialSessionTitle(prompt string) error {
+	ctx := s.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.SetInitialSessionTitleContext(ctx, prompt)
+}
+
+// SetInitialSessionTitleContext lets bounded callers cancel optional model
+// generation before they commit to starting a turn.
+func (s *appServerSession) SetInitialSessionTitleContext(ctx context.Context, prompt string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	threadID := s.CurrentSessionID()
+	if threadID == "" {
+		return fmt.Errorf("codex app-server thread id is empty")
+	}
+	s.titleMu.Lock()
+	s.stateMu.Lock()
+	if s.initialTitleHandled {
+		s.stateMu.Unlock()
+		s.titleMu.Unlock()
+		return nil
+	}
+	// Consume the one-shot attempt before optional generation so concurrent or
+	// duplicate initialization can never launch a second model process.
+	s.initialTitleHandled = true
+	explicitTitleRev := s.explicitTitleRev
+	s.stateMu.Unlock()
+	s.titleMu.Unlock()
+
+	title := initialCodexThreadTitle(prompt)
+	if model := strings.TrimSpace(s.sessionTitleModel); model != "" {
+		generator := s.titleGenerator
+		if generator == nil {
+			generator = s.generateSessionTitleWithCodex
+		}
+		generated, err := generator(ctx, title)
+		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			slog.Warn("codex app-server: optional session title generation failed, using local title",
+				"model", model, "error", err)
+		} else if generated = initialCodexThreadTitle(generated); generated != untitledCodexThread {
+			title = generated
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	title = formatSessionTitle(s.sessionTitlePrefix, title)
+	if !s.alive.Load() {
+		return fmt.Errorf("session is closed")
+	}
+
+	s.titleMu.Lock()
+	defer s.titleMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.explicitTitleRev != explicitTitleRev {
+		return nil
+	}
+	timeout := appServerTitleUpdateTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return context.DeadlineExceeded
+		}
+		if remaining < timeout {
+			timeout = remaining
+		}
+	}
+	return s.setSessionTitleRPCWithTimeout(threadID, title, timeout)
 }
 
 func (s *appServerSession) turnStartParams(threadID string, input []map[string]any, options *core.TurnOptions) map[string]any {

@@ -661,6 +661,29 @@ type SessionTitleProvider interface {
 	GetSessionTitle(sessionID string) string
 }
 
+// SessionTitleSetter is an optional capability for agent sessions whose
+// backend persists a user-facing title separately from conversation content.
+// The target may be the live session or another persisted session reachable
+// through the same backend connection.
+type SessionTitleSetter interface {
+	SetSessionTitle(sessionID, title string) error
+}
+
+// InitialSessionTitleSetter is an optional capability for sessions that can
+// persist a final user-facing title immediately after a fresh backend session
+// is created. Callers pass the real request that triggered creation; resumed
+// sessions must not be initialized again.
+type InitialSessionTitleSetter interface {
+	SetInitialSessionTitle(prompt string) error
+}
+
+// ContextInitialSessionTitleSetter lets bounded callers cancel optional title
+// generation before a backend turn starts. Implementations should keep the
+// non-context method for callers whose lifecycle is owned by the session.
+type ContextInitialSessionTitleSetter interface {
+	SetInitialSessionTitleContext(ctx context.Context, prompt string) error
+}
+
 // WorkDirSwitcher is an optional interface for agents that support runtime
 // work directory switching. The change takes effect on the next session start;
 // the current running session is terminated automatically by the engine.

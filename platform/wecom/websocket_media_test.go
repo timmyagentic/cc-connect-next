@@ -38,9 +38,9 @@ func TestWsCollectInboundParts_fileAndQuote(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		t.Fatal(err)
 	}
-	texts, imgs, files := wsCollectInboundParts(&body)
-	if len(texts) != 0 || len(imgs) != 0 || len(files) != 1 || files[0].URL != "https://example.com/f" {
-		t.Fatalf("files=%v texts=%v imgs=%v", files, texts, imgs)
+	texts, quoteTexts, imgs, files := wsCollectInboundParts(&body)
+	if len(texts) != 0 || len(quoteTexts) != 0 || len(imgs) != 0 || len(files) != 1 || files[0].URL != "https://example.com/f" {
+		t.Fatalf("files=%v texts=%v quoteTexts=%v imgs=%v", files, texts, quoteTexts, imgs)
 	}
 }
 
@@ -64,9 +64,9 @@ func TestWsCollectInboundParts_mixed(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		t.Fatal(err)
 	}
-	texts, imgs, files := wsCollectInboundParts(&body)
-	if len(texts) != 1 || texts[0] != "see" || len(imgs) != 1 || imgs[0].URL != "https://i" || len(files) != 0 {
-		t.Fatalf("texts=%v imgs=%v files=%v", texts, imgs, files)
+	texts, quoteTexts, imgs, files := wsCollectInboundParts(&body)
+	if len(texts) != 1 || texts[0] != "see" || len(quoteTexts) != 0 || len(imgs) != 1 || imgs[0].URL != "https://i" || len(files) != 0 {
+		t.Fatalf("texts=%v quoteTexts=%v imgs=%v files=%v", texts, quoteTexts, imgs, files)
 	}
 }
 
@@ -89,7 +89,7 @@ func TestWsCollectInboundParts_fileWithNonEmptyMixedUsesTopLevelFile(t *testing.
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		t.Fatal(err)
 	}
-	texts, imgs, files := wsCollectInboundParts(&body)
+	texts, _, imgs, files := wsCollectInboundParts(&body)
 	if len(files) != 1 || files[0].URL != "https://example.com/doc.pdf" || len(imgs) != 0 {
 		t.Fatalf("texts=%v imgs=%v files=%v", texts, imgs, files)
 	}
@@ -115,9 +115,30 @@ func TestWsCollectInboundParts_mixedContainsFile(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &body); err != nil {
 		t.Fatal(err)
 	}
-	texts, imgs, files := wsCollectInboundParts(&body)
+	texts, _, imgs, files := wsCollectInboundParts(&body)
 	if len(texts) != 1 || len(imgs) != 0 || len(files) != 1 || files[0].URL != "https://f" {
 		t.Fatalf("texts=%v imgs=%v files=%v", texts, imgs, files)
+	}
+}
+
+func TestWsCollectInboundParts_SeparatesQuotedText(t *testing.T) {
+	t.Parallel()
+	body := wsMsgCallbackBody{MsgType: "text"}
+	body.Text.Content = "actual request"
+	body.Quote = &wsQuoteBlock{MsgType: "text"}
+	body.Quote.Text = &struct {
+		Content string `json:"content"`
+	}{Content: "another user's message"}
+
+	texts, quoteTexts, imgs, files := wsCollectInboundParts(&body)
+	if len(texts) != 1 || texts[0] != "actual request" {
+		t.Fatalf("texts = %#v, want user-authored request", texts)
+	}
+	if len(quoteTexts) != 1 || quoteTexts[0] != "another user's message" {
+		t.Fatalf("quoteTexts = %#v, want separate quote", quoteTexts)
+	}
+	if len(imgs) != 0 || len(files) != 0 {
+		t.Fatalf("unexpected media: imgs=%v files=%v", imgs, files)
 	}
 }
 

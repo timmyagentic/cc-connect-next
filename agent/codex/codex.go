@@ -34,19 +34,21 @@ func init() {
 //   - "full-auto": --sandbox workspace-write + approval_policy=never
 //   - "yolo":      --dangerously-bypass-approvals-and-sandbox
 type Agent struct {
-	workDir         string
-	model           string
-	contextWindow   int64 // optional positive Codex model_context_window override
-	reasoningEffort string
-	serviceTier     string // Codex service tier (e.g. "fast"); catalog-driven, passed through verbatim
-	mode            string // "suggest" | "auto-edit" | "full-auto" | "yolo"
-	backend         string // "exec" | "app_server"
-	appServerURL    string
-	codexHome       string
-	systemPrompt    string
-	appendPrompt    string
-	cmd             string   // CLI binary name, default "codex"
-	cliExtraArgs    []string // extra args parsed from cmd after the binary
+	workDir            string
+	model              string
+	contextWindow      int64 // optional positive Codex model_context_window override
+	reasoningEffort    string
+	serviceTier        string // Codex service tier (e.g. "fast"); catalog-driven, passed through verbatim
+	mode               string // "suggest" | "auto-edit" | "full-auto" | "yolo"
+	backend            string // "exec" | "app_server"
+	appServerURL       string
+	codexHome          string
+	systemPrompt       string
+	appendPrompt       string
+	sessionTitlePrefix string
+	sessionTitleModel  string
+	cmd                string   // CLI binary name, default "codex"
+	cliExtraArgs       []string // extra args parsed from cmd after the binary
 	providerstate.Store
 	configEnv  []string // env vars from [projects.agent.options.env] — persists across SetSessionEnv calls
 	sessionEnv []string
@@ -72,6 +74,8 @@ func New(opts map[string]any) (core.Agent, error) {
 	codexHome, _ := opts["codex_home"].(string)
 	systemPrompt, _ := opts["system_prompt"].(string)
 	appendPrompt, _ := opts["append_system_prompt"].(string)
+	sessionTitlePrefix, _ := opts["session_title_prefix"].(string)
+	sessionTitleModel, _ := opts["session_title_model"].(string)
 	mode = normalizeMode(mode)
 	backend = normalizeBackend(backend)
 	appServerURL = normalizeAppServerURL(appServerURL)
@@ -100,21 +104,23 @@ func New(opts map[string]any) (core.Agent, error) {
 	}
 
 	return &Agent{
-		workDir:         workDir,
-		model:           model,
-		contextWindow:   contextWindow,
-		reasoningEffort: normalizeReasoningEffort(reasoningEffort),
-		serviceTier:     strings.TrimSpace(serviceTier),
-		mode:            mode,
-		backend:         backend,
-		appServerURL:    appServerURL,
-		codexHome:       strings.TrimSpace(codexHome),
-		systemPrompt:    strings.TrimSpace(systemPrompt),
-		appendPrompt:    strings.TrimSpace(appendPrompt),
-		cmd:             cmd,
-		cliExtraArgs:    cliExtraArgs,
-		configEnv:       configEnv,
-		Store:           providerstate.New("codex"),
+		workDir:            workDir,
+		model:              model,
+		contextWindow:      contextWindow,
+		reasoningEffort:    normalizeReasoningEffort(reasoningEffort),
+		serviceTier:        strings.TrimSpace(serviceTier),
+		mode:               mode,
+		backend:            backend,
+		appServerURL:       appServerURL,
+		codexHome:          strings.TrimSpace(codexHome),
+		systemPrompt:       strings.TrimSpace(systemPrompt),
+		appendPrompt:       strings.TrimSpace(appendPrompt),
+		sessionTitlePrefix: normalizeSessionTitlePrefix(sessionTitlePrefix),
+		sessionTitleModel:  strings.TrimSpace(sessionTitleModel),
+		cmd:                cmd,
+		cliExtraArgs:       cliExtraArgs,
+		configEnv:          configEnv,
+		Store:              providerstate.New("codex"),
 	}, nil
 }
 
@@ -509,6 +515,8 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	codexHome := a.codexHome
 	systemPrompt := a.systemPrompt
 	appendPrompt := a.appendPrompt
+	sessionTitlePrefix := a.sessionTitlePrefix
+	sessionTitleModel := a.sessionTitleModel
 	cliBin := a.cmd
 	cliExtraArgs := a.cliExtraArgs
 	workDir := a.workDir
@@ -538,22 +546,24 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 
 	if backend == "app_server" {
 		return newAppServerSession(ctx, appServerSessionParams{
-			url:           appServerURL,
-			cliBin:        cliBin,
-			cliExtraArgs:  cliExtraArgs,
-			workDir:       workDir,
-			model:         model,
-			contextWindow: contextWindow,
-			effort:        reasoningEffort,
-			serviceTier:   serviceTier,
-			mode:          mode,
-			resumeID:      sessionID,
-			baseURL:       baseURL,
-			modelProvider: provName,
-			extraEnv:      extraEnv,
-			codexHome:     codexHome,
-			systemPrompt:  systemPrompt,
-			appendPrompt:  appendPrompt,
+			url:                appServerURL,
+			cliBin:             cliBin,
+			cliExtraArgs:       cliExtraArgs,
+			workDir:            workDir,
+			model:              model,
+			contextWindow:      contextWindow,
+			effort:             reasoningEffort,
+			serviceTier:        serviceTier,
+			mode:               mode,
+			resumeID:           sessionID,
+			baseURL:            baseURL,
+			modelProvider:      provName,
+			extraEnv:           extraEnv,
+			codexHome:          codexHome,
+			systemPrompt:       systemPrompt,
+			appendPrompt:       appendPrompt,
+			sessionTitlePrefix: sessionTitlePrefix,
+			sessionTitleModel:  sessionTitleModel,
 		})
 	}
 	if codexHome != "" {
@@ -645,6 +655,10 @@ func (a *Agent) WorkspaceAgentOptions() map[string]any {
 	}
 	if a.codexHome != "" {
 		opts["codex_home"] = a.codexHome
+	}
+	opts["session_title_prefix"] = normalizeSessionTitlePrefix(a.sessionTitlePrefix)
+	if a.sessionTitleModel != "" {
+		opts["session_title_model"] = a.sessionTitleModel
 	}
 	return opts
 }

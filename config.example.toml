@@ -1646,6 +1646,23 @@ app_secret = "your-feishu-app-secret"
 # backend = "app_server"
 # app_server_url = "stdio"
 #
+# Codex App session titles / Codex App 会话标题
+# Every title uses this complete source prefix; blank or omitted values default
+# to "[飞书]". Change it for another deployment source, e.g. "[Slack]".
+# 每个标题都会带这个完整来源前缀；省略或留空时默认使用 "[飞书]"。
+# 其他来源可改成 "[Slack]" 等。
+# session_title_prefix = "[飞书]"
+#
+# Optional local model title generation. Empty (default) uses the deterministic
+# local title with no extra process or model usage. Setting the local Codex-only
+# slug below runs an isolated `codex exec --ephemeral` call with a 10-second
+# timeout; it adds latency/usage and falls back safely on any failure.
+# 可选的本地模型标题生成。空字符串（默认）使用确定性本地标题，不增加进程或模型用量。
+# 设置下面的本地 Codex 专用 slug 后，会执行隔离的 `codex exec --ephemeral`，
+# 超时 10 秒；它会增加延迟与用量，任何失败都会安全回退。
+# session_title_model = ""
+# session_title_model = "gpt-5.3-codex-spark"
+#
 # Optional: project system prompt / 可选：项目系统提示
 # Codex has no native system-prompt flag, so cc-connect-next injects this as a
 # preamble prepended to your first message of each new session (resumed

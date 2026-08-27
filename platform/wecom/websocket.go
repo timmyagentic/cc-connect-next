@@ -407,7 +407,7 @@ func (p *WSPlatform) handleMsgCallback(frame wsFrame) {
 		chatName = body.ChatID
 	}
 
-	texts, imgRefs, fileRefs := wsCollectInboundParts(&body)
+	texts, quoteTexts, imgRefs, fileRefs := wsCollectInboundParts(&body)
 
 	switch body.MsgType {
 	case "voice":
@@ -423,7 +423,7 @@ func (p *WSPlatform) handleMsgCallback(frame wsFrame) {
 			}
 			out = append(out, texts...)
 			slog.Info("wecom-ws: voice + media", "user", body.From.UserID, "images", len(imgRefs), "files", len(fileRefs))
-			go p.deliverWSMediaInbound(&body, sessionKey, chatName, rctx, out, imgRefs, fileRefs)
+			go p.deliverWSMediaInbound(&body, sessionKey, chatName, rctx, out, quoteTexts, imgRefs, fileRefs)
 			return
 		}
 		slog.Debug("wecom-ws: voice received (transcribed)", "user", body.From.UserID, "len", len(vt))
@@ -432,31 +432,32 @@ func (p *WSPlatform) handleMsgCallback(frame wsFrame) {
 			MessageID: body.MsgID,
 			UserID:    body.From.UserID, UserName: body.From.UserID,
 			ChatName: chatName,
-			Content:  vt, ReplyCtx: rctx, FromVoice: true,
+			Content:  vt, ExtraContent: strings.Join(quoteTexts, "\n"), ReplyCtx: rctx, FromVoice: true,
 		})
 		return
 	}
 
 	if len(imgRefs) == 0 && len(fileRefs) == 0 {
-		if len(texts) == 0 {
+		if len(texts) == 0 && len(quoteTexts) == 0 {
 			slog.Warn("wecom-ws: no text or media in message", "msg_type", body.MsgType, "msg_id", body.MsgID)
 			return
 		}
 		content := stripWeComAtMentions(strings.Join(texts, "\n"), p.botID, body.AibotID)
+		extraContent := stripWeComAtMentions(strings.Join(quoteTexts, "\n"), p.botID, body.AibotID)
 		slog.Debug("wecom-ws: text received", "user", body.From.UserID, "len", len(content))
 		go p.handler(p, &core.Message{
 			SessionKey: sessionKey, Platform: "wecom",
 			MessageID: body.MsgID,
 			UserID:    body.From.UserID, UserName: body.From.UserID,
 			ChatName: chatName,
-			Content:  content, ReplyCtx: rctx,
+			Content:  content, ExtraContent: extraContent, ReplyCtx: rctx,
 		})
 		return
 	}
 
 	slog.Info("wecom-ws: media message", "msg_type", body.MsgType, "user", body.From.UserID,
 		"images", len(imgRefs), "files", len(fileRefs), "text_parts", len(texts))
-	go p.deliverWSMediaInbound(&body, sessionKey, chatName, rctx, texts, imgRefs, fileRefs)
+	go p.deliverWSMediaInbound(&body, sessionKey, chatName, rctx, texts, quoteTexts, imgRefs, fileRefs)
 }
 
 // Reply sends a response message via aibot_respond_msg using the stream format.
