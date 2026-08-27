@@ -3280,6 +3280,9 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 	if lastActive.IsZero() {
 		lastActive = session.GetUpdatedAt()
 	}
+	if explicitlyActivated := session.GetExplicitActivatedAt(); explicitlyActivated.After(lastActive) {
+		lastActive = explicitlyActivated
+	}
 	if lastActive.IsZero() || time.Since(lastActive) < e.resetOnIdle {
 		return nil
 	}

@@ -216,6 +216,14 @@ func buildAppendSystemPrompt(agentPrompt, platformPrompt, userAppend string) str
 	return strings.Join(parts, "\n")
 }
 
+func claudeStreamJSONProtocolArgs() []string {
+	return []string{
+		"--output-format", "stream-json",
+		"--input-format", "stream-json",
+		"--permission-prompt-tool", "stdio",
+	}
+}
+
 func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs []string, cmdArgsFlag string, model, effort, sessionID, mode, systemPrompt, appendSystemPrompt string, allowedTools, disallowedTools []string, pluginDirs []string, extraEnv []string, platformPrompt string, disableVerbose bool, spawnOpts core.SpawnOptions, maxContextTokens int, ccDataDir string) (*claudeSession, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 
@@ -231,12 +239,7 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 	// innerArgs are Claude Code CLI flags — when a wrapper is used with
 	// cmdArgsFlag these get bundled into a single passthrough string.
 	// outerArgs are flags the wrapper itself understands (e.g. --model).
-	innerArgs := []string{
-		"--output-format", "stream-json",
-		"--input-format", "stream-json",
-		"--permission-prompt-tool", "stdio",
-		"--replay-user-messages",
-	}
+	innerArgs := claudeStreamJSONProtocolArgs()
 	if !disableVerbose {
 		innerArgs = append(innerArgs, "--verbose")
 	}

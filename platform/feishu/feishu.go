@@ -290,6 +290,9 @@ type Platform struct {
 	cancel           context.CancelFunc
 	dedup            *core.MessageDedup
 	botOpenID        string
+	botIdentityErr   error
+	botOpenIDFetcher func() (string, error)
+	botRetryCancel   context.CancelFunc
 	peerBots         map[string]string // app_id -> friendly alias, for quoted-reply attribution
 	mentionMap       map[string]string // friendly bot name -> open_id, for outbound native @ notifications
 	userNameCache    sync.Map          // open_id -> display name
@@ -410,6 +413,8 @@ var _ core.RelayGroupVisibilityTarget = (*Platform)(nil)
 var _ core.RelayGroupVisibilitySender = (*Platform)(nil)
 var _ core.AsyncRecoverablePlatform = (*Platform)(nil)
 var _ core.AsyncRecoverablePlatform = (*interactivePlatform)(nil)
+
+const botIdentityRetryInterval = 5 * time.Minute
 
 type interactivePlatform struct {
 	*Platform
@@ -652,6 +657,104 @@ func (p *Platform) getBotOpenID() string {
 	return p.botOpenID
 }
 
+func (p *Platform) markBotIdentityUnavailable(err error) {
+	if err == nil {
+		err = errors.New("bot open_id unavailable")
+	}
+	p.mu.Lock()
+	p.botOpenID = ""
+	p.botIdentityErr = fmt.Errorf("%s bot open_id unresolved: %w", p.tag(), err)
+	p.mu.Unlock()
+}
+
+func (p *Platform) setBotIdentity(openID string) error {
+	openID = strings.TrimSpace(openID)
+	if openID == "" {
+		return errors.New("bot info response has empty open_id")
+	}
+	p.mu.Lock()
+	p.botOpenID = openID
+	p.botIdentityErr = nil
+	p.mu.Unlock()
+	return nil
+}
+
+func (p *Platform) botIdentityState() (string, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.botOpenID, p.botIdentityErr
+}
+
+func (p *Platform) fetchBotOpenIDWithRetry(ctx context.Context) (string, error) {
+	var openID string
+	err := p.withTransientRetry(ctx, "fetch bot open_id", func() error {
+		p.mu.RLock()
+		fetcher := p.botOpenIDFetcher
+		p.mu.RUnlock()
+		if fetcher == nil {
+			fetcher = p.fetchBotOpenID
+		}
+		id, err := fetcher()
+		if err != nil {
+			return err
+		}
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return errors.New("bot info response has empty open_id")
+		}
+		openID = id
+		return nil
+	})
+	return openID, err
+}
+
+func (p *Platform) recoverBotIdentity(ctx context.Context) error {
+	openID, err := p.fetchBotOpenIDWithRetry(ctx)
+	if err != nil {
+		return err
+	}
+	return p.setBotIdentity(openID)
+}
+
+func (p *Platform) startBotIdentityRecovery() {
+	p.mu.Lock()
+	if p.botRetryCancel != nil {
+		p.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	p.botRetryCancel = cancel
+	p.mu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(botIdentityRetryInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := p.recoverBotIdentity(ctx); err != nil {
+					slog.Error(p.tag()+": bot open_id still unresolved; group mention filter remains fail-closed", "error", err)
+					continue
+				}
+				slog.Info(p.tag()+": bot open_id recovered; group mention filter restored", "open_id", p.getBotOpenID())
+				return
+			}
+		}
+	}()
+}
+
+func (p *Platform) stopBotIdentityRecovery() {
+	p.mu.Lock()
+	cancel := p.botRetryCancel
+	p.botRetryCancel = nil
+	p.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 func (p *Platform) KeepPreviewOnFinish() bool {
 	return p.useInteractiveCard
 }
@@ -667,13 +770,12 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 	// can still receive events and operate correctly. We therefore only attempt
 	// bot open_id discovery eagerly for WebSocket mode.
 	if !p.shouldUseWebhookMode() {
-		if openID, err := p.fetchBotOpenID(); err != nil {
-			slog.Warn(p.platformName+": failed to get bot open_id, group chat filtering disabled", "error", err)
+		if err := p.recoverBotIdentity(context.Background()); err != nil {
+			p.markBotIdentityUnavailable(err)
+			slog.Error(p.platformName+": failed to get bot open_id; group mention filter is fail-closed until recovery", "error", err)
+			p.startBotIdentityRecovery()
 		} else {
-			p.mu.Lock()
-			p.botOpenID = openID
-			p.mu.Unlock()
-			slog.Info(p.platformName+": bot identified", "open_id", openID)
+			slog.Info(p.platformName+": bot identified", "open_id", p.getBotOpenID())
 		}
 	}
 
@@ -877,7 +979,7 @@ func (p *Platform) syncSharedConnectionState() {
 func (p *Platform) ConnectionError() error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.connErr
+	return errors.Join(p.connErr, p.botIdentityErr)
 }
 
 // startWebhookMode starts the HTTP webhook server mode (for Lark international version)
@@ -1607,6 +1709,43 @@ func (p *Platform) onMessageRecalled(_ context.Context, event *larkim.P2MessageR
 	return nil
 }
 
+func (p *Platform) shouldDispatchGroupMessage(msg *larkim.EventMessage, msgType, chatID, sessionKey string, groupReplyAllForChat bool) bool {
+	if stringValue(msg.ChatType) != "group" || groupReplyAllForChat {
+		return true
+	}
+
+	botOpenID, identityErr := p.botIdentityState()
+	if botOpenID == "" {
+		// Webhook/private deployments intentionally skip eager bot identity
+		// discovery. Only an explicit discovery failure activates fail-closed
+		// behavior, preserving that compatibility boundary.
+		if identityErr != nil {
+			slog.Warn(p.tag()+": ignoring group message while bot open_id is unresolved", "chat_id", chatID)
+			return false
+		}
+		return true
+	}
+	if isBotMentioned(msg.Mentions, botOpenID) {
+		return true
+	}
+
+	switch {
+	// Feishu @all sends {"text":"@_all"} with 0 mentions.
+	case p.respondToAtEveryoneAndHere && msg.Content != nil && strings.Contains(*msg.Content, "@_all"):
+		slog.Debug(p.tag()+": responding to @all message", "chat_id", chatID)
+		return true
+	// Once a thread has been engaged via @bot, allow follow-up attachment-only
+	// messages in that thread without requiring another mention.
+	case p.threadIsolation && isAttachmentMsgType(msgType) && p.isActiveThreadSession(sessionKey):
+		slog.Debug(p.tag()+": passing attachment through active thread without mention",
+			"chat_id", chatID, "session_key", sessionKey, "msg_type", msgType)
+		return true
+	default:
+		slog.Debug(p.tag()+": ignoring group message without bot mention", "chat_id", chatID)
+		return false
+	}
+}
+
 func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 	msg := event.Event.Message
 	sender := event.Event.Sender
@@ -1674,25 +1813,8 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	// thread set; sessionKey is also used downstream for dispatch.
 	sessionKey := p.makeSessionKey(msg, chatID, userID)
 
-	if chatType == "group" && !groupReplyAllForChat && p.getBotOpenID() != "" {
-		if !isBotMentioned(msg.Mentions, p.getBotOpenID()) {
-			switch {
-			// Feishu @all sends {"text":"@_all"} with 0 mentions.
-			case p.respondToAtEveryoneAndHere && msg.Content != nil && strings.Contains(*msg.Content, "@_all"):
-				slog.Debug(p.tag()+": responding to @all message", "chat_id", chatID)
-			// Once a thread has been engaged via @bot, allow follow-up
-			// attachment-only messages (image/file/audio) in the same thread
-			// through without re-mentioning the bot. Plain text and rich-text
-			// posts still require an explicit @bot to avoid pulling in
-			// unrelated chatter.
-			case p.threadIsolation && isAttachmentMsgType(msgType) && p.isActiveThreadSession(sessionKey):
-				slog.Debug(p.tag()+": passing attachment through active thread without mention",
-					"chat_id", chatID, "session_key", sessionKey, "msg_type", msgType, "message_id", messageID)
-			default:
-				slog.Debug(p.tag()+": ignoring group message without bot mention", "chat_id", chatID)
-				return nil
-			}
-		}
+	if !p.shouldDispatchGroupMessage(msg, msgType, chatID, sessionKey, groupReplyAllForChat) {
+		return nil
 	}
 
 	if !core.AllowList(p.allowFrom, userID) {
@@ -5752,6 +5874,7 @@ func (p *Platform) updateCardEntity(ctx context.Context, h *feishuPreviewHandle,
 }
 
 func (p *Platform) Stop() error {
+	p.stopBotIdentityRecovery()
 	if p.isWSPrimary {
 		p.markConnectionUnavailable(fmt.Errorf("%s stopped", p.tag()))
 		remaining := unregisterSharedWS(p)
