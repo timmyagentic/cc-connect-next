@@ -525,12 +525,12 @@ func (p *Platform) dispatchInbound(ctx context.Context, m *weixinMessage, h core
 		p.refreshTypingTicket(ctx, from, tok)
 	}
 
-	body, extraContent := bodyPartsFromItemList(m.ItemList)
+	body := bodyFromItemList(m.ItemList)
 	images, files, audio := p.collectInboundMedia(ctx, m.ItemList)
 	if strings.TrimSpace(body) == "" && len(images) == 0 && len(files) == 0 && audio == nil && mediaOnlyItems(m.ItemList) {
 		body = "[收到媒体消息：CDN 下载或解密失败，或未配置 cdn_base_url；请改用文字说明。]"
 	}
-	if strings.TrimSpace(body) == "" && strings.TrimSpace(extraContent) == "" && len(images) == 0 && len(files) == 0 && audio == nil {
+	if strings.TrimSpace(body) == "" && len(images) == 0 && len(files) == 0 && audio == nil {
 		return
 	}
 
@@ -541,17 +541,16 @@ func (p *Platform) dispatchInbound(ctx context.Context, m *weixinMessage, h core
 	}
 
 	h(p, &core.Message{
-		SessionKey:   sessionKeyPrefix + from,
-		Platform:     p.Name(),
-		MessageID:    msgID,
-		UserID:       from,
-		UserName:     shortWeixinUser(from),
-		Content:      body,
-		ExtraContent: extraContent,
-		Images:       images,
-		Files:        files,
-		Audio:        audio,
-		ReplyCtx:     rc,
+		SessionKey: sessionKeyPrefix + from,
+		Platform:   p.Name(),
+		MessageID:  msgID,
+		UserID:     from,
+		UserName:   shortWeixinUser(from),
+		Content:    body,
+		Images:     images,
+		Files:      files,
+		Audio:      audio,
+		ReplyCtx:   rc,
 	})
 }
 

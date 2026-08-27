@@ -643,15 +643,11 @@ func (s *appServerSession) SetSessionTitle(sessionID, title string) error {
 }
 
 func (s *appServerSession) setSessionTitleRPC(sessionID, title string) error {
-	return s.setSessionTitleRPCWithTimeout(sessionID, title, appServerTitleUpdateTimeout)
-}
-
-func (s *appServerSession) setSessionTitleRPCWithTimeout(sessionID, title string, timeout time.Duration) error {
 	var resp struct{}
 	if err := s.requestWithTimeout("thread/name/set", map[string]any{
 		"threadId": sessionID,
 		"name":     title,
-	}, &resp, timeout); err != nil {
+	}, &resp, appServerTitleUpdateTimeout); err != nil {
 		return fmt.Errorf("codex app-server thread/name/set: %w", err)
 	}
 	return nil
@@ -660,19 +656,6 @@ func (s *appServerSession) setSessionTitleRPCWithTimeout(sessionID, title string
 // SetInitialSessionTitle names a fresh app-server thread at the creation
 // boundary. Send intentionally does not own this lifecycle step.
 func (s *appServerSession) SetInitialSessionTitle(prompt string) error {
-	ctx := s.ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return s.SetInitialSessionTitleContext(ctx, prompt)
-}
-
-// SetInitialSessionTitleContext lets bounded callers cancel optional model
-// generation before they commit to starting a turn.
-func (s *appServerSession) SetInitialSessionTitleContext(ctx context.Context, prompt string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	threadID := s.CurrentSessionID()
 	if threadID == "" {
 		return fmt.Errorf("codex app-server thread id is empty")
@@ -697,20 +680,19 @@ func (s *appServerSession) SetInitialSessionTitleContext(ctx context.Context, pr
 		if generator == nil {
 			generator = s.generateSessionTitleWithCodex
 		}
+		ctx := s.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		generated, err := generator(ctx, title)
 		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
-			}
 			slog.Warn("codex app-server: optional session title generation failed, using local title",
 				"model", model, "error", err)
 		} else if generated = initialCodexThreadTitle(generated); generated != untitledCodexThread {
 			title = generated
 		}
 	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
+
 	title = formatSessionTitle(s.sessionTitlePrefix, title)
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
@@ -718,26 +700,10 @@ func (s *appServerSession) SetInitialSessionTitleContext(ctx context.Context, pr
 
 	s.titleMu.Lock()
 	defer s.titleMu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
 	if s.explicitTitleRev != explicitTitleRev {
 		return nil
 	}
-	timeout := appServerTitleUpdateTimeout
-	if deadline, ok := ctx.Deadline(); ok {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			return context.DeadlineExceeded
-		}
-		if remaining < timeout {
-			timeout = remaining
-		}
-	}
-	return s.setSessionTitleRPCWithTimeout(threadID, title, timeout)
+	return s.setSessionTitleRPC(threadID, title)
 }
 
 func (s *appServerSession) turnStartParams(threadID string, input []map[string]any, options *core.TurnOptions) map[string]any {

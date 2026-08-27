@@ -44,10 +44,10 @@ func formatSessionTitle(prefix, title string) string {
 	return prefix + " " + title
 }
 
-// initialCodexThreadTitle derives a deterministic local title from the first
-// real user request. It deliberately excludes cc-connect-next metadata and
-// quoted context so Codex App never falls back to displaying internal prompt
-// scaffolding or somebody else's quoted message as the conversation name.
+// initialCodexThreadTitle derives a deterministic local title from the request
+// that created the thread. It deliberately excludes cc-connect-next metadata and
+// known quote scaffolding so Codex App does not persist internal prompt metadata
+// or another person's quoted message as the conversation name.
 func initialCodexThreadTitle(prompt string) string {
 	text := prompt
 	if strings.HasPrefix(text, capabilityBriefMarker) {
@@ -66,33 +66,38 @@ func initialCodexThreadTitle(prompt string) string {
 	}
 	text = strings.TrimSpace(text)
 
-	quotedContext := strings.HasPrefix(text, "[Quoted message from ") ||
-		strings.HasPrefix(text, "--- Reply chain (")
-	if quotedContext {
-		boundary := strings.LastIndex(text, "\n\n\n")
+	quoteBoundary := ""
+	switch {
+	case strings.HasPrefix(text, "[Quoted message from "),
+		strings.HasPrefix(text, "--- Reply chain ("):
+		quoteBoundary = "\n\n\n"
+	case strings.HasPrefix(text, `引用: "`),
+		strings.HasPrefix(text, "[引用消息]\n"):
+		quoteBoundary = "\n\n"
+	case strings.HasPrefix(text, "[replying to "),
+		strings.HasPrefix(text, "[引用: "):
+		quoteBoundary = "]\n"
+	case strings.HasPrefix(text, "[Reply to "):
+		// Telegram reply context has no unambiguous closing delimiter. Prefer a
+		// generic title over persisting somebody else's message.
+		return untitledCodexThread
+	}
+	if quoteBoundary != "" {
+		boundary := strings.LastIndex(text, quoteBoundary)
 		if boundary < 0 {
 			return untitledCodexThread
 		}
-		text = strings.TrimSpace(text[boundary+3:])
+		text = strings.TrimSpace(text[boundary+len(quoteBoundary):])
 		if text == "" {
 			return untitledCodexThread
 		}
 	}
 	lines := strings.Split(text, "\n")
 	var title string
-	if quotedContext {
-		for _, line := range lines {
-			if candidate := cleanThreadTitleLine(line); candidate != "" {
-				title = candidate
-				break
-			}
-		}
-	} else {
-		for _, line := range lines {
-			if candidate := cleanThreadTitleLine(line); candidate != "" {
-				title = candidate
-				break
-			}
+	for _, line := range lines {
+		if candidate := cleanThreadTitleLine(line); candidate != "" {
+			title = candidate
+			break
 		}
 	}
 	if title == "" {

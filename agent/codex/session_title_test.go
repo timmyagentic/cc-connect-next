@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/timmyagentic/cc-connect-next/core"
 )
@@ -52,6 +51,31 @@ func TestInitialCodexThreadTitle(t *testing.T) {
 		{
 			name:   "reply chain only does not expose quoted content",
 			prompt: "--- Reply chain (2 messages) ---\n[1] user:\n第一条\n\n[2] assistant:\n第二条\n\n",
+			want:   "New conversation",
+		},
+		{
+			name:   "dingtalk quote uses actual request",
+			prompt: `引用: "另一位用户的敏感内容"` + "\n\n继续检查失败原因",
+			want:   "继续检查失败原因",
+		},
+		{
+			name:   "qqbot quote uses actual request",
+			prompt: "[引用消息]\n另一位用户的敏感内容\n\n继续检查失败原因",
+			want:   "继续检查失败原因",
+		},
+		{
+			name:   "discord quote uses actual request",
+			prompt: "[replying to Alice: another user's content]\ncontinue checking",
+			want:   "continue checking",
+		},
+		{
+			name:   "weixin quote uses actual request",
+			prompt: "[引用: Alice | 另一位用户的敏感内容]\n继续检查失败原因",
+			want:   "继续检查失败原因",
+		},
+		{
+			name:   "telegram quote falls back conservatively",
+			prompt: "[Reply to Alice]: another user's content\ncontinue checking",
 			want:   "New conversation",
 		},
 		{
@@ -289,29 +313,6 @@ func TestAppServerSession_ExplicitRenameWinsDuringInitialGeneration(t *testing.T
 	}
 }
 
-func TestAppServerSession_ContextDeadlineStopsTitleBeforeRPC(t *testing.T) {
-	stdin := &steerFakeStdin{}
-	s := newSteerTestSession(t, stdin, "thread-1", "")
-	s.sessionTitleModel = "gpt-5.3-codex-spark"
-	s.titleGenerator = func(ctx context.Context, _ string) (string, error) {
-		<-ctx.Done()
-		return "", ctx.Err()
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-
-	err := s.SetInitialSessionTitleContext(ctx, "首个真实问题")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("SetInitialSessionTitleContext() error = %v, want context deadline exceeded", err)
-	}
-	stdin.mu.Lock()
-	requestCount := len(stdin.requests)
-	stdin.mu.Unlock()
-	if requestCount != 0 {
-		t.Fatalf("thread/name/set request count = %d, want 0 after deadline", requestCount)
-	}
-}
-
 func TestSessionTitleGenerationArgsAreEphemeralAndPromptFree(t *testing.T) {
 	s := &appServerSession{
 		cliExtraArgs:      []string{"--profile", "work", "--dangerously-bypass-approvals-and-sandbox"},
@@ -482,4 +483,3 @@ func TestAppServerSession_SetSessionTitleUsesOfficialRPC(t *testing.T) {
 
 var _ core.SessionTitleSetter = (*appServerSession)(nil)
 var _ core.InitialSessionTitleSetter = (*appServerSession)(nil)
-var _ core.ContextInitialSessionTitleSetter = (*appServerSession)(nil)
