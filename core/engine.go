@@ -565,31 +565,27 @@ type workspaceInitFlow struct {
 // The message is NOT sent to agent stdin at queue time; the event loop
 // sends it after the current turn completes to avoid mid-turn interference.
 type queuedMessage struct {
-	messageID          string
-	platform           Platform
-	replyCtx           any
-	content            string
-	initialTitlePrompt string
-	images             []ImageAttachment
-	files              []FileAttachment
-	fromVoice          bool
-	userID             string
-	userName           string // sender's display name for sender injection
-	msgPlatform        string // platform name for sender injection
-	msgSessionKey      string // session key for extracting chat ID
-	channelKey         string // platform-provided channel identifier (preferred over sessionKey extraction)
-	answerProfile      AnswerProfileName
-	userMessageTimeMs  int64 // Feishu create_time ms (optional); see Message.UserMessageTimeMs
+	messageID         string
+	platform          Platform
+	replyCtx          any
+	content           string
+	images            []ImageAttachment
+	files             []FileAttachment
+	fromVoice         bool
+	userID            string
+	userName          string // sender's display name for sender injection
+	msgPlatform       string // platform name for sender injection
+	msgSessionKey     string // session key for extracting chat ID
+	channelKey        string // platform-provided channel identifier (preferred over sessionKey extraction)
+	answerProfile     AnswerProfileName
+	userMessageTimeMs int64 // Feishu create_time ms (optional); see Message.UserMessageTimeMs
 }
 
 // interactiveState tracks a running interactive agent session and its permission state.
 type interactiveState struct {
 	// capabilityBriefSent flips after the capability brief has been
 	// prepended to a prompt for this state (guarded by mu).
-	capabilityBriefSent bool
-	// initialTitlePending is set when a synthetic heartbeat creates the
-	// backend before any real user request can supply the title.
-	initialTitlePending      bool
+	capabilityBriefSent      bool
 	agentSession             AgentSession
 	platform                 Platform
 	replyCtx                 any
@@ -1740,14 +1736,12 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 	}
 
 	content := job.Prompt
-	initialTitlePrompt := content
 	if strings.HasPrefix(content, "/") {
 		parts := strings.Fields(content)
 		if len(parts) > 0 {
 			cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
 			if skill := e.skills.Resolve(cmd); skill != nil {
 				content = BuildSkillInvocationPrompt(skill, parts[1:])
-				initialTitlePrompt = BuildSkillInvocationTitle(skill, parts[1:])
 			}
 		}
 	}
@@ -1813,7 +1807,7 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 			iKey = workspaceDir + ":" + iKey
 		}
 		prevHistLen := session.HistoryLen()
-		e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, runSessionKey, initialTitlePrompt)
+		e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, runSessionKey)
 		e.cleanupInteractiveState(iKey)
 		// Empty-response detection via session history delta: processInteractiveMessageWith
 		// always adds a "user" entry (prevHistLen+1), then an "assistant" entry on success
@@ -1836,7 +1830,7 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 		iKey = workspaceDir + ":" + sessionKey
 	}
 	prevHistLen := session.HistoryLen()
-	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey, initialTitlePrompt)
+	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey)
 	// Same empty-response detection as the useNewSession path above.
 	if !job.Mute && session.HistoryLen() < prevHistLen+2 {
 		return fmt.Errorf("cron job %q produced an empty response", job.ID)
@@ -1945,14 +1939,12 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 	}
 
 	content := job.Prompt
-	initialTitlePrompt := content
 	if strings.HasPrefix(content, "/") {
 		parts := strings.Fields(content)
 		if len(parts) > 0 {
 			cmd := strings.ToLower(strings.TrimPrefix(parts[0], "/"))
 			if skill := e.skills.Resolve(cmd); skill != nil {
 				content = BuildSkillInvocationPrompt(skill, parts[1:])
-				initialTitlePrompt = BuildSkillInvocationTitle(skill, parts[1:])
 			}
 		}
 	}
@@ -2015,7 +2007,7 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 		if workspaceDir != "" {
 			iKey = workspaceDir + ":" + iKey
 		}
-		e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, runSessionKey, initialTitlePrompt)
+		e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, runSessionKey)
 		e.cleanupInteractiveState(iKey)
 		return nil
 	}
@@ -2029,7 +2021,7 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 	if workspaceDir != "" {
 		iKey = workspaceDir + ":" + sessionKey
 	}
-	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey, initialTitlePrompt)
+	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey)
 	return nil
 }
 
@@ -2358,7 +2350,7 @@ func (e *Engine) ExecuteHeartbeat(sessionKey, prompt string, silent bool) error 
 		return fmt.Errorf("session %q is busy", sessionKey)
 	}
 
-	e.processInteractiveMessageWithoutInitialTitle(targetPlatform, msg, session)
+	e.processInteractiveMessage(targetPlatform, msg, session)
 	return nil
 }
 
@@ -3215,12 +3207,12 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		// fall back to the FIFO below, unknown outcomes are final (no queue,
 		// to avoid duplicate delivery).
 		if e.busyMessageMode == BusyMessageModeSteer &&
-			e.trySteerBusyMessageWithTitle(p, msg, content, interactiveKey, session, sessions) {
+			e.trySteerBusyMessage(p, msg, interactiveKey, session, sessions) {
 			return
 		}
 		// Try to queue the message for the running turn so the agent
 		// processes it immediately after the current turn ends.
-		if e.queueMessageForBusySessionWithTitle(p, msg, content, interactiveKey, session) {
+		if e.queueMessageForBusySession(p, msg, interactiveKey, session) {
 			// Race guard: the drain loop in processInteractiveMessageWith may
 			// have just finished (session unlocked) between our TryLock failure
 			// and the queue append. Re-try TryLock — if it succeeds, no one is
@@ -3258,7 +3250,7 @@ sessionLocked:
 		"session", session.ID,
 	)
 
-	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, resolvedWorkspace, msg.SessionKey, content)
+	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, resolvedWorkspace, msg.SessionKey)
 }
 
 func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions *SessionManager, interactiveKey string, session *Session) *Session {
@@ -3330,10 +3322,6 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 // session lacks the steer capability, or the steer was definitively rejected
 // without delivering anything.
 func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey string, session *Session, sessions *SessionManager) bool {
-	return e.trySteerBusyMessageWithTitle(p, msg, msg.Content, interactiveKey, session, sessions)
-}
-
-func (e *Engine) trySteerBusyMessageWithTitle(p Platform, msg *Message, initialTitlePrompt, interactiveKey string, session *Session, sessions *SessionManager) bool {
 	// turn/steer cannot carry model, reasoning-effort, or service-tier
 	// overrides. A profiled message must remain a distinct queued turn or the
 	// user would be told a profile was applied when it was not.
@@ -3371,7 +3359,6 @@ func (e *Engine) trySteerBusyMessageWithTitle(p Platform, msg *Message, initialT
 	if !ok {
 		return false
 	}
-	e.initializePendingSessionTitle(state, initialTitlePrompt)
 
 	// Create the successor lifecycle card ("C2") in a pending steering phase
 	// BEFORE the RPC so the sender gets immediate acknowledgement replying to
@@ -3543,10 +3530,6 @@ func (e *Engine) commitSteerPresentation(interactiveKey string, h steerHandoff) 
 // the event loop sends it after the current turn's EventResult is received.
 // Returns true if the message was successfully queued, false otherwise.
 func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiveKey string, session *Session) bool {
-	return e.queueMessageForBusySessionWithTitle(p, msg, msg.Content, interactiveKey, session)
-}
-
-func (e *Engine) queueMessageForBusySessionWithTitle(p Platform, msg *Message, initialTitlePrompt, interactiveKey string, session *Session) bool {
 	e.interactiveMu.Lock()
 	state, hasState := e.interactiveStates[interactiveKey]
 	if !hasState || state == nil {
@@ -3588,21 +3571,20 @@ func (e *Engine) queueMessageForBusySessionWithTitle(p Platform, msg *Message, i
 		return true // handled: queue-full reply sent
 	}
 	state.pendingMessages = append(state.pendingMessages, queuedMessage{
-		messageID:          msg.MessageID,
-		platform:           p,
-		replyCtx:           msg.ReplyCtx,
-		content:            msg.Content,
-		initialTitlePrompt: initialTitlePrompt,
-		images:             msg.Images,
-		files:              msg.Files,
-		fromVoice:          msg.FromVoice,
-		userID:             msg.UserID,
-		userName:           msg.UserName,
-		msgPlatform:        msg.Platform,
-		msgSessionKey:      msg.SessionKey,
-		channelKey:         msg.ChannelKey,
-		answerProfile:      msg.AnswerProfile,
-		userMessageTimeMs:  msg.UserMessageTimeMs,
+		messageID:         msg.MessageID,
+		platform:          p,
+		replyCtx:          msg.ReplyCtx,
+		content:           msg.Content,
+		images:            msg.Images,
+		files:             msg.Files,
+		fromVoice:         msg.FromVoice,
+		userID:            msg.UserID,
+		userName:          msg.UserName,
+		msgPlatform:       msg.Platform,
+		msgSessionKey:     msg.SessionKey,
+		channelKey:        msg.ChannelKey,
+		answerProfile:     msg.AnswerProfile,
+		userMessageTimeMs: msg.UserMessageTimeMs,
 	})
 	if session != nil {
 		session.TouchUserActivity()
@@ -3624,23 +3606,6 @@ func (e *Engine) queueMessageForBusySessionWithTitle(p Platform, msg *Message, i
 	)
 	e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgMessageQueued, msg.Content))
 	return true
-}
-
-func (e *Engine) initializePendingSessionTitle(state *interactiveState, prompt string) {
-	if state == nil {
-		return
-	}
-	state.mu.Lock()
-	if !state.initialTitlePending {
-		state.mu.Unlock()
-		return
-	}
-	state.initialTitlePending = false
-	agentSession := state.agentSession
-	state.mu.Unlock()
-	if agentSession != nil {
-		e.initializeFreshSessionTitle(e.ctx, agentSession, prompt)
-	}
 }
 
 // ensureInteractiveStateForQueueing creates a placeholder interactiveState
@@ -4111,26 +4076,15 @@ func isDenyResponse(s string) bool {
 // Interactive agent processing
 // ──────────────────────────────────────────────────────────────
 
-func (e *Engine) processInteractiveMessageWithoutInitialTitle(p Platform, msg *Message, session *Session) {
-	e.processInteractiveMessageWithOptionalTitle(p, msg, session, e.agent, e.sessions, msg.SessionKey, "", "", nil)
-}
-
 func (e *Engine) processInteractiveMessage(p Platform, msg *Message, session *Session) {
-	e.processInteractiveMessageWith(p, msg, session, e.agent, e.sessions, msg.SessionKey, "", "", msg.Content)
+	e.processInteractiveMessageWith(p, msg, session, e.agent, e.sessions, msg.SessionKey, "", "")
 }
 
 // processInteractiveMessageWith is the core interactive processing loop.
 // It accepts an explicit agent, interactiveKey (for the interactiveStates map),
 // and workspaceDir so that multi-workspace mode can route to per-workspace agents.
 // ccSessionKey, when non-empty, is used for CC_SESSION_KEY in the agent env; otherwise interactiveKey is used.
-// initialTitlePrompt is the normalized user-authored text before platform context is merged into msg.Content.
-func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session *Session, agent Agent, sessions *SessionManager, interactiveKey string, workspaceDir string, ccSessionKey string, initialTitlePrompt string) {
-	e.processInteractiveMessageWithOptionalTitle(p, msg, session, agent, sessions, interactiveKey, workspaceDir, ccSessionKey, &initialTitlePrompt)
-}
-
-// processInteractiveMessageWithOptionalTitle accepts nil only for synthetic
-// turns such as heartbeat checks that must not consume a fresh thread's title.
-func (e *Engine) processInteractiveMessageWithOptionalTitle(p Platform, msg *Message, session *Session, agent Agent, sessions *SessionManager, interactiveKey string, workspaceDir string, ccSessionKey string, initialTitlePrompt *string) {
+func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session *Session, agent Agent, sessions *SessionManager, interactiveKey string, workspaceDir string, ccSessionKey string) {
 	// session.Unlock() is NOT deferred here — it is called explicitly in
 	// the drain loop below while holding state.mu to close the race window
 	// between "queue is empty" and "session unlocked". A deferred fallback
@@ -4161,7 +4115,7 @@ func (e *Engine) processInteractiveMessageWithOptionalTitle(p Platform, msg *Mes
 	if agent != e.agent {
 		agentOverride = agent
 	}
-	state := e.getOrCreateInteractiveStateWithOptionalTitle(interactiveKey, p, msg.ReplyCtx, session, sessions, agentOverride, ccSessionKey, initialTitlePrompt)
+	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, sessions, agentOverride, ccSessionKey, msg.Content)
 
 	// Set workspaceDir on the state for idle reaper identification
 	if workspaceDir != "" {
@@ -4441,36 +4395,19 @@ func adoptPendingFromPlaceholder(existing, newState *interactiveState) {
 
 // When agentOverride is non-nil it is used instead of e.agent to start the session.
 // ccSessionKey, when non-empty, is used for CC_SESSION_KEY env injection; otherwise sessionKey is used.
-// initialTitlePrompt is the real request that triggered a fresh backend session.
+// initialTitlePrompt is the request that triggered a fresh backend session.
 func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey, initialTitlePrompt string) *interactiveState {
-	return e.getOrCreateInteractiveStateWithOptionalTitle(sessionKey, p, replyCtx, session, sessions, agentOverride, ccSessionKey, &initialTitlePrompt)
-}
-
-func (e *Engine) getOrCreateInteractiveStateWithOptionalTitle(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey string, initialTitlePrompt *string) *interactiveState {
-	state, freshSession := e.getOrCreateInteractiveState(sessionKey, p, replyCtx, session, sessions, agentOverride, ccSessionKey, initialTitlePrompt == nil)
-	if freshSession != nil && initialTitlePrompt == nil {
-		return state
-	}
-
-	titleSession := freshSession
-	if titleSession == nil && initialTitlePrompt != nil {
-		state.mu.Lock()
-		if state.initialTitlePending {
-			state.initialTitlePending = false
-			titleSession = state.agentSession
-		}
-		state.mu.Unlock()
-	}
-	if titleSession != nil && initialTitlePrompt != nil {
-		e.initializeFreshSessionTitle(e.ctx, titleSession, *initialTitlePrompt)
+	state, freshSession := e.getOrCreateInteractiveState(sessionKey, p, replyCtx, session, sessions, agentOverride, ccSessionKey)
+	if freshSession != nil {
+		e.initializeFreshSessionTitle(freshSession, initialTitlePrompt)
 	}
 	return state
 }
 
-// getOrCreateInteractiveState returns a newly-created session separately so
-// title generation can run after interactiveMu is released. The caller still
-// initializes the title synchronously before the first turn is sent.
-func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey string, deferInitialTitle bool) (*interactiveState, AgentSession) {
+// getOrCreateInteractiveState returns a newly-created backend session
+// separately so optional title generation runs after interactiveMu is released.
+// The caller still initializes the title synchronously before the first turn.
+func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey string) (*interactiveState, AgentSession) {
 	e.interactiveMu.Lock()
 	defer e.interactiveMu.Unlock()
 
@@ -4654,12 +4591,11 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	}
 
 	newState := &interactiveState{
-		agentSession:        agentSession,
-		platform:            p,
-		replyCtx:            replyCtx,
-		agent:               agent,
-		initialTitlePending: createdFresh && deferInitialTitle,
-		eventsNeedResync:    true,
+		agentSession:     agentSession,
+		platform:         p,
+		replyCtx:         replyCtx,
+		agent:            agent,
+		eventsNeedResync: true,
 	}
 	adoptPendingFromPlaceholder(e.interactiveStates[sessionKey], newState)
 	state = newState
@@ -4683,25 +4619,15 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	return state, nil
 }
 
-func (e *Engine) initializeFreshSessionTitle(ctx context.Context, agentSession AgentSession, prompt string) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if ctx.Err() != nil {
+func (e *Engine) initializeFreshSessionTitle(agentSession AgentSession, prompt string) {
+	setter, ok := agentSession.(InitialSessionTitleSetter)
+	if !ok {
 		return
 	}
 	if strings.TrimSpace(prompt) == "" {
 		prompt = e.i18n.T(MsgNewConversationTitle)
 	}
-	var err error
-	if setter, ok := agentSession.(ContextInitialSessionTitleSetter); ok {
-		err = setter.SetInitialSessionTitleContext(ctx, prompt)
-	} else if setter, ok := agentSession.(InitialSessionTitleSetter); ok {
-		err = setter.SetInitialSessionTitle(prompt)
-	} else {
-		return
-	}
-	if err != nil {
+	if err := setter.SetInitialSessionTitle(prompt); err != nil {
 		slog.Warn("failed to initialize agent session title",
 			"session_id", agentSession.CurrentSessionID(), "error", err)
 	}
@@ -6843,7 +6769,6 @@ func (queue *turnQueue) handle() {
 		state.presentationOpen = true
 		state.mu.Unlock()
 		state.steerMu.Unlock()
-		e.initializePendingSessionTitle(state, queued.initialTitlePrompt)
 
 		// Stop the previous turn's typing indicator
 		if stopTyping != nil {
@@ -8402,7 +8327,6 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.activeAnswerProfile = queued.answerProfile
 		state.mu.Unlock()
 		state.steerMu.Unlock()
-		e.initializePendingSessionTitle(state, queued.initialTitlePrompt)
 
 		queuedRichCardCopy := e.i18n.RichCardCopyForText(queued.content)
 		e.i18n.DetectAndSet(queued.content)
@@ -10353,9 +10277,6 @@ func (e *Engine) syncLiveSessionTitle(interactiveKey, targetID, title string) {
 
 	state.mu.Lock()
 	agentSession := state.agentSession
-	if agentSession != nil && agentSession.CurrentSessionID() == targetID {
-		state.initialTitlePending = false
-	}
 	state.mu.Unlock()
 	setter, ok := agentSession.(SessionTitleSetter)
 	if !ok {
@@ -16448,8 +16369,7 @@ func (e *Engine) executeCustomCommand(p Platform, msg *Message, cmd *CustomComma
 	)
 
 	msg.Content = prompt
-	titlePrompt := commandInvocationTitle(cmd.Name, args)
-	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey, titlePrompt)
+	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey)
 }
 
 // executeShellCommand runs a shell command and sends the output to the user.
@@ -16677,8 +16597,7 @@ func (e *Engine) executeSkill(p Platform, msg *Message, skill *Skill, args []str
 	)
 
 	msg.Content = prompt
-	titlePrompt := BuildSkillInvocationTitle(skill, args)
-	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey, titlePrompt)
+	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey)
 }
 
 func (e *Engine) cmdSkills(p Platform, msg *Message) {
@@ -17662,9 +17581,6 @@ func (e *Engine) relayContextForSourceSessionKey(fromProject, sourceSessionKey s
 // dedicated relay session, sends the message to the agent, and blocks until
 // the complete response is collected (or the relay context times out).
 func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey, message string) (string, error) {
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
 	agent, sessions, relaySessionKey, err := e.relayContextForSourceSessionKey(fromProject, sourceSessionKey)
 	if err != nil {
 		return "", err
@@ -17695,9 +17611,6 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 		// Resume failed — fall back to a fresh session so the relay is not
 		// permanently broken by a corrupted/stale session ID.
 		if session.GetAgentSessionID() != "" {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return "", ctxErr
-			}
 			slog.Warn("relay: session resume failed, trying fresh session",
 				"relay_key", relaySessionKey, "error", err)
 			session.SetAgentSessionID("", agent.Name())
@@ -17711,16 +17624,8 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 			return "", fmt.Errorf("start relay session: %w", err)
 		}
 	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		closeRelayAgentSession(agentSession, relaySessionKey)
-		return "", ctxErr
-	}
 	if createdFresh {
-		e.initializeFreshSessionTitle(ctx, agentSession, message)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			closeRelayAgentSession(agentSession, relaySessionKey)
-			return "", ctxErr
-		}
+		e.initializeFreshSessionTitle(agentSession, message)
 	}
 	saveRelaySessionID := func(id string, force bool) {
 		if id == "" {
@@ -17745,10 +17650,6 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 
 	saveRelaySessionID(agentSession.CurrentSessionID(), false)
 
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		closeRelayAgentSession(agentSession, relaySessionKey)
-		return "", ctxErr
-	}
 	if err := e.sendAgentTurn(agent, agentSession, message, nil, nil, ""); err != nil {
 		closeRelayAgentSession(agentSession, relaySessionKey)
 		return "", fmt.Errorf("send relay message: %w", err)

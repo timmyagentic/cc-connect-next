@@ -106,9 +106,7 @@ model_context_window = 872000
 ```
 
 Codex app-server thread 会在 `thread/start` 返回后、首个 turn 开始前立即获得
-用户可见标题。所有 Codex App 标题都会带可配置的来源前缀，默认是 `[飞书]`。
-如果 synthetic heartbeat 抢先创建了后端 thread，它不会使用 heartbeat prompt 命名，
-而是把一次性标题保留给下一条真实用户请求：
+用户可见标题。所有 Codex App 标题都会带可配置的来源前缀，默认是 `[飞书]`：
 
 ```toml
 [projects.agent.options]

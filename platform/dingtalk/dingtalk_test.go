@@ -425,27 +425,6 @@ func TestFormatReplyContent_WithQuotedText(t *testing.T) {
 	}
 }
 
-func TestSplitReplyContent_SeparatesUserTextFromQuote(t *testing.T) {
-	p := &Platform{}
-	repliedContent, _ := json.Marshal(repliedTextContent{Text: "other user's message"})
-	richText := &richTextContent{
-		Content:    "actual request",
-		IsReplyMsg: true,
-		RepliedMsg: &repliedMessage{
-			MsgType: "text",
-			Content: repliedContent,
-		},
-	}
-
-	content, extra := p.splitReplyContent(richText, "fallback")
-	if content != "actual request" {
-		t.Fatalf("content = %q, want user-authored request", content)
-	}
-	if extra != "引用: \"other user's message\"\n" {
-		t.Fatalf("extra content = %q, want separate quoted context", extra)
-	}
-}
-
 func TestFormatReplyContent_EmptyContent_UsesFallback(t *testing.T) {
 	p := &Platform{}
 	repliedContent, _ := json.Marshal(repliedTextContent{Text: "quoted"})
@@ -714,11 +693,9 @@ func TestOnRawMessage_QuotedInteractiveCardEnrichesMessageContent(t *testing.T) 
 	if got == nil {
 		t.Fatal("handler was not called")
 	}
-	if got.Content != "please continue" {
-		t.Errorf("message content = %q, want user-authored text", got.Content)
-	}
-	if got.ExtraContent != "引用: \"previous card answer\"\n" {
-		t.Errorf("message extra content = %q, want separate quoted context", got.ExtraContent)
+	expected := "引用: \"previous card answer\"\n\nplease continue"
+	if got.Content != expected {
+		t.Errorf("message content = %q, want %q", got.Content, expected)
 	}
 }
 

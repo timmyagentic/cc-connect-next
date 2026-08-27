@@ -67,13 +67,14 @@ type wsQuoteBlock struct {
 	Mixed *wsMixedBlock `json:"mixed,omitempty"`
 }
 
-// wsCollectInboundParts extracts user text, quoted text, and media refs while
-// keeping quote context separate for platform-neutral metadata.
-func wsCollectInboundParts(body *wsMsgCallbackBody) (texts, quoteTexts []string, imgs, files []wsMediaRef) {
-	appendText := func(target *[]string, s string) {
+// wsCollectInboundParts extracts text lines and media refs (main message + quote + mixed),
+// matching @wecom/aibot-node-sdk message parsing. Does not include the top-level voice
+// transcription (handled separately via wsVoiceText).
+func wsCollectInboundParts(body *wsMsgCallbackBody) (texts []string, imgs, files []wsMediaRef) {
+	appendText := func(s string) {
 		s = strings.TrimSpace(s)
 		if s != "" {
-			*target = append(*target, s)
+			texts = append(texts, s)
 		}
 	}
 	appendImage := func(url, aeskey string) {
@@ -86,7 +87,7 @@ func wsCollectInboundParts(body *wsMsgCallbackBody) (texts, quoteTexts []string,
 			files = append(files, wsMediaRef{URL: url, Aeskey: aeskey})
 		}
 	}
-	walkMixed := func(m *wsMixedBlock, target *[]string) {
+	walkMixed := func(m *wsMixedBlock) {
 		if m == nil {
 			return
 		}
@@ -94,7 +95,7 @@ func wsCollectInboundParts(body *wsMsgCallbackBody) (texts, quoteTexts []string,
 			switch item.MsgType {
 			case "text":
 				if item.Text != nil {
-					appendText(target, item.Text.Content)
+					appendText(item.Text.Content)
 				}
 			case "image":
 				if item.Image != nil {
@@ -114,11 +115,11 @@ func wsCollectInboundParts(body *wsMsgCallbackBody) (texts, quoteTexts []string,
 		switch q.MsgType {
 		case "text":
 			if q.Text != nil {
-				appendText(&quoteTexts, q.Text.Content)
+				appendText(q.Text.Content)
 			}
 		case "voice":
 			if q.Voice != nil {
-				appendText(&quoteTexts, q.Voice.Content)
+				appendText(q.Voice.Content)
 			}
 		case "image":
 			if q.Image != nil {
@@ -129,14 +130,14 @@ func wsCollectInboundParts(body *wsMsgCallbackBody) (texts, quoteTexts []string,
 				appendFile(q.File.URL, q.File.Aeskey)
 			}
 		case "mixed":
-			walkMixed(q.Mixed, &quoteTexts)
+			walkMixed(q.Mixed)
 		}
 	}
 
 	if body.Mixed != nil && len(body.Mixed.MsgItem) > 0 {
-		walkMixed(body.Mixed, &texts)
+		walkMixed(body.Mixed)
 	} else {
-		appendText(&texts, body.Text.Content)
+		appendText(body.Text.Content)
 		if body.Image != nil {
 			appendImage(body.Image.URL, body.Image.Aeskey)
 		}
@@ -155,7 +156,7 @@ func wsCollectInboundParts(body *wsMsgCallbackBody) (texts, quoteTexts []string,
 		}
 	}
 	walkQuote(body.Quote)
-	return texts, quoteTexts, imgs, files
+	return texts, imgs, files
 }
 
 // decodeWeComAESKey normalizes and decodes the aeskey from WeCom WS callbacks.
@@ -329,7 +330,7 @@ func downloadWeComWSMedia(ctx context.Context, urlStr, aesKey string) (data []by
 }
 
 // deliverWSMediaInbound downloads image/file refs and forwards one core.Message.
-func (p *WSPlatform) deliverWSMediaInbound(body *wsMsgCallbackBody, sessionKey, chatName string, rctx wsReplyContext, texts, quoteTexts []string, imgs, files []wsMediaRef) {
+func (p *WSPlatform) deliverWSMediaInbound(body *wsMsgCallbackBody, sessionKey, chatName string, rctx wsReplyContext, texts []string, imgs, files []wsMediaRef) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
@@ -374,10 +375,8 @@ func (p *WSPlatform) deliverWSMediaInbound(body *wsMsgCallbackBody, sessionKey, 
 
 	content := strings.Join(texts, "\n")
 	content = stripWeComAtMentions(content, p.botID, body.AibotID)
-	extraContent := strings.Join(quoteTexts, "\n")
-	extraContent = stripWeComAtMentions(extraContent, p.botID, body.AibotID)
 
-	if content == "" && extraContent == "" && len(images) == 0 && len(fileAtts) == 0 {
+	if content == "" && len(images) == 0 && len(fileAtts) == 0 {
 		slog.Warn("wecom-ws: media inbound empty after downloads", "msg_id", body.MsgID)
 		return
 	}
@@ -386,11 +385,10 @@ func (p *WSPlatform) deliverWSMediaInbound(body *wsMsgCallbackBody, sessionKey, 
 		SessionKey: sessionKey, Platform: "wecom",
 		MessageID: body.MsgID,
 		UserID:    body.From.UserID, UserName: body.From.UserID,
-		ChatName:     chatName,
-		Content:      content,
-		ExtraContent: extraContent,
-		Images:       images,
-		Files:        fileAtts,
-		ReplyCtx:     rctx,
+		ChatName: chatName,
+		Content:  content,
+		Images:   images,
+		Files:    fileAtts,
+		ReplyCtx: rctx,
 	})
 }

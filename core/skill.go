@@ -289,26 +289,3 @@ func BuildSkillInvocationPrompt(skill *Skill, args []string) string {
 	sb.WriteString("\n\nPlease follow the skill instructions above to complete the task.")
 	return sb.String()
 }
-
-// BuildSkillInvocationTitle preserves the user-visible skill invocation for
-// metadata instead of deriving every title from the prompt wrapper above.
-func BuildSkillInvocationTitle(skill *Skill, args []string) string {
-	if skill == nil {
-		return commandInvocationTitle("skill", args)
-	}
-	name := strings.TrimSpace(skill.Name)
-	if name == "" {
-		name = strings.TrimSpace(skill.DisplayName)
-	}
-	return commandInvocationTitle(name, args)
-}
-
-func commandInvocationTitle(name string, args []string) string {
-	name = strings.TrimSpace(strings.TrimPrefix(name, "/"))
-	parts := make([]string, 0, len(args)+1)
-	if name != "" {
-		parts = append(parts, "/"+name)
-	}
-	parts = append(parts, args...)
-	return strings.TrimSpace(strings.Join(parts, " "))
-}

@@ -38,9 +38,20 @@ type titleInitializingResultSession struct {
 
 type orderedTitleSession struct {
 	*controllableAgentSession
-	mu          sync.Mutex
-	order       []string
-	titlePrompt string
+	mu    sync.Mutex
+	order []string
+}
+
+type blockingTitleSession struct {
+	*controllableAgentSession
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingTitleSession) SetInitialSessionTitle(string) error {
+	close(s.started)
+	<-s.release
+	return nil
 }
 
 func (s *orderedTitleSession) record(step string) {
@@ -49,11 +60,8 @@ func (s *orderedTitleSession) record(step string) {
 	s.mu.Unlock()
 }
 
-func (s *orderedTitleSession) SetInitialSessionTitle(prompt string) error {
-	s.mu.Lock()
-	s.order = append(s.order, "title")
-	s.titlePrompt = prompt
-	s.mu.Unlock()
+func (s *orderedTitleSession) SetInitialSessionTitle(string) error {
+	s.record("title")
 	return nil
 }
 
@@ -67,56 +75,6 @@ func (s *orderedTitleSession) snapshot() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.order...)
-}
-
-func (s *orderedTitleSession) prompt() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.titlePrompt
-}
-
-type blockingTitleSession struct {
-	*controllableAgentSession
-	started chan struct{}
-	release chan struct{}
-}
-
-type relayDeadlineTitleSession struct {
-	*controllableAgentSession
-	sendMu    sync.Mutex
-	sendCalls int
-}
-
-type heartbeatTitlePlatform struct {
-	*stubPlatformEngine
-}
-
-func (*heartbeatTitlePlatform) ReconstructReplyCtx(string) (any, error) {
-	return "heartbeat-ctx", nil
-}
-
-func (s *relayDeadlineTitleSession) SetInitialSessionTitleContext(ctx context.Context, _ string) error {
-	<-ctx.Done()
-	return ctx.Err()
-}
-
-func (s *relayDeadlineTitleSession) Send(string, []ImageAttachment, []FileAttachment) error {
-	s.sendMu.Lock()
-	s.sendCalls++
-	s.sendMu.Unlock()
-	return nil
-}
-
-func (s *relayDeadlineTitleSession) sendCount() int {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	return s.sendCalls
-}
-
-func (s *blockingTitleSession) SetInitialSessionTitle(string) error {
-	close(s.started)
-	<-s.release
-	return nil
 }
 
 func (s *titleInitializingResultSession) SetInitialSessionTitle(prompt string) error {
@@ -157,79 +115,6 @@ func TestGetOrCreateInteractiveStateWith_TitlesFreshSessionAtCreation(t *testing
 	}
 }
 
-func TestInitializeFreshSessionTitle_LocalizesEmptyFallback(t *testing.T) {
-	for _, tt := range []struct {
-		lang Language
-		want string
-	}{
-		{lang: LangEnglish, want: "New conversation"},
-		{lang: LangChinese, want: "新会话"},
-		{lang: LangTraditionalChinese, want: "新會話"},
-		{lang: LangJapanese, want: "新しい会話"},
-		{lang: LangSpanish, want: "Nueva conversación"},
-	} {
-		t.Run(string(tt.lang), func(t *testing.T) {
-			live := &titleSyncAgentSession{controllableAgentSession: newControllableSession("thread-fresh")}
-			e := NewEngine("test", &controllableAgent{nextSession: live}, nil, "", tt.lang)
-
-			e.initializeFreshSessionTitle(context.Background(), live, "")
-			if live.initialCalls != 1 || live.initialPrompt != tt.want {
-				t.Fatalf("fallback calls = %d prompt = %q, want %q", live.initialCalls, live.initialPrompt, tt.want)
-			}
-		})
-	}
-}
-
-func TestProcessInteractiveMessage_CreatesThenTitlesBeforeFirstSend(t *testing.T) {
-	live := &orderedTitleSession{controllableAgentSession: newControllableSession("thread-fresh")}
-	agent := &controllableAgent{
-		startSessionFn: func(context.Context, string) (AgentSession, error) {
-			live.record("start")
-			return live, nil
-		},
-	}
-	p := &stubPlatformEngine{n: "test"}
-	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-	key := "test:user"
-	managed := e.sessions.GetOrCreateActive(key)
-	if !managed.TryLock() {
-		t.Fatal("failed to lock managed session")
-	}
-
-	e.processInteractiveMessageWith(
-		p,
-		&Message{
-			SessionKey:   key,
-			Platform:     "test",
-			MessageID:    "msg-1",
-			Content:      "[Reply to Alice]: 不应进入标题\n首个真实问题",
-			ExtraContent: "[Reply to Alice]: 不应进入标题",
-			ReplyCtx:     "ctx",
-		},
-		managed,
-		agent,
-		e.sessions,
-		key,
-		"",
-		key,
-		"首个真实问题",
-	)
-
-	got := live.snapshot()
-	want := []string{"start", "title", "send"}
-	if len(got) != len(want) {
-		t.Fatalf("lifecycle order = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("lifecycle order = %v, want %v", got, want)
-		}
-	}
-	if got := live.prompt(); got != "首个真实问题" {
-		t.Fatalf("title prompt = %q, want platform-neutral user content", got)
-	}
-}
-
 func TestGetOrCreateInteractiveStateWith_TitleGenerationReleasesGlobalLock(t *testing.T) {
 	live := &blockingTitleSession{
 		controllableAgentSession: newControllableSession("thread-fresh"),
@@ -264,49 +149,65 @@ func TestGetOrCreateInteractiveStateWith_TitleGenerationReleasesGlobalLock(t *te
 	}
 }
 
-func TestExecuteHeartbeat_DefersTitleUntilRealUser(t *testing.T) {
+func TestInitializeFreshSessionTitle_LocalizesEmptyFallback(t *testing.T) {
+	for _, tt := range []struct {
+		lang Language
+		want string
+	}{
+		{lang: LangEnglish, want: "New conversation"},
+		{lang: LangChinese, want: "新会话"},
+		{lang: LangTraditionalChinese, want: "新會話"},
+		{lang: LangJapanese, want: "新しい会話"},
+		{lang: LangSpanish, want: "Nueva conversación"},
+	} {
+		t.Run(string(tt.lang), func(t *testing.T) {
+			live := &titleSyncAgentSession{controllableAgentSession: newControllableSession("thread-fresh")}
+			e := NewEngine("test", &controllableAgent{nextSession: live}, nil, "", tt.lang)
+
+			e.initializeFreshSessionTitle(live, "")
+			if live.initialCalls != 1 || live.initialPrompt != tt.want {
+				t.Fatalf("fallback calls = %d prompt = %q, want %q", live.initialCalls, live.initialPrompt, tt.want)
+			}
+		})
+	}
+}
+
+func TestProcessInteractiveMessage_CreatesThenTitlesBeforeFirstSend(t *testing.T) {
 	live := &orderedTitleSession{controllableAgentSession: newControllableSession("thread-fresh")}
-	agent := &controllableAgent{nextSession: live}
-	p := &heartbeatTitlePlatform{stubPlatformEngine: &stubPlatformEngine{n: "test"}}
+	agent := &controllableAgent{
+		startSessionFn: func(context.Context, string) (AgentSession, error) {
+			live.record("start")
+			return live, nil
+		},
+	}
+	p := &stubPlatformEngine{n: "test"}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
 	key := "test:user"
-
-	if err := e.ExecuteHeartbeat(key, "This is a periodic heartbeat check", true); err != nil {
-		t.Fatalf("ExecuteHeartbeat() error = %v", err)
-	}
-	if got := live.prompt(); got != "" {
-		t.Fatalf("heartbeat title prompt = %q, want deferred title", got)
-	}
-	e.interactiveMu.Lock()
-	state := e.interactiveStates[key]
-	e.interactiveMu.Unlock()
-	if state == nil {
-		t.Fatal("heartbeat did not create an interactive state")
-	}
-	state.mu.Lock()
-	pending := state.initialTitlePending
-	state.mu.Unlock()
-	if !pending {
-		t.Fatal("fresh heartbeat session did not retain pending title state")
-	}
-
 	managed := e.sessions.GetOrCreateActive(key)
 	if !managed.TryLock() {
-		t.Fatal("heartbeat did not release the managed session")
+		t.Fatal("failed to lock managed session")
 	}
+
 	e.processInteractiveMessageWith(
 		p,
-		&Message{SessionKey: key, Platform: "test", Content: "首个真实用户问题", ReplyCtx: "ctx"},
+		&Message{SessionKey: key, Platform: "test", MessageID: "msg-1", Content: "首个真实问题", ReplyCtx: "ctx"},
 		managed,
 		agent,
 		e.sessions,
 		key,
 		"",
 		key,
-		"首个真实用户问题",
 	)
-	if got := live.prompt(); got != "首个真实用户问题" {
-		t.Fatalf("deferred title prompt = %q, want first real user request", got)
+
+	got := live.snapshot()
+	want := []string{"start", "title", "send"}
+	if len(got) != len(want) {
+		t.Fatalf("lifecycle order = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("lifecycle order = %v, want %v", got, want)
+		}
 	}
 }
 
@@ -363,48 +264,6 @@ func TestHandleRelay_TitlesFreshSessionAtCreation(t *testing.T) {
 	}
 	if live.initialCalls != 1 || live.initialPrompt != "relay first request" {
 		t.Fatalf("relay title calls = %d, prompt = %q", live.initialCalls, live.initialPrompt)
-	}
-}
-
-func TestHandleRelay_DeadlineDuringTitleGenerationSkipsTurn(t *testing.T) {
-	live := &relayDeadlineTitleSession{controllableAgentSession: newControllableSession("relay-thread")}
-	e := newTestEngine()
-	e.agent = &controllableAgent{nextSession: live}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-
-	response, err := e.HandleRelay(ctx, "source", "test:chat-1:user", "relay first request")
-	if response != "" {
-		t.Fatalf("HandleRelay() response = %q, want empty on title deadline", response)
-	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("HandleRelay() error = %v, want context deadline exceeded", err)
-	}
-	if got := live.sendCount(); got != 0 {
-		t.Fatalf("agent turn send count = %d, want 0 after relay deadline", got)
-	}
-	select {
-	case <-live.closed:
-	case <-time.After(2 * time.Second):
-		t.Fatal("relay session was not closed after title deadline")
-	}
-}
-
-func TestExecuteSkill_TitlesFreshSessionFromInvocation(t *testing.T) {
-	live := &orderedTitleSession{controllableAgentSession: newControllableSession("skill-thread")}
-	agent := &controllableAgent{nextSession: live}
-	p := &stubPlatformEngine{n: "test"}
-	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-	msg := &Message{SessionKey: "test:user", Platform: "test", Content: "/imagegen 生成 产品图", ReplyCtx: "ctx"}
-	skill := &Skill{Name: "imagegen", Prompt: "The generic skill wrapper must not become the title."}
-
-	e.executeSkill(p, msg, skill, []string{"生成", "产品图"})
-	deadline := time.Now().Add(2 * time.Second)
-	for live.prompt() == "" && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if got := live.prompt(); got != "/imagegen 生成 产品图" {
-		t.Fatalf("skill title prompt = %q, want invocation-derived title", got)
 	}
 }
 
