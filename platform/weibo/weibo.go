@@ -555,81 +555,69 @@ func (p *Platform) sendMessage(rctx any, content string) error {
 }
 
 func (p *Platform) SendImage(_ context.Context, rctx any, img core.ImageAttachment) error {
-	rc, ok := rctx.(replyContext)
-	if !ok {
-		return fmt.Errorf("weibo: invalid reply context type: %T", rctx)
-	}
-
-	b64 := base64.StdEncoding.EncodeToString(img.Data)
-	mime := img.MimeType
-	if mime == "" {
-		mime = "image/png"
-	}
-	fname := img.FileName
-	if fname == "" {
-		fname = "image"
-	}
-
-	msgID := fmt.Sprintf("img-%s-%d", rc.fromUserID, time.Now().UnixMilli())
-	env := map[string]any{
-		"type": "send_message",
-		"payload": sendPayload{
-			ToUserID:  rc.fromUserID,
-			MessageID: msgID,
-			Done:      true,
-			Input: []messageInputItem{{
-				Type: "message",
-				Role: "assistant",
-				Content: []contentPart{{
-					Type:     "input_image",
-					FileName: fname,
-					Source:   &inputSource{Type: "base64", MediaType: mime, Data: b64},
-				}},
-			}},
-		},
-	}
-	slog.Debug(p.tag()+": sending image", "to", rc.fromUserID, "name", fname, "size", len(img.Data))
-	return p.writeWS(env)
+	return p.sendAttachment(rctx, weiboAttachment{
+		name: img.FileName, defaultName: "image",
+		mimeType: img.MimeType, defaultMimeType: "image/png",
+		data: img.Data, inputType: "input_image", idPrefix: "img", kind: "image",
+	})
 }
 
 func (p *Platform) SendFile(_ context.Context, rctx any, file core.FileAttachment) error {
+	return p.sendAttachment(rctx, weiboAttachment{
+		name: file.FileName, defaultName: "attachment",
+		mimeType: file.MimeType, defaultMimeType: "application/octet-stream",
+		data: file.Data, inputType: "input_file", idPrefix: "file", kind: "file",
+	})
+}
+
+type weiboAttachment struct {
+	name            string
+	defaultName     string
+	mimeType        string
+	defaultMimeType string
+	data            []byte
+	inputType       string
+	idPrefix        string
+	kind            string
+}
+
+func (p *Platform) sendAttachment(rctx any, attachment weiboAttachment) error {
 	rc, ok := rctx.(replyContext)
 	if !ok {
 		return fmt.Errorf("weibo: invalid reply context type: %T", rctx)
 	}
-
-	b64 := base64.StdEncoding.EncodeToString(file.Data)
-	mime := file.MimeType
-	if mime == "" {
-		mime = "application/octet-stream"
+	mimeType := attachment.mimeType
+	if mimeType == "" {
+		mimeType = attachment.defaultMimeType
 	}
-	fname := file.FileName
-	if fname == "" {
-		fname = "attachment"
+	name := attachment.name
+	if name == "" {
+		name = attachment.defaultName
 	}
 
-	msgID := fmt.Sprintf("file-%s-%d", rc.fromUserID, time.Now().UnixMilli())
 	env := map[string]any{
 		"type": "send_message",
 		"payload": sendPayload{
 			ToUserID:  rc.fromUserID,
-			MessageID: msgID,
+			MessageID: fmt.Sprintf("%s-%s-%d", attachment.idPrefix, rc.fromUserID, time.Now().UnixMilli()),
 			Done:      true,
 			Input: []messageInputItem{{
 				Type: "message",
 				Role: "assistant",
 				Content: []contentPart{{
-					Type:     "input_file",
-					FileName: fname,
-					Source:   &inputSource{Type: "base64", MediaType: mime, Data: b64},
+					Type:     attachment.inputType,
+					FileName: name,
+					Source: &inputSource{
+						Type: "base64", MediaType: mimeType,
+						Data: base64.StdEncoding.EncodeToString(attachment.data),
+					},
 				}},
 			}},
 		},
 	}
-	slog.Debug(p.tag()+": sending file", "to", rc.fromUserID, "name", fname, "size", len(file.Data))
+	slog.Debug(p.tag()+": sending "+attachment.kind, "to", rc.fromUserID, "name", name, "size", len(attachment.data))
 	return p.writeWS(env)
 }
-
 func (p *Platform) writeWS(data any) error {
 	// gorilla/websocket only allows one concurrent writer; wsMu must guard the
 	// full WriteJSON call (pingLoop already follows this pattern), otherwise
