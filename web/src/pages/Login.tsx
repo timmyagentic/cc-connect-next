@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Zap, AlertCircle, Languages, Sun, Moon, Monitor } from 'lucide-react';
+import { Zap, AlertCircle, Sun, Moon, Monitor } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { useThemeStore } from '@/store/theme';
 import { api } from '@/api/client';

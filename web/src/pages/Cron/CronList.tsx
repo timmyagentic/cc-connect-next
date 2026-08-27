@@ -7,7 +7,7 @@ import {
 import { Button, Badge, Modal, Input, Textarea, EmptyState } from '@/components/ui';
 import { listCronJobs, createCronJob, updateCronJob, deleteCronJob, triggerCronJob, type CronJob } from '@/api/cron';
 import { listProjects, type ProjectSummary } from '@/api/projects';
-import { listSessions, type Session } from '@/api/sessions';
+import { listSessions } from '@/api/sessions';
 import { formatTime, cn } from '@/lib/utils';
 
 const MODE_OPTIONS = ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'dontAsk'] as const;

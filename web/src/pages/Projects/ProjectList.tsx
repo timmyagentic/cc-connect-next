@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Server, Heart, ArrowRight, FolderKanban, Plus, Smartphone, Settings2 } from 'lucide-react';
 import { Card, Badge, Button, Input, Modal, EmptyState } from '@/components/ui';
 import { listProjects, type ProjectSummary } from '@/api/projects';
@@ -38,7 +38,6 @@ const PLATFORM_OPTIONS: { key: string; label: string; color: string; qr?: boolea
 
 export default function ProjectList() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -92,16 +91,6 @@ export default function ProjectList() {
   const handleQRComplete = () => {
     setShowWizard(false);
     fetch();
-  };
-
-  const handleManualDone = async () => {
-    // For non-QR platforms, use feishu EnsureProject to create the project skeleton,
-    // then the user configures platform details from the project detail page.
-    // We use the feishu save endpoint with empty credentials just to create the project.
-    // Actually, let's guide the user to the project detail page to configure.
-    setShowWizard(false);
-    fetch();
-    navigate(`/projects/${newProjName}`);
   };
 
   if (loading && projects.length === 0) {

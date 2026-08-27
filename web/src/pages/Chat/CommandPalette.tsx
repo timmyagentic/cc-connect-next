@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Slash, Search, MessageSquarePlus, List, ArrowRightLeft, Eye, History,
+  Search, MessageSquarePlus, List, ArrowRightLeft, Eye, History,
   Square, Brain, Cpu, Languages, Layers, Activity, Stethoscope, Info,
-  Settings, Timer, HeartPulse, Terminal, Tag, Wrench, Upload, Trash2,
+  Settings, Timer, HeartPulse, Terminal, Tag, Upload, Trash2,
   FolderOpen, HelpCircle, User, BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
