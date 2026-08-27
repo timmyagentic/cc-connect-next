@@ -89,9 +89,19 @@ type RichCardSupporter interface {
 	BuildRichCard(status CardStatus, title string, steps []ToolStep, markdown string, streaming bool, statusFooter string) string
 }
 
-// RichCardCopy contains fully localized lifecycle text. Keeping this copy in
-// core ensures platform renderers never hardcode one language or need to infer
-// locale from a phase token.
+// ReplyFooterDurationCopy contains the localized duration formats snapshotted
+// for one turn. Format strings receive the numeric values documented by their
+// field names.
+type ReplyFooterDurationCopy struct {
+	LessThanSecond string
+	SecondsFormat  string // float64 seconds
+	MinutesFormat  string // integer minutes, integer seconds
+	HoursFormat    string // integer hours, integer minutes
+}
+
+// RichCardCopy contains fully localized lifecycle and terminal-display text.
+// Keeping this copy in core ensures platform renderers never hardcode one
+// language or need to infer locale from a phase token.
 type RichCardCopy struct {
 	Thinking          string
 	CallingTools      string
@@ -110,10 +120,11 @@ type RichCardCopy struct {
 	UsageLimitBody    string
 	UsageLimitSummary string
 	// Steer / presentation handoff copy (issue #27).
-	Steering          string // pending phase title while a steer is awaiting acceptance
-	Redirected        string // header title of a card frozen by a successful steer
-	RedirectedBody    string // static notice appended below retained partial output
-	RedirectedSummary string // collapsed summary line for a redirected card
+	Steering            string // pending phase title while a steer is awaiting acceptance
+	Redirected          string // header title of a card frozen by a successful steer
+	RedirectedBody      string // static notice appended below retained partial output
+	RedirectedSummary   string // collapsed summary line for a redirected card
+	ReplyFooterDuration ReplyFooterDurationCopy
 }
 
 // LocalizedRichCardSupporter is an optional extension for native rich-card

@@ -6316,6 +6316,7 @@ func (t *turnProcessor) run() {
 				legacyPermissionDeliveredPrefix: legacyPermissionDeliveredPrefix,
 				pendingSend:                     &pendingSend,
 				turnStart:                       turnStart,
+				footerDurationCopy:              turnRichCardCopy.ReplyFooterDuration,
 				msgID:                           msgID,
 			}
 			if !completion.handle() {
@@ -6449,6 +6450,7 @@ type turnCompletion struct {
 	legacyPermissionDeliveredPrefix string
 	pendingSend                     *<-chan error
 	turnStart                       time.Time
+	footerDurationCopy              ReplyFooterDurationCopy
 	msgID                           string
 	isSilent                        bool
 }
@@ -6466,6 +6468,7 @@ func (completion *turnCompletion) handle() bool {
 		completion.segmentStart,
 		completion.hasRichCard,
 	)
+	turnElapsed := time.Since(completion.turnStart)
 	if !completion.waitForAnsweringDwell(response.base) {
 		return false
 	}
@@ -6476,7 +6479,7 @@ func (completion *turnCompletion) handle() bool {
 
 	statusFooter := ""
 	if !response.isSilent {
-		statusFooter = e.composeStatusFooter(completion.replyAgent, state.agentSession, time.Since(completion.turnStart))
+		statusFooter = e.composeStatusFooter(completion.replyAgent, state.agentSession, turnElapsed, completion.footerDurationCopy)
 	}
 	normalizedBaseResponse := strings.TrimSpace(response.base)
 	state.mu.Lock()
@@ -8105,16 +8108,16 @@ func (d *turnDelivery) deliver() {
 	}
 	if streamCard != nil && !isSilent {
 		sp.finish("", "") // cleanup preview (should be no-op if card was active)
-		// Build final card content with full response
-		finalContent := buildCardContent(cardThinkingText, cardToolCalls, fullResponse)
+		// Native streaming cards own the complete terminal payload, so append
+		// the same opt-in footer used by plain previews and rich cards.
+		finalContent := appendReplyFooter(buildCardContent(cardThinkingText, cardToolCalls, fullResponse), statusFooter)
 		if err := streamCard.Finalize(e.ctx, finalContent); err != nil {
 			slog.Error("streaming card finalize failed, sending fallback", "error", err)
 			discardStreamingCard()
-			// Fallback: send the response as a normal message
-			for _, chunk := range SplitMessageCodeFenceAware(fullResponse, maxPlatformMessageLen) {
-				if err := sendWorkspaceWithError(p, replyCtx, chunk); err != nil {
-					return
-				}
+			// Fallback: send the response as a normal message while preserving
+			// the footer on its final chunk.
+			if !sendChunksWithStatusFooter(e.ctx, p, replyCtx, fullResponse, statusFooter, sendWorkspaceWithError) {
+				return
 			}
 		}
 	} else if isSilent {
@@ -9423,7 +9426,7 @@ func replyFooterReasoningEffort(session AgentSession, agent Agent) string {
 // "<model> · effort:<effort> · ⏱ <elapsed>". Elapsed time is measured from
 // the start of this turn until its final response is ready for delivery. Plain
 // replies and rich-card completion paths share this value.
-func (e *Engine) composeStatusFooter(agent Agent, session AgentSession, elapsed time.Duration) string {
+func (e *Engine) composeStatusFooter(agent Agent, session AgentSession, elapsed time.Duration, copy ReplyFooterDurationCopy) string {
 	if !e.replyFooterEnabled {
 		return ""
 	}
@@ -9434,16 +9437,29 @@ func (e *Engine) composeStatusFooter(agent Agent, session AgentSession, elapsed 
 	if effort := replyFooterReasoningEffort(session, agent); effort != "" {
 		parts = append(parts, "effort:"+effort)
 	}
-	parts = append(parts, "⏱ "+formatReplyFooterDuration(elapsed))
+	parts = append(parts, "⏱ "+formatReplyFooterDuration(elapsed, copy))
 	return strings.Join(parts, " · ")
 }
 
-func formatReplyFooterDuration(d time.Duration) string {
+func formatReplyFooterDuration(d time.Duration, copy ReplyFooterDurationCopy) string {
 	if d < 0 {
 		d = 0
 	}
+	defaults := replyFooterDurationCopyForLanguage(LangEnglish)
+	if copy.LessThanSecond == "" {
+		copy.LessThanSecond = defaults.LessThanSecond
+	}
+	if copy.SecondsFormat == "" {
+		copy.SecondsFormat = defaults.SecondsFormat
+	}
+	if copy.MinutesFormat == "" {
+		copy.MinutesFormat = defaults.MinutesFormat
+	}
+	if copy.HoursFormat == "" {
+		copy.HoursFormat = defaults.HoursFormat
+	}
 	if d < time.Second {
-		return "<1s"
+		return copy.LessThanSecond
 	}
 
 	switch {
@@ -9457,11 +9473,11 @@ func formatReplyFooterDuration(d time.Duration) string {
 
 	switch {
 	case d < time.Minute:
-		return fmt.Sprintf("%.1fs", d.Seconds())
+		return fmt.Sprintf(copy.SecondsFormat, d.Seconds())
 	case d < time.Hour:
-		return fmt.Sprintf("%dm %02ds", int(d/time.Minute), int(d%time.Minute/time.Second))
+		return fmt.Sprintf(copy.MinutesFormat, int(d/time.Minute), int(d%time.Minute/time.Second))
 	default:
-		return fmt.Sprintf("%dh %02dm", int(d/time.Hour), int(d%time.Hour/time.Minute))
+		return fmt.Sprintf(copy.HoursFormat, int(d/time.Hour), int(d%time.Hour/time.Minute))
 	}
 }
 

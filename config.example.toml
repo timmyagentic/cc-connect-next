@@ -768,7 +768,7 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 name = "my-backend"
 # reply_footer = true              # Show "model · effort:x · ⏱ 12.3s" under each finished reply, on plain replies
 #                                   # and rich cards alike (default: false / hidden)
-#                                   # 在每条完成的回复底部显示「model · effort:x · ⏱ 12.3s」，普通回复与 rich 卡片
+#                                   # 在每条完成的回复底部显示「model · effort:x · ⏱ 12.3秒」，普通回复与 rich 卡片
 #                                   # 均生效（默认 false 隐藏）
 # show_context_indicator = true    # DEPRECATED no-op: the footer no longer renders token/ctx metadata
 #                                   # 已废弃（无效果）：footer 不再渲染 token/上下文信息

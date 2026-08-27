@@ -1966,8 +1966,8 @@ func (p *stubRichCardAnswerDwellPlatform) lifecycleTimes() (time.Time, time.Time
 	return p.firstStreamAt, p.completedAt
 }
 
-func (p *stubRichCardSilentPlatform) BuildRichCard(status CardStatus, _ string, steps []ToolStep, markdown string, _ bool, _ string) string {
-	return fmt.Sprintf("rich:status=%s steps=%d body=%q", status, len(steps), markdown)
+func (p *stubRichCardSilentPlatform) BuildRichCard(status CardStatus, _ string, steps []ToolStep, markdown string, _ bool, footer string) string {
+	return fmt.Sprintf("rich:status=%s steps=%d body=%q footer=%s", status, len(steps), markdown, footer)
 }
 
 func (p *stubRichCardSilentPlatform) SendPreviewStart(_ context.Context, replyCtx any, content string) (any, error) {
@@ -3767,12 +3767,13 @@ func TestProcessInteractiveEvents_RichCardShortAnswerUsesFirstChunkTypewriter(t 
 }
 
 func TestProcessInteractiveEvents_RichCardKeepsAnsweringPhaseVisibleBeforeDone(t *testing.T) {
-	const dwell = 80 * time.Millisecond
+	const dwell = 150 * time.Millisecond
 	base := &stubRichCardSilentPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
 	p := &stubRichCardAnswerDwellPlatform{stubRichCardSilentPlatform: base, dwell: dwell}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
 	e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: "rich"})
 	e.SetStreamPreviewCfg(StreamPreviewCfg{Enabled: true, IntervalMs: 0, MinDeltaChars: 1})
+	e.SetReplyFooterEnabled(true)
 
 	sessionKey := "feishu:user-rich-answer-dwell"
 	session := e.sessions.GetOrCreateActive(sessionKey)
@@ -3782,7 +3783,8 @@ func TestProcessInteractiveEvents_RichCardKeepsAnsweringPhaseVisibleBeforeDone(t
 
 	agentSession.events <- Event{Type: EventText, Content: "One-shot answer."}
 	agentSession.events <- Event{Type: EventResult, Content: "One-shot answer.", Done: true}
-	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-rich-answer-dwell", time.Now(), nil, nil, state.replyCtx)
+	turnStart := time.Now().Add(-900 * time.Millisecond)
+	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-rich-answer-dwell", turnStart, nil, nil, state.replyCtx)
 
 	firstStreamAt, completedAt := p.lifecycleTimes()
 	if firstStreamAt.IsZero() || completedAt.IsZero() {
@@ -3790,6 +3792,10 @@ func TestProcessInteractiveEvents_RichCardKeepsAnsweringPhaseVisibleBeforeDone(t
 	}
 	if elapsed := completedAt.Sub(firstStreamAt); elapsed < dwell-10*time.Millisecond {
 		t.Fatalf("answering phase visible for %s, want approximately %s before Done", elapsed, dwell)
+	}
+	_, _, updates, _ := base.snapshot()
+	if len(updates) == 0 || !strings.Contains(updates[len(updates)-1], "footer=⏱ <1s") {
+		t.Fatalf("final card footer included display dwell instead of processing time: %v", updates)
 	}
 }
 
@@ -16007,10 +16013,11 @@ func (s *stubPlatformWithObserve) SendObservation(_ context.Context, _, _ string
 // (e.g. DingTalk with AI Card configured), so instant reply should be skipped.
 type stubStreamingCardPlatform struct {
 	stubPlatformEngine
-	cardCreated atomic.Bool
-	cardFail    bool // when true, CreateStreamingCard returns an error
-	cardMu      sync.Mutex
-	card        *stubStreamingCard
+	cardCreated     atomic.Bool
+	cardFail        bool // when true, CreateStreamingCard returns an error
+	cardFinalizeErr bool
+	cardMu          sync.Mutex
+	card            *stubStreamingCard
 }
 
 func (p *stubStreamingCardPlatform) CreateStreamingCard(_ context.Context, _ any) (StreamingCard, error) {
@@ -16020,7 +16027,7 @@ func (p *stubStreamingCardPlatform) CreateStreamingCard(_ context.Context, _ any
 	p.cardCreated.Store(true)
 	p.cardMu.Lock()
 	defer p.cardMu.Unlock()
-	p.card = &stubStreamingCard{}
+	p.card = &stubStreamingCard{finalizeErr: p.cardFinalizeErr}
 	return p.card, nil
 }
 
@@ -16032,13 +16039,22 @@ func (p *stubStreamingCardPlatform) getCard() *stubStreamingCard {
 
 // stubStreamingCard is a minimal StreamingCard for tests.
 type stubStreamingCard struct {
-	discarded atomic.Bool
-	finalized atomic.Bool
+	discarded   atomic.Bool
+	finalized   atomic.Bool
+	mu          sync.Mutex
+	finalText   string
+	finalizeErr bool
 }
 
 func (c *stubStreamingCard) Update(_ context.Context, _ string) error { return nil }
-func (c *stubStreamingCard) Finalize(_ context.Context, _ string) error {
+func (c *stubStreamingCard) Finalize(_ context.Context, content string) error {
+	c.mu.Lock()
+	c.finalText = content
+	c.mu.Unlock()
 	c.finalized.Store(true)
+	if c.finalizeErr {
+		return errors.New("stub: finalize failed")
+	}
 	return nil
 }
 func (c *stubStreamingCard) Discard(_ context.Context) error {
@@ -16046,6 +16062,56 @@ func (c *stubStreamingCard) Discard(_ context.Context) error {
 	return nil
 }
 func (c *stubStreamingCard) Failed() bool { return false }
+
+func (c *stubStreamingCard) finalContent() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.finalText
+}
+
+func TestProcessInteractiveEvents_StreamingCardFinalizesWithReplyFooter(t *testing.T) {
+	p := &stubStreamingCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "dingtalk"}}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	e.SetReplyFooterEnabled(true)
+	sessionKey := "dingtalk:user-stream-card-footer"
+	session := e.sessions.GetOrCreateActive(sessionKey)
+	agentSession := newControllableSession("s-stream-card-footer")
+	state := &interactiveState{agentSession: agentSession, platform: p, replyCtx: "ctx-stream-card-footer"}
+	e.interactiveStates[sessionKey] = state
+
+	agentSession.events <- Event{Type: EventResult, Content: "answer", Done: true}
+	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-stream-card-footer", time.Now(), nil, nil, state.replyCtx)
+
+	card := p.getCard()
+	if card == nil || !card.finalized.Load() {
+		t.Fatal("streaming card was not finalized")
+	}
+	if got := card.finalContent(); !strings.Contains(got, "answer\n\n*⏱ <1s*") {
+		t.Fatalf("final streaming card = %q, want answer plus elapsed footer", got)
+	}
+}
+
+func TestProcessInteractiveEvents_StreamingCardFallbackKeepsReplyFooter(t *testing.T) {
+	p := &stubStreamingCardPlatform{
+		stubPlatformEngine: stubPlatformEngine{n: "dingtalk"},
+		cardFinalizeErr:    true,
+	}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	e.SetReplyFooterEnabled(true)
+	sessionKey := "dingtalk:user-stream-card-footer-fallback"
+	session := e.sessions.GetOrCreateActive(sessionKey)
+	agentSession := newControllableSession("s-stream-card-footer-fallback")
+	state := &interactiveState{agentSession: agentSession, platform: p, replyCtx: "ctx-stream-card-footer-fallback"}
+	e.interactiveStates[sessionKey] = state
+
+	agentSession.events <- Event{Type: EventResult, Content: "answer", Done: true}
+	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-stream-card-footer-fallback", time.Now(), nil, nil, state.replyCtx)
+
+	sent := p.getSent()
+	if len(sent) != 1 || !strings.Contains(sent[0], "answer\n\n*⏱ <1s*") {
+		t.Fatalf("streaming-card fallback = %v, want one answer with elapsed footer", sent)
+	}
+}
 
 func TestProcessInteractiveEvents_SilentReplyDiscardsStreamingCard(t *testing.T) {
 	p := &stubStreamingCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "dingtalk"}}
