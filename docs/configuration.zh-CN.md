@@ -2090,13 +2090,22 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 默认值：`unset / adapter default`
 - 生效方式：`restart`
 
-### `projects.platforms.options.port` — `feishu, lark, line, wecom`
+### `projects.platforms.options.port` — `feishu, lark, line`
 
-设置入站 Webhook 监听端口。
+以带引号的字符串设置入站 Webhook 监听端口。
 
-- 作用域：`platform` (`feishu, lark, line, wecom`)
-- 类型：`integer`
-- 默认值：`unset / adapter default`
+- 作用域：`platform` (`feishu, lark, line`)
+- 类型：`string`
+- 默认值：`8080`
+- 生效方式：`restart`
+
+### `projects.platforms.options.port` — `wecom`
+
+以带引号的字符串设置入站 Webhook 监听端口。
+
+- 作用域：`platform` (`wecom`)
+- 类型：`string`
+- 默认值：`8081`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.progress_style` — `discord, feishu, lark, telegram`
@@ -2295,12 +2304,14 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.webhook_resubscribe_interval` — `max`
 
-定期刷新 MAX Webhook 订阅。
+使用 Go duration 字符串定期刷新 MAX Webhook 订阅。
 
 - 作用域：`platform` (`max`)
-- 类型：`integer`
-- 默认值：`unset / adapter default`
+- 类型：`string`
+- 默认值：`5m`
 - 生效方式：`restart`
+- 允许值: `Go duration string (for example: 30s, 5m, 1h)`
+- 示例: `webhook_resubscribe_interval = "5m"`
 
 ### `projects.platforms.options.webhook_secret` — `max`
 

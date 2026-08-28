@@ -167,6 +167,30 @@ func TestRegisteredPluginConfigSchemasCoverLiteralOptionReads(t *testing.T) {
 	}
 }
 
+func TestReviewedPlatformOptionTypesMatchConstructors(t *testing.T) {
+	for _, owner := range []string{"feishu", "lark", "line", "wecom"} {
+		port := findCatalogOption(t, core.PlatformConfigOptions(owner), "port")
+		if port.Type != "string" {
+			t.Errorf("%s port type = %q, want string", owner, port.Type)
+		}
+	}
+	interval := findCatalogOption(t, core.PlatformConfigOptions("max"), "webhook_resubscribe_interval")
+	if interval.Type != "string" || interval.Default != "5m" || !strings.Contains(interval.Example, `"5m"`) {
+		t.Fatalf("MAX resubscribe interval metadata = %#v", interval)
+	}
+}
+
+func findCatalogOption(t *testing.T, options []core.ConfigOption, key string) core.ConfigOption {
+	t.Helper()
+	for _, option := range options {
+		if option.Key == key {
+			return option
+		}
+	}
+	t.Fatalf("catalog option %q not found", key)
+	return core.ConfigOption{}
+}
+
 func TestAnnotateUnknownPluginConfigKeys_ReportsDynamicMapTypos(t *testing.T) {
 	cfg := &config.Config{Projects: []config.ProjectConfig{{
 		Name: "demo",

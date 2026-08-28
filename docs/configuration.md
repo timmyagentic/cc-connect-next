@@ -2090,13 +2090,22 @@ Recognize selected Feishu bot identities as relay peers.
 - Default: `unset / adapter default`
 - Takes effect: `restart`
 
-### `projects.platforms.options.port` — `feishu, lark, line, wecom`
+### `projects.platforms.options.port` — `feishu, lark, line`
 
-Set the inbound webhook listening port.
+Set the inbound webhook listening port as a quoted string.
 
-- Scope: `platform` (`feishu, lark, line, wecom`)
-- Type: `integer`
-- Default: `unset / adapter default`
+- Scope: `platform` (`feishu, lark, line`)
+- Type: `string`
+- Default: `8080`
+- Takes effect: `restart`
+
+### `projects.platforms.options.port` — `wecom`
+
+Set the inbound webhook listening port as a quoted string.
+
+- Scope: `platform` (`wecom`)
+- Type: `string`
+- Default: `8081`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.progress_style` — `discord, feishu, lark, telegram`
@@ -2295,12 +2304,14 @@ Set the MAX webhook URL path.
 
 ### `projects.platforms.options.webhook_resubscribe_interval` — `max`
 
-Periodically refresh the MAX webhook subscription.
+Periodically refresh the MAX webhook subscription using a Go duration string.
 
 - Scope: `platform` (`max`)
-- Type: `integer`
-- Default: `unset / adapter default`
+- Type: `string`
+- Default: `5m`
 - Takes effect: `restart`
+- Allowed values: `Go duration string (for example: 30s, 5m, 1h)`
+- Example: `webhook_resubscribe_interval = "5m"`
 
 ### `projects.platforms.options.webhook_secret` — `max`
 

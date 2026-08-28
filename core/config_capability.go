@@ -237,6 +237,7 @@ type optionDoc struct {
 	keywords               []string
 	apply                  ConfigApplyMode
 	sensitive, internal    bool
+	example                string
 }
 
 func documentedOption(key string, doc optionDoc) ConfigOption {
@@ -268,7 +269,7 @@ func documentedOption(key string, doc optionDoc) ConfigOption {
 	return ConfigOption{
 		Key: key, Type: doc.typeName, Default: doc.defaultValue, Values: append([]string(nil), doc.values...),
 		Description: doc.description, DescriptionZH: doc.zh, Keywords: append([]string(nil), doc.keywords...),
-		ApplyMode: doc.apply, Sensitive: doc.sensitive, Internal: doc.internal,
+		ApplyMode: doc.apply, Sensitive: doc.sensitive, Internal: doc.internal, Example: doc.example,
 	}
 }
 
@@ -384,7 +385,7 @@ func platformOption(key string) ConfigOption {
 		"mode":                            {description: "Select the platform connection mode, such as WebSocket or callback.", zh: "选择平台连接模式，例如 WebSocket 或回调。"},
 		"name":                            {description: "Set the account display name used by the platform adapter.", zh: "设置平台适配器使用的账号显示名称。"},
 		"peer_bots":                       {typeName: "string[]", description: "Recognize selected Feishu bot identities as relay peers.", zh: "将指定飞书机器人身份识别为 Relay 对端。"},
-		"port":                            {typeName: "integer", description: "Set the inbound webhook listening port.", zh: "设置入站 Webhook 监听端口。"},
+		"port":                            {typeName: "string", defaultValue: "adapter default", description: "Set the inbound webhook listening port as a quoted string.", zh: "以带引号的字符串设置入站 Webhook 监听端口。"},
 		"progress_style":                  {defaultValue: "compact", values: []string{"legacy", "compact", "card"}, description: "Choose how progress is rendered on the messaging platform.", zh: "选择消息平台上的进度展示样式。", keywords: []string{"进度卡片", "card"}},
 		"proxy":                           {description: "Route platform HTTP/WebSocket traffic through an HTTP or SOCKS5 proxy.", zh: "通过 HTTP 或 SOCKS5 代理转发平台 HTTP/WebSocket 流量。"},
 		"proxy_password":                  {description: "Authenticate to the configured platform proxy.", zh: "认证已配置的平台代理。", sensitive: true},
@@ -406,7 +407,7 @@ func platformOption(key string) ConfigOption {
 		"user_id":                         {description: "Set or override the Matrix bot user ID.", zh: "设置或覆盖 Matrix 机器人用户 ID。"},
 		"webhook_listen":                  {description: "Set the local listen address for MAX webhook delivery.", zh: "设置 MAX Webhook 的本地监听地址。"},
 		"webhook_path":                    {description: "Set the MAX webhook URL path.", zh: "设置 MAX Webhook URL 路径。"},
-		"webhook_resubscribe_interval":    {typeName: "integer", description: "Periodically refresh the MAX webhook subscription.", zh: "定期刷新 MAX Webhook 订阅。"},
+		"webhook_resubscribe_interval":    {typeName: "string", defaultValue: "5m", values: []string{"Go duration string (for example: 30s, 5m, 1h)"}, description: "Periodically refresh the MAX webhook subscription using a Go duration string.", zh: "使用 Go duration 字符串定期刷新 MAX Webhook 订阅。", example: `webhook_resubscribe_interval = "5m"`},
 		"webhook_secret":                  {description: "Verify MAX webhook requests.", zh: "验证 MAX Webhook 请求。", sensitive: true},
 		"webhook_url":                     {description: "Publish the externally reachable MAX webhook URL.", zh: "设置外部可访问的 MAX Webhook 地址。"},
 		"ws_endpoint":                     {description: "Override the platform WebSocket endpoint.", zh: "覆盖平台 WebSocket 地址。"},
