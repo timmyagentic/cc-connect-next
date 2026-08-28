@@ -224,7 +224,7 @@ connection can compete for the bot's events.
 
 ### The recommended Feishu configuration
 
-This is the shape the project is operated with day to day, not a theoretical ideal: a quoted answer card that carries the final answer and nothing else, file references rendered so they can be clicked, and a bot that participates in its group without being @mentioned every time.
+This is the shape the project is operated with day to day, not a theoretical ideal: a quoted answer card that carries the final answer plus a compact status footer, file references rendered so they can be clicked, and a bot that participates in its group without being @mentioned every time.
 
 ```toml
 [projects.display]
@@ -232,7 +232,7 @@ card_mode = "rich"               # Feishu Card 2.0 answer card: counts only, nev
 thinking_messages = false        # keep reasoning out of the chat
 tool_messages = false            # keep tool calls and their arguments out of the chat
 show_context_indicator = false   # deprecated no-op, kept for config compatibility
-reply_footer = false             # keep the "model · effort · elapsed" footer out of the chat
+reply_footer = true              # show the compact "model · effort · elapsed" footer
 hide_agent_footer = true         # strip the equivalent lines the agent emits itself
 
 [projects.references]
@@ -260,7 +260,7 @@ allow_from = "ou_your_open_id"   # or "*"
 allow_chat = "oc_your_chat_id"   # or "*"
 ```
 
-The card appears immediately, shows only anonymous reasoning/tool counts, streams the answer in the same quoted card, and ends with a localized completion label (`✅ Done` in English, `✅ 已完成` in Chinese) or a localized generic failure label. Reasoning, tool details, model/token/context metadata, working directories, and reply footers are omitted from the card payload.
+The card appears immediately, shows only anonymous reasoning/tool counts, streams the answer in the same quoted card, and ends with a localized completion label (`✅ Done` in English, `✅ 已完成` in Chinese) or a localized generic failure label. Reasoning, tool details, token/context metadata, and working directories are omitted; the default footer adds only model, effort, and elapsed time and can be disabled with `reply_footer = false`.
 
 See the [Feishu answer-card contract](docs/feishu-card-contract.md) for the exact lifecycle, privacy boundary, fallback behavior, locale coverage, and executable verification commands.
 

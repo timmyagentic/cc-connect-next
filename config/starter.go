@@ -61,14 +61,14 @@ type = "` + StarterAgentType + `"   # "claudecode", "codex", "cursor", "gemini",
 
 [projects.agent.options]
 work_dir = "` + PlaceholderWorkDir + `"   # REPLACE: absolute path of the project the agent works in
-mode = "default"
-backend = "app_server"                    # native turn/steer and interactive approvals
+mode = "yolo"                              # run without approval prompts or sandbox restrictions
+backend = "app_server"                    # native turn/steer and approval protocol support
 app_server_url = "stdio"                  # launch a local codex app-server subprocess
 # backend = "exec"                        # explicit opt-out: busy messages fall back to FIFO
 
 # The tables below are the recommended Feishu profile: a quoted answer card
-# that carries the final answer and nothing else, clickable file references,
-# and a bot that answers its group without being @mentioned every time. They
+# that carries the final answer plus a compact status footer, clickable file
+# references, and a bot that answers its group without being @mentioned. They
 # are generated from the same definition ` + "`cc-connect-next feishu setup`" + `
 # applies, so the two cannot drift apart.
 `)

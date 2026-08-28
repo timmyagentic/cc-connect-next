@@ -314,11 +314,11 @@ func TestEffectiveDisplayQuiet(t *testing.T) {
 }
 
 func TestEffectiveDisplay_FinalAnswerOnlyDefaults(t *testing.T) {
-	// The out-of-the-box chat shows only the final answer: process messages,
-	// the context indicator, and the reply footer all require explicit opt-in.
+	// The out-of-the-box chat hides process messages and the deprecated context
+	// indicator, while keeping the compact status footer visible.
 	_, thinking, tool, _, _, ctxIndicator, footer, _ := EffectiveDisplay(&Config{}, nil)
-	if thinking || tool || ctxIndicator || footer {
-		t.Fatalf("empty config must default to final-answer-only output, got thinking=%v tool=%v ctx=%v footer=%v",
+	if thinking || tool || ctxIndicator || !footer {
+		t.Fatalf("empty config must hide process output and show the footer, got thinking=%v tool=%v ctx=%v footer=%v",
 			thinking, tool, ctxIndicator, footer)
 	}
 
@@ -333,6 +333,24 @@ func TestEffectiveDisplay_FinalAnswerOnlyDefaults(t *testing.T) {
 	if !thinking || !tool || !ctxIndicator || !footer {
 		t.Fatalf("explicit true must restore process output, got thinking=%v tool=%v ctx=%v footer=%v",
 			thinking, tool, ctxIndicator, footer)
+	}
+}
+
+func TestEffectiveDisplay_ExplicitFalseDisablesDefaultReplyFooter(t *testing.T) {
+	fal := false
+	tru := true
+
+	cfg := &Config{Display: DisplayConfig{ReplyFooter: &fal}}
+	_, _, _, _, _, _, footer, _ := EffectiveDisplay(cfg, nil)
+	if footer {
+		t.Fatal("global reply_footer=false did not override the enabled built-in default")
+	}
+
+	cfg.Display.ReplyFooter = &tru
+	proj := &ProjectConfig{Display: &DisplayConfig{ReplyFooter: &fal}}
+	_, _, _, _, _, _, footer, _ = EffectiveDisplay(cfg, proj)
+	if footer {
+		t.Fatal("project reply_footer=false did not override global true")
 	}
 }
 

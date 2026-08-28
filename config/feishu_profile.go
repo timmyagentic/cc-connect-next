@@ -44,9 +44,9 @@ func (s RecommendedFeishuSetting) TableHeader() string {
 // recommends, as the settings that produce it.
 //
 // It is the shape this project is actually operated with day to day rather than
-// a theoretical ideal: a quoted answer card that carries the final answer and
-// nothing else, file references rendered so they can be clicked, and a bot that
-// participates in its group without being @mentioned every time.
+// a theoretical ideal: a quoted answer card that carries the final answer plus
+// a compact status footer, file references rendered so they can be clicked,
+// and a bot that participates in its group without being @mentioned every time.
 //
 // Most of these already match the built-in defaults. The profile still spells
 // them out: a recommendation the user accepted should keep producing the same
@@ -70,8 +70,8 @@ func RecommendedFeishuProfile(agentType string) []RecommendedFeishuSetting {
 			"keep tool calls and their arguments out of the chat"},
 		{feishuProfileTableDisplay, "show_context_indicator", "false",
 			"deprecated no-op, kept for config compatibility"},
-		{feishuProfileTableDisplay, "reply_footer", "false",
-			"keep the \"model · effort · elapsed\" footer out of the chat"},
+		{feishuProfileTableDisplay, "reply_footer", "true",
+			"show the compact model, effort, and elapsed-time footer"},
 		{feishuProfileTableDisplay, "hide_agent_footer", "true",
 			"strip the equivalent model/token/context lines the agent emits itself"},
 
