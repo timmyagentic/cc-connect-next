@@ -1,5 +1,13 @@
 package acp
 
+import "github.com/timmyagentic/cc-connect-next/core"
+
+func init() {
+	agent := &Agent{}
+	options := core.ConfigurePermissionModeOption(core.DescribeAgentOptions(agent.KnownOptionKeys()), agent.PermissionModes())
+	core.RegisterAgentConfigOptions("acp", options)
+}
+
 // KnownOptionKeys implements core.AgentOptionSchema: the exhaustive set of
 // [projects.agent.options] keys this agent consumes (directly or via the
 // shared core.ParseCmdOpts / core.ParseConfigEnv helpers). Keys configured

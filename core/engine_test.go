@@ -5752,6 +5752,12 @@ func TestHandleMessage_MultiWorkspacePreservesCCSessionKey(t *testing.T) {
 			if strings.Contains(got, normalizedWsDir) {
 				t.Fatalf("CC_SESSION_KEY leaked workspace path: %q", got)
 			}
+			if got := wsAgent.EnvValue("CC_AGENT_TYPE"); got != "stub" {
+				t.Fatalf("CC_AGENT_TYPE = %q, want stub", got)
+			}
+			if got := wsAgent.EnvValue("CC_PLATFORM_TYPES"); got != "discord" {
+				t.Fatalf("CC_PLATFORM_TYPES = %q, want discord", got)
+			}
 			return
 		}
 

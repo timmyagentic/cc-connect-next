@@ -52,19 +52,23 @@ Each user gets an independent session with full conversation context. Manage ses
 
 During a session, the agent may request tool permissions. Reply **allow** / **deny** / **allow all**.
 
-cc-connect-next rotates to a fresh session automatically after long inactivity:
+You can opt in to rotating to a fresh session after long inactivity:
 
 ```toml
 [[projects]]
 name = "demo"
-reset_on_idle_mins = 30   # default when unset; set to 0 to disable
+reset_on_idle_mins = 30   # positive minutes enable rotation; unset/0 disables it
 ```
 
 The next normal message after a long idle period starts in a fresh session automatically, without deleting the old session from `/list`.
 
-**Why this is on by default:** without idle rotation, every workspace-pool eviction (~15 min) caused the next message to resume the previous transcript via `--continue`. Over many cycles this re-ingests stale chat history (failed commands, debugging noise, abandoned tangents) and the model's attention drifts away from the original intent. Rotating after 30 minutes of user inactivity gives a clean slate when you come back to a task, while preserving the old session for `/list` and `/switch`.
+Without idle rotation, every workspace-pool eviction may cause the next message
+to resume the previous transcript via `--continue`. Over many cycles this can
+re-ingest stale chat history (failed commands, debugging noise, abandoned
+tangents). Opting in with a positive value gives a clean slate after that idle
+period while preserving the old session for `/list` and `/switch`.
 
-To restore the previous behavior of always continuing, set `reset_on_idle_mins = 0`.
+The built-in default is `0`, which always continues the previous session.
 
 ### Model switch preserves history
 
@@ -1268,7 +1272,12 @@ Full protocol reference: [bridge-protocol.md](./bridge-protocol.md)
 
 ## Configuration Reference
 
-See [config.example.toml](../config.example.toml) for full examples.
+See the generated [configuration capability reference](configuration.md) for
+the purpose, default, allowed values, scope, and apply mode of every declared
+option. Agents query the same version-matched catalog with
+`cc-connect-next config capabilities --search "keywords"`, so users can ask in
+natural language without reading the config file. The complete copy/paste
+example remains in [config.example.toml](../config.example.toml).
 
 ### Project Structure
 

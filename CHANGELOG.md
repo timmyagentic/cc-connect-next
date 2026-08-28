@@ -17,6 +17,25 @@
   session and workspace binding. Existing configs that omit the key keep the
   compatibility fallback `false`; explicit `false` remains supported.
 
+### Agent-friendly configuration knowledge
+
+- Every compiled build now carries a structured configuration capability
+  catalog covering typed global/project settings and the exact dynamic option
+  surfaces of all included Agent and messaging-platform adapters. Each entry
+  explains purpose, scope, type, default/allowed values, apply mode,
+  sensitivity, and bilingual natural-language keywords.
+- `cc-connect-next config capabilities` exposes that catalog without reading
+  the operator's actual config or credentials. It supports natural-language
+  search, exact-key lookup, active Agent/platform filtering, and stable
+  Markdown or JSON output; generated English and Chinese references are
+  checked into `docs/` from the same source.
+- A bounded, version-matched catalog capsule is injected once per Agent
+  session. It tells the Agent to query the local catalog before answering
+  configuration questions, explain exact TOML paths and apply semantics, and
+  report unsupported wishes honestly through `/feedback` instead of inventing
+  keys. Agent and Platform option-map typos now join the existing startup
+  warning and capability-gap flow instead of remaining silent.
+
 ### Correctness and upstream compatibility
 
 - Feishu/Lark WebSocket projects now fail closed for mention-gated group

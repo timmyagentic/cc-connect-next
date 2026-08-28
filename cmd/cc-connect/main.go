@@ -43,8 +43,8 @@ var globalAPIServer *core.APIServer
 // repeatedly re-ingested and starts to dominate the model's attention. The
 // previous session is preserved and remains accessible via /list and /switch.
 //
-// Set reset_on_idle_mins = 0 in config.toml to opt out and restore the
-// previous behavior of always continuing the prior session.
+// Set reset_on_idle_mins to a positive value to opt in. Zero or omission keeps
+// the default behavior of always continuing the prior session.
 const defaultResetOnIdleMins = 0
 
 // resolveResetOnIdle returns the configured reset-on-idle duration for a
@@ -409,6 +409,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error loading config (%s): %v\n", configPath, err)
 		os.Exit(1)
 	}
+	annotateUnknownPluginConfigKeys(cfg)
 
 	config.ConfigPath = configPath
 	slog.Info("config loaded", "path", configPath)
@@ -431,6 +432,9 @@ func main() {
 	}
 
 	setupLogger(cfg.Log.Level, logWriter)
+	for _, key := range cfg.UnknownConfigKeys {
+		slog.Warn("configuration key is not declared by this build and will have no effect", "key", key)
+	}
 
 	// Refuse to race a running official CC Connect daemon for the same
 	// platform credentials: two consumers on one credential split the event
@@ -475,6 +479,7 @@ func main() {
 
 	engines := make([]*core.Engine, 0, len(cfg.Projects))
 	effectiveWorkDirs := make([]string, 0, len(cfg.Projects))
+	configCatalog := config.CapabilityCatalog(core.CurrentVersion)
 
 	for _, proj := range cfg.Projects {
 		// Inject project-level run_as_user / run_as_env into the agent's
@@ -534,12 +539,14 @@ func main() {
 		}
 		engine.SetFeedbackConfig(cfg.FeedbackEnabled(), feedbackEndpoint, core.EnsureInstallID(cfg.DataDir))
 		engine.SetFeedbackCapabilityGaps(cfg.UnknownConfigKeys)
-		// Prevention at the source: tell the LLM what this deployment can
-		// actually be configured to do, so it answers config questions from
-		// the real option set instead of inventing keys.
-		if schema, ok := agent.(core.AgentOptionSchema); ok {
-			engine.SetCapabilityBrief(core.BuildCapabilityBrief(proj.Agent.Type, schema.KnownOptionKeys()))
+		// Give the Agent a bounded, version-matched configuration capsule and
+		// teach it to query the read-only local catalog for exact details when
+		// users ask natural-language configuration questions.
+		platformTypes := make([]string, 0, len(proj.Platforms))
+		for _, platform := range proj.Platforms {
+			platformTypes = append(platformTypes, platform.Type)
 		}
+		engine.SetCapabilityBrief(core.BuildConfigurationCapabilityBrief(configCatalog, proj.Agent.Type, platformTypes))
 		engine.SetFilterExternalSessions(proj.FilterExternalSessions != nil && *proj.FilterExternalSessions)
 		engine.SetBaseWorkDir(workDir)
 		engine.SetProjectStateStore(projectState)
@@ -823,7 +830,7 @@ func main() {
 		resetIdle, defaulted := resolveResetOnIdle(proj.ResetOnIdleMins)
 		engine.SetResetOnIdle(resetIdle)
 		if defaulted {
-			slog.Info("project: reset_on_idle_mins not set, applying default — set reset_on_idle_mins = 0 to opt out, see docs/usage.md",
+			slog.Info("project: reset_on_idle_mins not set, applying disabled default — set a positive value to enable idle rotation, see docs/usage.md",
 				"project", proj.Name, "default_minutes", defaultResetOnIdleMins)
 		}
 
@@ -1747,6 +1754,7 @@ Commands:
 
   config             Manage configuration
     example          Print a complete annotated config.toml example
+    capabilities     Explain this build's configuration capabilities (Markdown/JSON)
     format           Format the config file (alias: fmt)
     path             Print the resolved config file path
 
@@ -1773,6 +1781,7 @@ Examples:
   cc-connect-next update                   Update to the latest stable version
   cc-connect-next migrate --dry-run        Preview migration from official CC Connect
   cc-connect-next config format            Format the config file
+  cc-connect-next config capabilities --search "hide reasoning"
   cc-connect-next config example > c.toml  Save example config to a file
 
 `, v, updateHint)
@@ -1883,7 +1892,7 @@ func reloadConfig(configPath, projName string, engine *core.Engine) (*core.Confi
 	resetIdle, defaulted := resolveResetOnIdle(proj.ResetOnIdleMins)
 	engine.SetResetOnIdle(resetIdle)
 	if defaulted {
-		slog.Info("project: reset_on_idle_mins not set, applying default — set reset_on_idle_mins = 0 to opt out, see docs/usage.md",
+		slog.Info("project: reset_on_idle_mins not set, applying disabled default — set a positive value to enable idle rotation, see docs/usage.md",
 			"project", proj.Name, "default_minutes", defaultResetOnIdleMins)
 	}
 
