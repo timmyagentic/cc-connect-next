@@ -37,6 +37,53 @@ func TestNew_DefaultsToInteractivePlatform(t *testing.T) {
 	}
 }
 
+func TestNew_ThreadIsolationCompatibilityAndExplicitValues(t *testing.T) {
+	tests := []struct {
+		name string
+		set  bool
+		want bool
+	}{
+		{name: "omitted keeps legacy fallback", want: false},
+		{name: "explicit false", set: true, want: false},
+		{name: "explicit true", set: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := map[string]any{"app_id": "cli_xxx", "app_secret": "secret"}
+			if tt.set {
+				opts["thread_isolation"] = tt.want
+			}
+			p, err := New(opts)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			interactive, ok := p.(*interactivePlatform)
+			if !ok {
+				t.Fatalf("platform type = %T, want *interactivePlatform", p)
+			}
+			if interactive.threadIsolation != tt.want {
+				t.Fatalf("threadIsolation = %v, want %v", interactive.threadIsolation, tt.want)
+			}
+		})
+	}
+}
+
+func TestMakeSessionKey_ThreadIsolationSeparatesGroupRoots(t *testing.T) {
+	p := &Platform{platformName: "feishu", threadIsolation: true}
+	chatType := "group"
+	rootA, rootB := "om_root_a", "om_root_b"
+	messageA, messageB := "om_reply_a", "om_reply_b"
+
+	keyA := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, RootId: &rootA, MessageId: &messageA}, "oc_group", "ou_user")
+	keyB := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, RootId: &rootB, MessageId: &messageB}, "oc_group", "ou_user")
+	if keyA == keyB {
+		t.Fatalf("different topic roots share session key %q", keyA)
+	}
+	if keyA != "feishu:oc_group:root:om_root_a" || keyB != "feishu:oc_group:root:om_root_b" {
+		t.Fatalf("topic keys = %q / %q", keyA, keyB)
+	}
+}
+
 func TestNew_CanDisableInteractiveCards(t *testing.T) {
 	p, err := New(map[string]any{"app_id": "cli_xxx", "app_secret": "secret", "enable_feishu_card": false})
 	if err != nil {

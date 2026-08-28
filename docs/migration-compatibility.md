@@ -38,6 +38,8 @@ A migrated configuration keeps its bytes, so every setting it does not spell out
 - **Feishu/Lark `done_emoji` defaults to `"Done"`** (official: no completion reaction). Set `done_emoji = "none"` to disable it. An explicit `reaction_emoji = "none"` already covers the completion reaction, so a migrated config that opted out of reactions stays silent.
 - **`language` defaults to `"zh"`** (official: auto-detect from user messages). Set `language = "auto"` for the official detection behavior or pick a language explicitly. Regional spellings (`zh-CN`, `en-US`, `ja-JP`, …), casing, and surrounding whitespace resolve to the matching language; a value no language matches still falls back to detection and logs a warning at startup.
 
+Feishu topic isolation is deliberately **not** an upgrade-time default change: an existing or migrated config that omits `thread_isolation` still gets the compatibility fallback `false`. Only a newly generated Starter config, or an operator who explicitly accepts the recommended Feishu profile, receives `thread_isolation = true`; either config can spell out `false` to retain per-user chat sessions.
+
 Everything else — including Feishu `progress_style` (`legacy`), `reaction_emoji` (`OnIt`), the Weixin send quota (4 per 24h), and all timeout defaults — matches the official values.
 
 The generated manifest is schema version 2 and records `source_version` as either the caller-supplied canonical release or `auto-layout-v1`, together with every copied file's source, target, size, and SHA-256.

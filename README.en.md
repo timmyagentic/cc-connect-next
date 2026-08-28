@@ -171,6 +171,7 @@ type = "feishu"
 app_id = "${FEISHU_APP_ID}"
 app_secret = "${FEISHU_APP_SECRET}"
 reply_to_trigger = true
+thread_isolation = true
 done_emoji = "Done"
 ```
 

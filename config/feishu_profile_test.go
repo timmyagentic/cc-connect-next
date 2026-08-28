@@ -35,7 +35,7 @@ func TestRecommendedFeishuProfileCoversTheDeployedShape(t *testing.T) {
 		"references.enclosure_style":     `"code"`,
 		"platform.enable_feishu_card":    "true",
 		"platform.reply_to_trigger":      "true",
-		"platform.thread_isolation":      "false",
+		"platform.thread_isolation":      "true",
 		"platform.done_emoji":            `"Done"`,
 		"platform.group_reply_all":       "true",
 	}
@@ -210,7 +210,7 @@ app_secret = "solo-secret"
 	if opts["group_reply_all"] != true || opts["reply_to_trigger"] != true || opts["enable_feishu_card"] != true {
 		t.Fatalf("platform options = %#v", opts)
 	}
-	if opts["thread_isolation"] != false || opts["done_emoji"] != "Done" {
+	if opts["thread_isolation"] != true || opts["done_emoji"] != "Done" {
 		t.Fatalf("platform options = %#v", opts)
 	}
 	// Credentials must survive untouched.
