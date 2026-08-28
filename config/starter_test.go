@@ -87,7 +87,7 @@ func TestStarterConfigTOML_LoadsAndValidates(t *testing.T) {
 	}
 }
 
-func TestStarterConfigTOML_DefaultsToNativeCodexSteer(t *testing.T) {
+func TestStarterConfigTOML_DefaultsToYoloNativeCodexSteer(t *testing.T) {
 	tables := rawTables(t, StarterConfigTOML())
 
 	if got := tables["[queue]"]["busy_message_mode"]; got != `"steer"` {
@@ -101,6 +101,9 @@ func TestStarterConfigTOML_DefaultsToNativeCodexSteer(t *testing.T) {
 	}
 	if got := tables["[projects.agent.options]"]["app_server_url"]; !strings.HasPrefix(got, `"stdio"`) {
 		t.Fatalf("starter Codex app_server_url = %s, want stdio", got)
+	}
+	if got := tables["[projects.agent.options]"]["mode"]; !strings.HasPrefix(got, `"yolo"`) {
+		t.Fatalf("starter Codex mode = %s, want yolo", got)
 	}
 
 	path := filepath.Join(t.TempDir(), "config.toml")

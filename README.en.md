@@ -151,7 +151,7 @@ card_mode = "rich"          # "legacy" opts back into inherited CC Connect rende
 thinking_messages = false
 tool_messages = false
 show_context_indicator = false
-reply_footer = false
+reply_footer = true
 hide_agent_footer = true
 
 [[projects]]
@@ -162,6 +162,7 @@ type = "codex"
 
 [projects.agent.options]
 work_dir = "/absolute/path/to/project"
+mode = "yolo"
 
 [[projects.platforms]]
 type = "feishu"

@@ -50,8 +50,8 @@ Rich-card progress carries event kinds and anonymous counts only. The renderer n
 - token, context, or working-directory metadata;
 - expandable/collapsible detail panels.
 
-One opt-in exception: with `reply_footer = true` (default false), a finished
-card carries a dim `model · effort · ⏱ elapsed` footer line — model name,
+By default, a finished card carries a dim `model · effort · ⏱ elapsed` footer
+line; set `reply_footer = false` to hide it. The footer contains the model name,
 reasoning effort, and this turn's processing time only, never tokens, context,
 or paths. The timer starts when the turn begins processing (after any queue
 wait) and stops when its final response is ready for delivery.

@@ -26,7 +26,7 @@ func TestRecommendedFeishuProfileCoversTheDeployedShape(t *testing.T) {
 		"display.thinking_messages":      "false",
 		"display.tool_messages":          "false",
 		"display.show_context_indicator": "false",
-		"display.reply_footer":           "false",
+		"display.reply_footer":           "true",
 		"display.hide_agent_footer":      "true",
 		"references.normalize_agents":    `["codex"]`,
 		"references.render_platforms":    `["feishu"]`,
@@ -193,8 +193,8 @@ app_secret = "solo-secret"
 		t.Fatalf("thinking_messages = %#v, want explicit false", proj.Display.ThinkingMessages)
 	}
 	_, thinking, tools, _, _, ctxIndicator, footer, _ := EffectiveDisplay(&cfg, proj)
-	if thinking || tools || ctxIndicator || footer {
-		t.Fatalf("profile did not pin the final-answer-only surface: %v/%v/%v/%v", thinking, tools, ctxIndicator, footer)
+	if thinking || tools || ctxIndicator || !footer {
+		t.Fatalf("profile did not pin final-answer-only content with the status footer: %v/%v/%v/%v", thinking, tools, ctxIndicator, footer)
 	}
 	if strings.Join(proj.References.NormalizeAgents, ",") != "codex" {
 		t.Fatalf("normalize_agents = %#v, want the project agent", proj.References.NormalizeAgents)

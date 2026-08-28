@@ -119,7 +119,7 @@ card_mode = "rich"
 thinking_messages = false
 tool_messages = false
 show_context_indicator = false
-reply_footer = false
+reply_footer = true
 hide_agent_footer = true
 
 [[projects]]
@@ -130,7 +130,7 @@ type = "claudecode"
 
 [projects.agent.options]
 work_dir = "/path/to/your/project"
-mode = "default"
+mode = "yolo"
 
 [projects.references]
 normalize_agents = ["codex", "claudecode"]
@@ -157,7 +157,7 @@ done_emoji = "Done"
 # image_batch_window_ms = 500  # 可选：连续多图合批窗口（默认 500ms，详见下文）
 ```
 
-> `card_mode = "rich"` 是 cc-connect-next 的默认飞书回答形态：收到消息后立即引用回复一张非空 Card 2.0 卡片，只展示匿名的推理/工具次数；答案开始后在同一卡片中流式更新正文，结束时显示当前语言对应的完成文案（中文为 `已完成`）。推理文本、工具名称/参数/结果、模型、token、上下文、工作目录和 footer 不会进入这张回答卡片，也不存在可展开详情。`hide_agent_footer = true` 还会过滤 Agent 自己附加的模型/token/context 状态尾巴。需要上游旧展示时显式设置 `card_mode = "legacy"`。精确行为和验收命令见[回答卡片契约](feishu-card-contract.md)。
+> `card_mode = "rich"` 是 cc-connect-next 的默认飞书回答形态：收到消息后立即引用回复一张非空 Card 2.0 卡片，只展示匿名的推理/工具次数；答案开始后在同一卡片中流式更新正文，结束时显示当前语言对应的完成文案（中文为 `已完成`）。推理文本、工具名称/参数/结果、token、上下文和工作目录不会进入这张回答卡片，也不存在可展开详情；默认 footer 只展示 model、effort 与本轮处理时间，可用 `reply_footer = false` 关闭。`hide_agent_footer = true` 还会过滤 Agent 自己附加的 model/token/context 状态尾巴。需要上游旧展示时显式设置 `card_mode = "legacy"`。精确行为和验收命令见[回答卡片契约](feishu-card-contract.md)。
 > 如果应用没有交互卡片权限，或后台未配置卡片回调，可将 `enable_feishu_card = false`，让所有命令统一走纯文本回复，避免卡片发送失败后用户看不到内容。
 > 如果开启 `thread_isolation = true`，群聊里每个根消息 / reply thread 会对应一个独立 agent session 和独立工作区绑定；已有群级工作区会作为新话题默认值复制过去，但不会被删除，也不会覆盖已有话题绑定。机器人第一次在既有话题中被 @ 时会补入此前根消息上下文一次；补上下文期间到达的同话题消息会按接收顺序短暂排队，临时拉取失败则由下一条消息重试。后续回合不重复注入。私聊行为保持原样。
 > `progress_style = "compact"` 会把思考/工具进度合并到一条可更新消息里，减少刷屏；`legacy` 保持原有逐条发送；`card` 会使用结构化卡片（标题 + 进度块）持续更新同一条消息，观感比纯文本更清晰。

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Defaults
+
+- Fresh starter configs now use Codex `mode = "yolo"`, so new installations
+  run without approval prompts or sandbox restrictions. Existing explicit
+  modes are unchanged, and hand-written configs that omit `mode` keep the
+  adapter's compatibility fallback.
+- `reply_footer` now defaults to `true`, showing the compact model, reasoning
+  effort, and elapsed-time line on completed replies. Global or per-project
+  `reply_footer = false` still disables it and takes precedence over the new
+  built-in default.
+
 ### Correctness and upstream compatibility
 
 - Feishu/Lark WebSocket projects now fail closed for mention-gated group
