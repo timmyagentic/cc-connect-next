@@ -46,7 +46,8 @@ func (s RecommendedFeishuSetting) TableHeader() string {
 // It is the shape this project is actually operated with day to day rather than
 // a theoretical ideal: a quoted answer card that carries the final answer plus
 // a compact status footer, file references rendered so they can be clicked,
-// and a bot that participates in its group without being @mentioned every time.
+// topic-scoped sessions/workspaces, and a bot that participates in its group
+// without being @mentioned every time.
 //
 // Most of these already match the built-in defaults. The profile still spells
 // them out: a recommendation the user accepted should keep producing the same
@@ -90,8 +91,8 @@ func RecommendedFeishuProfile(agentType string) []RecommendedFeishuSetting {
 			"use the interactive card client instead of plain messages"},
 		{feishuProfileTablePlatform, "reply_to_trigger", "true",
 			"reply in a quote of the message that triggered the turn"},
-		{feishuProfileTablePlatform, "thread_isolation", "false",
-			"keep one session per chat instead of one per thread"},
+		{feishuProfileTablePlatform, "thread_isolation", "true",
+			"give every Feishu topic its own agent session and workspace binding"},
 		{feishuProfileTablePlatform, "done_emoji", `"Done"`,
 			"react when a turn finishes so the chat pushes a notification"},
 		{feishuProfileTablePlatform, "group_reply_all", "true",

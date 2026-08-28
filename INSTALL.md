@@ -245,7 +245,7 @@ enclosure_style = "code"
 [projects.platforms.options]
 enable_feishu_card = true        # interactive card client instead of plain messages
 reply_to_trigger = true          # reply in a quote of the triggering message
-thread_isolation = false         # one session per chat, not per thread
+thread_isolation = true          # one independent agent session/workspace per Feishu topic
 done_emoji = "Done"              # react when a turn finishes, so the chat pushes a notification
 group_reply_all = true           # answer every group message without an @mention
 ```

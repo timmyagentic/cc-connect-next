@@ -12,6 +12,10 @@
   effort, and elapsed-time line on completed replies. Global or per-project
   `reply_footer = false` still disables it and takes precedence over the new
   built-in default.
+- New Starter configs and accepted recommended Feishu/Lark profiles now write
+  `thread_isolation = true`, so each group topic gets an independent Agent
+  session and workspace binding. Existing configs that omit the key keep the
+  compatibility fallback `false`; explicit `false` remains supported.
 
 ### Correctness and upstream compatibility
 
