@@ -12,6 +12,14 @@
 # A single cc-connect-next process can manage multiple projects simultaneously.
 # 每个 [[projects]] 将一个代码目录绑定到独立的 agent 和平台。
 # 单个 cc-connect-next 进程可以同时管理多个项目。
+#
+# You do not need to read this file to discover what can be configured. Ask
+# the connected Agent in natural language, or query this build's read-only
+# catalog with: cc-connect-next config capabilities --search "keywords"
+# Detailed generated reference: docs/configuration.md
+# 你无需阅读本文件来了解可配置能力。可以直接用自然语言询问连接的 Agent，
+# 或运行当前版本的只读目录：cc-connect-next config capabilities --search "关键词"
+# 逐项生成式参考：docs/configuration.zh-CN.md
 
 # =============================================================================
 # Global Settings / 全局设置
@@ -197,13 +205,14 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 # attention. The previous session is preserved and remains accessible via
 # /list and /switch.
 #
-# Default: 30 minutes when unset. Set to 0 to opt out and always continue the
-# previous session (the pre-default behavior).
+# Default: 0 (disabled) when unset. Set a positive number of minutes to rotate
+# after that idle period; set 0 to keep always continuing the previous session.
 # 用户长时间未发消息后，自动切换到一个新的活跃会话。
 # 这与 idle_timeout_mins 不同：它不是检测 agent 卡住，而是用户回来后自动开始新会话。
-# 默认值为 30 分钟（未设置时）。设为 0 可以禁用此行为，恢复始终继续上次会话。
+# 未设置时默认值为 0（禁用）。设置正整数分钟后才会在该空闲期后轮换；设为 0
+# 会始终继续上次会话。
 # [[projects]]
-# reset_on_idle_mins = 30   # default when unset / 未设置时的默认值；设为 0 表示禁用
+# reset_on_idle_mins = 30   # opt in with a positive value / 设置正整数以启用；0 表示禁用
 
 # =============================================================================
 # OS-user isolation via run_as_user (Linux/macOS only)

@@ -1,5 +1,15 @@
 package codex
 
+import "github.com/timmyagentic/cc-connect-next/core"
+
+func init() {
+	agent := &Agent{}
+	options := core.ConfigurePermissionModeOption(core.DescribeAgentOptions(agent.KnownOptionKeys()), agent.PermissionModes())
+	options = core.ConfigureOption(options, "reasoning_effort", "unset / adapter default", "low", "medium", "high", "xhigh", "max")
+	options = append(options, core.DescribeAgentOptions([]string{"provider"})...)
+	core.RegisterAgentConfigOptions("codex", options)
+}
+
 // KnownOptionKeys implements core.AgentOptionSchema: the exhaustive set of
 // [projects.agent.options] keys this agent consumes (directly or via the
 // shared core.ParseCmdOpts / core.ParseConfigEnv helpers). Keys configured

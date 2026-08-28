@@ -71,11 +71,15 @@ func runDoctorHealthCheck(args []string) int {
 		fmt.Fprintln(os.Stderr, "Run cc-connect-next once to create a starter config, or pass --config <path>.")
 		return 1
 	}
+	annotateUnknownPluginConfigKeys(cfg)
 	if config.ConfigPath == "" {
 		config.ConfigPath = configPath
 	}
 
 	fmt.Printf("config: %s\n", configPath)
+	for _, key := range cfg.UnknownConfigKeys {
+		fmt.Printf("warning: configuration key is not declared by this build and will have no effect: %s\n", key)
+	}
 
 	i18n := core.NewI18n(configLanguage(cfg.Language))
 	ctx := context.Background()

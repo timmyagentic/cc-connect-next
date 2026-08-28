@@ -1,5 +1,11 @@
 package tmux
 
+import "github.com/timmyagentic/cc-connect-next/core"
+
+func init() {
+	core.RegisterAgentConfigOptions("tmux", core.DescribeAgentOptions((&Agent{}).KnownOptionKeys()))
+}
+
 // KnownOptionKeys implements core.AgentOptionSchema: the exhaustive set of
 // [projects.agent.options] keys this agent consumes (directly or via the
 // shared core.ParseCmdOpts / core.ParseConfigEnv helpers). Keys configured

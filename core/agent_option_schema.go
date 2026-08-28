@@ -6,20 +6,18 @@ import (
 	"strings"
 )
 
-// AgentOptionSchema is an optional Agent capability: implementations declare
-// the exhaustive set of [projects.agent.options] keys they consume. The
-// declared surface powers the capability brief injected into the LLM's
-// session context, so the model answers configuration questions from the
-// real option set instead of inventing keys.
+// AgentOptionSchema is the adapter-local compatibility surface: implementations
+// declare the [projects.agent.options] keys consumed by their constructor or
+// shared parsing helpers. Compiled adapters derive their richer ConfigOption
+// catalog from this list and may add host-level capabilities such as provider
+// selection separately.
 type AgentOptionSchema interface {
 	KnownOptionKeys() []string
 }
 
-// BuildCapabilityBrief renders the configuration-capability primer injected
-// once per session. It tells the model exactly which options exist for the
-// active agent and what to do when a user asks for something outside them:
-// say so plainly and point at /feedback — prevention at the source, instead
-// of detecting misconfiguration after the fact.
+// BuildCapabilityBrief renders the legacy key-only primer.
+// Deprecated: runtime sessions use BuildConfigurationCapabilityBrief, which
+// includes typed/global/project/platform metadata and the local lookup contract.
 func BuildCapabilityBrief(agentType string, keys []string) string {
 	if len(keys) == 0 {
 		return ""

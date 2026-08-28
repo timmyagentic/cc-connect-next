@@ -1161,6 +1161,21 @@ func (e *Engine) SetFilterExternalSessions(v bool) {
 func (e *Engine) SetWebSetupFunc(fn func() (int, string, bool, error)) { e.webSetupFunc = fn }
 func (e *Engine) SetWebStatusFunc(fn func() string)                    { e.webStatusFunc = fn }
 
+func (e *Engine) platformNames() []string {
+	seen := make(map[string]bool, len(e.platforms))
+	names := make([]string, 0, len(e.platforms))
+	for _, platform := range e.platforms {
+		name := platform.Name()
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func (e *Engine) SetSkipGit(skipGit bool) {
 	e.skipGit = skipGit
 }
@@ -4297,6 +4312,8 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 		envVars := []string{
 			"CC_PROJECT=" + e.name,
 			"CC_SESSION_KEY=" + ccKey,
+			"CC_AGENT_TYPE=" + agent.Name(),
+			"CC_PLATFORM_TYPES=" + p.Name(),
 		}
 		if e.dataDir != "" {
 			envVars = append(envVars, "CC_DATA_DIR="+e.dataDir)
@@ -17430,6 +17447,8 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 		envVars := []string{
 			"CC_PROJECT=" + e.name,
 			"CC_SESSION_KEY=" + sourceSessionKey,
+			"CC_AGENT_TYPE=" + agent.Name(),
+			"CC_PLATFORM_TYPES=" + strings.Join(e.platformNames(), ","),
 		}
 		if exePath, err := os.Executable(); err == nil {
 			binDir := filepath.Dir(exePath)

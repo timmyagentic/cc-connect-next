@@ -71,6 +71,12 @@ cc-connect-next
 
 Startup refuses to run while any `REPLACE` placeholder remains, naming the key and the step that resolves it — instead of reporting healthy and then failing to connect. `doctor` checks config, agent CLI login state, platforms, dependencies, and network without opening a platform connection.
 
+When you are unsure whether something is configurable, ask the connected Agent
+in natural language. It queries the read-only catalog built into the installed
+version instead of guessing keys; you can also run
+`cc-connect-next config capabilities --search "keywords"`. See the generated
+[configuration capability reference](docs/configuration.md) for every declared option.
+
 Install as a service once things work:
 
 ```bash

@@ -1,5 +1,14 @@
 package cursor
 
+import "github.com/timmyagentic/cc-connect-next/core"
+
+func init() {
+	agent := &Agent{}
+	options := core.ConfigurePermissionModeOption(core.DescribeAgentOptions(agent.KnownOptionKeys()), agent.PermissionModes())
+	options = append(options, core.DescribeAgentOptions([]string{"provider"})...)
+	core.RegisterAgentConfigOptions("cursor", options)
+}
+
 // KnownOptionKeys implements core.AgentOptionSchema: the exhaustive set of
 // [projects.agent.options] keys this agent consumes (directly or via the
 // shared core.ParseCmdOpts / core.ParseConfigEnv helpers). Keys configured
