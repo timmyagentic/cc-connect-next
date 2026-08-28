@@ -68,6 +68,12 @@
 
 相关配置： `projects.platforms.type`, `projects.platforms.options.allow_from`, `projects.platforms.options.proxy`, `projects.platforms.options.group_reply_all`, `projects.platforms.options.share_session_in_channel`
 
+### 群聊回复与会话边界 (`platform-session-routing`)
+
+控制群聊免 @ 回复，并选择用户、频道或平台话题是共享还是隔离 Agent 会话。
+
+相关配置： `projects.platforms.options.group_reply_all`, `projects.platforms.options.share_session_in_channel`, `projects.platforms.options.thread_isolation`
+
 ### Provider、模型与回答档位 (`providers-models`)
 
 共享 Provider 凭据、为各 Agent 路由端点/模型、切换 Provider，并配置一次性 Fast/Quality 回答。
@@ -2247,13 +2253,22 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 默认值：`unset / adapter default`
 - 生效方式：`restart`
 
-### `projects.platforms.options.thread_isolation` — `discord, feishu, lark`
+### `projects.platforms.options.thread_isolation` — `discord`
 
 为每个话题或线程使用独立 Agent 会话。
 
-- 作用域：`platform` (`discord, feishu, lark`)
+- 作用域：`platform` (`discord`)
 - 类型：`boolean`
 - 默认值：`false`
+- 生效方式：`restart`
+
+### `projects.platforms.options.thread_isolation` — `feishu, lark`
+
+为每个飞书/Lark 话题使用独立 Agent 会话和工作区绑定。省略该键时保留 false 兼容回落；新 Starter 配置和用户接受的推荐 Profile 会显式写入 true。
+
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`boolean`
+- 默认值：`false when omitted; new Starter/recommended profile writes true`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.token` — `discord, max, qq, telegram, webex, weixin`

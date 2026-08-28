@@ -124,6 +124,41 @@ func TestCodexModeCatalogDistinguishesStarterFromOmissionFallback(t *testing.T) 
 	}
 }
 
+func TestFeishuThreadIsolationCatalogDistinguishesProfileFromOmissionFallback(t *testing.T) {
+	for _, owner := range []string{"feishu", "lark"} {
+		option := findCatalogOption(t, core.PlatformConfigOptions(owner), "thread_isolation")
+		for _, want := range []string{"false", "omitted", "Starter", "recommended", "true"} {
+			if !strings.Contains(option.Default, want) {
+				t.Errorf("%s thread_isolation default %q missing %q", owner, option.Default, want)
+			}
+		}
+		if !strings.Contains(option.Description, "Omitting") || !strings.Contains(option.Description, "workspace binding") {
+			t.Errorf("%s description does not explain compatibility and topic scope: %q", owner, option.Description)
+		}
+		if !strings.Contains(option.DescriptionZH, "省略") || !strings.Contains(option.DescriptionZH, "工作区绑定") {
+			t.Errorf("%s Chinese description does not explain compatibility and topic scope: %q", owner, option.DescriptionZH)
+		}
+	}
+
+	discord := findCatalogOption(t, core.PlatformConfigOptions("discord"), "thread_isolation")
+	if discord.Default != "false" || strings.Contains(discord.Description, "Starter") {
+		t.Fatalf("Feishu-specific default leaked into Discord metadata: %#v", discord)
+	}
+	if !strings.Contains(config.StarterConfigTOML(), "thread_isolation = true") {
+		t.Fatal("generated Starter config no longer writes thread_isolation = true")
+	}
+
+	var out bytes.Buffer
+	if err := writeConfigCapabilities(&out, []string{"--platform", "feishu", "--search", "同一个群多个话题", "--lang", "zh"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"projects.platforms.options.thread_isolation", "新 Starter", "省略该键"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("natural-language topic query missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestWriteConfigCapabilities_AnswersChineseIntentWithoutReadingConfig(t *testing.T) {
 	var out bytes.Buffer
 	if err := writeConfigCapabilities(&out, []string{"--search", "隐藏思考", "--lang", "zh"}); err != nil {

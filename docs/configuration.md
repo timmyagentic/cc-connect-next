@@ -68,6 +68,12 @@ Connect and tune Feishu, Telegram, Discord, Slack, DingTalk, WeCom, Weixin, QQ, 
 
 Related configuration: `projects.platforms.type`, `projects.platforms.options.allow_from`, `projects.platforms.options.proxy`, `projects.platforms.options.group_reply_all`, `projects.platforms.options.share_session_in_channel`
 
+### Group replies and session boundaries (`platform-session-routing`)
+
+Control mention-free group replies and choose whether users, channels, or platform topics share or isolate Agent sessions.
+
+Related configuration: `projects.platforms.options.group_reply_all`, `projects.platforms.options.share_session_in_channel`, `projects.platforms.options.thread_isolation`
+
 ### Providers, models, and answer profiles (`providers-models`)
 
 Share provider credentials, route each Agent to endpoints/models, switch providers, and configure one-shot fast/quality answers.
@@ -2247,13 +2253,22 @@ Override the directory used for persistent platform state.
 - Default: `unset / adapter default`
 - Takes effect: `restart`
 
-### `projects.platforms.options.thread_isolation` — `discord, feishu, lark`
+### `projects.platforms.options.thread_isolation` — `discord`
 
 Use a separate Agent session for each platform thread or topic.
 
-- Scope: `platform` (`discord, feishu, lark`)
+- Scope: `platform` (`discord`)
 - Type: `boolean`
 - Default: `false`
+- Takes effect: `restart`
+
+### `projects.platforms.options.thread_isolation` — `feishu, lark`
+
+Use a separate Agent session and workspace binding for each Feishu/Lark topic. Omitting the key keeps the false compatibility fallback; new Starter configs and accepted recommended profiles explicitly set true.
+
+- Scope: `platform` (`feishu, lark`)
+- Type: `boolean`
+- Default: `false when omitted; new Starter/recommended profile writes true`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.token` — `discord, max, qq, telegram, webex, weixin`
