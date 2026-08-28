@@ -315,7 +315,7 @@ Show the model, reasoning effort, and elapsed-time footer on completed replies.
 
 - Scope: `global`
 - Type: `boolean`
-- Default: `false`
+- Default: `true`
 - Takes effect: `reload`
 
 ### `display.show_context_indicator`
@@ -844,11 +844,11 @@ Choose the Agent approval, sandbox, or planning mode.
 
 ### `projects.agent.options.mode` — `codex`
 
-Choose the Agent approval, sandbox, or planning mode.
+Choose the Codex approval and sandbox mode. Omitting the key keeps the suggest compatibility fallback; fresh generated configs explicitly set yolo.
 
 - Scope: `agent` (`codex`)
 - Type: `string`
-- Default: `suggest`
+- Default: `suggest when omitted; generated starter config writes yolo`
 - Takes effect: `restart`
 - Allowed values: `suggest`, `auto-edit`, `full-auto`, `yolo`
 

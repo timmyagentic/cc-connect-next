@@ -315,7 +315,7 @@
 
 - 作用域：`global`
 - 类型：`boolean`
-- 默认值：`false`
+- 默认值：`true`
 - 生效方式：`reload`
 
 ### `display.show_context_indicator`
@@ -844,11 +844,11 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.agent.options.mode` — `codex`
 
-选择 Agent 的审批、沙箱或规划模式。
+选择 Codex 审批与沙箱模式。省略该键时保留 suggest 兼容回落；全新生成的配置会显式写入 yolo。
 
 - 作用域：`agent` (`codex`)
 - 类型：`string`
-- 默认值：`suggest`
+- 默认值：`suggest when omitted; generated starter config writes yolo`
 - 生效方式：`restart`
 - 允许值: `suggest`, `auto-edit`, `full-auto`, `yolo`
 

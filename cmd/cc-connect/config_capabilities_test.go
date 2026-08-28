@@ -109,6 +109,21 @@ func TestConfigurationCatalogHighRiskDefaultsMatchRuntime(t *testing.T) {
 	}
 }
 
+func TestCodexModeCatalogDistinguishesStarterFromOmissionFallback(t *testing.T) {
+	mode := findCatalogOption(t, core.AgentConfigOptions("codex"), "mode")
+	for _, want := range []string{"suggest", "starter", "yolo"} {
+		if !strings.Contains(mode.Default, want) {
+			t.Errorf("Codex mode default %q missing %q", mode.Default, want)
+		}
+	}
+	if !strings.Contains(mode.Description, "Omitting") || !strings.Contains(mode.Description, "fresh generated configs") {
+		t.Errorf("Codex mode description does not explain both semantics: %q", mode.Description)
+	}
+	if !strings.Contains(config.StarterConfigTOML(), `mode = "yolo"`) {
+		t.Fatal("generated Starter config no longer writes mode = yolo")
+	}
+}
+
 func TestWriteConfigCapabilities_AnswersChineseIntentWithoutReadingConfig(t *testing.T) {
 	var out bytes.Buffer
 	if err := writeConfigCapabilities(&out, []string{"--search", "隐藏思考", "--lang", "zh"}); err != nil {
