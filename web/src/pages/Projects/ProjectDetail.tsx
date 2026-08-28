@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, Plug, Heart, Settings, Layers, Zap, Pause, Play,
-  Trash2, Plus, Check, Clock, ExternalLink, Link2,
+  Trash2, Plus, Clock, ExternalLink, Link2,
 } from 'lucide-react';
 import { Card, Badge, Button, Input, Modal, EmptyState } from '@/components/ui';
 import { getProject, updateProject, deleteProject, listAgentTypes, type ProjectDetail as ProjectDetailType } from '@/api/projects';
@@ -39,7 +39,6 @@ export default function ProjectDetail() {
   const [tab, setTab] = useState<Tab>('overview');
   const [project, setProject] = useState<ProjectDetailType | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [activeProvider, setActiveProvider] = useState('');
   const [heartbeat, setHeartbeatState] = useState<HeartbeatStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -61,7 +60,6 @@ export default function ProjectDetail() {
   // Global providers & refs
   const [globalProviders, setGlobalProviders] = useState<GlobalProvider[]>([]);
   const [providerRefs, setProviderRefs] = useState<string[]>([]);
-  const [savingRefs, setSavingRefs] = useState(false);
 
   // Add provider modal
   const [showAddProvider, setShowAddProvider] = useState(false);
@@ -145,7 +143,6 @@ export default function ProjectDetail() {
       }
       if (provs.status === 'fulfilled') {
         setProviders(provs.value.providers || []);
-        setActiveProvider(provs.value.active_provider || '');
       }
       if (hb.status === 'fulfilled') {
         const hbVal = hb.value;
@@ -350,11 +347,8 @@ export default function ProjectDetail() {
                           className="text-gray-400 hover:text-red-500"
                           onClick={async () => {
                             const next = providerRefs.filter(r => r !== p.name);
-                            setSavingRefs(true);
-                            try {
-                              await saveProviderRefs(name!, next);
-                              await fetchAll();
-                            } finally { setSavingRefs(false); }
+                            await saveProviderRefs(name!, next);
+                            await fetchAll();
                           }}
                         >
                           <Trash2 size={14} />
@@ -402,11 +396,8 @@ export default function ProjectDetail() {
                         className="flex items-center justify-between w-full px-3 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-accent/40 hover:bg-accent/5 transition-all text-left"
                         onClick={async () => {
                           const next = [...providerRefs, gp.name];
-                          setSavingRefs(true);
-                          try {
-                            await saveProviderRefs(name!, next);
-                            await fetchAll();
-                          } finally { setSavingRefs(false); }
+                          await saveProviderRefs(name!, next);
+                          await fetchAll();
                           setShowAddProvider(false);
                         }}
                       >

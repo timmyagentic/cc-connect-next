@@ -16,9 +16,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
+	"github.com/timmyagentic/cc-connect-next/agent/internal/processgroup"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
@@ -369,7 +369,7 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 	// single signal. Without this, killing only the direct child can leave
 	// MCP grandchildren (e.g. the Telegram bridge bun process) spinning at
 	// 100% CPU after their parent's stdio pipe closes.
-	prepareCmdForKill(cmd)
+	processgroup.Prepare(cmd)
 	// Filter out CLAUDECODE env var to prevent "nested session" detection,
 	// since cc-connect-next is a bridge, not a nested Claude Code session.
 	env := filterEnv(os.Environ(), "CLAUDECODE")
@@ -1178,7 +1178,7 @@ func (cs *claudeSession) Close() error {
 	// Phase 2: SIGTERM the whole process group — gives the process and its
 	// descendants (e.g. MCP server bridges) a second chance to run cleanup
 	// handlers that respond to signals but not stdin EOF.
-	if err := signalProcessGroup(cs.cmd, syscall.SIGTERM); err != nil {
+	if err := processgroup.Terminate(cs.cmd); err != nil {
 		slog.Warn("claudeSession: signal SIGTERM", "error", err)
 	}
 
@@ -1195,7 +1195,7 @@ func (cs *claudeSession) Close() error {
 	// such as the Telegram bridge) are reaped along with the direct child;
 	// otherwise they can survive as orphans and spin at 100% CPU.
 	cs.cancel()
-	if err := forceKillCmd(cs.cmd); err != nil {
+	if err := processgroup.Kill(cs.cmd); err != nil {
 		slog.Warn("claudeSession: force kill", "error", err)
 	}
 	<-cs.done

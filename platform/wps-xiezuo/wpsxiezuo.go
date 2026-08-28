@@ -946,43 +946,20 @@ func (p *Platform) getToken(ctx context.Context) (string, error) {
 // --- Reaction API (typing indicator) ---
 
 func (p *Platform) addReaction(ctx context.Context, rctx replyContext, reactionType string) error {
-	token, err := p.getToken(ctx)
-	if err != nil {
-		return err
-	}
-
-	body, _ := json.Marshal(reactionRequest{ReactionType: reactionType})
-	url := fmt.Sprintf("%s/v7/chats/%s/messages/%s/reactions/create", p.baseURL, rctx.ChatID, rctx.MessageID)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("add reaction failed: status=%d body=%s", resp.StatusCode, string(respBody))
-	}
-	return nil
+	return p.updateReaction(ctx, rctx, reactionType, "create", "add")
 }
 
 func (p *Platform) deleteReaction(ctx context.Context, rctx replyContext, reactionType string) error {
+	return p.updateReaction(ctx, rctx, reactionType, "delete", "delete")
+}
+
+func (p *Platform) updateReaction(ctx context.Context, rctx replyContext, reactionType, action, operation string) error {
 	token, err := p.getToken(ctx)
 	if err != nil {
 		return err
 	}
-
 	body, _ := json.Marshal(reactionRequest{ReactionType: reactionType})
-	url := fmt.Sprintf("%s/v7/chats/%s/messages/%s/reactions/delete", p.baseURL, rctx.ChatID, rctx.MessageID)
-
+	url := fmt.Sprintf("%s/v7/chats/%s/messages/%s/reactions/%s", p.baseURL, rctx.ChatID, rctx.MessageID, action)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -995,10 +972,9 @@ func (p *Platform) deleteReaction(ctx context.Context, rctx replyContext, reacti
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("delete reaction failed: status=%d body=%s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("%s reaction failed: status=%d body=%s", operation, resp.StatusCode, string(respBody))
 	}
 	return nil
 }

@@ -485,53 +485,32 @@ func (p *Platform) Stop() error {
 // --- Optional interfaces ---
 
 func (p *Platform) SendImage(ctx context.Context, rctx any, img core.ImageAttachment) error {
-	rc, ok := rctx.(replyContext)
-	if !ok {
-		return fmt.Errorf("matrix: invalid reply context type %T", rctx)
-	}
-	client := p.getClient()
-	if client == nil {
-		return fmt.Errorf("matrix: not connected")
-	}
-
-	mime := img.MimeType
-	if mime == "" {
-		mime = "image/png"
-	}
-	name := img.FileName
-	if name == "" {
-		name = "image"
-	}
-
-	uri, err := client.UploadMedia(ctx, mautrix.ReqUploadMedia{
-		ContentBytes: img.Data,
-		ContentType:  mime,
-		FileName:     name,
+	return p.sendAttachment(ctx, rctx, matrixAttachment{
+		name: img.FileName, defaultName: "image",
+		mimeType: img.MimeType, defaultMimeType: "image/png",
+		data: img.Data, messageType: event.MsgImage, kind: "image",
 	})
-	if err != nil {
-		return fmt.Errorf("matrix: upload image: %w", err)
-	}
-
-	content := &event.MessageEventContent{
-		MsgType: event.MsgImage,
-		Body:    name,
-		Info: &event.FileInfo{
-			MimeType: mime,
-			Size:     len(img.Data),
-		},
-	}
-	if !uri.ContentURI.IsEmpty() {
-		content.URL = uri.ContentURI.CUString()
-	} else {
-		content.File = &event.EncryptedFileInfo{
-			URL: uri.ContentURI.CUString(),
-		}
-	}
-
-	return p.sendRoomEvent(ctx, rc.roomID, event.EventMessage, content)
 }
 
 func (p *Platform) SendFile(ctx context.Context, rctx any, file core.FileAttachment) error {
+	return p.sendAttachment(ctx, rctx, matrixAttachment{
+		name: file.FileName, defaultName: "attachment",
+		mimeType: file.MimeType, defaultMimeType: "application/octet-stream",
+		data: file.Data, messageType: event.MsgFile, kind: "file",
+	})
+}
+
+type matrixAttachment struct {
+	name            string
+	defaultName     string
+	mimeType        string
+	defaultMimeType string
+	data            []byte
+	messageType     event.MessageType
+	kind            string
+}
+
+func (p *Platform) sendAttachment(ctx context.Context, rctx any, attachment matrixAttachment) error {
 	rc, ok := rctx.(replyContext)
 	if !ok {
 		return fmt.Errorf("matrix: invalid reply context type %T", rctx)
@@ -541,43 +520,38 @@ func (p *Platform) SendFile(ctx context.Context, rctx any, file core.FileAttachm
 		return fmt.Errorf("matrix: not connected")
 	}
 
-	mime := file.MimeType
-	if mime == "" {
-		mime = "application/octet-stream"
+	mimeType := attachment.mimeType
+	if mimeType == "" {
+		mimeType = attachment.defaultMimeType
 	}
-	name := file.FileName
+	name := attachment.name
 	if name == "" {
-		name = "attachment"
+		name = attachment.defaultName
 	}
-
 	uri, err := client.UploadMedia(ctx, mautrix.ReqUploadMedia{
-		ContentBytes: file.Data,
-		ContentType:  mime,
+		ContentBytes: attachment.data,
+		ContentType:  mimeType,
 		FileName:     name,
 	})
 	if err != nil {
-		return fmt.Errorf("matrix: upload file: %w", err)
+		return fmt.Errorf("matrix: upload %s: %w", attachment.kind, err)
 	}
 
 	content := &event.MessageEventContent{
-		MsgType: event.MsgFile,
+		MsgType: attachment.messageType,
 		Body:    name,
 		Info: &event.FileInfo{
-			MimeType: mime,
-			Size:     len(file.Data),
+			MimeType: mimeType,
+			Size:     len(attachment.data),
 		},
 	}
 	if !uri.ContentURI.IsEmpty() {
 		content.URL = uri.ContentURI.CUString()
 	} else {
-		content.File = &event.EncryptedFileInfo{
-			URL: uri.ContentURI.CUString(),
-		}
+		content.File = &event.EncryptedFileInfo{URL: uri.ContentURI.CUString()}
 	}
-
 	return p.sendRoomEvent(ctx, rc.roomID, event.EventMessage, content)
 }
-
 func (p *Platform) StartTyping(ctx context.Context, rctx any) (stop func()) {
 	rc, ok := rctx.(replyContext)
 	if !ok {

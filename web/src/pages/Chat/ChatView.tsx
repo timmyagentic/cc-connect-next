@@ -3,10 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
 import {
   ArrowLeft, Send, User, Bot, Circle, WifiOff,
-  Copy, Check, FileText, Image as ImageIcon, Loader2,
+  Copy, Check, FileText, Loader2,
   Slash, ChevronDown,
 } from 'lucide-react';
-import { Badge, Button } from '@/components/ui';
 import {
   listSessions, getSession, switchSession as activateSession,
   type Session, type SessionDetail,

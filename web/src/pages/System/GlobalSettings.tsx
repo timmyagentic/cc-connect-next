@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Save, Loader2 } from 'lucide-react';
-import { Card, Button, Input } from '@/components/ui';
-import { getGlobalSettings, updateGlobalSettings, type GlobalSettings as GS } from '@/api/settings';
+import { Card, Button } from '@/components/ui';
+import { getGlobalSettings, updateGlobalSettings } from '@/api/settings';
 import { cn } from '@/lib/utils';
 
 const LOG_LEVELS = ['debug', 'info', 'warn', 'error'];

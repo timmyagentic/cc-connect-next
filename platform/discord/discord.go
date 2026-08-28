@@ -1039,17 +1039,39 @@ func (p *Platform) sendChannel(rc replyContext, content string) error {
 
 // SendImage sends an image to the channel or interaction.
 // Implements core.ImageSender.
-func (p *Platform) SendImage(ctx context.Context, rctx any, img core.ImageAttachment) error {
-	name := img.FileName
-	if name == "" {
-		name = "image.png"
-	}
+func (p *Platform) SendImage(_ context.Context, rctx any, img core.ImageAttachment) error {
+	return p.sendAttachment(rctx, discordAttachment{
+		name: img.FileName, defaultName: "image.png", mimeType: img.MimeType,
+		data: img.Data, kind: "image", method: "SendImage",
+	})
+}
 
+func (p *Platform) SendFile(_ context.Context, rctx any, file core.FileAttachment) error {
+	return p.sendAttachment(rctx, discordAttachment{
+		name: file.FileName, defaultName: "attachment", mimeType: file.MimeType,
+		data: file.Data, kind: "file", method: "SendFile",
+	})
+}
+
+type discordAttachment struct {
+	name        string
+	defaultName string
+	mimeType    string
+	data        []byte
+	kind        string
+	method      string
+}
+
+func (p *Platform) sendAttachment(rctx any, attachment discordAttachment) error {
+	name := attachment.name
+	if name == "" {
+		name = attachment.defaultName
+	}
 	newFile := func() *discordgo.File {
 		return &discordgo.File{
 			Name:        name,
-			ContentType: img.MimeType,
-			Reader:      bytes.NewReader(img.Data),
+			ContentType: attachment.mimeType,
+			Reader:      bytes.NewReader(attachment.data),
 		}
 	}
 
@@ -1073,12 +1095,12 @@ func (p *Platform) SendImage(ctx context.Context, rctx any, img core.ImageAttach
 			})
 		}
 		if err != nil {
-			slog.Warn("discord: interaction image failed, falling back to channel message", "error", err)
+			slog.Warn("discord: interaction "+attachment.kind+" failed, falling back to channel message", "error", err)
 			_, err = p.session.ChannelMessageSendComplex(rc.channelID, &discordgo.MessageSend{
 				Files: []*discordgo.File{newFile()},
 			})
 			if err != nil {
-				return fmt.Errorf("discord: send image fallback: %w", err)
+				return fmt.Errorf("discord: send %s fallback: %w", attachment.kind, err)
 			}
 		}
 		return nil
@@ -1087,70 +1109,13 @@ func (p *Platform) SendImage(ctx context.Context, rctx any, img core.ImageAttach
 			Files: []*discordgo.File{newFile()},
 		})
 		if err != nil {
-			return fmt.Errorf("discord: send image: %w", err)
+			return fmt.Errorf("discord: send %s: %w", attachment.kind, err)
 		}
 		return nil
 	default:
-		return fmt.Errorf("discord: SendImage: invalid reply context type %T", rctx)
+		return fmt.Errorf("discord: %s: invalid reply context type %T", attachment.method, rctx)
 	}
 }
-
-func (p *Platform) SendFile(ctx context.Context, rctx any, file core.FileAttachment) error {
-	name := file.FileName
-	if name == "" {
-		name = "attachment"
-	}
-
-	newFile := func() *discordgo.File {
-		return &discordgo.File{
-			Name:        name,
-			ContentType: file.MimeType,
-			Reader:      bytes.NewReader(file.Data),
-		}
-	}
-
-	switch rc := rctx.(type) {
-	case *interactionReplyCtx:
-		rc.mu.Lock()
-		first := !rc.firstDone
-		if first {
-			rc.firstDone = true
-		}
-		rc.mu.Unlock()
-
-		var err error
-		if first {
-			_, err = p.session.InteractionResponseEdit(rc.interaction, &discordgo.WebhookEdit{
-				Files: []*discordgo.File{newFile()},
-			})
-		} else {
-			_, err = p.session.FollowupMessageCreate(rc.interaction, true, &discordgo.WebhookParams{
-				Files: []*discordgo.File{newFile()},
-			})
-		}
-		if err != nil {
-			slog.Warn("discord: interaction file failed, falling back to channel message", "error", err)
-			_, err = p.session.ChannelMessageSendComplex(rc.channelID, &discordgo.MessageSend{
-				Files: []*discordgo.File{newFile()},
-			})
-			if err != nil {
-				return fmt.Errorf("discord: send file fallback: %w", err)
-			}
-		}
-		return nil
-	case replyContext:
-		_, err := p.session.ChannelMessageSendComplex(rc.targetChannelID(), &discordgo.MessageSend{
-			Files: []*discordgo.File{newFile()},
-		})
-		if err != nil {
-			return fmt.Errorf("discord: send file: %w", err)
-		}
-		return nil
-	default:
-		return fmt.Errorf("discord: SendFile: invalid reply context type %T", rctx)
-	}
-}
-
 func buildDiscordActionRows(rows [][]core.ButtonOption) []discordgo.MessageComponent {
 	components := make([]discordgo.MessageComponent, 0, len(rows))
 	for _, row := range rows {

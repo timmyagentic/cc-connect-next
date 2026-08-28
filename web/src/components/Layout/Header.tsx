@@ -1,8 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { useState, useRef, useEffect } from 'react';
-import {
-  RefreshCw, Sun, Moon, Monitor, LogOut, Languages, ChevronDown,
-} from 'lucide-react';
+import { RefreshCw, Sun, Moon, Monitor, LogOut, Languages } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useThemeStore } from '@/store/theme';
 import { useAuthStore } from '@/store/auth';
