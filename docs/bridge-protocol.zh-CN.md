@@ -146,7 +146,7 @@ token = "your-secret"     # 认证密钥，必填
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `type` | string | 是 | `"message"` |
-| `msg_id` | string | 是 | 平台消息 ID，用于追踪。 |
+| `msg_id` | string | 是 | 平台消息 ID，用于追踪和短窗口幂等。 |
 | `session_key` | string | 是 | 唯一会话标识。格式：`{platform}:{scope}:{user}`。由适配器定义组合方式。 |
 | `user_id` | string | 是 | 用户在平台上的唯一标识。 |
 | `user_name` | string | 否 | 显示名称。 |
@@ -155,6 +155,11 @@ token = "your-secret"     # 认证密钥，必填
 | `images` | Image[] | 否 | 附带的图片（见[图片对象](#图片对象)）。 |
 | `files` | File[] | 否 | 附带的文件（见[文件对象](#文件对象)）。 |
 | `audio` | Audio | 否 | 语音消息（见[音频对象](#音频对象)）。 |
+
+在同一个 cc-connect-next 进程内，非空 `msg_id` 会按 adapter、项目和会话在
+60 秒窗口内去重；替换 adapter WebSocket 连接不会清空该窗口。只有重试同一条
+逻辑消息时才应复用 ID，新的用户操作必须生成新 ID。为兼容旧 adapter，空 ID
+仍会被接受，但永不参与去重。
 
 #### `card_action`
 
@@ -477,12 +482,17 @@ token = "your-secret"     # 认证密钥，必填
 | `preview` | 流式预览（需要 `update_message`） | `preview_start`、`reply_stream` |
 | `delete_message` | 删除消息 | `delete_message` |
 | `reconstruct_reply` | 可从 session_key 重建回复上下文 | 启用定时任务/心跳消息 |
+| `persistent_scheduled_delivery` | adapter 以 daemon 方式长期运行并能为持久任务保持/恢复连接 | 允许其会话成为持久 Cron/Timer 目标；必须同时声明 `reconstruct_reply` |
 
 如果未声明某个能力，cc-connect-next 会自动降级：
 - 没有 `card` → 卡片通过 `RenderText()` 渲染为纯文本。
 - 没有 `buttons` → 按钮被省略或渲染为文本提示。
 - 没有 `preview` → 禁用流式预览；只发送最终回复。
 - 没有 `typing` → 跳过输入指示器。
+
+浏览器标签页生命周期内的 adapter 不得声明 `persistent_scheduled_delivery`。
+未声明时，交互回复仍然可用，但其会话不能被持久化为 Cron/Timer 目标，避免任务
+在浏览器打开时被接受、关闭标签页后才失败。
 
 ### 图片对象
 

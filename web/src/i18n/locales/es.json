@@ -123,6 +123,8 @@
     "descPlaceholder": "Descripción de la tarea",
     "promptPlaceholder": "Indicación para enviar al agente...",
     "selectSessionKey": "Seleccionar sesión (vacío = predeterminada)",
+    "sessionNotSchedulable": "no disponible para entrega programada persistente",
+    "sessionNotSchedulableHint": "Las sesiones Web conectadas al navegador no admiten entrega programada persistente. Elige una sesión de mensajería con entrega duradera.",
     "taskType": "Tipo de tarea",
     "mode": "Modo de permisos",
     "modeDefault": "Usar predeterminado del proyecto"

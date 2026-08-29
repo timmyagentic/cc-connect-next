@@ -8,6 +8,7 @@ import { Button, Badge, Modal, Input, Textarea, EmptyState } from '@/components/
 import { listCronJobs, createCronJob, updateCronJob, deleteCronJob, triggerCronJob, type CronJob } from '@/api/cron';
 import { listProjects, type ProjectSummary } from '@/api/projects';
 import { listSessions } from '@/api/sessions';
+import { buildScheduledSessionTargets, type ScheduledSessionTarget } from './sessionTargets.js';
 import { formatTime, cn } from '@/lib/utils';
 
 const MODE_OPTIONS = ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'dontAsk'] as const;
@@ -104,7 +105,7 @@ function Select({ label, value, onChange, options, placeholder }: {
   label?: string;
   value: string;
   onChange: (v: string) => void;
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; disabled?: boolean }[];
   placeholder?: string;
 }) {
   return (
@@ -123,7 +124,7 @@ function Select({ label, value, onChange, options, placeholder }: {
           )}
         >
           {placeholder && <option value="">{placeholder}</option>}
-          {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {options.map(o => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
         </select>
         <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
       </div>
@@ -187,7 +188,7 @@ export default function CronList() {
   const [form, setForm] = useState<JobForm>({ ...emptyForm });
   const [saving, setSaving] = useState(false);
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
-  const [sessionKeys, setSessionKeys] = useState<string[]>([]);
+  const [sessionTargets, setSessionTargets] = useState<ScheduledSessionTarget[]>([]);
 
   const isEdit = !!editJob;
 
@@ -197,16 +198,12 @@ export default function CronList() {
   );
 
   useEffect(() => {
-    if (!form.project) { setSessionKeys([]); return; }
+    if (!form.project) { setSessionTargets([]); return; }
     let cancelled = false;
     listSessions(form.project).then(data => {
       if (cancelled) return;
-      const keys = new Set<string>();
-      for (const s of data.sessions || []) {
-        if (s.session_key) keys.add(s.session_key);
-      }
-      setSessionKeys([...keys]);
-    }).catch(() => { if (!cancelled) setSessionKeys([]); });
+      setSessionTargets(buildScheduledSessionTargets(data.sessions || []));
+    }).catch(() => { if (!cancelled) setSessionTargets([]); });
     return () => { cancelled = true; };
   }, [form.project]);
 
@@ -518,9 +515,18 @@ export default function CronList() {
             label={t('cron.sessionKey')}
             value={form.session_key}
             onChange={v => setForm({ ...form, session_key: v })}
-            options={sessionKeys.map(k => ({ value: k, label: k }))}
+            options={sessionTargets.map(target => ({
+              value: target.key,
+              label: target.supported ? target.key : `${target.key} — ${t('cron.sessionNotSchedulable')}`,
+              disabled: !target.supported,
+            }))}
             placeholder={t('cron.selectSessionKey')}
           />
+          {sessionTargets.some(target => !target.supported) && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              {t('cron.sessionNotSchedulableHint')}
+            </p>
+          )}
 
           <Select
             label={t('cron.mode')}

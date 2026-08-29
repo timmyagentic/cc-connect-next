@@ -238,10 +238,10 @@ func (s *TimerStore) ListPending() []*TimerJob {
 
 // TimerScheduler runs one-shot timer jobs using time.AfterFunc.
 type TimerScheduler struct {
-	store    *TimerStore
-	engines  map[string]*Engine
-	mu       sync.RWMutex
-	timers   map[string]*time.Timer // job ID → active timer
+	store              *TimerStore
+	engines            map[string]*Engine
+	mu                 sync.RWMutex
+	timers             map[string]*time.Timer // job ID → active timer
 	defaultSilent      bool
 	defaultSessionMode string
 }
@@ -336,6 +336,9 @@ func (ts *TimerScheduler) AddJob(job *TimerJob) error {
 		return err
 	}
 	job.SessionMode = NormalizeCronSessionMode(job.SessionMode)
+	if err := ts.validatePersistentTarget(job.Project, job.SessionKey); err != nil {
+		return err
+	}
 	if err := ts.store.Add(job); err != nil {
 		return err
 	}
@@ -405,6 +408,11 @@ func (ts *TimerScheduler) executeJob(jobID string) {
 		ts.store.MarkFired(jobID, fmt.Errorf("project %q not found", job.Project))
 		return
 	}
+	if err := engine.ValidatePersistentProactiveTarget(job.SessionKey); err != nil {
+		ts.store.MarkFired(jobID, err)
+		slog.Error("timer: unsupported persistent target", "id", jobID, "error", err)
+		return
+	}
 
 	slog.Info("timer: executing job", "id", jobID, "project", job.Project, "prompt", truncateStr(job.Prompt, 60))
 
@@ -432,6 +440,16 @@ func (ts *TimerScheduler) executeJob(jobID string) {
 	} else {
 		slog.Info("timer: job completed", "id", jobID)
 	}
+}
+
+func (ts *TimerScheduler) validatePersistentTarget(project, sessionKey string) error {
+	ts.mu.RLock()
+	engine := ts.engines[project]
+	ts.mu.RUnlock()
+	if engine == nil {
+		return nil
+	}
+	return engine.ValidatePersistentProactiveTarget(sessionKey)
 }
 
 func GenerateTimerID() string {

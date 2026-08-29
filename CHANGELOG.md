@@ -38,6 +38,15 @@
 
 ### Correctness and upstream compatibility
 
+- Bridge message delivery now treats a non-empty `msg_id` as a short-window
+  idempotency key scoped by adapter, project, and session. Duplicate frames are
+  dropped before Engine/FIFO admission, including across adapter WebSocket
+  replacement, while empty IDs retain their compatibility behavior.
+- Persisted Cron/Timer targets now honor an optional platform durability gate.
+  Browser-connected Web/Bridge sessions are rejected before create, update,
+  enable, or manual trigger, and the Web editor disables them with an explicit
+  explanation instead of accepting jobs that fail after `triggered`.
+
 - Feishu/Lark WebSocket projects now fail closed for mention-gated group
   traffic when startup cannot resolve the bot `open_id`. The degraded identity
   reaches the existing runtime health/readiness surface, transient discovery

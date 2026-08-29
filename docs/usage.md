@@ -981,6 +981,14 @@ cc-connect-next cron del <job-id>
 
 Optional: `--session-mode new-per-run` starts a fresh agent session on each run (default is `reuse`, same as before). `--timeout-mins N` sets how long the scheduler waits per run (`0` = no limit; omit = 30 minutes).
 
+Persisted cron jobs and one-shot timers require a durable messaging target.
+Browser-connected Web/Bridge chat sessions are intentionally rejected because
+their adapter disappears when the tab or browser closes. In the Web cron
+editor, choose a durable platform session such as Feishu, Telegram, or Discord.
+Existing unsupported jobs are kept for inspection, but enabling or manually
+triggering them returns a synchronous error instead of reporting a misleading
+`triggered` state.
+
 ### Natural Language (Claude Code)
 
 > "Every day at 6am, summarize GitHub trending"

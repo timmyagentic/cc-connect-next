@@ -1645,6 +1645,66 @@ func (e *Engine) ActiveSessionKeys() []string {
 	return keys
 }
 
+// ValidatePersistentProactiveTarget lets platforms reject session keys that
+// work only while an ephemeral transport is connected. Missing or legacy
+// platform prefixes preserve the prior behavior; the execution path will keep
+// producing its existing, more specific platform-resolution error.
+func (e *Engine) ValidatePersistentProactiveTarget(sessionKey string) error {
+	platform, _, resolvedSessionKey, err := e.resolveScheduledPlatform(sessionKey)
+	if err != nil {
+		return nil
+	}
+	if validator, ok := platform.(PersistentProactiveTargetValidator); ok {
+		return validator.ValidatePersistentProactiveTarget(resolvedSessionKey)
+	}
+	return nil
+}
+
+// PersistentProactiveTargetSupport returns the API-facing support flag and a
+// human-readable reason without mutating platform or scheduler state.
+func (e *Engine) PersistentProactiveTargetSupport(sessionKey string) (bool, string) {
+	if err := e.ValidatePersistentProactiveTarget(sessionKey); err != nil {
+		return false, err.Error()
+	}
+	return true, ""
+}
+
+func (e *Engine) resolveScheduledPlatform(sessionKey string) (Platform, string, string, error) {
+	resolvedSessionKey := sessionKey
+	platformName := extractPlatformName(sessionKey)
+	var targetPlatform Platform
+	for _, platform := range e.platforms {
+		if platform.Name() == platformName {
+			targetPlatform = platform
+			break
+		}
+	}
+	if targetPlatform == nil {
+		for _, platform := range e.platforms {
+			needle := ":" + platform.Name() + ":"
+			if idx := strings.Index(sessionKey, needle); idx >= 0 {
+				targetPlatform = platform
+				platformName = platform.Name()
+				resolvedSessionKey = sessionKey[idx+1:]
+				break
+			}
+		}
+	}
+	if targetPlatform == nil {
+		for _, platform := range e.platforms {
+			matcher, ok := platform.(SessionKeyTargetMatcher)
+			if ok && matcher.MatchesSessionKey(sessionKey) {
+				targetPlatform = platform
+				break
+			}
+		}
+	}
+	if targetPlatform == nil {
+		return nil, platformName, resolvedSessionKey, fmt.Errorf("platform %q not found for session %q", platformName, sessionKey)
+	}
+	return targetPlatform, platformName, resolvedSessionKey, nil
+}
+
 type scheduledJobSpec struct {
 	kind            string
 	hookEvent       HookEventType
@@ -1739,32 +1799,9 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 		Extra:      map[string]any{"job_id": spec.id, "job_description": spec.description},
 	})
 
-	sessionKey := spec.sessionKey
-	platformName := ""
-	if idx := strings.Index(sessionKey, ":"); idx > 0 {
-		platformName = sessionKey[:idx]
-	}
-
-	var targetPlatform Platform
-	for _, p := range e.platforms {
-		if p.Name() == platformName {
-			targetPlatform = p
-			break
-		}
-	}
-	if targetPlatform == nil {
-		for _, p := range e.platforms {
-			needle := ":" + p.Name() + ":"
-			if idx := strings.Index(sessionKey, needle); idx >= 0 {
-				targetPlatform = p
-				platformName = p.Name()
-				sessionKey = sessionKey[idx+1:]
-				break
-			}
-		}
-	}
-	if targetPlatform == nil {
-		return fmt.Errorf("platform %q not found for session %q", platformName, sessionKey)
+	targetPlatform, platformName, sessionKey, err := e.resolveScheduledPlatform(spec.sessionKey)
+	if err != nil {
+		return err
 	}
 
 	rc, ok := targetPlatform.(ReplyContextReconstructor)
@@ -1774,7 +1811,7 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 
 	runSessionKey := sessionKey
 	var replyCtx any
-	var err error
+	var replyErr error
 	if !spec.mute {
 		if resolver, ok := targetPlatform.(CronReplyTargetResolver); ok {
 			resolvedSessionKey, resolvedReplyCtx, resolveErr := resolver.ResolveCronReplyTarget(sessionKey, spec.runTitle)
@@ -1793,9 +1830,9 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 		}
 	}
 	if replyCtx == nil {
-		replyCtx, err = rc.ReconstructReplyCtx(runSessionKey)
-		if err != nil {
-			return fmt.Errorf("reconstruct reply context: %w", err)
+		replyCtx, replyErr = rc.ReconstructReplyCtx(runSessionKey)
+		if replyErr != nil {
+			return fmt.Errorf("reconstruct reply context: %w", replyErr)
 		}
 	}
 
@@ -15581,6 +15618,14 @@ func (e *Engine) cmdCron(p Platform, msg *Message, args []string) {
 	}
 }
 
+func (e *Engine) replyScheduledJobError(p Platform, msg *Message, err error) {
+	if errors.Is(err, ErrPersistentProactiveDeliveryUnsupported) {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgCronTargetUnsupported))
+		return
+	}
+	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+}
+
 func (e *Engine) cmdCronAdd(p Platform, msg *Message, args []string) {
 	// /cron add <min> <hour> <day> <month> <weekday> <prompt...>
 	if len(args) < 6 {
@@ -15602,7 +15647,7 @@ func (e *Engine) cmdCronAdd(p Platform, msg *Message, args []string) {
 	}
 
 	if err := e.cronScheduler.AddJob(job); err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		e.replyScheduledJobError(p, msg, err)
 		return
 	}
 
@@ -15635,7 +15680,7 @@ func (e *Engine) cmdCronAddExec(p Platform, msg *Message, args []string) {
 	}
 
 	if err := e.cronScheduler.AddJob(job); err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		e.replyScheduledJobError(p, msg, err)
 		return
 	}
 
@@ -15724,6 +15769,8 @@ func (e *Engine) cmdCronExec(p Platform, msg *Message, args []string) {
 			e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgCronNotFound), id))
 		case errors.Is(err, ErrCronProjectNotFound):
 			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgCronProjectUnavailable))
+		case errors.Is(err, ErrPersistentProactiveDeliveryUnsupported):
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgCronTargetUnsupported))
 		default:
 			e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		}
@@ -15758,7 +15805,7 @@ func (e *Engine) cmdCronToggle(p Platform, msg *Message, args []string, enable b
 		err = e.cronScheduler.DisableJob(id)
 	}
 	if err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		e.replyScheduledJobError(p, msg, err)
 		return
 	}
 	if enable {
@@ -15866,7 +15913,7 @@ func (e *Engine) cmdTimerAdd(p Platform, msg *Message, args []string) {
 	}
 
 	if err := e.timerScheduler.AddJob(job); err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		e.replyScheduledJobError(p, msg, err)
 		return
 	}
 
@@ -15904,7 +15951,7 @@ func (e *Engine) cmdTimerAddExec(p Platform, msg *Message, args []string) {
 	}
 
 	if err := e.timerScheduler.AddJob(job); err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		e.replyScheduledJobError(p, msg, err)
 		return
 	}
 

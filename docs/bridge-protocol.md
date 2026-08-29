@@ -146,7 +146,7 @@ Delivers an incoming user message to the engine.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `type` | string | yes | `"message"` |
-| `msg_id` | string | yes | Platform-specific message ID for tracing. |
+| `msg_id` | string | yes | Platform-specific message ID used for tracing and short-window idempotency. |
 | `session_key` | string | yes | Unique session identifier. Format: `{platform}:{scope}:{user}`. The adapter defines how to compose this. |
 | `user_id` | string | yes | User identifier on the platform. |
 | `user_name` | string | no | Display name. |
@@ -155,6 +155,12 @@ Delivers an incoming user message to the engine.
 | `images` | Image[] | no | Attached images (see [Image Object](#image-object)). |
 | `files` | File[] | no | Attached files (see [File Object](#file-object)). |
 | `audio` | Audio | no | Voice message (see [Audio Object](#audio-object)). |
+
+Within one cc-connect-next process, identical non-empty `msg_id` values are
+deduplicated for 60 seconds per adapter, project, and session. The dedup state
+survives replacement of the adapter WebSocket connection. Reuse an ID only
+when retrying the same logical message; use a new ID for a new user action.
+Empty IDs remain accepted for compatibility but are never deduplicated.
 
 #### `card_action`
 
@@ -477,12 +483,18 @@ Notify the adapter of a server-side error.
 | `preview` | Streaming preview (requires `update_message`) | `preview_start`, `reply_stream` |
 | `delete_message` | Delete messages | `delete_message` |
 | `reconstruct_reply` | Can reconstruct reply context from session_key | Enables cron/heartbeat messages |
+| `persistent_scheduled_delivery` | Adapter is daemon-like and can remain/reconnect for persisted delivery | Allows its sessions to be persisted as Cron/Timer targets; requires `reconstruct_reply` |
 
 If a capability is not declared, cc-connect-next will automatically degrade:
 - No `card` → cards are rendered as plain text via `RenderText()`.
 - No `buttons` → buttons are omitted or rendered as text hints.
 - No `preview` → streaming is disabled; only the final reply is sent.
 - No `typing` → typing indicators are skipped.
+
+Browser/tab-scoped adapters must not declare `persistent_scheduled_delivery`.
+Without it, interactive replies continue to work, but the adapter's sessions
+are rejected as persisted Cron/Timer targets. This prevents a job from being
+accepted while the browser is open and then failing after the tab closes.
 
 ### Image Object
 

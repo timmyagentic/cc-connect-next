@@ -123,6 +123,8 @@
     "descPlaceholder": "ジョブの説明",
     "promptPlaceholder": "エージェントに送信するプロンプト...",
     "selectSessionKey": "セッションを選択（空=デフォルト）",
+    "sessionNotSchedulable": "永続的なスケジュール配信は利用不可",
+    "sessionNotSchedulableHint": "ブラウザー接続型の Web セッションは永続的なスケジュール配信を受信できません。永続的に配信できるメッセージセッションを選択してください。",
     "taskType": "タスク種別",
     "mode": "権限モード",
     "modeDefault": "プロジェクトのデフォルトを使用"

@@ -486,6 +486,9 @@ func (cs *CronScheduler) AddJob(job *CronJob) error {
 	if _, err := cron.ParseStandard(job.CronExpr); err != nil {
 		return fmt.Errorf("invalid cron expression %q: %w", job.CronExpr, err)
 	}
+	if err := cs.validatePersistentTarget(job.Project, job.SessionKey); err != nil {
+		return err
+	}
 	if err := cs.store.Add(job); err != nil {
 		return err
 	}
@@ -506,10 +509,17 @@ func (cs *CronScheduler) RemoveJob(id string) bool {
 }
 
 func (cs *CronScheduler) EnableJob(id string) error {
+	job := cs.store.Get(id)
+	if job == nil {
+		return fmt.Errorf("job %q not found", id)
+	}
+	if err := cs.validatePersistentTarget(job.Project, job.SessionKey); err != nil {
+		return err
+	}
 	if !cs.store.SetEnabled(id, true) {
 		return fmt.Errorf("job %q not found", id)
 	}
-	job := cs.store.Get(id)
+	job = cs.store.Get(id)
 	if job != nil {
 		return cs.scheduleJob(job)
 	}
@@ -577,6 +587,16 @@ func (cs *CronScheduler) UpdateJob(id string, field string, value any) error {
 	if field == "enabled" {
 		if _, ok := value.(bool); !ok {
 			return fmt.Errorf("enabled must be a boolean")
+		}
+	}
+
+	candidate := *job
+	if err := updateJobField(&candidate, field, value); err != nil {
+		return fmt.Errorf("invalid %s: %w", field, err)
+	}
+	if candidate.Enabled || field == "project" || field == "session_key" {
+		if err := cs.validatePersistentTarget(candidate.Project, candidate.SessionKey); err != nil {
+			return err
 		}
 	}
 
@@ -667,10 +687,13 @@ func (cs *CronScheduler) RunJobNow(id string) error {
 		return fmt.Errorf("%w: %q", ErrCronJobNotFound, id)
 	}
 	cs.mu.RLock()
-	_, ok := cs.engines[job.Project]
+	engine, ok := cs.engines[job.Project]
 	cs.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("%w: %q", ErrCronProjectNotFound, job.Project)
+	}
+	if err := engine.ValidatePersistentProactiveTarget(job.SessionKey); err != nil {
+		return err
 	}
 	snapshot := *job
 	go cs.runJob(&snapshot, true)
@@ -692,6 +715,11 @@ func (cs *CronScheduler) runJob(job *CronJob, manual bool) {
 	if !ok {
 		slog.Error("cron: project not found", "job", job.ID, "project", job.Project, "manual", manual)
 		cs.store.MarkRun(job.ID, fmt.Errorf("project %q not found", job.Project))
+		return
+	}
+	if err := engine.ValidatePersistentProactiveTarget(job.SessionKey); err != nil {
+		cs.store.MarkRun(job.ID, err)
+		slog.Error("cron: unsupported persistent target", "id", job.ID, "manual", manual, "error", err)
 		return
 	}
 
@@ -723,6 +751,16 @@ func (cs *CronScheduler) runJob(job *CronJob, manual bool) {
 	}
 }
 
+func (cs *CronScheduler) validatePersistentTarget(project, sessionKey string) error {
+	cs.mu.RLock()
+	engine := cs.engines[project]
+	cs.mu.RUnlock()
+	if engine == nil {
+		return nil
+	}
+	return engine.ValidatePersistentProactiveTarget(sessionKey)
+}
+
 // mutePlatform wraps a Platform and discards all outgoing messages.
 // Used for muted cron jobs that should execute without sending chat messages.
 type mutePlatform struct {
@@ -731,7 +769,6 @@ type mutePlatform struct {
 
 func (m *mutePlatform) Reply(_ context.Context, _ any, _ string) error { return nil }
 func (m *mutePlatform) Send(_ context.Context, _ any, _ string) error  { return nil }
-
 
 func GenerateCronID() string {
 	b := make([]byte, 4)

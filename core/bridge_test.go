@@ -380,6 +380,104 @@ func TestBridge_MessageRouting(t *testing.T) {
 	}
 }
 
+func TestBridge_DuplicateMessageIDDoesNotEnterBusyFIFO(t *testing.T) {
+	bs, wsURL := startTestBridge(t, "")
+	bp := bs.NewPlatform("test-proj")
+	session := newAnswerProfileTestSession()
+	session.releaseFirst = make(chan struct{})
+	engine := NewEngine("test-proj", &answerProfileTestAgent{session: session}, []Platform{bp}, "", LangEnglish)
+	bs.RegisterEngine("test-proj", engine, bp)
+	t.Cleanup(func() { _ = engine.Stop() })
+
+	conn := dialWS(t, wsURL, nil)
+	register(t, conn, "web", []string{"text"})
+	payload := map[string]any{
+		"type":        "message",
+		"msg_id":      "same-message-id",
+		"session_key": "bridge:web-admin:test-proj",
+		"user_id":     "web-admin",
+		"content":     "run once",
+		"reply_ctx":   "ctx",
+		"project":     "test-proj",
+	}
+	mustWriteJSON(t, conn, payload)
+	mustWriteJSON(t, conn, payload)
+
+	waitAnswerProfileTest(t, "first Bridge turn starts", func() bool {
+		calls, _ := session.snapshot()
+		return len(calls) == 1
+	})
+	close(session.releaseFirst)
+	time.Sleep(100 * time.Millisecond)
+
+	calls, _ := session.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("duplicate msg_id produced %d Agent turns, want exactly 1", len(calls))
+	}
+}
+
+func TestBridge_MessageIDDedupeScopeSurvivesAdapterReplacement(t *testing.T) {
+	bs, wsURL := startTestBridge(t, "")
+	bp := bs.NewPlatform("test-proj")
+	engine := NewEngine("test-proj", &stubAgent{}, []Platform{bp}, "", LangEnglish)
+	bs.RegisterEngine("test-proj", engine, bp)
+
+	var receivedMu sync.Mutex
+	received := make([]string, 0, 4)
+	bp.handler = func(_ Platform, msg *Message) {
+		receivedMu.Lock()
+		received = append(received, msg.SessionKey)
+		receivedMu.Unlock()
+	}
+	messageCount := func() int {
+		receivedMu.Lock()
+		defer receivedMu.Unlock()
+		return len(received)
+	}
+	waitForCount := func(want int) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if messageCount() >= want {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("received %d Bridge messages, want %d", messageCount(), want)
+	}
+	writeMessage := func(conn *websocket.Conn, msgID, sessionKey string) {
+		t.Helper()
+		mustWriteJSON(t, conn, map[string]any{
+			"type": "message", "msg_id": msgID, "session_key": sessionKey,
+			"user_id": "web-admin", "content": "hello", "reply_ctx": "ctx",
+			"project": "test-proj",
+		})
+	}
+
+	conn1 := dialWS(t, wsURL, nil)
+	register(t, conn1, "web", []string{"text"})
+	writeMessage(conn1, "same-id", "bridge:web-admin:test-proj")
+	waitForCount(1)
+
+	// Replacing the adapter must not reset the process-level dedup window.
+	conn2 := dialWS(t, wsURL, nil)
+	register(t, conn2, "web", []string{"text"})
+	writeMessage(conn2, "same-id", "bridge:web-admin:test-proj")
+	time.Sleep(100 * time.Millisecond)
+	if got := messageCount(); got != 1 {
+		t.Fatalf("duplicate after adapter replacement increased count to %d, want 1", got)
+	}
+
+	// The same platform ID in another session is a distinct message.
+	writeMessage(conn2, "same-id", "bridge:web-admin:other-project-view")
+	waitForCount(2)
+
+	// Empty IDs retain the historical compatibility behavior and are never deduped.
+	writeMessage(conn2, "", "bridge:web-admin:test-proj")
+	writeMessage(conn2, "", "bridge:web-admin:test-proj")
+	waitForCount(4)
+}
+
 func TestBridge_MessageReplyCtxCarriesProgressHints(t *testing.T) {
 	bs, wsURL := startTestBridge(t, "")
 
