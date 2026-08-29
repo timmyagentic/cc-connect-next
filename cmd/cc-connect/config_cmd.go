@@ -1,6 +1,6 @@
 package main
 
-//go:generate go run . config docs --output-dir ../../docs
+//go:generate go run . config docs --output-dir ../../docs --web-output ../../web/src/generated/configContract.ts
 
 import (
 	"encoding/json"

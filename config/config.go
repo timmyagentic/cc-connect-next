@@ -1132,6 +1132,9 @@ func (c *Config) ResolveEnvironment() {
 }
 
 func (c *Config) validateInternal(permissive bool) error {
+	if err := validateProviderConfigs("providers", c.Providers); err != nil {
+		return err
+	}
 	if err := validateDisplayConfig("display", &c.Display); err != nil {
 		return err
 	}
@@ -1151,6 +1154,44 @@ func (c *Config) validateInternal(permissive bool) error {
 	if c.Relay.TimeoutSecs != nil && *c.Relay.TimeoutSecs < 0 {
 		return fmt.Errorf("config: relay.timeout_secs must be >= 0")
 	}
+	if c.MaxAttachmentSizeMB < 0 {
+		return fmt.Errorf("config: max_attachment_size_mb must be >= 0")
+	}
+	for _, check := range []struct {
+		path  string
+		value *int
+	}{
+		{path: "idle_timeout_mins", value: c.IdleTimeoutMins},
+		{path: "max_turn_time_mins", value: c.MaxTurnTimeMins},
+		{path: "workspace_idle_timeout_mins", value: c.WorkspaceIdleTimeoutMins},
+		{path: "queue.max_depth", value: c.Queue.MaxDepth},
+		{path: "rate_limit.max_messages", value: c.RateLimit.MaxMessages},
+		{path: "rate_limit.window_secs", value: c.RateLimit.WindowSecs},
+		{path: "stream_preview.interval_ms", value: c.StreamPreview.IntervalMs},
+		{path: "stream_preview.min_delta_chars", value: c.StreamPreview.MinDeltaChars},
+		{path: "stream_preview.max_chars", value: c.StreamPreview.MaxChars},
+	} {
+		if check.value != nil && *check.value < 0 {
+			return fmt.Errorf("config: %s must be >= 0", check.path)
+		}
+	}
+	if c.RateLimit.WindowSecs != nil && *c.RateLimit.WindowSecs == 0 {
+		return fmt.Errorf("config: rate_limit.window_secs must be > 0")
+	}
+	if c.OutgoingRateLimit.MaxPerSecond != nil && *c.OutgoingRateLimit.MaxPerSecond < 0 {
+		return fmt.Errorf("config: outgoing_rate_limit.max_per_second must be >= 0")
+	}
+	if c.OutgoingRateLimit.Burst != nil && *c.OutgoingRateLimit.Burst < 0 {
+		return fmt.Errorf("config: outgoing_rate_limit.burst must be >= 0")
+	}
+	for name, platform := range c.OutgoingRateLimit.Platforms {
+		if platform.MaxPerSecond != nil && *platform.MaxPerSecond < 0 {
+			return fmt.Errorf("config: outgoing_rate_limit.platforms.%s.max_per_second must be >= 0", name)
+		}
+		if platform.Burst != nil && *platform.Burst < 0 {
+			return fmt.Errorf("config: outgoing_rate_limit.platforms.%s.burst must be >= 0", name)
+		}
+	}
 	if c.Queue.BusyMessageMode != nil {
 		if _, ok := NormalizeBusyMessageMode(*c.Queue.BusyMessageMode); !ok {
 			return fmt.Errorf("config: queue.busy_message_mode must be \"queue\" or \"steer\"")
@@ -1160,6 +1201,88 @@ func (c *Config) validateInternal(permissive bool) error {
 	case "", "full", "summary", "none":
 	default:
 		return fmt.Errorf("config: relay.visibility must be \"full\", \"summary\", or \"none\"")
+	}
+	if c.Bridge.Enabled != nil && *c.Bridge.Enabled && strings.TrimSpace(c.Bridge.Token) == "" && (c.Bridge.Insecure == nil || !*c.Bridge.Insecure) {
+		return fmt.Errorf("config: bridge.token is required when bridge.enabled = true unless bridge.insecure = true")
+	}
+	if c.Management.Enabled != nil && *c.Management.Enabled && strings.TrimSpace(c.Management.Token) == "" {
+		return fmt.Errorf("config: management.token is required when management.enabled = true")
+	}
+	if c.Speech.Enabled {
+		switch strings.TrimSpace(c.Speech.Provider) {
+		case "", "openai":
+			if strings.TrimSpace(c.Speech.OpenAI.APIKey) == "" {
+				return fmt.Errorf("config: speech.openai.api_key is required when speech is enabled with the OpenAI provider")
+			}
+		case "groq":
+			if strings.TrimSpace(c.Speech.Groq.APIKey) == "" {
+				return fmt.Errorf("config: speech.groq.api_key is required when speech.provider = groq")
+			}
+		case "qwen":
+			if strings.TrimSpace(c.Speech.Qwen.APIKey) == "" {
+				return fmt.Errorf("config: speech.qwen.api_key is required when speech.provider = qwen")
+			}
+		case "gemini":
+			if strings.TrimSpace(c.Speech.Gemini.APIKey) == "" {
+				return fmt.Errorf("config: speech.gemini.api_key is required when speech.provider = gemini")
+			}
+		default:
+			return fmt.Errorf("config: speech.provider must be \"openai\", \"groq\", \"qwen\", or \"gemini\"")
+		}
+	}
+	if c.TTS.Enabled {
+		switch strings.TrimSpace(c.TTS.Provider) {
+		case "", "openai":
+			if strings.TrimSpace(c.TTS.OpenAI.APIKey) == "" {
+				return fmt.Errorf("config: tts.openai.api_key is required when TTS is enabled with the OpenAI provider")
+			}
+		case "qwen":
+			if strings.TrimSpace(c.TTS.Qwen.APIKey) == "" {
+				return fmt.Errorf("config: tts.qwen.api_key is required when tts.provider = qwen")
+			}
+		case "mimo":
+			if strings.TrimSpace(c.TTS.Mimo.APIKey) == "" {
+				return fmt.Errorf("config: tts.mimo.api_key is required when tts.provider = mimo")
+			}
+		case "minimax", "espeak", "pico", "edge":
+		default:
+			return fmt.Errorf("config: tts.provider must be \"openai\", \"qwen\", \"minimax\", \"mimo\", \"espeak\", \"pico\", or \"edge\"")
+		}
+	}
+	if mode := strings.TrimSpace(c.TTS.TTSMode); mode != "" && mode != "voice_only" && mode != "always" {
+		return fmt.Errorf("config: tts.tts_mode must be \"voice_only\" or \"always\"")
+	}
+	for i, alias := range c.Aliases {
+		if strings.TrimSpace(alias.Name) == "" || strings.TrimSpace(alias.Command) == "" {
+			return fmt.Errorf("config: aliases[%d].name and command are required", i)
+		}
+	}
+	for i, command := range c.Commands {
+		if strings.TrimSpace(command.Name) == "" {
+			return fmt.Errorf("config: commands[%d].name is required", i)
+		}
+		hasPrompt := strings.TrimSpace(command.Prompt) != ""
+		hasExec := strings.TrimSpace(command.Exec) != ""
+		if hasPrompt == hasExec {
+			return fmt.Errorf("config: commands[%d] must set exactly one of prompt or exec", i)
+		}
+	}
+	for i, hook := range c.Hooks {
+		if strings.TrimSpace(hook.Event) == "" {
+			return fmt.Errorf("config: hooks[%d].event is required", i)
+		}
+		switch strings.ToLower(strings.TrimSpace(hook.Type)) {
+		case "command":
+			if strings.TrimSpace(hook.Command) == "" || strings.TrimSpace(hook.URL) != "" {
+				return fmt.Errorf("config: hooks[%d] type=command requires command and forbids url", i)
+			}
+		case "http":
+			if strings.TrimSpace(hook.URL) == "" || strings.TrimSpace(hook.Command) != "" {
+				return fmt.Errorf("config: hooks[%d] type=http requires url and forbids command", i)
+			}
+		default:
+			return fmt.Errorf("config: hooks[%d].type must be \"command\" or \"http\"", i)
+		}
 	}
 	if len(c.Projects) == 0 {
 		return fmt.Errorf("config: at least one [[projects]] entry is required")
@@ -1172,7 +1295,19 @@ func (c *Config) validateInternal(permissive bool) error {
 		if proj.Agent.Type == "" {
 			return fmt.Errorf("config: %s.agent.type is required", prefix)
 		}
+		if proj.Heartbeat.Enabled != nil && *proj.Heartbeat.Enabled && strings.TrimSpace(proj.Heartbeat.SessionKey) == "" {
+			return fmt.Errorf("config: %s.heartbeat.session_key is required when heartbeat.enabled = true", prefix)
+		}
+		if proj.Heartbeat.IntervalMins != nil && *proj.Heartbeat.IntervalMins <= 0 {
+			return fmt.Errorf("config: %s.heartbeat.interval_mins must be > 0", prefix)
+		}
+		if proj.Heartbeat.TimeoutMins != nil && *proj.Heartbeat.TimeoutMins <= 0 {
+			return fmt.Errorf("config: %s.heartbeat.timeout_mins must be > 0", prefix)
+		}
 		if err := validateAnswerProfiles(prefix+".agent.answer_profiles", proj.Agent.AnswerProfiles); err != nil {
+			return err
+		}
+		if err := validateProviderConfigs(prefix+".agent.providers", proj.Agent.Providers); err != nil {
 			return err
 		}
 		if len(proj.Platforms) == 0 && !permissive {
@@ -1182,6 +1317,11 @@ func (c *Config) validateInternal(permissive bool) error {
 			if p.Type == "" {
 				return fmt.Errorf("config: %s.platforms[%d].type is required", prefix, j)
 			}
+		}
+		switch proj.Mode {
+		case "", "fixed", "multi-workspace":
+		default:
+			return fmt.Errorf("config: %s.mode must be \"fixed\" or \"multi-workspace\"", prefix)
 		}
 		if proj.Mode == "multi-workspace" {
 			if proj.BaseDir == "" {
@@ -1193,6 +1333,12 @@ func (c *Config) validateInternal(permissive bool) error {
 		}
 		if proj.ResetOnIdleMins != nil && *proj.ResetOnIdleMins < 0 {
 			return fmt.Errorf("config: %s.reset_on_idle_mins must be >= 0", prefix)
+		}
+		if proj.AutoCompress.MaxTokens != nil && *proj.AutoCompress.MaxTokens < 0 {
+			return fmt.Errorf("config: %s.auto_compress.max_tokens must be >= 0", prefix)
+		}
+		if proj.AutoCompress.MinGapMins != nil && *proj.AutoCompress.MinGapMins < 0 {
+			return fmt.Errorf("config: %s.auto_compress.min_gap_mins must be >= 0", prefix)
 		}
 		if _, ok := NormalizeBusyMessageMode(proj.BusyMessageMode); !ok {
 			return fmt.Errorf("config: %s.busy_message_mode must be \"queue\" or \"steer\"", prefix)
@@ -1211,6 +1357,33 @@ func (c *Config) validateInternal(permissive bool) error {
 		}
 		if err := validateDisplayConfig(prefix+".display", proj.Display); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateProviderConfigs(prefix string, providers []ProviderConfig) error {
+	seen := make(map[string]bool, len(providers))
+	for i, provider := range providers {
+		name := strings.TrimSpace(provider.Name)
+		if name == "" {
+			return fmt.Errorf("config: %s[%d].name is required", prefix, i)
+		}
+		if seen[name] {
+			return fmt.Errorf("config: %s contains duplicate provider name %q", prefix, name)
+		}
+		seen[name] = true
+		for j, model := range provider.Models {
+			if strings.TrimSpace(model.Model) == "" {
+				return fmt.Errorf("config: %s[%d].models[%d].model is required", prefix, i, j)
+			}
+		}
+		for agentType, models := range provider.AgentModelLists {
+			for j, model := range models {
+				if strings.TrimSpace(model.Model) == "" {
+					return fmt.Errorf("config: %s[%d].agent_model_lists.%s[%d].model is required", prefix, i, agentType, j)
+				}
+			}
 		}
 	}
 	return nil
@@ -1264,6 +1437,12 @@ func validateDisplayConfig(prefix string, display *DisplayConfig) error {
 	}
 	if display.HistoryMaxLen != nil && *display.HistoryMaxLen < 0 {
 		return fmt.Errorf("config: %s.history_max_len must be >= 0", prefix)
+	}
+	if display.ThinkingMaxLen != nil && *display.ThinkingMaxLen < 0 {
+		return fmt.Errorf("config: %s.thinking_max_len must be >= 0", prefix)
+	}
+	if display.ToolMaxLen != nil && *display.ToolMaxLen < 0 {
+		return fmt.Errorf("config: %s.tool_max_len must be >= 0", prefix)
 	}
 	return nil
 }
@@ -1354,6 +1533,14 @@ func validateUsersConfig(prefix string, u *UsersConfig) error {
 				return fmt.Errorf("config: %s.users: user %q appears in both role %q and %q", prefix, uid, prev, roleName)
 			}
 			seenUserIDs[lower] = roleName
+		}
+		if rc.RateLimit != nil {
+			if rc.RateLimit.MaxMessages != nil && *rc.RateLimit.MaxMessages < 0 {
+				return fmt.Errorf("config: %s.users.roles.%s.rate_limit.max_messages must be >= 0", prefix, roleName)
+			}
+			if rc.RateLimit.WindowSecs != nil && *rc.RateLimit.WindowSecs <= 0 {
+				return fmt.Errorf("config: %s.users.roles.%s.rate_limit.window_secs must be > 0", prefix, roleName)
+			}
 		}
 	}
 	if wildcardCount > 1 {
@@ -3836,10 +4023,19 @@ func GetGlobalSettings() map[string]any {
 	if err := toml.Unmarshal(data, cfg); err != nil {
 		return nil
 	}
+	language, _ := NormalizeLanguage(cfg.Language)
+	attachmentSend := cfg.AttachmentSend
+	if attachmentSend == "" {
+		attachmentSend = "on"
+	}
+	logLevel := cfg.Log.Level
+	if logLevel == "" {
+		logLevel = "info"
+	}
 	result := map[string]any{
-		"language":        cfg.Language,
-		"attachment_send": cfg.AttachmentSend,
-		"log_level":       cfg.Log.Level,
+		"language":        language,
+		"attachment_send": attachmentSend,
+		"log_level":       logLevel,
 	}
 	if cfg.IdleTimeoutMins != nil {
 		result["idle_timeout_mins"] = *cfg.IdleTimeoutMins
@@ -3851,22 +4047,16 @@ func GetGlobalSettings() map[string]any {
 	} else {
 		result["max_turn_time_mins"] = 0
 	}
-	// Display
-	if cfg.Display.ThinkingMessages != nil {
-		result["thinking_messages"] = *cfg.Display.ThinkingMessages
-	} else {
-		result["thinking_messages"] = true
-	}
+	// Display. Use the same effective defaults as the running engine so the
+	// Web settings surface cannot advertise a different omitted-key behavior.
+	_, thinkingMessages, toolMessages, _, _, _, _, _ := EffectiveDisplay(cfg, nil)
+	result["thinking_messages"] = thinkingMessages
 	if cfg.Display.ThinkingMaxLen != nil {
 		result["thinking_max_len"] = *cfg.Display.ThinkingMaxLen
 	} else {
 		result["thinking_max_len"] = 300
 	}
-	if cfg.Display.ToolMessages != nil {
-		result["tool_messages"] = *cfg.Display.ToolMessages
-	} else {
-		result["tool_messages"] = true
-	}
+	result["tool_messages"] = toolMessages
 	if cfg.Display.ToolMaxLen != nil {
 		result["tool_max_len"] = *cfg.Display.ToolMaxLen
 	} else {

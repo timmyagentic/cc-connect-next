@@ -1180,8 +1180,8 @@ WebSocket 支持双向通信 —— 向 Agent 发送消息，并实时接收 Age
 按用户意图组织的能力概览、每个配置项的作用、默认值、允许值、作用域和
 生效方式，见 [配置能力参考](configuration.zh-CN.md)。运行中的 Agent 也会按需调用
 `cc-connect-next config capabilities --search "关键词"` 查询当前安装版本的同一份目录，
-不需要用户阅读配置文件。可复制的完整配置示例仍见
-[config.example.toml](../config.example.toml)。
+不需要用户阅读配置文件。可复制的精选部署示例见
+[config.example.toml](../config.example.toml)；穷举配置项以生成契约为准。
 
 ### 项目结构
 

@@ -154,6 +154,7 @@ thread_isolation = "topics_only" # 新 Starter/推荐 Profile 默认；仅隔离
 # progress_style = "legacy"  # 可选：legacy | compact | card
 # resolve_mentions = true    # 可选：把 @显示名 解析为飞书原生 at
 # mention_map = { Reviewer-Bot = "ou_reviewer_bot_open_id" } # 可选：机器人名称 -> bot open_id
+# peer_bots = { cli_peer_app_id = "Reviewer-Bot" } # 可选：peer app_id -> 引用回复归因别名
 # image_batch_window_ms = 500  # 可选：连续多图合批窗口（默认 500ms，详见下文）
 ```
 
@@ -162,7 +163,7 @@ thread_isolation = "topics_only" # 新 Starter/推荐 Profile 默认；仅隔离
 > `thread_isolation` 使用三个描述隔离范围的模式：`off` 不隔离；`topics_only` 只隔离飞书事件明确携带 `thread_id` 的真实话题；`topic_per_message` 让每条群主会话消息都成为独立话题/session。新 Starter 和用户接受的推荐飞书 Profile 显式写入 `topics_only`。旧布尔配置保持兼容：省略或 `false` 映射 `off`，`true` 映射 `topic_per_message`，不会悄悄改变既有部署。真实话题的根消息用自身 message ID，话题回复用 root ID，因此同一话题始终映射到同一 session。`topics_only` 下，群主会话直接 @ 机器人和非话题引用回复仍按用户/频道会话原地回复，不会自动创建话题。`share_session_in_channel` 只控制这条主会话回落；`group_reply_all` 只控制是否需要 @；`reply_to_trigger` 只控制主会话的引用展示，真实话题回复始终留在话题内。已有群级工作区会作为新话题默认值复制过去，但不会被删除，也不会覆盖已有话题绑定。机器人第一次在既有话题中被 @ 时会补入此前根消息上下文一次；补上下文期间到达的同话题消息按接收顺序短暂排队，临时拉取失败则由下一条消息重试。后续回合不重复注入，私聊行为保持原样。
 > `progress_style = "compact"` 会把思考/工具进度合并到一条可更新消息里，减少刷屏；`legacy` 保持原有逐条发送；`card` 会使用结构化卡片（标题 + 进度块）持续更新同一条消息，观感比纯文本更清晰。
 > `domain` 只影响运行时 API / WebSocket 请求地址；CLI `setup/new/bind` 的引导域名仍然使用内置默认值。
-> `done_emoji` 设置后，agent 每次完成回复时会在用户消息上添加指定表情（如 `"Done"` → ✅）。先移除 "OnIt" 表情（如果有），再添加 done 表情。在 quiet 模式下特别有用，因为飞书卡片原地更新不触发推送，done 表情可以通知用户 agent 已完成。设为 `"none"` 或不配置则禁用。
+> `done_emoji` 省略时默认使用 `"Done"`；agent 每次完成回复时会先移除 "OnIt"（如果有），再添加完成表情。在 quiet 模式下尤其有用，因为飞书卡片原地更新不触发推送。设为 `"none"` 可单独关闭；`reaction_emoji = "none"` 也会关闭隐式完成表情，除非又显式设置了 `done_emoji`。
 > `image_batch_window_ms` 控制连续多张图片合并成一条 agent 消息的等待窗口（默认 500ms）。飞书手机端一次连发多张图时，每张图是独立事件；cc-connect-next 会在窗口内将它们合并成一条多图消息再分发给 agent。如果你的网络/设备发送间隔超过 500ms 且仍被拆成多轮回复（每张图独立处理），可调高到 800–1200ms；如果以单图为主、希望响应更快，可适当调低。设为 `0` 时回退到默认 500ms。
 
 ---

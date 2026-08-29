@@ -5,6 +5,13 @@ import "github.com/timmyagentic/cc-connect-next/core"
 func init() {
 	agent := &Agent{}
 	options := core.ConfigurePermissionModeOption(core.DescribeAgentOptions(agent.KnownOptionKeys()), agent.PermissionModes())
+	for _, key := range []string{"cmd", "cli_path", "command"} {
+		options = core.RefineConfigOption(options, key, func(option *core.ConfigOption) {
+			option.Requirement = core.ConfigRequirementConditional
+			option.RequiredWhen = []string{"one of cmd, cli_path, or command must be set"}
+		})
+	}
+	options = core.ConfigureOption(options, "display_name", "ACP")
 	core.RegisterAgentConfigOptions("acp", options)
 }
 

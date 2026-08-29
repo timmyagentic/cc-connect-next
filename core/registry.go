@@ -97,9 +97,11 @@ func ValidatePlatformOptions(name string, opts map[string]any) error {
 		return fmt.Errorf("unknown platform %q, available: %v", name, available)
 	}
 	if validator := platformValidators[name]; validator != nil {
-		return validator(opts)
+		if err := validator(opts); err != nil {
+			return err
+		}
 	}
-	return nil
+	return ValidateConfigOptionContract(name, PlatformConfigOptions(name), opts)
 }
 
 func ListRegisteredAgents() []string {
@@ -135,7 +137,9 @@ func ValidateAgentOptions(name string, opts map[string]any) error {
 		return fmt.Errorf("unknown agent %q, available: %v", name, available)
 	}
 	if validator := agentValidators[name]; validator != nil {
-		return validator(opts)
+		if err := validator(opts); err != nil {
+			return err
+		}
 	}
-	return nil
+	return ValidateConfigOptionContract(name, AgentConfigOptions(name), opts)
 }

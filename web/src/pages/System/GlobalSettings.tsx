@@ -4,10 +4,11 @@ import { Save, Loader2 } from 'lucide-react';
 import { Card, Button } from '@/components/ui';
 import { getGlobalSettings, updateGlobalSettings } from '@/api/settings';
 import { cn } from '@/lib/utils';
+import { globalSettingsContract } from '@/generated/configContract';
 
-const LOG_LEVELS = ['debug', 'info', 'warn', 'error'];
-const ATTACHMENT_OPTS = ['', 'on', 'off'];
-const LANGUAGES = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'es'];
+const LOG_LEVELS = globalSettingsContract.logLevel.allowedValues;
+const ATTACHMENT_OPTS = ['', ...globalSettingsContract.attachmentSend.allowedValues];
+const LANGUAGES = globalSettingsContract.language.allowedValues;
 
 function Toggle({ value, onChange, label, hint }: { value: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (
@@ -71,35 +72,35 @@ export default function GlobalSettings() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
-  const [language, setLanguage] = useState('en');
-  const [attachmentSend, setAttachmentSend] = useState('');
-  const [logLevel, setLogLevel] = useState('info');
-  const [idleTimeout, setIdleTimeout] = useState(120);
-  const [thinkingMessages, setThinkingMessages] = useState(true);
-  const [thinkingMaxLen, setThinkingMaxLen] = useState(300);
-  const [toolMessages, setToolMessages] = useState(true);
-  const [toolMaxLen, setToolMaxLen] = useState(500);
-  const [spEnabled, setSpEnabled] = useState(true);
-  const [spInterval, setSpInterval] = useState(1500);
-  const [rlMax, setRlMax] = useState(20);
-  const [rlWindow, setRlWindow] = useState(60);
+  const [language, setLanguage] = useState<string>(globalSettingsContract.language.defaultValue);
+  const [attachmentSend, setAttachmentSend] = useState<string>(globalSettingsContract.attachmentSend.defaultValue);
+  const [logLevel, setLogLevel] = useState<string>(globalSettingsContract.logLevel.defaultValue);
+  const [idleTimeout, setIdleTimeout] = useState<number>(globalSettingsContract.idleTimeoutMins.defaultValue);
+  const [thinkingMessages, setThinkingMessages] = useState<boolean>(globalSettingsContract.thinkingMessages.defaultValue);
+  const [thinkingMaxLen, setThinkingMaxLen] = useState<number>(globalSettingsContract.thinkingMaxLen.defaultValue);
+  const [toolMessages, setToolMessages] = useState<boolean>(globalSettingsContract.toolMessages.defaultValue);
+  const [toolMaxLen, setToolMaxLen] = useState<number>(globalSettingsContract.toolMaxLen.defaultValue);
+  const [spEnabled, setSpEnabled] = useState<boolean>(globalSettingsContract.streamPreviewEnabled.defaultValue);
+  const [spInterval, setSpInterval] = useState<number>(globalSettingsContract.streamPreviewIntervalMs.defaultValue);
+  const [rlMax, setRlMax] = useState<number>(globalSettingsContract.rateLimitMaxMessages.defaultValue);
+  const [rlWindow, setRlWindow] = useState<number>(globalSettingsContract.rateLimitWindowSecs.defaultValue);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const s = await getGlobalSettings();
-      setLanguage(s.language || 'en');
-      setAttachmentSend(s.attachment_send || '');
-      setLogLevel(s.log_level || 'info');
-      setIdleTimeout(s.idle_timeout_mins ?? 120);
-      setThinkingMessages(s.thinking_messages ?? true);
-      setThinkingMaxLen(s.thinking_max_len ?? 300);
-      setToolMessages(s.tool_messages ?? true);
-      setToolMaxLen(s.tool_max_len ?? 500);
-      setSpEnabled(s.stream_preview_enabled ?? true);
-      setSpInterval(s.stream_preview_interval_ms ?? 1500);
-      setRlMax(s.rate_limit_max_messages ?? 20);
-      setRlWindow(s.rate_limit_window_secs ?? 60);
+      setLanguage(s.language || globalSettingsContract.language.defaultValue);
+      setAttachmentSend(s.attachment_send || globalSettingsContract.attachmentSend.defaultValue);
+      setLogLevel(s.log_level || globalSettingsContract.logLevel.defaultValue);
+      setIdleTimeout(s.idle_timeout_mins ?? globalSettingsContract.idleTimeoutMins.defaultValue);
+      setThinkingMessages(s.thinking_messages ?? globalSettingsContract.thinkingMessages.defaultValue);
+      setThinkingMaxLen(s.thinking_max_len ?? globalSettingsContract.thinkingMaxLen.defaultValue);
+      setToolMessages(s.tool_messages ?? globalSettingsContract.toolMessages.defaultValue);
+      setToolMaxLen(s.tool_max_len ?? globalSettingsContract.toolMaxLen.defaultValue);
+      setSpEnabled(s.stream_preview_enabled ?? globalSettingsContract.streamPreviewEnabled.defaultValue);
+      setSpInterval(s.stream_preview_interval_ms ?? globalSettingsContract.streamPreviewIntervalMs.defaultValue);
+      setRlMax(s.rate_limit_max_messages ?? globalSettingsContract.rateLimitMaxMessages.defaultValue);
+      setRlWindow(s.rate_limit_window_secs ?? globalSettingsContract.rateLimitWindowSecs.defaultValue);
     } catch {
       // ignore
     } finally {

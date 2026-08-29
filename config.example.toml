@@ -1098,6 +1098,8 @@ app_secret = "your-feishu-app-secret"
 #                           # after an event is delivered and cannot make missing tenant events appear.
 #                           # 飞书还必须申请并发布敏感权限 `im:message.group_msg`；此选项只改变
 #                           # 收到事件后的本地过滤，不能让租户未投递的事件凭空出现。
+# require_mention = true    # Compatibility alias: false enables group_reply_all; true does not override it
+#                           # 兼容别名：false 会启用 group_reply_all；true 不会覆盖显式 group_reply_all
 # group_reply_all_chats = "oc_target_chat_id_1,oc_target_chat_id_2"
 #                           # Optional: only these group chats bypass @mention; all other groups
 #                           # still require @. A TOML string array is also accepted.
@@ -1106,8 +1108,10 @@ app_secret = "your-feishu-app-secret"
 #                                   # 设为 true 时，群聊内所有用户共享同一个 Agent 会话
 # thread_isolation = "topics_only" # off | topics_only | topic_per_message; legacy true = topic_per_message, false = off
 #                                   # 关闭 | 仅真实话题隔离 | 每条群消息一个话题；旧 true 映射 topic_per_message，false 映射 off
-# reply_to_trigger = true   # Default: bot uses “reply to message” API (quotes the user’s message). Set false to post plain chat messages instead.
-#                           # 默认 true：用「回复消息」API（引用用户消息）。设为 false 则在会话里发普通消息、不引用触发消息。
+# reply_to_trigger = true   # Default: quote the trigger in ordinary chats. false posts a plain message there;
+#                           # topics isolated by thread_isolation always remain in their topic.
+#                           # 默认 true：普通会话引用触发消息；false 在普通会话发送不引用的消息；
+#                           # 被 thread_isolation 隔离的话题始终留在原话题。
 # progress_style = "legacy" # Progress rendering style: legacy | compact | card
 #                           # 进度消息展示风格：legacy（逐条消息）| compact（单消息持续更新）| card（结构化卡片）
 # resolve_mentions = false  # Auto-resolve @name in outgoing messages to Feishu at tags by matching group member names
@@ -1117,6 +1121,10 @@ app_secret = "your-feishu-app-secret"
 #                           # Takes priority over group-member names and requires resolve_mentions = true.
 #                           # 机器人名称 -> open_id 的显式映射，用于真正触发机器人间 @ 通知；
 #                           # 优先级高于群成员同名匹配，并且必须同时开启 resolve_mentions。
+# peer_bots = { cli_peer_app_id = "Reviewer-Bot" }
+#                           # Peer bot app_id -> friendly alias for quoted-reply attribution.
+#                           # 对端机器人 app_id -> 友好别名，用于引用回复归因。
+# respond_to_at_everyone_and_here = false # Treat @everyone/@here as a bot mention / 将 @everyone/@here 视为机器人提及
 # image_batch_window_ms = 500  # Coalesce window for consecutive images from the same session (default: 500ms).
 #                              # When the Feishu mobile client sends multiple images, each arrives as a separate
 #                              # event; cc-connect-next buffers them and dispatches a single multi-image message once

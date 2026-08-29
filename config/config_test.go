@@ -189,6 +189,43 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
+func TestConfigValidate_ContractRelationships(t *testing.T) {
+	boolPtr := func(value bool) *bool { return &value }
+	intPtr := func(value int) *int { return &value }
+	floatPtr := func(value float64) *float64 { return &value }
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{name: "bridge token", mutate: func(cfg *Config) { cfg.Bridge.Enabled = boolPtr(true) }, wantErr: "bridge.token is required"},
+		{name: "management token", mutate: func(cfg *Config) { cfg.Management.Enabled = boolPtr(true) }, wantErr: "management.token is required"},
+		{name: "alias fields", mutate: func(cfg *Config) { cfg.Aliases = []AliasConfig{{Name: "x"}} }, wantErr: "name and command are required"},
+		{name: "command one-of", mutate: func(cfg *Config) { cfg.Commands = []CommandConfig{{Name: "x", Prompt: "a", Exec: "b"}} }, wantErr: "exactly one of prompt or exec"},
+		{name: "hook command", mutate: func(cfg *Config) { cfg.Hooks = []HookConfig{{Event: "message", Type: "command"}} }, wantErr: "requires command"},
+		{name: "hook HTTP", mutate: func(cfg *Config) { cfg.Hooks = []HookConfig{{Event: "message", Type: "http"}} }, wantErr: "requires url"},
+		{name: "heartbeat session", mutate: func(cfg *Config) { cfg.Projects[0].Heartbeat.Enabled = boolPtr(true) }, wantErr: "heartbeat.session_key is required"},
+		{name: "speech credential", mutate: func(cfg *Config) { cfg.Speech.Enabled = true }, wantErr: "speech.openai.api_key is required"},
+		{name: "speech canonical provider", mutate: func(cfg *Config) { cfg.Speech.Enabled = true; cfg.Speech.Provider = "GROQ" }, wantErr: "speech.provider must be"},
+		{name: "TTS credential", mutate: func(cfg *Config) { cfg.TTS.Enabled = true }, wantErr: "tts.openai.api_key is required"},
+		{name: "TTS mode", mutate: func(cfg *Config) { cfg.TTS.TTSMode = "sometimes" }, wantErr: "tts.tts_mode must be"},
+		{name: "provider name", mutate: func(cfg *Config) { cfg.Providers = []ProviderConfig{{}} }, wantErr: "providers[0].name is required"},
+		{name: "provider model", mutate: func(cfg *Config) { cfg.Providers = []ProviderConfig{{Name: "x", Models: []ProviderModelConfig{{}}}} }, wantErr: "models[0].model is required"},
+		{name: "negative idle timeout", mutate: func(cfg *Config) { cfg.IdleTimeoutMins = intPtr(-1) }, wantErr: "idle_timeout_mins must be >= 0"},
+		{name: "zero rate window", mutate: func(cfg *Config) { cfg.RateLimit.WindowSecs = intPtr(0) }, wantErr: "rate_limit.window_secs must be > 0"},
+		{name: "negative display length", mutate: func(cfg *Config) { cfg.Display.ThinkingMaxLen = intPtr(-1) }, wantErr: "display.thinking_max_len must be >= 0"},
+		{name: "negative outgoing rate", mutate: func(cfg *Config) { cfg.OutgoingRateLimit.MaxPerSecond = floatPtr(-1) }, wantErr: "outgoing_rate_limit.max_per_second must be >= 0"},
+		{name: "project mode", mutate: func(cfg *Config) { cfg.Projects[0].Mode = "dynamic" }, wantErr: "mode must be \"fixed\" or \"multi-workspace\""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Projects: []ProjectConfig{validProject("demo")}}
+			tt.mutate(cfg)
+			assertErrContains(t, cfg.Validate(), tt.wantErr)
+		})
+	}
+}
+
 func TestRunAsEnv_RejectsDangerousVars(t *testing.T) {
 	dangerous := []string{"PATH", "path", "LD_PRELOAD", "HOME", "USER", "SHELL", "SUDO_USER", "SUDO_COMMAND", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES"}
 	for _, v := range dangerous {
@@ -2174,6 +2211,30 @@ func writeTestConfig(t *testing.T, content string) {
 	t.Cleanup(func() {
 		ConfigPath = oldPath
 	})
+}
+
+func TestGetGlobalSettings_UsesEffectiveDisplayDefaults(t *testing.T) {
+	writeTestConfig(t, `
+[[projects]]
+name = "demo"
+[projects.agent]
+type = "codex"
+[[projects.platforms]]
+type = "feishu"
+`)
+
+	settings := GetGlobalSettings()
+	for key, want := range map[string]any{"language": "zh", "attachment_send": "on", "log_level": "info"} {
+		if got := settings[key]; got != want {
+			t.Errorf("%s = %#v, want %#v", key, got, want)
+		}
+	}
+	if got := settings["thinking_messages"]; got != false {
+		t.Errorf("thinking_messages = %#v, want effective omitted default false", got)
+	}
+	if got := settings["tool_messages"]; got != false {
+		t.Errorf("tool_messages = %#v, want effective omitted default false", got)
+	}
 }
 
 func readTestConfig(t *testing.T) Config {
