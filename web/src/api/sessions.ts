@@ -18,6 +18,8 @@ export interface Session {
   updated_at: string;
   history_count: number;
   last_message: LastMessage | null;
+  supports_scheduled_delivery?: boolean;
+  scheduled_delivery_reason?: string;
   user_name?: string;
   chat_name?: string;
 }

@@ -34,6 +34,7 @@ type BridgeServer struct {
 
 	mu       sync.RWMutex
 	adapters map[string]*bridgeAdapter // platform name → adapter
+	dedup    MessageDedup              // accepted inbound messages; survives adapter replacement
 
 	// lifecycleMu serializes adapter availability transitions with engine
 	// registration. The adapter and engine maps keep their own locks because
@@ -354,20 +355,22 @@ type BridgePlatform struct {
 
 // Compile-time interface checks.
 var (
-	_ Platform                  = (*BridgePlatform)(nil)
-	_ CardSender                = (*BridgePlatform)(nil)
-	_ InlineButtonSender        = (*BridgePlatform)(nil)
-	_ MessageUpdater            = (*BridgePlatform)(nil)
-	_ PreviewStarter            = (*BridgePlatform)(nil)
-	_ PreviewCleaner            = (*BridgePlatform)(nil)
-	_ TypingIndicator           = (*BridgePlatform)(nil)
-	_ AudioSender               = (*BridgePlatform)(nil)
-	_ VideoSender               = (*BridgePlatform)(nil)
-	_ ImageSender               = (*BridgePlatform)(nil)
-	_ FileSender                = (*BridgePlatform)(nil)
-	_ CardNavigable             = (*BridgePlatform)(nil)
-	_ ReplyContextReconstructor = (*BridgePlatform)(nil)
-	_ PlatformHealth            = (*BridgePlatform)(nil)
+	_ Platform                           = (*BridgePlatform)(nil)
+	_ CardSender                         = (*BridgePlatform)(nil)
+	_ InlineButtonSender                 = (*BridgePlatform)(nil)
+	_ MessageUpdater                     = (*BridgePlatform)(nil)
+	_ PreviewStarter                     = (*BridgePlatform)(nil)
+	_ PreviewCleaner                     = (*BridgePlatform)(nil)
+	_ TypingIndicator                    = (*BridgePlatform)(nil)
+	_ AudioSender                        = (*BridgePlatform)(nil)
+	_ VideoSender                        = (*BridgePlatform)(nil)
+	_ ImageSender                        = (*BridgePlatform)(nil)
+	_ FileSender                         = (*BridgePlatform)(nil)
+	_ CardNavigable                      = (*BridgePlatform)(nil)
+	_ ReplyContextReconstructor          = (*BridgePlatform)(nil)
+	_ PersistentProactiveTargetValidator = (*BridgePlatform)(nil)
+	_ SessionKeyTargetMatcher            = (*BridgePlatform)(nil)
+	_ PlatformHealth                     = (*BridgePlatform)(nil)
 )
 
 func (bp *BridgePlatform) Name() string { return "bridge" }
@@ -426,6 +429,26 @@ func (bp *BridgePlatform) ReconstructReplyCtx(sessionKey string) (any, error) {
 		return nil, err
 	}
 	return newBridgeReplyCtx(a, sessionKey, replyCtx), nil
+}
+
+// ValidatePersistentProactiveTarget rejects persisted cron/timer targets unless
+// the connected adapter can reconstruct replies and explicitly declares a
+// daemon-like persistent delivery lifetime. Browser/tab adapters remain
+// interactive-only and cannot make a job depend on their transient socket.
+func (bp *BridgePlatform) ValidatePersistentProactiveTarget(sessionKey string) error {
+	platform := bp.server.platformFromSessionKey(sessionKey)
+	if platform != "" {
+		if adapter := bp.server.getAdapter(platform); adapter != nil &&
+			adapter.capabilities["reconstruct_reply"] &&
+			adapter.capabilities["persistent_scheduled_delivery"] {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: Bridge session %q depends on a live adapter without persistent scheduled delivery; choose a durable messaging session", ErrPersistentProactiveDeliveryUnsupported, sessionKey)
+}
+
+func (bp *BridgePlatform) MatchesSessionKey(sessionKey string) bool {
+	return bp.server.platformFromSessionKey(sessionKey) != ""
 }
 
 func newBridgeReplyCtx(a *bridgeAdapter, sessionKey, replyCtx string) *bridgeReplyCtx {
@@ -971,6 +994,12 @@ func (a *bridgeAdapter) handleMessage(raw json.RawMessage) {
 		return
 	}
 
+	dedupKey := bridgeMessageDedupKey(a.platform, ref.engine.name, m.SessionKey, m.MsgID)
+	if a.server.dedup.IsDuplicate(dedupKey) {
+		slog.Debug("bridge: duplicate message ignored", "platform", a.platform, "session_key", m.SessionKey, "msg_id", m.MsgID)
+		return
+	}
+
 	msg := &Message{
 		SessionKey: m.SessionKey,
 		Platform:   a.platform,
@@ -1020,6 +1049,13 @@ func (a *bridgeAdapter) handleMessage(raw json.RawMessage) {
 	if ref.platform.handler != nil {
 		ref.platform.handler(ref.platform, msg)
 	}
+}
+
+func bridgeMessageDedupKey(platform, project, sessionKey, msgID string) string {
+	if msgID == "" {
+		return ""
+	}
+	return strings.Join([]string{platform, project, sessionKey, msgID}, "\x00")
 }
 
 func (a *bridgeAdapter) handleCardAction(raw json.RawMessage) {

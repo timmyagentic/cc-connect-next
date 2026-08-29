@@ -880,6 +880,12 @@ cc-connect-next cron del <job-id>
 
 可选：`--session-mode new-per-run` 每次触发使用新的 agent 会话（默认 `reuse` 与旧行为一致）。`--timeout-mins N` 设置单次调度最长等待分钟数（`0` 表示不限制；省略为 30 分钟）。
 
+持久 Cron 和一次性 Timer 必须使用可持久主动投递的消息目标。浏览器连接型
+Web/Bridge 聊天会话会被明确拒绝，因为关闭标签页或浏览器后 adapter 即会消失。
+在 Web 定时任务编辑器中，请选择飞书、Telegram 或 Discord 等持久平台会话。
+已有的不支持任务会保留以供查看，但重新启用或手动触发时会同步返回错误，
+不会先显示具有误导性的 `triggered` 状态。
+
 ### 自然语言（Claude Code）
 
 > "每天早上6点帮我总结 GitHub trending"

@@ -78,6 +78,7 @@ scripts/*
 !scripts/check-release-version.js
 !scripts/release-channel-policy.js
 !scripts/release-policy.test.js
+!scripts/web-cron-session-targets.test.js
 tmp/
 temp/
 *.tmp

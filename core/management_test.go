@@ -324,6 +324,34 @@ func TestMgmt_Sessions(t *testing.T) {
 	}
 }
 
+func TestMgmt_SessionsExposePersistentScheduledDeliverySupport(t *testing.T) {
+	_, ts, engine := testManagementServer(t, "tok")
+	bridge := NewBridgeServerInsecure(0, "", "/bridge/ws", nil).NewPlatform("test-project")
+	engine.AddPlatform(bridge)
+	engine.sessions.GetOrCreateActive("bridge:web-admin:test-project")
+
+	r := mgmtGet(t, ts.URL+"/api/v1/projects/test-project/sessions", "tok")
+	if !r.OK {
+		t.Fatalf("sessions list failed: %s", r.Error)
+	}
+	var data struct {
+		Sessions []map[string]any `json:"sessions"`
+	}
+	if err := json.Unmarshal(r.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1", len(data.Sessions))
+	}
+	session := data.Sessions[0]
+	if supported, ok := session["supports_scheduled_delivery"].(bool); !ok || supported {
+		t.Fatalf("supports_scheduled_delivery = %#v, want false", session["supports_scheduled_delivery"])
+	}
+	if reason, _ := session["scheduled_delivery_reason"].(string); !strings.Contains(reason, "live adapter") {
+		t.Fatalf("scheduled_delivery_reason = %q, want live-adapter explanation", reason)
+	}
+}
+
 func TestMgmt_SessionDetail(t *testing.T) {
 	_, ts, e := testManagementServer(t, "tok")
 
@@ -550,6 +578,30 @@ func TestMgmt_CronWithScheduler(t *testing.T) {
 	r = mgmtDelete(t, ts.URL+"/api/v1/cron/nonexistent", "tok")
 	if r.OK {
 		t.Fatal("expected 404 for nonexistent cron job")
+	}
+}
+
+func TestMgmt_CronRejectsPersistentBridgeTargetSynchronously(t *testing.T) {
+	mgmt, ts, engine := testManagementServer(t, "tok")
+	bridge := NewBridgeServerInsecure(0, "", "/bridge/ws", nil).NewPlatform("test-project")
+	engine.AddPlatform(bridge)
+	store, err := NewCronStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewCronScheduler(store)
+	scheduler.RegisterEngine("test-project", engine)
+	mgmt.SetCronScheduler(scheduler)
+
+	r := mgmtPost(t, ts.URL+"/api/v1/cron", "tok", map[string]any{
+		"project": "test-project", "session_key": "bridge:web-admin:test-project",
+		"cron_expr": "0 9 * * *", "prompt": "hello",
+	})
+	if r.OK || !strings.Contains(r.Error, "persistent") {
+		t.Fatalf("cron create response = ok:%v error:%q, want synchronous persistent-target error", r.OK, r.Error)
+	}
+	if got := store.List(); len(got) != 0 {
+		t.Fatalf("rejected management cron was persisted: %#v", got)
 	}
 }
 

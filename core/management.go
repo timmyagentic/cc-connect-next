@@ -968,6 +968,11 @@ func (m *ManagementServer) handleProjectSessions(w http.ResponseWriter, r *http.
 			sessionKey := idToKey[s.ID]
 			_, live := activeKeys[sessionKey]
 			info["live"] = live
+			supported, reason := e.PersistentProactiveTargetSupport(sessionKey)
+			info["supports_scheduled_delivery"] = supported
+			if reason != "" {
+				info["scheduled_delivery_reason"] = reason
+			}
 			if p, ok := activeKeys[sessionKey]; ok {
 				info["platform"] = p
 			} else if len(sessionKey) > 0 {

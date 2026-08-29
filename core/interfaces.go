@@ -18,11 +18,32 @@ type Platform interface {
 // ErrNotSupported indicates a platform doesn't support a particular operation.
 var ErrNotSupported = errors.New("operation not supported by this platform")
 
+// ErrPersistentProactiveDeliveryUnsupported indicates that a platform can
+// reply while its live transport is connected, but cannot be used as the
+// durable target of a persisted cron or timer job.
+var ErrPersistentProactiveDeliveryUnsupported = errors.New("persistent proactive delivery is not supported by this platform")
+
 // ReplyContextReconstructor is an optional interface for platforms that can
 // recreate a reply context from a session key. This is needed for cron jobs
 // to send messages to users without an incoming message.
 type ReplyContextReconstructor interface {
 	ReconstructReplyCtx(sessionKey string) (any, error)
+}
+
+// PersistentProactiveTargetValidator is an optional platform capability used
+// before a cron or timer target is persisted or manually triggered. Platforms
+// that do not implement it retain the existing behavior. Connection-scoped
+// platforms can implement it to fail early instead of accepting a job that
+// cannot be delivered after the transport disconnects.
+type PersistentProactiveTargetValidator interface {
+	ValidatePersistentProactiveTarget(sessionKey string) error
+}
+
+// SessionKeyTargetMatcher lets a multiplexing platform claim session-key
+// prefixes that differ from Platform.Name(). BridgePlatform uses this for
+// external adapter names while ordinary platforms keep name-based routing.
+type SessionKeyTargetMatcher interface {
+	MatchesSessionKey(sessionKey string) bool
 }
 
 // RelayGroupVisibilityTarget lets a platform preserve the caller's thread or
