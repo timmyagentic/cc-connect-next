@@ -66,3 +66,30 @@ func TestCapabilityCatalog_NaturalLanguageSearchFindsMessageDisplay(t *testing.T
 		t.Fatalf("search paths = %s", joined)
 	}
 }
+
+func TestCapabilityCatalog_TokenBudgetIsNotSensitive(t *testing.T) {
+	catalog := CapabilityCatalog("v-test")
+	wantSensitive := map[string]bool{
+		"projects.auto_compress.max_tokens": false,
+		"bridge.token":                      true,
+		"management.token":                  true,
+		"speech.openai.api_key":             true,
+		"webhook.token":                     true,
+	}
+	seen := make(map[string]bool, len(wantSensitive))
+	for _, option := range catalog.Options {
+		want, ok := wantSensitive[option.Path]
+		if !ok || option.Owner != "" {
+			continue
+		}
+		seen[option.Path] = true
+		if option.Sensitive != want {
+			t.Errorf("%s sensitive = %t, want %t", option.Path, option.Sensitive, want)
+		}
+	}
+	for path := range wantSensitive {
+		if !seen[path] {
+			t.Errorf("catalog option %s not found", path)
+		}
+	}
+}

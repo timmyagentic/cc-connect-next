@@ -1347,7 +1347,6 @@ Set the estimated token threshold that triggers auto-compression.
 - Type: `integer`
 - Default: `12000`
 - Takes effect: `reload`
-- Sensitive: yes; prefer an environment-variable placeholder.
 
 ### `projects.auto_compress.min_gap_mins`
 
@@ -1627,11 +1626,11 @@ Identify the bot application Agent in the platform tenant.
 
 ### `projects.platforms.options.allow_chat` — `feishu, lark`
 
-Restrict Feishu access to selected chat IDs.
+Restrict access to a comma-separated list of Feishu/Lark chat IDs; empty or '*' allows every chat.
 
 - Scope: `platform` (`feishu, lark`)
 - Type: `string`
-- Default: `unset / adapter default`
+- Default: `empty / allow all chats`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.allow_from` — `dingtalk, discord, feishu, lark, line, matrix, max, qq, qqbot, slack, telegram, webex, wecom, weibo, weixin, wps-xiezuo`
@@ -1661,20 +1660,39 @@ Override the platform API base URL.
 - Default: `unset / adapter default`
 - Takes effect: `restart`
 
-### `projects.platforms.options.app_id` — `feishu, lark, qqbot, weibo, wps-xiezuo`
+### `projects.platforms.options.app_id` — `feishu, lark`
+
+Identify the Feishu/Lark bot application; this option is required.
+
+- Scope: `platform` (`feishu, lark`)
+- Type: `string`
+- Default: `required`
+- Takes effect: `restart`
+
+### `projects.platforms.options.app_id` — `qqbot, weibo, wps-xiezuo`
 
 Identify the bot application.
 
-- Scope: `platform` (`feishu, lark, qqbot, weibo, wps-xiezuo`)
+- Scope: `platform` (`qqbot, weibo, wps-xiezuo`)
 - Type: `string`
 - Default: `unset / adapter default`
 - Takes effect: `restart`
 
-### `projects.platforms.options.app_secret` — `feishu, lark, qqbot, weibo, wps-xiezuo`
+### `projects.platforms.options.app_secret` — `feishu, lark`
+
+Authenticate the Feishu/Lark bot application; this sensitive option is required.
+
+- Scope: `platform` (`feishu, lark`)
+- Type: `string`
+- Default: `required`
+- Takes effect: `restart`
+- Sensitive: yes; prefer an environment-variable placeholder.
+
+### `projects.platforms.options.app_secret` — `qqbot, weibo, wps-xiezuo`
 
 Authenticate the bot application.
 
-- Scope: `platform` (`feishu, lark, qqbot, weibo, wps-xiezuo`)
+- Scope: `platform` (`qqbot, weibo, wps-xiezuo`)
 - Type: `string`
 - Default: `unset`
 - Takes effect: `restart`
@@ -1774,11 +1792,20 @@ Decrypt encrypted WeCom callback payloads.
 - Takes effect: `restart`
 - Sensitive: yes; prefer an environment-variable placeholder.
 
-### `projects.platforms.options.callback_path` — `feishu, lark, line, wecom`
+### `projects.platforms.options.callback_path` — `feishu, lark`
+
+Set the inbound webhook callback path used when encrypt_key enables webhook mode.
+
+- Scope: `platform` (`feishu, lark`)
+- Type: `string`
+- Default: `/feishu/webhook`
+- Takes effect: `restart`
+
+### `projects.platforms.options.callback_path` — `line, wecom`
 
 Set the inbound webhook callback path.
 
-- Scope: `platform` (`feishu, lark, line, wecom`)
+- Scope: `platform` (`line, wecom`)
 - Type: `string`
 - Default: `unset / adapter default`
 - Takes effect: `restart`
@@ -1906,27 +1933,45 @@ Initialize Matrix cross-signing when the server requires the account password.
 - Takes effect: `restart`
 - Sensitive: yes; prefer an environment-variable placeholder.
 
-### `projects.platforms.options.domain` — `feishu, lark`
+### `projects.platforms.options.domain` — `feishu`
 
-Override the Feishu/Lark API and WebSocket domain.
+Override the Feishu/Lark OpenAPI and WebSocket base URL; Feishu and Lark use different SDK defaults.
 
-- Scope: `platform` (`feishu, lark`)
+- Scope: `platform` (`feishu`)
 - Type: `string`
-- Default: `unset / adapter default`
+- Default: `https://open.feishu.cn`
 - Takes effect: `restart`
 
-### `projects.platforms.options.done_emoji` — `dingtalk, feishu, lark`
+### `projects.platforms.options.domain` — `lark`
+
+Override the Feishu/Lark OpenAPI and WebSocket base URL; Feishu and Lark use different SDK defaults.
+
+- Scope: `platform` (`lark`)
+- Type: `string`
+- Default: `https://open.larksuite.com`
+- Takes effect: `restart`
+
+### `projects.platforms.options.done_emoji` — `dingtalk`
 
 Choose the completion reaction; 'none' disables it.
 
-- Scope: `platform` (`dingtalk, feishu, lark`)
+- Scope: `platform` (`dingtalk`)
+- Type: `string`
+- Default: `Done`
+- Takes effect: `restart`
+
+### `projects.platforms.options.done_emoji` — `feishu, lark`
+
+Choose the completion reaction. 'none' disables it; reaction_emoji = 'none' also disables the implicit completion reaction unless done_emoji is set explicitly.
+
+- Scope: `platform` (`feishu, lark`)
 - Type: `string`
 - Default: `Done`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.enable_feishu_card` — `feishu, lark`
 
-Enable Feishu interactive-card replies.
+Use Feishu/Lark interactive cards for replies; false falls back to non-card replies.
 
 - Scope: `platform` (`feishu, lark`)
 - Type: `boolean`
@@ -1953,11 +1998,11 @@ Add a processing reaction to incoming messages.
 
 ### `projects.platforms.options.encrypt_key` — `feishu, lark`
 
-Decrypt encrypted Feishu webhook events.
+Leave unset to consume events over WebSocket; set the event encrypt key to select webhook mode and decrypt webhook events.
 
 - Scope: `platform` (`feishu, lark`)
 - Type: `string`
-- Default: `unset`
+- Default: `unset / WebSocket mode`
 - Takes effect: `restart`
 - Sensitive: yes; prefer an environment-variable placeholder.
 
@@ -1970,22 +2015,31 @@ Accept Feishu messages only from group chats.
 - Default: `false`
 - Takes effect: `restart`
 
-### `projects.platforms.options.group_reply_all` — `discord, feishu, lark, matrix, telegram`
+### `projects.platforms.options.group_reply_all` — `discord, matrix, telegram`
 
 Reply to every group message without requiring a mention.
 
-- Scope: `platform` (`discord, feishu, lark, matrix, telegram`)
+- Scope: `platform` (`discord, matrix, telegram`)
+- Type: `boolean`
+- Default: `false`
+- Takes effect: `restart`
+
+### `projects.platforms.options.group_reply_all` — `feishu, lark`
+
+Reply to every group message without an explicit bot mention, unless a non-empty group_reply_all_chats allowlist takes precedence.
+
+- Scope: `platform` (`feishu, lark`)
 - Type: `boolean`
 - Default: `false`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.group_reply_all_chats` — `feishu, lark`
 
-Enable mention-free replies only in selected Feishu chats.
+Allow mention-free replies only in selected chat IDs. Accepts a comma-separated string or string array; a non-empty list takes precedence over group_reply_all.
 
 - Scope: `platform` (`feishu, lark`)
-- Type: `string[]`
-- Default: `unset / adapter default`
+- Type: `string | string[]`
+- Default: `empty / use group_reply_all`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.group_reply_all_guilds` — `discord`
@@ -2026,11 +2080,11 @@ Set the NapCat/QQ HTTP API endpoint.
 
 ### `projects.platforms.options.image_batch_window_ms` — `feishu, lark`
 
-Batch Feishu images arriving close together into one turn.
+Batch consecutive images from one session after this quiet window in milliseconds. Zero uses the 500 ms fallback; negative values are rejected.
 
 - Scope: `platform` (`feishu, lark`)
 - Type: `integer`
-- Default: `unset / adapter default`
+- Default: `500`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.intents` — `qqbot`
@@ -2062,11 +2116,11 @@ Enable QQ Bot Markdown message support.
 
 ### `projects.platforms.options.mention_map` — `feishu, lark`
 
-Map Feishu mention identities to replacement text or Agent handles.
+Map a friendly bot name to its open_id for outbound native @ mentions; requires resolve_mentions = true.
 
 - Scope: `platform` (`feishu, lark`)
 - Type: `table`
-- Default: `unset / adapter default`
+- Default: `empty`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.mode` — `wecom`
@@ -2089,18 +2143,27 @@ Set the account display name used by the platform adapter.
 
 ### `projects.platforms.options.peer_bots` — `feishu, lark`
 
-Recognize selected Feishu bot identities as relay peers.
+Map each peer bot app_id to a friendly alias for quoted-reply attribution.
 
 - Scope: `platform` (`feishu, lark`)
-- Type: `string[]`
-- Default: `unset / adapter default`
+- Type: `table`
+- Default: `empty`
 - Takes effect: `restart`
 
-### `projects.platforms.options.port` — `feishu, lark, line`
+### `projects.platforms.options.port` — `feishu, lark`
+
+Set the webhook-mode listening port as a quoted string.
+
+- Scope: `platform` (`feishu, lark`)
+- Type: `string`
+- Default: `8080`
+- Takes effect: `restart`
+
+### `projects.platforms.options.port` — `line`
 
 Set the inbound webhook listening port as a quoted string.
 
-- Scope: `platform` (`feishu, lark, line`)
+- Scope: `platform` (`line`)
 - Type: `string`
 - Default: `8080`
 - Takes effect: `restart`
@@ -2114,13 +2177,23 @@ Set the inbound webhook listening port as a quoted string.
 - Default: `8081`
 - Takes effect: `restart`
 
-### `projects.platforms.options.progress_style` — `discord, feishu, lark, telegram`
+### `projects.platforms.options.progress_style` — `discord, telegram`
 
 Choose how progress is rendered on the messaging platform.
 
-- Scope: `platform` (`discord, feishu, lark, telegram`)
+- Scope: `platform` (`discord, telegram`)
 - Type: `string`
 - Default: `compact`
+- Takes effect: `restart`
+- Allowed values: `legacy`, `compact`, `card`
+
+### `projects.platforms.options.progress_style` — `feishu, lark`
+
+Choose legacy, compact, or card progress rendering for Feishu/Lark replies.
+
+- Scope: `platform` (`feishu, lark`)
+- Type: `string`
+- Default: `legacy`
 - Takes effect: `restart`
 - Allowed values: `legacy`, `compact`, `card`
 
@@ -2153,49 +2226,67 @@ Set the username for platform proxy authentication.
 - Takes effect: `restart`
 - Sensitive: yes; prefer an environment-variable placeholder.
 
-### `projects.platforms.options.reaction_emoji` — `dingtalk, feishu, lark`
+### `projects.platforms.options.reaction_emoji` — `dingtalk`
 
 Choose the processing reaction emoji.
 
-- Scope: `platform` (`dingtalk, feishu, lark`)
+- Scope: `platform` (`dingtalk`)
 - Type: `string`
 - Default: `unset / adapter default`
 - Takes effect: `restart`
 
+### `projects.platforms.options.reaction_emoji` — `feishu, lark`
+
+Choose the processing reaction; 'none' disables it and also suppresses the implicit done reaction.
+
+- Scope: `platform` (`feishu, lark`)
+- Type: `string`
+- Default: `OnIt`
+- Takes effect: `restart`
+
 ### `projects.platforms.options.reply_to_trigger` — `feishu, lark`
 
-Reply in Feishu using the triggering message as the reply target.
+Reply using the triggering message as the target. When false, ordinary replies are created without quoting it; replies inside a real topic still target that topic's thread_id to preserve topic locality.
 
 - Scope: `platform` (`feishu, lark`)
 - Type: `boolean`
-- Default: `unset / adapter default`
+- Default: `true`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.require_mention` — `feishu, lark`
 
-Require an explicit mention before replying in group chats.
+Require an explicit bot mention in group chats. Setting false is a compatibility alias for group_reply_all = true; true does not override an explicit group_reply_all setting.
 
 - Scope: `platform` (`feishu, lark`)
 - Type: `boolean`
-- Default: `unset / adapter default`
+- Default: `true`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.resolve_mentions` — `feishu, lark`
 
-Resolve Feishu mentions to readable names before sending text to the Agent.
+Resolve inbound Feishu/Lark mentions to readable names and enable mention_map for outbound native bot mentions.
 
 - Scope: `platform` (`feishu, lark`)
+- Type: `boolean`
+- Default: `false`
+- Takes effect: `restart`
+
+### `projects.platforms.options.respond_to_at_everyone_and_here` — `discord`
+
+Treat @everyone/@here as a valid bot mention.
+
+- Scope: `platform` (`discord`)
 - Type: `boolean`
 - Default: `unset / adapter default`
 - Takes effect: `restart`
 
-### `projects.platforms.options.respond_to_at_everyone_and_here` — `discord, feishu, lark`
+### `projects.platforms.options.respond_to_at_everyone_and_here` — `feishu, lark`
 
 Treat @everyone/@here as a valid bot mention.
 
-- Scope: `platform` (`discord, feishu, lark`)
+- Scope: `platform` (`feishu, lark`)
 - Type: `boolean`
-- Default: `unset / adapter default`
+- Default: `false`
 - Takes effect: `restart`
 
 ### `projects.platforms.options.robot_code` — `dingtalk`
@@ -2235,11 +2326,20 @@ Choose whether Slack sessions are isolated by user, channel, or thread.
 - Takes effect: `restart`
 - Allowed values: `user`, `channel`, `thread`
 
-### `projects.platforms.options.share_session_in_channel` — `dingtalk, discord, feishu, lark, matrix, qq, qqbot, slack, telegram`
+### `projects.platforms.options.share_session_in_channel` — `dingtalk, discord, matrix, qq, qqbot, slack, telegram`
 
 Share one Agent session among all users in a channel or room.
 
-- Scope: `platform` (`dingtalk, discord, feishu, lark, matrix, qq, qqbot, slack, telegram`)
+- Scope: `platform` (`dingtalk, discord, matrix, qq, qqbot, slack, telegram`)
+- Type: `boolean`
+- Default: `false`
+- Takes effect: `restart`
+
+### `projects.platforms.options.share_session_in_channel` — `feishu, lark`
+
+Share one Agent session among users in the same non-isolated channel; thread_isolation can still give real topics separate sessions.
+
+- Scope: `platform` (`feishu, lark`)
 - Type: `boolean`
 - Default: `false`
 - Takes effect: `restart`

@@ -191,15 +191,13 @@ func configTypeName(t reflect.Type) string {
 
 func isSensitiveConfigPath(path string) bool {
 	lower := strings.ToLower(path)
-	for _, marker := range []string{"api_key", "secret", "password", "token", "http_headers"} {
-		if strings.Contains(lower, marker) {
+	for _, segment := range strings.Split(lower, ".") {
+		switch segment {
+		case "api_key", "secret", "password", "token", "http_headers":
 			return true
 		}
 	}
-	if strings.Contains(lower, ".env.") || strings.Contains(lower, "http_headers") {
-		return true
-	}
-	return false
+	return strings.Contains(lower, ".env.")
 }
 
 func builtinMetadata(path string) builtinOptionMeta {

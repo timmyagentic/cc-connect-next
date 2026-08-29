@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	lark "github.com/larksuite/oapi-sdk-go/v3"
 	"github.com/timmyagentic/cc-connect-next/config"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
@@ -163,6 +164,81 @@ func TestFeishuThreadIsolationCatalogDistinguishesProfileFromOmissionFallback(t 
 	for _, want := range []string{"projects.platforms.options.thread_isolation", "topics_only", "topic_per_message", "新 Starter", "省略该键"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("natural-language topic query missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestFeishuCatalogMatchesRuntimeConfigurationContract(t *testing.T) {
+	owners := map[string]string{
+		"feishu": lark.FeishuBaseUrl,
+		"lark":   lark.LarkBaseUrl,
+	}
+	wantDefaults := map[string]string{
+		"allow_chat":                      "empty / allow all chats",
+		"app_id":                          "required",
+		"app_secret":                      "required",
+		"callback_path":                   "/feishu/webhook",
+		"done_emoji":                      "Done",
+		"enable_feishu_card":              "true",
+		"group_only":                      "false",
+		"group_reply_all":                 "false",
+		"group_reply_all_chats":           "empty / use group_reply_all",
+		"image_batch_window_ms":           "500",
+		"mention_map":                     "empty",
+		"peer_bots":                       "empty",
+		"port":                            "8080",
+		"progress_style":                  "legacy",
+		"reaction_emoji":                  "OnIt",
+		"reply_to_trigger":                "true",
+		"require_mention":                 "true",
+		"resolve_mentions":                "false",
+		"respond_to_at_everyone_and_here": "false",
+		"share_session_in_channel":        "false",
+	}
+	wantTypes := map[string]string{
+		"group_reply_all_chats": "string | string[]",
+		"image_batch_window_ms": "integer",
+		"mention_map":           "table",
+		"peer_bots":             "table",
+		"port":                  "string",
+	}
+
+	for owner, domain := range owners {
+		options := core.PlatformConfigOptions(owner)
+		for key, want := range wantDefaults {
+			if got := findCatalogOption(t, options, key).Default; got != want {
+				t.Errorf("%s.%s default = %q, want %q", owner, key, got, want)
+			}
+		}
+		if got := findCatalogOption(t, options, "domain").Default; got != domain {
+			t.Errorf("%s.domain default = %q, want SDK default %q", owner, got, domain)
+		}
+		for key, want := range wantTypes {
+			if got := findCatalogOption(t, options, key).Type; got != want {
+				t.Errorf("%s.%s type = %q, want %q", owner, key, got, want)
+			}
+		}
+		if !findCatalogOption(t, options, "app_secret").Sensitive {
+			t.Errorf("%s.app_secret must remain sensitive", owner)
+		}
+		for key, fragments := range map[string][]string{
+			"allow_chat":            {"comma-separated", "empty or '*'"},
+			"encrypt_key":           {"unset", "WebSocket", "webhook"},
+			"group_reply_all_chats": {"takes precedence", "group_reply_all"},
+			"mention_map":           {"resolve_mentions = true", "open_id"},
+			"peer_bots":             {"app_id", "alias"},
+			"reply_to_trigger":      {"real topic", "thread_id"},
+			"require_mention":       {"false", "group_reply_all = true"},
+		} {
+			option := findCatalogOption(t, options, key)
+			for _, fragment := range fragments {
+				if !strings.Contains(option.Description, fragment) {
+					t.Errorf("%s.%s description %q missing %q", owner, key, option.Description, fragment)
+				}
+			}
+			if option.DescriptionZH == "" {
+				t.Errorf("%s.%s is missing a Chinese description", owner, key)
+			}
 		}
 	}
 }

@@ -1347,7 +1347,6 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 类型：`integer`
 - 默认值：`12000`
 - 生效方式：`reload`
-- 敏感信息：是；优先使用环境变量占位符。
 
 ### `projects.auto_compress.min_gap_mins`
 
@@ -1627,11 +1626,11 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.allow_chat` — `feishu, lark`
 
-将飞书访问限制在指定会话 ID。
+将访问限制为逗号分隔的飞书/Lark 会话 ID；留空或 '*' 表示允许所有会话。
 
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`string`
-- 默认值：`unset / adapter default`
+- 默认值：`empty / allow all chats`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.allow_from` — `dingtalk, discord, feishu, lark, line, matrix, max, qq, qqbot, slack, telegram, webex, wecom, weibo, weixin, wps-xiezuo`
@@ -1661,20 +1660,39 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 默认值：`unset / adapter default`
 - 生效方式：`restart`
 
-### `projects.platforms.options.app_id` — `feishu, lark, qqbot, weibo, wps-xiezuo`
+### `projects.platforms.options.app_id` — `feishu, lark`
+
+标识飞书/Lark 机器人应用；此配置必填。
+
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`string`
+- 默认值：`required`
+- 生效方式：`restart`
+
+### `projects.platforms.options.app_id` — `qqbot, weibo, wps-xiezuo`
 
 标识机器人应用。
 
-- 作用域：`platform` (`feishu, lark, qqbot, weibo, wps-xiezuo`)
+- 作用域：`platform` (`qqbot, weibo, wps-xiezuo`)
 - 类型：`string`
 - 默认值：`unset / adapter default`
 - 生效方式：`restart`
 
-### `projects.platforms.options.app_secret` — `feishu, lark, qqbot, weibo, wps-xiezuo`
+### `projects.platforms.options.app_secret` — `feishu, lark`
+
+认证飞书/Lark 机器人应用；此敏感配置必填。
+
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`string`
+- 默认值：`required`
+- 生效方式：`restart`
+- 敏感信息：是；优先使用环境变量占位符。
+
+### `projects.platforms.options.app_secret` — `qqbot, weibo, wps-xiezuo`
 
 认证机器人应用。
 
-- 作用域：`platform` (`feishu, lark, qqbot, weibo, wps-xiezuo`)
+- 作用域：`platform` (`qqbot, weibo, wps-xiezuo`)
 - 类型：`string`
 - 默认值：`unset`
 - 生效方式：`restart`
@@ -1774,11 +1792,20 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 生效方式：`restart`
 - 敏感信息：是；优先使用环境变量占位符。
 
-### `projects.platforms.options.callback_path` — `feishu, lark, line, wecom`
+### `projects.platforms.options.callback_path` — `feishu, lark`
+
+设置 encrypt_key 启用 Webhook 模式后使用的入站回调路径。
+
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`string`
+- 默认值：`/feishu/webhook`
+- 生效方式：`restart`
+
+### `projects.platforms.options.callback_path` — `line, wecom`
 
 设置入站 Webhook 回调路径。
 
-- 作用域：`platform` (`feishu, lark, line, wecom`)
+- 作用域：`platform` (`line, wecom`)
 - 类型：`string`
 - 默认值：`unset / adapter default`
 - 生效方式：`restart`
@@ -1906,27 +1933,45 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 生效方式：`restart`
 - 敏感信息：是；优先使用环境变量占位符。
 
-### `projects.platforms.options.domain` — `feishu, lark`
+### `projects.platforms.options.domain` — `feishu`
 
-覆盖飞书/Lark API 与 WebSocket 域名。
+覆盖飞书/Lark OpenAPI 与 WebSocket 基础地址；飞书和 Lark 使用不同的 SDK 默认值。
 
-- 作用域：`platform` (`feishu, lark`)
+- 作用域：`platform` (`feishu`)
 - 类型：`string`
-- 默认值：`unset / adapter default`
+- 默认值：`https://open.feishu.cn`
 - 生效方式：`restart`
 
-### `projects.platforms.options.done_emoji` — `dingtalk, feishu, lark`
+### `projects.platforms.options.domain` — `lark`
+
+覆盖飞书/Lark OpenAPI 与 WebSocket 基础地址；飞书和 Lark 使用不同的 SDK 默认值。
+
+- 作用域：`platform` (`lark`)
+- 类型：`string`
+- 默认值：`https://open.larksuite.com`
+- 生效方式：`restart`
+
+### `projects.platforms.options.done_emoji` — `dingtalk`
 
 选择完成表情；'none' 表示关闭。
 
-- 作用域：`platform` (`dingtalk, feishu, lark`)
+- 作用域：`platform` (`dingtalk`)
+- 类型：`string`
+- 默认值：`Done`
+- 生效方式：`restart`
+
+### `projects.platforms.options.done_emoji` — `feishu, lark`
+
+选择完成时的表情回应。'none' 表示关闭；reaction_emoji = 'none' 也会关闭隐式完成回应，除非显式设置 done_emoji。
+
+- 作用域：`platform` (`feishu, lark`)
 - 类型：`string`
 - 默认值：`Done`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.enable_feishu_card` — `feishu, lark`
 
-启用飞书互动卡片回复。
+使用飞书/Lark 互动卡片回复；设为 false 时回退为非卡片回复。
 
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`boolean`
@@ -1953,11 +1998,11 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.encrypt_key` — `feishu, lark`
 
-解密飞书 Webhook 事件。
+留空时通过 WebSocket 消费事件；设置事件 Encrypt Key 后切换为 Webhook 模式并解密 Webhook 事件。
 
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`string`
-- 默认值：`unset`
+- 默认值：`unset / WebSocket mode`
 - 生效方式：`restart`
 - 敏感信息：是；优先使用环境变量占位符。
 
@@ -1970,22 +2015,31 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 默认值：`false`
 - 生效方式：`restart`
 
-### `projects.platforms.options.group_reply_all` — `discord, feishu, lark, matrix, telegram`
+### `projects.platforms.options.group_reply_all` — `discord, matrix, telegram`
 
 无需 @ 即回复所有群消息。
 
-- 作用域：`platform` (`discord, feishu, lark, matrix, telegram`)
+- 作用域：`platform` (`discord, matrix, telegram`)
+- 类型：`boolean`
+- 默认值：`false`
+- 生效方式：`restart`
+
+### `projects.platforms.options.group_reply_all` — `feishu, lark`
+
+无需明确 @ 机器人即可回复所有群消息；但非空 group_reply_all_chats 白名单优先。
+
+- 作用域：`platform` (`feishu, lark`)
 - 类型：`boolean`
 - 默认值：`false`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.group_reply_all_chats` — `feishu, lark`
 
-仅在指定飞书会话中启用无需 @ 的回复。
+仅在指定会话 ID 中允许无需 @ 的回复。支持逗号分隔字符串或字符串数组；非空列表优先于 group_reply_all。
 
 - 作用域：`platform` (`feishu, lark`)
-- 类型：`string[]`
-- 默认值：`unset / adapter default`
+- 类型：`string | string[]`
+- 默认值：`empty / use group_reply_all`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.group_reply_all_guilds` — `discord`
@@ -2026,11 +2080,11 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.image_batch_window_ms` — `feishu, lark`
 
-将在短时间内连续到达的飞书图片合并为一个回合。
+同一会话的连续图片在该静默窗口（毫秒）后合并处理。0 仍使用 500 ms 回退值；负数会被拒绝。
 
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`integer`
-- 默认值：`unset / adapter default`
+- 默认值：`500`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.intents` — `qqbot`
@@ -2062,11 +2116,11 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.mention_map` — `feishu, lark`
 
-将飞书 @ 身份映射为替换文本或 Agent 标识。
+将友好机器人名称映射到 open_id，以便出站消息使用原生 @；要求 resolve_mentions = true。
 
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`table`
-- 默认值：`unset / adapter default`
+- 默认值：`empty`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.mode` — `wecom`
@@ -2089,18 +2143,27 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.peer_bots` — `feishu, lark`
 
-将指定飞书机器人身份识别为 Relay 对端。
+将每个对端机器人 app_id 映射为友好别名，用于引用回复归因。
 
 - 作用域：`platform` (`feishu, lark`)
-- 类型：`string[]`
-- 默认值：`unset / adapter default`
+- 类型：`table`
+- 默认值：`empty`
 - 生效方式：`restart`
 
-### `projects.platforms.options.port` — `feishu, lark, line`
+### `projects.platforms.options.port` — `feishu, lark`
+
+以带引号的字符串设置 Webhook 模式监听端口。
+
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`string`
+- 默认值：`8080`
+- 生效方式：`restart`
+
+### `projects.platforms.options.port` — `line`
 
 以带引号的字符串设置入站 Webhook 监听端口。
 
-- 作用域：`platform` (`feishu, lark, line`)
+- 作用域：`platform` (`line`)
 - 类型：`string`
 - 默认值：`8080`
 - 生效方式：`restart`
@@ -2114,13 +2177,23 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 默认值：`8081`
 - 生效方式：`restart`
 
-### `projects.platforms.options.progress_style` — `discord, feishu, lark, telegram`
+### `projects.platforms.options.progress_style` — `discord, telegram`
 
 选择消息平台上的进度展示样式。
 
-- 作用域：`platform` (`discord, feishu, lark, telegram`)
+- 作用域：`platform` (`discord, telegram`)
 - 类型：`string`
 - 默认值：`compact`
+- 生效方式：`restart`
+- 允许值: `legacy`, `compact`, `card`
+
+### `projects.platforms.options.progress_style` — `feishu, lark`
+
+选择飞书/Lark 回复的 legacy、compact 或 card 进度展示样式。
+
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`string`
+- 默认值：`legacy`
 - 生效方式：`restart`
 - 允许值: `legacy`, `compact`, `card`
 
@@ -2153,49 +2226,67 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 生效方式：`restart`
 - 敏感信息：是；优先使用环境变量占位符。
 
-### `projects.platforms.options.reaction_emoji` — `dingtalk, feishu, lark`
+### `projects.platforms.options.reaction_emoji` — `dingtalk`
 
 选择处理中表情。
 
-- 作用域：`platform` (`dingtalk, feishu, lark`)
+- 作用域：`platform` (`dingtalk`)
 - 类型：`string`
 - 默认值：`unset / adapter default`
 - 生效方式：`restart`
 
+### `projects.platforms.options.reaction_emoji` — `feishu, lark`
+
+选择处理中表情回应；'none' 会关闭它，并同时抑制隐式完成回应。
+
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`string`
+- 默认值：`OnIt`
+- 生效方式：`restart`
+
 ### `projects.platforms.options.reply_to_trigger` — `feishu, lark`
 
-在飞书中回复到触发消息。
+以触发消息作为回复目标。设为 false 时普通回复不再引用该消息；真实话题内的回复仍会指向该话题的 thread_id，以保持话题归属。
 
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`boolean`
-- 默认值：`unset / adapter default`
+- 默认值：`true`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.require_mention` — `feishu, lark`
 
-群聊中必须明确 @ 机器人才回复。
+群聊中要求明确 @ 机器人。设为 false 是 group_reply_all = true 的兼容别名；true 不会覆盖显式 group_reply_all 配置。
 
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`boolean`
-- 默认值：`unset / adapter default`
+- 默认值：`true`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.resolve_mentions` — `feishu, lark`
 
-发送给 Agent 前将飞书 @ 解析为可读名称。
+将入站飞书/Lark @ 解析为可读名称，并启用 mention_map 以发送原生机器人 @。
 
 - 作用域：`platform` (`feishu, lark`)
+- 类型：`boolean`
+- 默认值：`false`
+- 生效方式：`restart`
+
+### `projects.platforms.options.respond_to_at_everyone_and_here` — `discord`
+
+将 @everyone/@here 视为有效的机器人提及。
+
+- 作用域：`platform` (`discord`)
 - 类型：`boolean`
 - 默认值：`unset / adapter default`
 - 生效方式：`restart`
 
-### `projects.platforms.options.respond_to_at_everyone_and_here` — `discord, feishu, lark`
+### `projects.platforms.options.respond_to_at_everyone_and_here` — `feishu, lark`
 
 将 @everyone/@here 视为有效的机器人提及。
 
-- 作用域：`platform` (`discord, feishu, lark`)
+- 作用域：`platform` (`feishu, lark`)
 - 类型：`boolean`
-- 默认值：`unset / adapter default`
+- 默认值：`false`
 - 生效方式：`restart`
 
 ### `projects.platforms.options.robot_code` — `dingtalk`
@@ -2235,11 +2326,20 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 生效方式：`restart`
 - 允许值: `user`, `channel`, `thread`
 
-### `projects.platforms.options.share_session_in_channel` — `dingtalk, discord, feishu, lark, matrix, qq, qqbot, slack, telegram`
+### `projects.platforms.options.share_session_in_channel` — `dingtalk, discord, matrix, qq, qqbot, slack, telegram`
 
 让频道或房间内所有用户共享同一个 Agent 会话。
 
-- 作用域：`platform` (`dingtalk, discord, feishu, lark, matrix, qq, qqbot, slack, telegram`)
+- 作用域：`platform` (`dingtalk, discord, matrix, qq, qqbot, slack, telegram`)
+- 类型：`boolean`
+- 默认值：`false`
+- 生效方式：`restart`
+
+### `projects.platforms.options.share_session_in_channel` — `feishu, lark`
+
+让同一非隔离频道内的用户共享一个 Agent 会话；thread_isolation 仍可为真实话题建立独立会话。
+
+- 作用域：`platform` (`feishu, lark`)
 - 类型：`boolean`
 - 默认值：`false`
 - 生效方式：`restart`
