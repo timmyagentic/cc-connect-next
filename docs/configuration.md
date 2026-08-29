@@ -2264,12 +2264,13 @@ Use a separate Agent session for each platform thread or topic.
 
 ### `projects.platforms.options.thread_isolation` — `feishu, lark`
 
-Use a separate Agent session and workspace binding for each Feishu/Lark topic. Omitting the key keeps the false compatibility fallback; new Starter configs and accepted recommended profiles explicitly set true.
+Choose Feishu/Lark topic isolation scope. off keeps legacy per-user/channel sessions. topics_only isolates only real topics whose events carry thread_id; ordinary group messages stay in the main chat. topic_per_message gives every top-level group message its own topic/session. Real topics get an independent Agent session and workspace binding in both enabled modes. Omitting the key maps to off; legacy true maps to topic_per_message and false maps to off. New Starter and recommended profiles write topics_only.
 
 - Scope: `platform` (`feishu, lark`)
-- Type: `boolean`
-- Default: `false when omitted; new Starter/recommended profile writes true`
+- Type: `string | boolean (legacy)`
+- Default: `off when omitted; new Starter/recommended profile writes topics_only; legacy true maps to topic_per_message`
 - Takes effect: `restart`
+- Allowed values: `off`, `topics_only`, `topic_per_message`
 
 ### `projects.platforms.options.token` — `discord, max, qq, telegram, webex, weixin`
 

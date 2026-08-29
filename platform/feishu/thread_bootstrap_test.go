@@ -17,7 +17,7 @@ import (
 )
 
 func TestMarkThreadSessionActiveReportsFirstActivation(t *testing.T) {
-	p := &Platform{threadIsolation: true}
+	p := &Platform{threadMode: threadIsolationTopicsOnly}
 	const key = "feishu:oc_chat:root:om_root"
 	if !p.markThreadSessionActive(key) {
 		t.Fatal("first activation must request thread bootstrap")
@@ -90,13 +90,13 @@ func TestOnMessageThreadBootstrapRetriesAfterRootFetchFailure(t *testing.T) {
 	defer srv.Close()
 
 	p := &Platform{
-		platformName:    "feishu",
-		domain:          srv.URL,
-		appID:           appID,
-		appSecret:       appSecret,
-		botOpenID:       botOpenID,
-		threadIsolation: true,
-		dedup:           &core.MessageDedup{},
+		platformName: "feishu",
+		domain:       srv.URL,
+		appID:        appID,
+		appSecret:    appSecret,
+		botOpenID:    botOpenID,
+		threadMode:   threadIsolationTopicsOnly,
+		dedup:        &core.MessageDedup{},
 		client: lark.NewClient(appID, appSecret,
 			lark.WithOpenBaseUrl(srv.URL),
 			lark.WithHttpClient(srv.Client()),
@@ -199,10 +199,10 @@ func TestDispatchMessageCompletesBootstrapOnlyAfterCoreDispatch(t *testing.T) {
 	defer srv.Close()
 
 	p := &Platform{
-		platformName:    "feishu",
-		appID:           appID,
-		appSecret:       appSecret,
-		threadIsolation: true,
+		platformName: "feishu",
+		appID:        appID,
+		appSecret:    appSecret,
+		threadMode:   threadIsolationTopicsOnly,
 		client: lark.NewClient(appID, appSecret,
 			lark.WithOpenBaseUrl(srv.URL),
 			lark.WithHttpClient(srv.Client()),
@@ -334,13 +334,13 @@ func TestOnMessageThreadBootstrapQueuesConcurrentFollowUpsInOrder(t *testing.T) 
 	defer releaseRoot()
 
 	p := &Platform{
-		platformName:    "feishu",
-		domain:          srv.URL,
-		appID:           appID,
-		appSecret:       appSecret,
-		botOpenID:       botOpenID,
-		threadIsolation: true,
-		dedup:           &core.MessageDedup{},
+		platformName: "feishu",
+		domain:       srv.URL,
+		appID:        appID,
+		appSecret:    appSecret,
+		botOpenID:    botOpenID,
+		threadMode:   threadIsolationTopicsOnly,
+		dedup:        &core.MessageDedup{},
 		client: lark.NewClient(appID, appSecret,
 			lark.WithOpenBaseUrl(srv.URL),
 			lark.WithHttpClient(srv.Client()),
@@ -454,13 +454,13 @@ func TestOnMessageThreadIsolationBootstrapsExistingRoot(t *testing.T) {
 	defer srv.Close()
 
 	p := &Platform{
-		platformName:    "feishu",
-		domain:          srv.URL,
-		appID:           appID,
-		appSecret:       appSecret,
-		botOpenID:       botOpenID,
-		threadIsolation: true,
-		dedup:           &core.MessageDedup{},
+		platformName: "feishu",
+		domain:       srv.URL,
+		appID:        appID,
+		appSecret:    appSecret,
+		botOpenID:    botOpenID,
+		threadMode:   threadIsolationTopicsOnly,
+		dedup:        &core.MessageDedup{},
 		client: lark.NewClient(appID, appSecret,
 			lark.WithOpenBaseUrl(srv.URL),
 			lark.WithHttpClient(srv.Client()),

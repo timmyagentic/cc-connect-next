@@ -1034,7 +1034,7 @@ func TestMarkAndIsActiveThreadSession(t *testing.T) {
 	const directKey = "feishu:oc_chat:ou_user"
 
 	t.Run("thread isolation disabled is no-op", func(t *testing.T) {
-		p := &Platform{threadIsolation: false}
+		p := &Platform{threadMode: threadIsolationOff}
 		p.markThreadSessionActive(threadKey)
 		if p.isActiveThreadSession(threadKey) {
 			t.Fatal("expected no-op when thread_isolation is off")
@@ -1042,7 +1042,7 @@ func TestMarkAndIsActiveThreadSession(t *testing.T) {
 	})
 
 	t.Run("non-thread sessionKey is ignored", func(t *testing.T) {
-		p := &Platform{threadIsolation: true}
+		p := &Platform{threadMode: threadIsolationTopicsOnly}
 		p.markThreadSessionActive(directKey)
 		if p.isActiveThreadSession(directKey) {
 			t.Fatal("expected non-thread sessionKey to be ignored")
@@ -1050,7 +1050,7 @@ func TestMarkAndIsActiveThreadSession(t *testing.T) {
 	})
 
 	t.Run("thread sessionKey is recorded", func(t *testing.T) {
-		p := &Platform{threadIsolation: true}
+		p := &Platform{threadMode: threadIsolationTopicsOnly}
 		if p.isActiveThreadSession(threadKey) {
 			t.Fatal("thread should not be active before mark")
 		}
@@ -1103,13 +1103,13 @@ func TestOnMessageThreadIsolationAdmitsAttachmentWithoutMention(t *testing.T) {
 
 	received := make(chan *core.Message, 8)
 	p := &Platform{
-		platformName:    "feishu",
-		domain:          srv.URL,
-		appID:           appID,
-		appSecret:       appSecret,
-		botOpenID:       botOpenID,
-		threadIsolation: true,
-		dedup:           &core.MessageDedup{},
+		platformName: "feishu",
+		domain:       srv.URL,
+		appID:        appID,
+		appSecret:    appSecret,
+		botOpenID:    botOpenID,
+		threadMode:   threadIsolationTopicsOnly,
+		dedup:        &core.MessageDedup{},
 		client: lark.NewClient(appID, appSecret,
 			lark.WithOpenBaseUrl(srv.URL),
 			lark.WithHttpClient(srv.Client()),
@@ -1128,7 +1128,7 @@ func TestOnMessageThreadIsolationAdmitsAttachmentWithoutMention(t *testing.T) {
 		return &s
 	}
 
-	buildEvent := func(msgID, msgType, content string, mentions []*larkim.MentionEvent, rootID string) *larkim.P2MessageReceiveV1 {
+	buildEvent := func(msgID, msgType, content string, mentions []*larkim.MentionEvent, rootID, threadID string) *larkim.P2MessageReceiveV1 {
 		ev := &larkim.P2MessageReceiveV1{
 			Event: &larkim.P2MessageReceiveV1Data{
 				Sender: &larkim.EventSender{
@@ -1149,6 +1149,9 @@ func TestOnMessageThreadIsolationAdmitsAttachmentWithoutMention(t *testing.T) {
 		if rootID != "" {
 			ev.Event.Message.RootId = stringPtr(rootID)
 		}
+		if threadID != "" {
+			ev.Event.Message.ThreadId = stringPtr(threadID)
+		}
 		return ev
 	}
 
@@ -1161,7 +1164,7 @@ func TestOnMessageThreadIsolationAdmitsAttachmentWithoutMention(t *testing.T) {
 	}
 
 	// Step 1: opening message @mentions the bot — establishes the thread.
-	if err := p.onMessage(context.Background(), buildEvent(rootMsgID, "text", `{"text":"@_user_1 看看这个"}`, botMention, "")); err != nil {
+	if err := p.onMessage(context.Background(), buildEvent(rootMsgID, "text", `{"text":"@_user_1 看看这个"}`, botMention, "", "omt_thread")); err != nil {
 		t.Fatalf("onMessage(root) error = %v", err)
 	}
 	threadKey := "feishu:" + chatID + ":root:" + rootMsgID
@@ -1176,7 +1179,7 @@ func TestOnMessageThreadIsolationAdmitsAttachmentWithoutMention(t *testing.T) {
 
 	// Step 2: follow-up image in the same thread, no @mention — should pass through.
 	imgContent := `{"image_key":"` + imageKey + `"}`
-	if err := p.onMessage(context.Background(), buildEvent("om_thread_img", "image", imgContent, nil, rootMsgID)); err != nil {
+	if err := p.onMessage(context.Background(), buildEvent("om_thread_img", "image", imgContent, nil, rootMsgID, "omt_thread")); err != nil {
 		t.Fatalf("onMessage(image in thread) error = %v", err)
 	}
 	select {
@@ -1192,7 +1195,7 @@ func TestOnMessageThreadIsolationAdmitsAttachmentWithoutMention(t *testing.T) {
 	}
 
 	// Step 3: image in a *different* thread without @mention — should still be dropped.
-	if err := p.onMessage(context.Background(), buildEvent("om_other_img", "image", imgContent, nil, "om_other_root")); err != nil {
+	if err := p.onMessage(context.Background(), buildEvent("om_other_img", "image", imgContent, nil, "om_other_root", "omt_other_thread")); err != nil {
 		t.Fatalf("onMessage(image in unrelated thread) error = %v", err)
 	}
 	select {
@@ -1205,7 +1208,7 @@ func TestOnMessageThreadIsolationAdmitsAttachmentWithoutMention(t *testing.T) {
 	// Step 4: text without @mention in the active thread — should be dropped
 	// (only attachments are admitted; otherwise unrelated thread chatter would
 	// flood the agent).
-	if err := p.onMessage(context.Background(), buildEvent("om_thread_text", "text", `{"text":"刚才那张图能看到吗"}`, nil, rootMsgID)); err != nil {
+	if err := p.onMessage(context.Background(), buildEvent("om_thread_text", "text", `{"text":"刚才那张图能看到吗"}`, nil, rootMsgID, "omt_thread")); err != nil {
 		t.Fatalf("onMessage(text in thread without mention) error = %v", err)
 	}
 	select {

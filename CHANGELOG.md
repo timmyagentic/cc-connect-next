@@ -13,9 +13,11 @@
   `reply_footer = false` still disables it and takes precedence over the new
   built-in default.
 - New Starter configs and accepted recommended Feishu/Lark profiles now write
-  `thread_isolation = true`, so each group topic gets an independent Agent
-  session and workspace binding. Existing configs that omit the key keep the
-  compatibility fallback `false`; explicit `false` remains supported.
+  `thread_isolation = "topics_only"`, so real group topics get independent
+  Agent sessions and workspace bindings while ordinary group messages remain
+  in the main chat. Existing configs remain compatible: omission and legacy
+  `false` map to `off`, while legacy `true` preserves the historical
+  `topic_per_message` behavior.
 
 ### Agent-friendly configuration knowledge
 
@@ -46,7 +48,13 @@
   Browser-connected Web/Bridge sessions are rejected before create, update,
   enable, or manual trigger, and the Web editor disables them with an explicit
   explanation instead of accepting jobs that fail after `triggered`.
-
+- Feishu/Lark `thread_isolation` is now an explicit scope mode: `off`,
+  `topics_only`, or `topic_per_message`. `topics_only` isolates only messages
+  that the platform marks as real topics (`thread_id` is present), while
+  `topic_per_message` preserves the previous behavior in which every top-level
+  group message becomes an isolated topic. Topic routing now also takes
+  precedence over `reply_to_trigger`, so disabling quote-style replies cannot
+  leak a real-topic response back into the main chat.
 - Feishu/Lark WebSocket projects now fail closed for mention-gated group
   traffic when startup cannot resolve the bot `open_id`. The degraded identity
   reaches the existing runtime health/readiness surface, transient discovery

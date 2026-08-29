@@ -1104,8 +1104,8 @@ app_secret = "your-feishu-app-secret"
 #                           # 可选：仅这些群聊无需 @；其他群聊仍需 @。也支持 TOML 字符串数组。
 # share_session_in_channel = false  # If true, all users in a group share one agent session
 #                                   # 设为 true 时，群聊内所有用户共享同一个 Agent 会话
-# thread_isolation = true   # New Starter/recommended Feishu profile: one thread/root = one agent session; set false for legacy per-user chat sessions
-#                           # 新 Starter/推荐飞书配置：一个话题/根消息对应一个 Agent 会话；设为 false 保留旧版群内按用户会话
+# thread_isolation = "topics_only" # off | topics_only | topic_per_message; legacy true = topic_per_message, false = off
+#                                   # 关闭 | 仅真实话题隔离 | 每条群消息一个话题；旧 true 映射 topic_per_message，false 映射 off
 # reply_to_trigger = true   # Default: bot uses “reply to message” API (quotes the user’s message). Set false to post plain chat messages instead.
 #                           # 默认 true：用「回复消息」API（引用用户消息）。设为 false 则在会话里发普通消息、不引用触发消息。
 # progress_style = "legacy" # Progress rendering style: legacy | compact | card
