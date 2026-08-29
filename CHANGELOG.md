@@ -46,7 +46,11 @@
   Browser-connected Web/Bridge sessions are rejected before create, update,
   enable, or manual trigger, and the Web editor disables them with an explicit
   explanation instead of accepting jobs that fail after `triggered`.
-
+- Feishu/Lark `thread_isolation = true` now isolates only messages that the
+  platform marks as real topics (`thread_id` is present). A direct @mention in
+  the main group chat, or an ordinary non-topic quoted reply, keeps the legacy
+  per-user/channel session and no longer creates a topic automatically; topic
+  roots and replies still share one isolated session and workspace binding.
 - Feishu/Lark WebSocket projects now fail closed for mention-gated group
   traffic when startup cannot resolve the bot `open_id`. The degraded identity
   reaches the existing runtime health/readiness surface, transient discovery

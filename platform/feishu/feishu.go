@@ -4581,15 +4581,23 @@ func stripMentions(text string, mentions []*larkim.MentionEvent, botOpenID strin
 	return strings.TrimSpace(text)
 }
 
-// TODO: Session-key derivation and reply-thread behavior are split across multiple code paths here.
-// Should revisit thread/root handling without changing thread_isolation=false behavior.
+// topicRootMessageID returns a stable root only for messages that Feishu marks
+// as belonging to a real topic. RootId alone is insufficient: ordinary quoted
+// replies also carry it, while ThreadId is absent for every non-topic message.
+func topicRootMessageID(msg *larkim.EventMessage) string {
+	if msg == nil || stringValue(msg.ThreadId) == "" {
+		return ""
+	}
+	if rootID := stringValue(msg.RootId); rootID != "" {
+		return rootID
+	}
+	// A topic's root message has no RootId because it is not itself a reply.
+	return stringValue(msg.MessageId)
+}
+
 func (p *Platform) makeSessionKey(msg *larkim.EventMessage, chatID, userID string) string {
 	if p.threadIsolation && msg != nil && stringValue(msg.ChatType) == "group" {
-		rootID := stringValue(msg.RootId)
-		if rootID == "" {
-			rootID = stringValue(msg.MessageId)
-		}
-		if rootID != "" {
+		if rootID := topicRootMessageID(msg); rootID != "" {
 			return fmt.Sprintf("%s:%s:root:%s", p.tag(), chatID, rootID)
 		}
 	}

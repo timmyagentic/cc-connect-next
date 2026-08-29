@@ -149,7 +149,7 @@ reply_to_trigger = true
 done_emoji = "Done"
 # domain = "https://open.feishu.cn" # 可选：覆盖运行时 API/WebSocket 域名
 # enable_feishu_card = true  # 可选：关闭后统一回退纯文本回复
-thread_isolation = true     # 新 Starter/推荐 Profile 默认；按飞书 thread/root 隔离群聊会话
+thread_isolation = true     # 新 Starter/推荐 Profile 默认；仅按真实飞书话题隔离会话
 # group_reply_all_chats = "oc_target_chat_id_1,oc_target_chat_id_2" # 可选：仅指定群聊免 @
 # progress_style = "legacy"  # 可选：legacy | compact | card
 # resolve_mentions = true    # 可选：把 @显示名 解析为飞书原生 at
@@ -159,7 +159,7 @@ thread_isolation = true     # 新 Starter/推荐 Profile 默认；按飞书 thre
 
 > `card_mode = "rich"` 是 cc-connect-next 的默认飞书回答形态：收到消息后立即引用回复一张非空 Card 2.0 卡片，只展示匿名的推理/工具次数；答案开始后在同一卡片中流式更新正文，结束时显示当前语言对应的完成文案（中文为 `已完成`）。推理文本、工具名称/参数/结果、token、上下文和工作目录不会进入这张回答卡片，也不存在可展开详情；默认 footer 只展示 model、effort 与本轮处理时间，可用 `reply_footer = false` 关闭。`hide_agent_footer = true` 还会过滤 Agent 自己附加的 model/token/context 状态尾巴。需要上游旧展示时显式设置 `card_mode = "legacy"`。精确行为和验收命令见[回答卡片契约](feishu-card-contract.md)。
 > 如果应用没有交互卡片权限，或后台未配置卡片回调，可将 `enable_feishu_card = false`，让所有命令统一走纯文本回复，避免卡片发送失败后用户看不到内容。
-> 新 Starter 和用户接受的推荐飞书 Profile 会显式写入 `thread_isolation = true`：群聊里每个根消息 / reply thread 对应一个独立 agent session 和独立工作区绑定；已有群级工作区会作为新话题默认值复制过去，但不会被删除，也不会覆盖已有话题绑定。旧配置如果省略该键仍保持 `false`，不会因升级改变会话边界；显式设为 `false` 也可保留群内按用户会话。机器人第一次在既有话题中被 @ 时会补入此前根消息上下文一次；补上下文期间到达的同话题消息按接收顺序短暂排队，临时拉取失败则由下一条消息重试。后续回合不重复注入。私聊行为保持原样。
+> 新 Starter 和用户接受的推荐飞书 Profile 会显式写入 `thread_isolation = true`。只有飞书事件明确携带 `thread_id` 的真实话题才会获得独立 agent session 和工作区绑定：话题根消息用自身 message ID，话题回复用 root ID，因此同一话题始终映射到同一 session。群主会话里直接 @ 机器人，以及不属于话题的普通引用回复，仍沿用 `thread_isolation = false` 时的按用户/频道会话，并在主会话原地回复，不会自动创建话题；`reply_to_trigger = true` 只会引用触发消息。已有群级工作区会作为新话题默认值复制过去，但不会被删除，也不会覆盖已有话题绑定。旧配置如果省略该键仍保持 `false`；显式设为 `false` 也受支持。机器人第一次在既有话题中被 @ 时会补入此前根消息上下文一次；补上下文期间到达的同话题消息按接收顺序短暂排队，临时拉取失败则由下一条消息重试。后续回合不重复注入。私聊行为保持原样。
 > `progress_style = "compact"` 会把思考/工具进度合并到一条可更新消息里，减少刷屏；`legacy` 保持原有逐条发送；`card` 会使用结构化卡片（标题 + 进度块）持续更新同一条消息，观感比纯文本更清晰。
 > `domain` 只影响运行时 API / WebSocket 请求地址；CLI `setup/new/bind` 的引导域名仍然使用内置默认值。
 > `done_emoji` 设置后，agent 每次完成回复时会在用户消息上添加指定表情（如 `"Done"` → ✅）。先移除 "OnIt" 表情（如果有），再添加 done 表情。在 quiet 模式下特别有用，因为飞书卡片原地更新不触发推送，done 表情可以通知用户 agent 已完成。设为 `"none"` 或不配置则禁用。
@@ -431,7 +431,7 @@ AI 输出中包含 `@某人` 时，发送到飞书前会自动匹配并替换。
 
 ### 话题级工作区
 
-开启 `thread_isolation = true` 后，每个话题使用独立的 workspace channel key。已有群级 `/workspace bind` 会作为话题默认值被复制，但源绑定始终保留；已经显式绑定的话题不会被默认值覆盖。这样两个话题可以分别绑定不同目录，而一个话题执行 `/workspace unbind` 也不会影响另一个话题。
+开启 `thread_isolation = true` 后，每个真实话题（事件含 `thread_id`）使用独立的 workspace channel key。群主会话中的普通消息仍使用原来的用户/频道 key。已有群级 `/workspace bind` 会作为话题默认值被复制，但源绑定始终保留；已经显式绑定的话题不会被默认值覆盖。这样两个话题可以分别绑定不同目录，而一个话题执行 `/workspace unbind` 也不会影响另一个话题。
 
 机器人第一次在一个已经存在的飞书话题里被 @ 时，会把此前的根消息 / 回复链作为上下文补给 Agent，并把该话题标记为已激活。补上下文尚未完成时，同话题后续消息按接收顺序等待，避免较新的消息先进入 Agent 而让首条指令被时间水位丢弃；若根消息 API 临时失败，队列中的下一条消息会重试。成功后继续使用独立 session，但不会反复注入旧上下文。
 

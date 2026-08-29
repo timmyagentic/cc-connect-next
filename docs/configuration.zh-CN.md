@@ -2264,7 +2264,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.thread_isolation` — `feishu, lark`
 
-为每个飞书/Lark 话题使用独立 Agent 会话和工作区绑定。省略该键时保留 false 兼容回落；新 Starter 配置和用户接受的推荐 Profile 会显式写入 true。
+仅为事件携带 thread_id 的真实飞书/Lark 话题使用独立 Agent 会话和工作区绑定。普通群消息和非话题引用回复沿用旧版按用户/频道会话，绝不会被升级成话题。省略该键时保留 false 兼容回落；新 Starter 配置和用户接受的推荐 Profile 会显式写入 true。
 
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`boolean`

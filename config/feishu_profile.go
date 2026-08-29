@@ -92,7 +92,7 @@ func RecommendedFeishuProfile(agentType string) []RecommendedFeishuSetting {
 		{feishuProfileTablePlatform, "reply_to_trigger", "true",
 			"reply in a quote of the message that triggered the turn"},
 		{feishuProfileTablePlatform, "thread_isolation", "true",
-			"give every Feishu topic its own agent session and workspace binding"},
+			"isolate real Feishu topics without changing ordinary group-chat sessions"},
 		{feishuProfileTablePlatform, "done_emoji", `"Done"`,
 			"react when a turn finishes so the chat pushes a notification"},
 		{feishuProfileTablePlatform, "group_reply_all", "true",

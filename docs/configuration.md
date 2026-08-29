@@ -2264,7 +2264,7 @@ Use a separate Agent session for each platform thread or topic.
 
 ### `projects.platforms.options.thread_isolation` — `feishu, lark`
 
-Use a separate Agent session and workspace binding for each Feishu/Lark topic. Omitting the key keeps the false compatibility fallback; new Starter configs and accepted recommended profiles explicitly set true.
+Use a separate Agent session and workspace binding only for real Feishu/Lark topics whose events carry thread_id. Ordinary group messages and non-topic replies keep legacy per-user/channel sessions and are never promoted to topics. Omitting the key keeps the false compatibility fallback; new Starter configs and accepted recommended profiles explicitly set true.
 
 - Scope: `platform` (`feishu, lark`)
 - Type: `boolean`

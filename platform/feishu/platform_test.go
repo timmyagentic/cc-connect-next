@@ -72,16 +72,68 @@ func TestMakeSessionKey_ThreadIsolationSeparatesGroupRoots(t *testing.T) {
 	p := &Platform{platformName: "feishu", threadIsolation: true}
 	chatType := "group"
 	rootA, rootB := "om_root_a", "om_root_b"
+	threadA, threadB := "omt_thread_a", "omt_thread_b"
 	messageA, messageB := "om_reply_a", "om_reply_b"
 
-	keyA := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, RootId: &rootA, MessageId: &messageA}, "oc_group", "ou_user")
-	keyB := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, RootId: &rootB, MessageId: &messageB}, "oc_group", "ou_user")
+	keyA := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, RootId: &rootA, ThreadId: &threadA, MessageId: &messageA}, "oc_group", "ou_user")
+	keyB := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, RootId: &rootB, ThreadId: &threadB, MessageId: &messageB}, "oc_group", "ou_user")
 	if keyA == keyB {
 		t.Fatalf("different topic roots share session key %q", keyA)
 	}
 	if keyA != "feishu:oc_group:root:om_root_a" || keyB != "feishu:oc_group:root:om_root_b" {
 		t.Fatalf("topic keys = %q / %q", keyA, keyB)
 	}
+}
+
+func TestMakeSessionKey_ThreadIsolationOnlyAppliesToRealTopics(t *testing.T) {
+	chatType := "group"
+	messageID := "om_message"
+	rootID := "om_root"
+	threadID := "omt_topic"
+
+	tests := []struct {
+		name string
+		msg  *larkim.EventMessage
+		want string
+	}{
+		{
+			name: "plain top-level group message keeps per-user session",
+			msg:  &larkim.EventMessage{ChatType: &chatType, MessageId: &messageID},
+			want: "feishu:oc_group:ou_user",
+		},
+		{
+			name: "ordinary non-topic reply does not isolate on root id alone",
+			msg:  &larkim.EventMessage{ChatType: &chatType, MessageId: &messageID, RootId: &rootID},
+			want: "feishu:oc_group:ou_user",
+		},
+		{
+			name: "topic root uses its own message id",
+			msg:  &larkim.EventMessage{ChatType: &chatType, MessageId: &rootID, ThreadId: &threadID},
+			want: "feishu:oc_group:root:om_root",
+		},
+		{
+			name: "topic reply uses stable root id",
+			msg:  &larkim.EventMessage{ChatType: &chatType, MessageId: &messageID, RootId: &rootID, ThreadId: &threadID},
+			want: "feishu:oc_group:root:om_root",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Platform{platformName: "feishu", threadIsolation: true}
+			if got := p.makeSessionKey(tt.msg, "oc_group", "ou_user"); got != tt.want {
+				t.Fatalf("makeSessionKey() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("plain group message still honors shared channel sessions", func(t *testing.T) {
+		p := &Platform{platformName: "feishu", threadIsolation: true, shareSessionInChannel: true}
+		msg := &larkim.EventMessage{ChatType: &chatType, MessageId: &messageID}
+		if got := p.makeSessionKey(msg, "oc_group", "ou_user"); got != "feishu:oc_group" {
+			t.Fatalf("makeSessionKey() = %q, want channel session", got)
+		}
+	})
 }
 
 func TestNew_CanDisableInteractiveCards(t *testing.T) {
@@ -776,6 +828,7 @@ func TestLark_ThreadIsolationUsesRootSessionKey(t *testing.T) {
 
 	messageID := "om_reply"
 	rootID := "om_root"
+	threadID := "omt_topic"
 	chatID := "oc_test"
 	openID := "ou_test"
 	msgType := "text"
@@ -802,6 +855,7 @@ func TestLark_ThreadIsolationUsesRootSessionKey(t *testing.T) {
 			Message: &larkim.EventMessage{
 				MessageId:   &messageID,
 				RootId:      &rootID,
+				ThreadId:    &threadID,
 				ChatId:      &chatID,
 				ChatType:    &chatType,
 				MessageType: &msgType,
@@ -826,7 +880,7 @@ func TestLark_ThreadIsolationUsesRootSessionKey(t *testing.T) {
 	}
 }
 
-func TestLark_GroupReplyAllWithThreadIsolationUsesRootSessionKeyWithoutMention(t *testing.T) {
+func TestLark_GroupReplyAllWithThreadIsolationKeepsPlainGroupSessionWithoutMention(t *testing.T) {
 	p, err := newPlatform("lark", lark.LarkBaseUrl, map[string]any{
 		"app_id": "cli_xxx", "app_secret": "secret", "enable_feishu_card": true,
 		"group_reply_all": true, "thread_isolation": true,
@@ -836,7 +890,7 @@ func TestLark_GroupReplyAllWithThreadIsolationUsesRootSessionKeyWithoutMention(t
 	}
 	ip := p.(*interactivePlatform)
 
-	messageID := "om_root"
+	messageID := "om_plain"
 	chatID := "oc_test"
 	openID := "ou_test"
 	msgType := "text"
@@ -871,18 +925,18 @@ func TestLark_GroupReplyAllWithThreadIsolationUsesRootSessionKeyWithoutMention(t
 
 	select {
 	case receivedMsg := <-msgCh:
-		if receivedMsg.SessionKey != "lark:oc_test:root:om_root" {
-			t.Fatalf("SessionKey = %q, want lark:oc_test:root:om_root", receivedMsg.SessionKey)
+		if receivedMsg.SessionKey != "lark:oc_test:ou_test" {
+			t.Fatalf("SessionKey = %q, want lark:oc_test:ou_test", receivedMsg.SessionKey)
 		}
 		rc, ok := receivedMsg.ReplyCtx.(replyContext)
 		if !ok {
 			t.Fatalf("ReplyCtx type = %T, want replyContext", receivedMsg.ReplyCtx)
 		}
-		if rc.sessionKey != "lark:oc_test:root:om_root" {
-			t.Fatalf("replyContext.sessionKey = %q, want lark:oc_test:root:om_root", rc.sessionKey)
+		if rc.sessionKey != "lark:oc_test:ou_test" {
+			t.Fatalf("replyContext.sessionKey = %q, want lark:oc_test:ou_test", rc.sessionKey)
 		}
-		if rc.messageID != "om_root" {
-			t.Fatalf("replyContext.messageID = %q, want om_root", rc.messageID)
+		if rc.messageID != "om_plain" {
+			t.Fatalf("replyContext.messageID = %q, want om_plain", rc.messageID)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected group root message to be handled without mention")
@@ -932,6 +986,24 @@ func TestBuildReplyMessageReqBody_SetsReplyInThreadFlag(t *testing.T) {
 				t.Fatalf("ReplyInThread = %v, want %v", got, tt.wantThreading)
 			}
 		})
+	}
+}
+
+func TestBuildReplyMessageReqBody_ThreadIsolationDoesNotPromotePlainGroupMessage(t *testing.T) {
+	p := &Platform{platformName: "feishu", threadIsolation: true}
+	chatType := "group"
+	messageID := "om_plain"
+	plainKey := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, MessageId: &messageID}, "oc_group", "ou_user")
+	body := p.buildReplyMessageReqBody(replyContext{messageID: messageID, sessionKey: plainKey}, larkim.MsgTypeText, `{"text":"hello"}`)
+	if body.ReplyInThread != nil && *body.ReplyInThread {
+		t.Fatal("plain group @mention would be promoted to a topic")
+	}
+
+	threadID := "omt_topic"
+	topicKey := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, MessageId: &messageID, ThreadId: &threadID}, "oc_group", "ou_user")
+	topicBody := p.buildReplyMessageReqBody(replyContext{messageID: messageID, sessionKey: topicKey}, larkim.MsgTypeText, `{"text":"hello"}`)
+	if topicBody.ReplyInThread == nil || !*topicBody.ReplyInThread {
+		t.Fatal("real topic reply did not remain in the topic")
 	}
 }
 

@@ -132,10 +132,10 @@ func TestFeishuThreadIsolationCatalogDistinguishesProfileFromOmissionFallback(t 
 				t.Errorf("%s thread_isolation default %q missing %q", owner, option.Default, want)
 			}
 		}
-		if !strings.Contains(option.Description, "Omitting") || !strings.Contains(option.Description, "workspace binding") {
+		if !strings.Contains(option.Description, "Omitting") || !strings.Contains(option.Description, "workspace binding") || !strings.Contains(option.Description, "Ordinary group messages") {
 			t.Errorf("%s description does not explain compatibility and topic scope: %q", owner, option.Description)
 		}
-		if !strings.Contains(option.DescriptionZH, "省略") || !strings.Contains(option.DescriptionZH, "工作区绑定") {
+		if !strings.Contains(option.DescriptionZH, "省略") || !strings.Contains(option.DescriptionZH, "工作区绑定") || !strings.Contains(option.DescriptionZH, "普通群消息") {
 			t.Errorf("%s Chinese description does not explain compatibility and topic scope: %q", owner, option.DescriptionZH)
 		}
 	}

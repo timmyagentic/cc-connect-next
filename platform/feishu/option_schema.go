@@ -20,8 +20,8 @@ func feishuConfigOptions() []core.ConfigOption {
 			continue
 		}
 		options[i].Default = "false when omitted; new Starter/recommended profile writes true"
-		options[i].Description = "Use a separate Agent session and workspace binding for each Feishu/Lark topic. Omitting the key keeps the false compatibility fallback; new Starter configs and accepted recommended profiles explicitly set true."
-		options[i].DescriptionZH = "为每个飞书/Lark 话题使用独立 Agent 会话和工作区绑定。省略该键时保留 false 兼容回落；新 Starter 配置和用户接受的推荐 Profile 会显式写入 true。"
+		options[i].Description = "Use a separate Agent session and workspace binding only for real Feishu/Lark topics whose events carry thread_id. Ordinary group messages and non-topic replies keep legacy per-user/channel sessions and are never promoted to topics. Omitting the key keeps the false compatibility fallback; new Starter configs and accepted recommended profiles explicitly set true."
+		options[i].DescriptionZH = "仅为事件携带 thread_id 的真实飞书/Lark 话题使用独立 Agent 会话和工作区绑定。普通群消息和非话题引用回复沿用旧版按用户/频道会话，绝不会被升级成话题。省略该键时保留 false 兼容回落；新 Starter 配置和用户接受的推荐 Profile 会显式写入 true。"
 		options[i].Keywords = []string{"topic isolation", "multiple topics", "话题隔离", "话题独立", "多个话题"}
 	}
 	return core.ConfigureOption(options, "port", "8080")
