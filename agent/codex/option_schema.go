@@ -9,10 +9,18 @@ func init() {
 		if options[i].Key != "mode" {
 			continue
 		}
-		options[i].Default = "suggest when omitted; generated starter config writes yolo"
+		options[i].Default = "suggest"
+		options[i].DefaultSource = core.ConfigDefaultAdapter
 		options[i].Description = "Choose the Codex approval and sandbox mode. Omitting the key keeps the suggest compatibility fallback; fresh generated configs explicitly set yolo."
 		options[i].DescriptionZH = "选择 Codex 审批与沙箱模式。省略该键时保留 suggest 兼容回落；全新生成的配置会显式写入 yolo。"
+		options[i].PresetValues = []core.ConfigPresetValue{{Preset: "starter", Value: "yolo", Description: "Fresh generated configuration.", DescriptionZH: "全新生成配置。"}}
 	}
+	options = core.RefineConfigOption(options, "backend", func(option *core.ConfigOption) {
+		option.PresetValues = []core.ConfigPresetValue{{Preset: "starter", Value: "app_server", Description: "Native steering and approval protocol.", DescriptionZH: "使用原生 steer 与审批协议。"}}
+	})
+	options = core.RefineConfigOption(options, "app_server_url", func(option *core.ConfigOption) {
+		option.PresetValues = []core.ConfigPresetValue{{Preset: "starter", Value: "stdio", Description: "Launch a local app-server subprocess.", DescriptionZH: "启动本地 app-server 子进程。"}}
+	})
 	options = core.ConfigureOption(options, "reasoning_effort", "unset / adapter default", "low", "medium", "high", "xhigh", "max")
 	options = append(options, core.DescribeAgentOptions([]string{"provider"})...)
 	core.RegisterAgentConfigOptions("codex", options)

@@ -391,14 +391,22 @@ type Platform struct {
 	imageBatchWindow time.Duration // quiet period before flushing a batch; 0 means use defaultImageBatchWindow
 }
 
-// defaultImageBatchWindow is the quiet period after the last image in a
-// session before the buffered batch is dispatched as a single multi-image
-// message. 500ms covers real-world mobile sending intervals (we've observed
-// ~330ms between consecutive sends from the Feishu mobile client when a user
-// taps "send" repeatedly) while remaining responsive for sequential single
-// image sends. Operators that need a longer or shorter window can override
-// it via the platform option `image_batch_window_ms`.
-const defaultImageBatchWindow = 500 * time.Millisecond
+const (
+	defaultProgressStyle = "legacy"
+	defaultReactionEmoji = "OnIt"
+	defaultDoneEmoji     = "Done"
+	defaultWebhookPort   = "8080"
+	defaultCallbackPath  = "/feishu/webhook"
+
+	// defaultImageBatchWindow is the quiet period after the last image in a
+	// session before the buffered batch is dispatched as a single multi-image
+	// message. 500ms covers real-world mobile sending intervals (we've observed
+	// ~330ms between consecutive sends from the Feishu mobile client when a user
+	// taps "send" repeatedly) while remaining responsive for sequential single
+	// image sends. Operators that need a longer or shorter window can override
+	// it via the platform option `image_batch_window_ms`.
+	defaultImageBatchWindow = 500 * time.Millisecond
+)
 
 // batchWindow returns the effective image-batch coalesce window for this
 // Platform. Tests and zero-initialised Platforms fall back to the default so
@@ -497,7 +505,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 	}
 	reactionEmoji, _ := opts["reaction_emoji"].(string)
 	if reactionEmoji == "" {
-		reactionEmoji = "OnIt"
+		reactionEmoji = defaultReactionEmoji
 	}
 	reactionsOptedOut := false
 	if v, ok := opts["reaction_emoji"].(string); ok && v == "none" {
@@ -509,7 +517,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		// reaction_emoji = "none" is an explicit "do not react to my messages",
 		// so it covers the completion reaction too. Spelling done_emoji out
 		// still wins, for anyone who wants only the finished-turn ping.
-		doneEmoji = "Done"
+		doneEmoji = defaultDoneEmoji
 	}
 	if doneEmoji == "none" {
 		doneEmoji = ""
@@ -556,11 +564,11 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		return nil, fmt.Errorf("%s: mention_map requires resolve_mentions = true", name)
 	}
 
-	progressStyle := "legacy"
+	progressStyle := defaultProgressStyle
 	if v, ok := opts["progress_style"].(string); ok {
 		switch strings.ToLower(strings.TrimSpace(v)) {
 		case "", "legacy":
-			progressStyle = "legacy"
+			progressStyle = defaultProgressStyle
 		case "compact", "card":
 			progressStyle = strings.ToLower(strings.TrimSpace(v))
 		default:
@@ -587,11 +595,11 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 	// Webhook mode configuration (for Lark international version)
 	port, _ := opts["port"].(string)
 	if port == "" {
-		port = "8080"
+		port = defaultWebhookPort
 	}
 	callbackPath, _ := opts["callback_path"].(string)
 	if callbackPath == "" {
-		callbackPath = "/feishu/webhook"
+		callbackPath = defaultCallbackPath
 	}
 	encryptKey, _ := opts["encrypt_key"].(string)
 

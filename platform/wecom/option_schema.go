@@ -8,5 +8,16 @@ func init() {
 		"callback_path", "callback_token", "corp_id", "corp_secret", "enable_markdown", "mode", "port",
 		"proxy", "proxy_password", "proxy_username",
 	})
-	core.RegisterPlatformConfigOptions("wecom", core.ConfigureOption(options, "port", "8081"))
+	options = core.ConfigureOption(options, "mode", "callback", "callback", "websocket")
+	for _, key := range []string{"corp_id", "corp_secret", "agent_id", "callback_token", "callback_aes_key"} {
+		options = core.ConfigureConditionalOption(options, key, "mode is unset or mode = callback")
+	}
+	for _, key := range []string{"bot_id", "bot_secret"} {
+		options = core.ConfigureConditionalOption(options, key, "mode = websocket")
+	}
+	options = core.ConfigureOption(options, "port", "8081")
+	options = core.ConfigureOption(options, "callback_path", "/wecom/callback")
+	options = core.ConfigureOption(options, "api_base_url", defaultAPIBaseURL)
+	options = core.ConfigureOption(options, "enable_markdown", "false")
+	core.RegisterPlatformConfigOptions("wecom", options)
 }

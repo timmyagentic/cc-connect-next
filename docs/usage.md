@@ -1284,8 +1284,9 @@ See the generated [configuration capability reference](configuration.md) for
 the purpose, default, allowed values, scope, and apply mode of every declared
 option. Agents query the same version-matched catalog with
 `cc-connect-next config capabilities --search "keywords"`, so users can ask in
-natural language without reading the config file. The complete copy/paste
-example remains in [config.example.toml](../config.example.toml).
+natural language without reading the config file. The curated copy/paste
+deployment example remains in [config.example.toml](../config.example.toml);
+the generated contract is the exhaustive option reference.
 
 ### Project Structure
 

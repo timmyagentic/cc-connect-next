@@ -76,7 +76,7 @@ func TestBuildConfigurationCapabilityBrief_TeachesNaturalLanguageLookup(t *testi
 	brief := BuildConfigurationCapabilityBrief(catalog, "codex", []string{"feishu"})
 	for _, want := range []string{
 		"[cc-connect-next capability brief]", "v2.0.0", "natural-language", "config capabilities",
-		"--agent codex", "--platform feishu", "do not invent", "model", "allow_from", "/feedback",
+		"--agent codex", "--platform feishu", "--all", "do not invent", "validated example", "model", "allow_from", "/feedback",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief missing %q:\n%s", want, brief)
@@ -95,5 +95,32 @@ func TestRenderConfigCatalogMarkdown_CoalescesEquivalentAdapterOptions(t *testin
 	}
 	if !strings.Contains(markdown, "`feishu, lark`") {
 		t.Fatalf("owner list missing:\n%s", markdown)
+	}
+}
+
+func TestRenderConfigCatalogMarkdown_RendersStructuredContract(t *testing.T) {
+	minimum, maximum := 1.0, 60.0
+	catalog := ConfigCatalog{Version: "v1", Options: []ConfigOption{{
+		Path: "projects.heartbeat.interval_mins", Key: "interval_mins", Scope: ConfigScopeProject,
+		Type: "integer", Default: "30", DefaultSource: ConfigDefaultBuiltin,
+		Requirement: ConfigRequirementConditional, RequiredWhen: []string{"projects.heartbeat.enabled = true"},
+		Requires: []string{"projects.heartbeat.session_key"}, ConflictsWith: []string{"projects.heartbeat.disabled"},
+		Minimum: &minimum, Maximum: &maximum, Unit: "minutes",
+		Description: "Heartbeat interval.", DescriptionZH: "心跳间隔。", ApplyMode: ConfigApplyRestart,
+		Example: `interval_mins = 30`, PresetValues: []ConfigPresetValue{{
+			Preset: "starter", Value: "15", Description: "Fresh Starter value.", DescriptionZH: "新 Starter 值。",
+		}},
+	}}}
+
+	for language, wants := range map[string][]string{
+		"en": {"Requirement: `conditional`", "Required when: `projects.heartbeat.enabled = true`", "Requires: `projects.heartbeat.session_key`", "Conflicts with: `projects.heartbeat.disabled`", "Range: `1` to `60` `minutes`", "Default source: `builtin`", "Preset `starter`: `15`", "Example: `interval_mins = 30`"},
+		"zh": {"要求：`条件必填`", "必填条件: `projects.heartbeat.enabled = true`", "依赖: `projects.heartbeat.session_key`", "冲突: `projects.heartbeat.disabled`", "范围: `1` 到 `60` `minutes`", "默认值来源：`builtin`", "预设 `starter`: `15`", "示例: `interval_mins = 30`"},
+	} {
+		markdown := RenderConfigCatalogMarkdown(catalog, language)
+		for _, want := range wants {
+			if !strings.Contains(markdown, want) {
+				t.Errorf("%s contract markdown missing %q:\n%s", language, want, markdown)
+			}
+		}
 	}
 }

@@ -3,7 +3,15 @@ package devin
 import "github.com/timmyagentic/cc-connect-next/core"
 
 func init() {
-	core.RegisterAgentConfigOptions("devin", core.DescribeAgentOptions((&Agent{}).KnownOptionKeys()))
+	options := core.DescribeAgentOptions((&Agent{}).KnownOptionKeys())
+	options = core.ConfigureOption(options, "command", "devin")
+	options = core.RefineConfigOption(options, "args", func(option *core.ConfigOption) {
+		option.Default = `["acp"]`
+		option.DefaultSource = core.ConfigDefaultBuiltin
+		option.Example = `args = ["acp"]`
+	})
+	options = core.ConfigureOption(options, "display_name", "Devin")
+	core.RegisterAgentConfigOptions("devin", options)
 }
 
 // KnownOptionKeys implements core.AgentOptionSchema: the exhaustive set of

@@ -92,8 +92,8 @@ app_secret = "` + PlaceholderFeishuAppSecret + `"   # REPLACE: see ` + "`cc-conn
 	writeStarterProfileSettings(&b, settings, feishuProfileTablePlatform)
 	b.WriteString(`# group_reply_all answers every group message without an @mention. Scope who
 # may drive the agent before using it in a shared group:
-# allow_from = ["ou_your_feishu_open_id"]
-# allow_chat = ["oc_your_group_chat_id"]
+# allow_from = "ou_your_feishu_open_id"
+# allow_chat = "oc_your_group_chat_id"
 
 # For more platforms (DingTalk, Telegram, Slack, Discord, LINE, WeChat Work)
 # see: https://github.com/timmyagentic/cc-connect-next/blob/main/config.example.toml

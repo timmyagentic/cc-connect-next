@@ -1332,9 +1332,8 @@ func TestNewPlatform_ImageBatchWindow(t *testing.T) {
 		t.Errorf("custom imageBatchWindow = %v, want %v", fp.imageBatchWindow, want)
 	}
 
-	// Zero is allowed (effectively disables coalescing) but still passes
-	// validation; batchWindow() will substitute the default at call time so
-	// timers never fire instantly.
+	// Zero is allowed and stored as zero, but batchWindow() substitutes the
+	// default at call time so timers never fire instantly.
 	p, err = newPlatform("feishu", lark.FeishuBaseUrl, map[string]any{
 		"app_id":                "cli_test",
 		"app_secret":            "secret",

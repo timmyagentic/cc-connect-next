@@ -6,5 +6,8 @@ func init() {
 	options := core.DescribePlatformOptions([]string{
 		"allow_from", "callback_path", "channel_secret", "channel_token", "port",
 	})
-	core.RegisterPlatformConfigOptions("line", core.ConfigureOption(options, "port", "8080"))
+	options = core.RequireConfigOptions(options, "channel_secret", "channel_token")
+	options = core.ConfigureOption(options, "port", "8080")
+	options = core.ConfigureOption(options, "callback_path", "/callback")
+	core.RegisterPlatformConfigOptions("line", options)
 }

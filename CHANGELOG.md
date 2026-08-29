@@ -21,6 +21,19 @@
 
 ### Agent-friendly configuration knowledge
 
+- The catalog is now an executable configuration contract rather than a
+  key/description index. Public entries declare TOML/environment/CLI source,
+  exact placement, required and conditional relationships, omitted-default
+  source, presets, accepted types/enums, numeric bounds/units, dependencies,
+  conflicts, apply mode, sensitivity, and a validated example. Dynamic
+  Agent/Platform options are checked against that contract before adapter
+  construction, and the Web settings constants are generated from it too.
+- Starter access-control guidance now uses the Feishu string form actually
+  consumed by runtime (`allow_from = "..."`, `allow_chat = "..."`), preventing
+  an attempted allowlist from silently becoming allow-all. Cross-adapter type,
+  required-credential, constructor-default, provider, hook, speech/TTS, and
+  reload metadata now have regression gates, and common natural-language
+  paraphrases are ranked to their exact options.
 - Every compiled build now carries a structured configuration capability
   catalog covering typed global/project settings and the exact dynamic option
   surfaces of all included Agent and messaging-platform adapters. Each entry

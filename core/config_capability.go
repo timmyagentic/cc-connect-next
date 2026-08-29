@@ -3,6 +3,7 @@ package core
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode"
@@ -30,25 +31,81 @@ const (
 	ConfigApplyRestart    ConfigApplyMode = "restart"
 )
 
+// ConfigRequirement describes whether an operator must provide an option.
+// Conditional requirements are accompanied by RequiredWhen expressions.
+type ConfigRequirement string
+
+const (
+	ConfigRequirementOptional    ConfigRequirement = "optional"
+	ConfigRequirementRequired    ConfigRequirement = "required"
+	ConfigRequirementConditional ConfigRequirement = "conditional"
+)
+
+// ConfigDefaultSource identifies who chooses an omitted value. This keeps an
+// honest distinction between a cc-connect-next builtin, runtime inheritance,
+// an adapter/upstream CLI default, and a field with no default at all.
+type ConfigDefaultSource string
+
+const (
+	ConfigDefaultBuiltin ConfigDefaultSource = "builtin"
+	ConfigDefaultUnset   ConfigDefaultSource = "unset"
+	ConfigDefaultRuntime ConfigDefaultSource = "runtime"
+	ConfigDefaultAdapter ConfigDefaultSource = "adapter"
+	ConfigDefaultInherit ConfigDefaultSource = "inherit"
+	ConfigDefaultNone    ConfigDefaultSource = "none"
+)
+
+// ConfigSource identifies the operator-facing configuration mechanism.
+type ConfigSource string
+
+const (
+	ConfigSourceTOML        ConfigSource = "toml"
+	ConfigSourceEnvironment ConfigSource = "environment"
+	ConfigSourceCLI         ConfigSource = "cli"
+)
+
+// ConfigPresetValue records an explicit generated or recommended value that
+// differs from (or intentionally pins) the omitted runtime default.
+type ConfigPresetValue struct {
+	Preset        string `json:"preset"`
+	Value         string `json:"value"`
+	Description   string `json:"description,omitempty"`
+	DescriptionZH string `json:"description_zh,omitempty"`
+}
+
 // ConfigOption is the machine-readable, Agent-friendly description of one
 // supported configuration key. It deliberately describes capability rather
 // than the current value, so catalog queries never need to read credentials.
 type ConfigOption struct {
-	Path          string          `json:"path"`
-	Key           string          `json:"key"`
-	Scope         ConfigScope     `json:"scope"`
-	Owner         string          `json:"owner,omitempty"`
-	Type          string          `json:"type"`
-	Default       string          `json:"default"`
-	Values        []string        `json:"allowed_values,omitempty"`
-	Description   string          `json:"description"`
-	DescriptionZH string          `json:"description_zh"`
-	Keywords      []string        `json:"keywords,omitempty"`
-	ApplyMode     ConfigApplyMode `json:"apply_mode"`
-	Sensitive     bool            `json:"sensitive,omitempty"`
-	Deprecated    bool            `json:"deprecated,omitempty"`
-	Internal      bool            `json:"internal,omitempty"`
-	Example       string          `json:"example,omitempty"`
+	Path             string              `json:"path"`
+	Key              string              `json:"key"`
+	Scope            ConfigScope         `json:"scope"`
+	Owner            string              `json:"owner,omitempty"`
+	Source           ConfigSource        `json:"source"`
+	Placement        string              `json:"placement"`
+	Type             string              `json:"type"`
+	Default          string              `json:"default"`
+	DefaultSource    ConfigDefaultSource `json:"default_source"`
+	Requirement      ConfigRequirement   `json:"requirement"`
+	RequiredWhen     []string            `json:"required_when,omitempty"`
+	Requires         []string            `json:"requires,omitempty"`
+	ConflictsWith    []string            `json:"conflicts_with,omitempty"`
+	Minimum          *float64            `json:"minimum,omitempty"`
+	Maximum          *float64            `json:"maximum,omitempty"`
+	Unit             string              `json:"unit,omitempty"`
+	Values           []string            `json:"allowed_values,omitempty"`
+	ClosedValues     bool                `json:"closed_values,omitempty"`
+	OpenValues       bool                `json:"open_values,omitempty"`
+	Description      string              `json:"description"`
+	DescriptionZH    string              `json:"description_zh"`
+	Keywords         []string            `json:"keywords,omitempty"`
+	ApplyMode        ConfigApplyMode     `json:"apply_mode"`
+	Sensitive        bool                `json:"sensitive,omitempty"`
+	Deprecated       bool                `json:"deprecated,omitempty"`
+	Internal         bool                `json:"internal,omitempty"`
+	Example          string              `json:"example,omitempty"`
+	PresetValues     []ConfigPresetValue `json:"preset_values,omitempty"`
+	exampleGenerated bool
 }
 
 // ConfigCapability maps natural-language user intent to one or more exact
@@ -149,6 +206,10 @@ func normalizePluginOptions(scope ConfigScope, owner string, options []ConfigOpt
 		if option.ApplyMode == "" {
 			option.ApplyMode = ConfigApplyRestart
 		}
+		// documentedOption runs before owner/path normalization, so recompute the
+		// derived placement now that the final adapter context is known.
+		option.Placement = ""
+		option = FinalizeConfigOption(option)
 		byKey[option.Key] = option
 	}
 	out := make([]ConfigOption, 0, len(byKey))
@@ -168,8 +229,64 @@ func ConfigureOption(options []ConfigOption, key, defaultValue string, values ..
 		}
 		if defaultValue != "" {
 			options[i].Default = defaultValue
+			options[i].DefaultSource = ""
 		}
 		options[i].Values = append([]string(nil), values...)
+		options[i] = FinalizeConfigOption(options[i])
+		break
+	}
+	return options
+}
+
+// RefineConfigOption lets one adapter attach owner-specific contract facts
+// while keeping the shared bilingual option vocabulary in core.
+func RefineConfigOption(options []ConfigOption, key string, refine func(*ConfigOption)) []ConfigOption {
+	for i := range options {
+		if options[i].Key != key {
+			continue
+		}
+		previousExample := options[i].Example
+		refine(&options[i])
+		if options[i].Example != previousExample {
+			options[i].exampleGenerated = false
+		}
+		options[i] = FinalizeConfigOption(options[i])
+		break
+	}
+	return options
+}
+
+// RequireConfigOptions marks adapter-local credentials or identifiers that
+// have no usable runtime fallback.
+func RequireConfigOptions(options []ConfigOption, keys ...string) []ConfigOption {
+	for _, key := range keys {
+		options = RefineConfigOption(options, key, func(option *ConfigOption) {
+			option.Requirement = ConfigRequirementRequired
+			option.Default = "none"
+			option.DefaultSource = ConfigDefaultNone
+		})
+	}
+	return options
+}
+
+// ConfigureConditionalOption records an adapter-local conditional contract.
+func ConfigureConditionalOption(options []ConfigOption, key string, requiredWhen ...string) []ConfigOption {
+	return RefineConfigOption(options, key, func(option *ConfigOption) {
+		option.Requirement = ConfigRequirementConditional
+		option.RequiredWhen = append([]string(nil), requiredWhen...)
+	})
+}
+
+// ConfigureOptionExample pins an adapter-reviewed example instead of the
+// generic type-derived fallback.
+func ConfigureOptionExample(options []ConfigOption, key, example string) []ConfigOption {
+	for i := range options {
+		if options[i].Key != key {
+			continue
+		}
+		options[i].Example = example
+		options[i].exampleGenerated = false
+		options[i] = FinalizeConfigOption(options[i])
 		break
 	}
 	return options
@@ -194,8 +311,221 @@ func cloneConfigOptions(options []ConfigOption) []ConfigOption {
 	for i := range out {
 		out[i].Values = append([]string(nil), out[i].Values...)
 		out[i].Keywords = append([]string(nil), out[i].Keywords...)
+		out[i].RequiredWhen = append([]string(nil), out[i].RequiredWhen...)
+		out[i].Requires = append([]string(nil), out[i].Requires...)
+		out[i].ConflictsWith = append([]string(nil), out[i].ConflictsWith...)
+		out[i].PresetValues = append([]ConfigPresetValue(nil), out[i].PresetValues...)
+		if out[i].Minimum != nil {
+			value := *out[i].Minimum
+			out[i].Minimum = &value
+		}
+		if out[i].Maximum != nil {
+			value := *out[i].Maximum
+			out[i].Maximum = &value
+		}
 	}
 	return out
+}
+
+// FinalizeConfigOption fills the contract fields shared by typed and dynamic
+// options. Adapter-local schemas should set their precise facts first and let
+// registration call this function once more after owner/path normalization.
+func FinalizeConfigOption(option ConfigOption) ConfigOption {
+	if option.Source == "" {
+		option.Source = ConfigSourceTOML
+	}
+	if option.Placement == "" {
+		option.Placement = defaultConfigPlacement(option)
+	}
+	if option.Requirement == "" {
+		option.Requirement = ConfigRequirementOptional
+	}
+	if option.Type == "" {
+		option.Type = "string"
+	}
+	switch option.Type {
+	case "bool":
+		option.Type = "boolean"
+	case "int":
+		option.Type = "integer"
+	}
+
+	switch option.Default {
+	case "":
+		option.Default = "unset"
+	case "unset / runtime default":
+		option.Default = "unset"
+		if option.DefaultSource == "" {
+			option.DefaultSource = ConfigDefaultRuntime
+		}
+	case "unset / adapter default", "adapter default":
+		option.Default = "unset"
+		if option.DefaultSource == "" {
+			option.DefaultSource = ConfigDefaultAdapter
+		}
+	case "required":
+		option.Default = "none"
+		option.Requirement = ConfigRequirementRequired
+		option.DefaultSource = ConfigDefaultNone
+	}
+	if option.DefaultSource == "" {
+		switch {
+		case option.Requirement == ConfigRequirementRequired && (option.Default == "none" || option.Default == "unset"):
+			option.DefaultSource = ConfigDefaultNone
+		case option.Default == "unset":
+			option.DefaultSource = ConfigDefaultUnset
+		case strings.HasPrefix(option.Default, "inherit"):
+			option.DefaultSource = ConfigDefaultInherit
+		default:
+			option.DefaultSource = ConfigDefaultBuiltin
+		}
+	}
+	if (option.Example == "" || option.exampleGenerated) && !option.Internal {
+		option.Example = defaultConfigOptionExample(option)
+		option.exampleGenerated = true
+	}
+	if option.Unit == "" {
+		option.Unit = inferredConfigUnit(option.Key)
+	}
+	if len(option.Values) > 0 && !option.ClosedValues && !option.OpenValues {
+		option.ClosedValues = true
+		for _, value := range option.Values {
+			if strings.TrimSpace(value) == "" || strings.ContainsAny(value, " ()") {
+				option.ClosedValues = false
+				break
+			}
+		}
+	}
+	return option
+}
+
+func defaultConfigPlacement(option ConfigOption) string {
+	if option.Source == ConfigSourceEnvironment {
+		return "process environment"
+	}
+	if option.Source == ConfigSourceCLI {
+		return "command line"
+	}
+	if option.Owner != "" {
+		switch option.Scope {
+		case ConfigScopeAgent:
+			return "[projects.agent.options] (inside one [[projects]])"
+		case ConfigScopePlatform:
+			return "[projects.platforms.options] (inside one [[projects.platforms]])"
+		}
+	}
+	path := option.Path
+	switch {
+	case strings.HasPrefix(path, "aliases."):
+		return "[[aliases]]"
+	case strings.HasPrefix(path, "commands."):
+		return "[[commands]]"
+	case strings.HasPrefix(path, "hooks."):
+		return "[[hooks]]"
+	case strings.HasPrefix(path, "providers.models."):
+		return "[[providers.models]] (inside one [[providers]])"
+	case strings.HasPrefix(path, "providers.agent_model_lists.<name>."):
+		return "[[providers.agent_model_lists.<name>]] (inside one [[providers]])"
+	case strings.HasPrefix(path, "providers."):
+		return "[[providers]]"
+	case strings.HasPrefix(path, "projects.agent.providers.models."):
+		return "[[projects.agent.providers.models]] (inside one [[projects.agent.providers]])"
+	case strings.HasPrefix(path, "projects.agent.providers.agent_model_lists.<name>."):
+		return "[[projects.agent.providers.agent_model_lists.<name>]] (inside one [[projects.agent.providers]])"
+	case strings.HasPrefix(path, "projects.agent.providers."):
+		return "[[projects.agent.providers]] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects.agent.answer_profiles.fast."):
+		return "[projects.agent.answer_profiles.fast] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects.agent.answer_profiles.quality."):
+		return "[projects.agent.answer_profiles.quality] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects.agent."):
+		return "[projects.agent] (inside one [[projects]])"
+	case path == "projects.platforms.type":
+		return "[[projects.platforms]] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects.users.roles.<name>.rate_limit."):
+		return "[projects.users.roles.<name>.rate_limit] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects.users.roles.<name>."):
+		return "[projects.users.roles.<name>] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects.users."):
+		return "[projects.users] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects.display."):
+		return "[projects.display] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects.references."):
+		return "[projects.references] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects.heartbeat."):
+		return "[projects.heartbeat] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects.auto_compress."):
+		return "[projects.auto_compress] (inside one [[projects]])"
+	case strings.HasPrefix(path, "projects."):
+		return "[[projects]]"
+	case strings.Contains(path, "."):
+		return "[" + path[:strings.LastIndex(path, ".")] + "]"
+	default:
+		return "config.toml root"
+	}
+}
+
+func defaultConfigOptionExample(option ConfigOption) string {
+	key := option.Key
+	if key == "" || key == "<name>" {
+		key = "example"
+	}
+	typeName := strings.TrimSpace(strings.Split(option.Type, "|")[0])
+	value := ""
+	for _, candidate := range option.Values {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" && !strings.Contains(candidate, " ") && !strings.Contains(candidate, "(") {
+			value = candidate
+			break
+		}
+	}
+	switch typeName {
+	case "boolean":
+		if option.Default == "true" || option.Default == "false" {
+			return key + " = " + option.Default
+		}
+		return key + " = true"
+	case "integer":
+		if _, err := strconv.ParseInt(option.Default, 10, 64); err == nil {
+			return key + " = " + option.Default
+		}
+		return key + " = 1"
+	case "number":
+		return key + " = 1.0"
+	case "string[]":
+		if value == "" {
+			value = "value"
+		}
+		return fmt.Sprintf(`%s = [%q]`, key, value)
+	case "table":
+		return key + ` = { example = "value" }`
+	default:
+		if option.Sensitive {
+			value = "${" + strings.ToUpper(strings.ReplaceAll(key, "-", "_")) + "}"
+		} else if value == "" {
+			if option.DefaultSource == ConfigDefaultBuiltin && option.Default != "unset" && option.Default != "none" && len(option.Default) <= 80 && !strings.ContainsAny(option.Default, " \t;()") {
+				value = option.Default
+			} else {
+				value = "value"
+			}
+		}
+		return fmt.Sprintf(`%s = %q`, key, value)
+	}
+}
+
+func inferredConfigUnit(key string) string {
+	switch {
+	case strings.HasSuffix(key, "_ms"):
+		return "milliseconds"
+	case strings.HasSuffix(key, "_secs") || strings.HasSuffix(key, "_seconds"):
+		return "seconds"
+	case strings.HasSuffix(key, "_mins") || strings.HasSuffix(key, "_minutes"):
+		return "minutes"
+	case strings.HasSuffix(key, "_mb"):
+		return "MiB"
+	default:
+		return ""
+	}
 }
 
 func OptionKeys(options []ConfigOption) []string {
@@ -233,12 +563,23 @@ func DescribePlatformOptions(keys []string) []ConfigOption {
 type optionDoc struct {
 	typeName, defaultValue string
 	values                 []string
+	openValues             bool
 	description, zh        string
 	keywords               []string
 	apply                  ConfigApplyMode
+	defaultSource          ConfigDefaultSource
+	requirement            ConfigRequirement
+	requiredWhen           []string
+	requires               []string
+	conflictsWith          []string
+	minimum, maximum       *float64
+	unit                   string
 	sensitive, internal    bool
 	example                string
+	presetValues           []ConfigPresetValue
 }
+
+func configFloat64(value float64) *float64 { return &value }
 
 func documentedOption(key string, doc optionDoc) ConfigOption {
 	if doc.typeName == "" {
@@ -266,11 +607,15 @@ func documentedOption(key string, doc optionDoc) ConfigOption {
 	if doc.zh == "" {
 		doc.zh = fmt.Sprintf("配置适配器的 %s 选项。", key)
 	}
-	return ConfigOption{
-		Key: key, Type: doc.typeName, Default: doc.defaultValue, Values: append([]string(nil), doc.values...),
+	return FinalizeConfigOption(ConfigOption{
+		Key: key, Type: doc.typeName, Default: doc.defaultValue, Values: append([]string(nil), doc.values...), OpenValues: doc.openValues,
 		Description: doc.description, DescriptionZH: doc.zh, Keywords: append([]string(nil), doc.keywords...),
 		ApplyMode: doc.apply, Sensitive: doc.sensitive, Internal: doc.internal, Example: doc.example,
-	}
+		DefaultSource: doc.defaultSource, Requirement: doc.requirement,
+		RequiredWhen: append([]string(nil), doc.requiredWhen...), Requires: append([]string(nil), doc.requires...),
+		ConflictsWith: append([]string(nil), doc.conflictsWith...), Minimum: doc.minimum, Maximum: doc.maximum,
+		Unit: doc.unit, PresetValues: append([]ConfigPresetValue(nil), doc.presetValues...),
+	})
 }
 
 func agentOption(key string) ConfigOption {
@@ -281,7 +626,7 @@ func agentOption(key string) ConfigOption {
 		"app_server_url":       {defaultValue: "stdio", description: "Choose the Codex app-server transport endpoint.", zh: "选择 Codex app-server 的传输端点。", keywords: []string{"app server", "stdio"}},
 		"args":                 {typeName: "string[]", description: "Pass additional arguments to the configured Agent command.", zh: "向配置的 Agent 命令传递额外参数。", keywords: []string{"arguments", "启动参数"}},
 		"auth_method":          {description: "Select the authentication method used by an ACP Agent.", zh: "选择 ACP Agent 使用的认证方式。", keywords: []string{"authentication", "认证"}},
-		"auto_create":          {typeName: "bool", defaultValue: "false", description: "Create the configured tmux session when it does not exist.", zh: "配置的 tmux 会话不存在时自动创建。"},
+		"auto_create":          {typeName: "bool", defaultValue: "true", description: "Create the configured tmux session when it does not exist.", zh: "配置的 tmux 会话不存在时自动创建。"},
 		"backend":              {defaultValue: "app_server", values: []string{"app_server", "exec"}, description: "Select the Codex execution backend; app_server supports native steering and approvals.", zh: "选择 Codex 执行后端；app_server 支持原生 steer 与审批。", keywords: []string{"steer", "执行后端"}},
 		"cc_data_dir":          {description: "Internal cc-connect-next data directory injected by the host.", zh: "由宿主注入的 cc-connect-next 内部数据目录。", internal: true},
 		"cc_project":           {description: "Internal cc-connect-next project name injected by the host.", zh: "由宿主注入的 cc-connect-next 内部项目名。", internal: true},
@@ -295,34 +640,34 @@ func agentOption(key string) ConfigOption {
 		"display_name":         {description: "Set the user-facing name of a generic or ACP Agent.", zh: "设置通用或 ACP Agent 的用户可见名称。"},
 		"env":                  {typeName: "table", description: "Inject project-scoped environment variables into Agent processes.", zh: "向 Agent 进程注入项目级环境变量。", sensitive: true, keywords: []string{"环境变量", "provider env"}},
 		"init_command":         {description: "Run a shell initialization command before tmux prompts are sent.", zh: "发送 tmux 提示前运行初始化命令。"},
-		"max_context_tokens":   {typeName: "integer", description: "Override the maximum context-token budget accepted by Claude Code.", zh: "覆盖 Claude Code 可使用的最大上下文 token 数。", keywords: []string{"context window", "上下文窗口"}},
+		"max_context_tokens":   {typeName: "integer", minimum: configFloat64(1), description: "Override the maximum context-token budget accepted by Claude Code.", zh: "覆盖 Claude Code 可使用的最大上下文 token 数。", keywords: []string{"context window", "上下文窗口"}},
 		"mode":                 {defaultValue: "adapter default", description: "Choose the Agent approval, sandbox, or planning mode.", zh: "选择 Agent 的审批、沙箱或规划模式。", keywords: []string{"yolo", "权限模式", "plan"}},
-		"model":                {description: "Select the default model for new Agent sessions.", zh: "选择新 Agent 会话的默认模型。", keywords: []string{"模型"}},
-		"model_context_window": {typeName: "integer", description: "Declare the Codex model context window used for usage reporting and compaction decisions.", zh: "声明 Codex 模型上下文窗口，用于用量展示和压缩决策。", keywords: []string{"context", "上下文窗口"}},
-		"pane":                 {description: "Select the tmux pane used for Agent input and output.", zh: "选择用于 Agent 输入输出的 tmux pane。"},
-		"plugin_dir":           {typeName: "string[]", description: "Load Claude Code plugins from the listed directories.", zh: "从指定目录加载 Claude Code 插件。", keywords: []string{"plugins", "插件"}},
-		"poll_interval_ms":     {typeName: "integer", description: "Set the tmux output polling interval in milliseconds.", zh: "设置 tmux 输出轮询间隔（毫秒）。"},
+		"model":                {description: "Select the default model for new Agent sessions.", zh: "选择新 Agent 会话的默认模型。", keywords: []string{"模型"}, example: `model = "provider/model-name"`},
+		"model_context_window": {typeName: "integer", minimum: configFloat64(1), description: "Declare the Codex model context window used for usage reporting and compaction decisions.", zh: "声明 Codex 模型上下文窗口，用于用量展示和压缩决策。", keywords: []string{"context", "上下文窗口"}},
+		"pane":                 {defaultValue: "0", description: "Select the tmux pane used for Agent input and output.", zh: "选择用于 Agent 输入输出的 tmux pane。"},
+		"plugin_dir":           {typeName: "string | string[]", description: "Load one or more Claude Code plugin directories.", zh: "加载一个或多个 Claude Code 插件目录。", keywords: []string{"plugins", "插件"}},
+		"poll_interval_ms":     {typeName: "integer", defaultValue: "200", minimum: configFloat64(1), unit: "milliseconds", description: "Set the tmux output polling interval in milliseconds.", zh: "设置 tmux 输出轮询间隔（毫秒）。"},
 		"prompt_pattern":       {description: "Regular expression used to recognize the tmux Agent prompt.", zh: "用于识别 tmux Agent 提示符的正则表达式。"},
-		"provider":             {description: "Select the active configured provider for this project.", zh: "选择当前项目使用的已配置 Provider。", apply: ConfigApplyReload, keywords: []string{"服务商", "provider switch"}},
+		"provider":             {description: "Select the active configured provider for this project.", zh: "选择当前项目使用的已配置 Provider。", apply: ConfigApplyReload, keywords: []string{"服务商", "provider switch"}, example: `provider = "provider-name"`},
 		"reasoning_effort":     {description: "Set the default reasoning-effort level for new turns.", zh: "设置新回合默认推理强度。", keywords: []string{"effort", "推理强度", "max"}},
 		"router_api_key":       {description: "Authenticate to the configured Claude Code Router.", zh: "用于认证已配置的 Claude Code Router。", sensitive: true},
 		"router_url":           {description: "Route Claude Code requests through the specified router URL.", zh: "将 Claude Code 请求路由到指定 Router 地址。"},
 		"run_as_env":           {typeName: "string[]", description: "Extend the environment allowlist passed across OS-user isolation.", zh: "扩展跨 OS 用户隔离传递的环境变量白名单。"},
 		"run_as_user":          {description: "Run Claude Code under another non-root OS user.", zh: "以另一个非 root 操作系统用户运行 Claude Code。", keywords: []string{"用户隔离", "sudo"}},
 		"service_tier":         {description: "Select the model-catalog service tier; common Codex values include default and fast.", zh: "选择模型目录声明的服务档位；Codex 常见取值包括 default 和 fast。", values: []string{"model-catalog-driven (for example: default, fast)"}, keywords: []string{"fast", "服务档位"}},
-		"session":              {description: "Name the tmux session that hosts the Agent.", zh: "指定承载 Agent 的 tmux 会话名。"},
+		"session":              {requirement: ConfigRequirementRequired, description: "Name the tmux session that hosts the Agent.", zh: "指定承载 Agent 的 tmux 会话名。"},
 		"session_title_model":  {description: "Optionally use an isolated local Codex model to generate concise Codex App titles.", zh: "可选使用隔离的本地 Codex 模型生成简洁的 Codex App 标题。", keywords: []string{"标题模型", "title"}},
 		"session_title_prefix": {defaultValue: "[飞书]", description: "Prefix Codex App session titles with a configurable source label.", zh: "为 Codex App 会话标题添加可配置的来源前缀。", keywords: []string{"标题前缀", "source label"}},
 		"shell":                {description: "Select the shell used by the tmux adapter.", zh: "选择 tmux 适配器使用的 shell。"},
-		"startup_wait_ms":      {typeName: "integer", description: "Wait this many milliseconds after creating a tmux session.", zh: "创建 tmux 会话后等待指定毫秒数。"},
-		"strip_input_block":    {typeName: "bool", description: "Remove the echoed input block from captured tmux output.", zh: "从捕获的 tmux 输出中移除回显输入块。"},
+		"startup_wait_ms":      {typeName: "integer", defaultValue: "0 (or 2000 when init_command is set)", minimum: configFloat64(0), unit: "milliseconds", description: "Wait this many milliseconds after creating a tmux session.", zh: "创建 tmux 会话后等待指定毫秒数。"},
+		"strip_input_block":    {typeName: "bool", defaultValue: "true", description: "Remove the echoed input block from captured tmux output.", zh: "从捕获的 tmux 输出中移除回显输入块。"},
 		"strip_patterns":       {typeName: "string[]", description: "Remove output lines matching the listed patterns.", zh: "移除匹配指定模式的输出行。"},
 		"system_prompt":        {description: "Replace the Agent's default system prompt for this project.", zh: "替换当前项目中 Agent 的默认系统提示。", keywords: []string{"系统提示词"}},
 		"thinking":             {description: "Configure the pi Agent's thinking mode or level.", zh: "配置 pi Agent 的思考模式或级别。"},
-		"timeout_mins":         {typeName: "integer", description: "Set the adapter process timeout in minutes; zero uses its default.", zh: "设置适配器进程超时分钟数；0 使用默认值。"},
-		"tool_timeout_secs":    {typeName: "integer", description: "Set the maximum wait for an iFlow tool call in seconds.", zh: "设置 iFlow 工具调用最大等待秒数。"},
+		"timeout_mins":         {typeName: "integer", minimum: configFloat64(0), unit: "minutes", description: "Set the adapter process timeout in minutes; zero uses its default.", zh: "设置适配器进程超时分钟数；0 使用默认值。"},
+		"tool_timeout_secs":    {typeName: "integer", minimum: configFloat64(0), unit: "seconds", description: "Set the maximum wait for an iFlow tool call in seconds.", zh: "设置 iFlow 工具调用最大等待秒数。"},
 		"window_per_session":   {typeName: "bool", defaultValue: "false", description: "Use a separate tmux window for every cc-connect-next session.", zh: "为每个 cc-connect-next 会话使用独立 tmux window。"},
-		"work_dir":             {defaultValue: ".", description: "Set the project working directory used by the Agent.", zh: "设置 Agent 使用的项目工作目录。", keywords: []string{"cwd", "工作目录"}},
+		"work_dir":             {defaultValue: ".", conflictsWith: []string{"projects.mode = multi-workspace"}, description: "Set the project working directory used by the Agent.", zh: "设置 Agent 使用的项目工作目录。", keywords: []string{"cwd", "工作目录"}, example: `work_dir = "/absolute/path/to/project"`},
 	}
 	return documentedOption(key, docs[key])
 }
@@ -332,8 +677,8 @@ func platformOption(key string) ConfigOption {
 		"access_token":                    {description: "Authenticate the Matrix bot account.", zh: "认证 Matrix 机器人账号。", sensitive: true},
 		"account_id":                      {defaultValue: "default", description: "Separate persistent Weixin state for multiple accounts.", zh: "为多个微信账号隔离持久化状态。"},
 		"agent_id":                        {description: "Identify the bot application Agent in the platform tenant.", zh: "指定平台租户中的机器人应用 Agent ID。"},
-		"allow_chat":                      {description: "Restrict Feishu access to selected chat IDs.", zh: "将飞书访问限制在指定会话 ID。", keywords: []string{"群白名单", "chat allowlist"}},
-		"allow_from":                      {defaultValue: "empty / allow all platform users", description: "Restrict bot access to selected platform user IDs; empty or '*' allows every platform user.", zh: "将机器人访问限制在指定平台用户 ID；留空或 '*' 表示允许所有平台用户。", keywords: []string{"只允许我", "用户白名单", "access control"}},
+		"allow_chat":                      {description: "Restrict Feishu access to selected chat IDs.", zh: "将飞书访问限制在指定会话 ID。", keywords: []string{"群白名单", "chat allowlist"}, example: `allow_chat = "oc_chat_id"`},
+		"allow_from":                      {defaultValue: "empty", description: "Restrict bot access to selected platform user IDs; empty or '*' allows every platform user.", zh: "将机器人访问限制在指定平台用户 ID；留空或 '*' 表示允许所有平台用户。", keywords: []string{"只允许我", "用户白名单", "access control"}, example: `allow_from = "user-id-1,user-id-2"`},
 		"api_base":                        {description: "Override the platform REST API base URL.", zh: "覆盖平台 REST API 基础地址。"},
 		"api_base_url":                    {description: "Override the platform API base URL.", zh: "覆盖平台 API 基础地址。"},
 		"app_id":                          {description: "Identify the bot application.", zh: "标识机器人应用。"},
@@ -352,7 +697,7 @@ func platformOption(key string) ConfigOption {
 		"callback_token":                  {description: "Verify WeCom callback requests.", zh: "验证企业微信回调请求。", sensitive: true},
 		"card_template_id":                {description: "Select the DingTalk interactive-card template ID.", zh: "选择钉钉互动卡片模板 ID。"},
 		"card_template_key":               {description: "Select the DingTalk card-template key.", zh: "选择钉钉卡片模板 Key。"},
-		"card_throttle_ms":                {typeName: "integer", description: "Throttle DingTalk card updates in milliseconds.", zh: "限制钉钉卡片更新频率（毫秒）。"},
+		"card_throttle_ms":                {typeName: "integer", minimum: configFloat64(1), unit: "milliseconds", description: "Throttle DingTalk card updates in milliseconds.", zh: "限制钉钉卡片更新频率（毫秒）。"},
 		"cc_data_dir":                     {description: "Internal cc-connect-next data directory injected by the host.", zh: "由宿主注入的 cc-connect-next 内部数据目录。", internal: true},
 		"cc_project":                      {description: "Internal cc-connect-next project name injected by the host.", zh: "由宿主注入的 cc-connect-next 内部项目名。", internal: true},
 		"cdn_base_url":                    {description: "Override the Weixin CDN download/upload base URL.", zh: "覆盖微信 CDN 下载/上传基础地址。"},
@@ -373,13 +718,13 @@ func platformOption(key string) ConfigOption {
 		"group_only":                      {typeName: "bool", defaultValue: "false", description: "Accept Feishu messages only from group chats.", zh: "仅接受飞书群聊消息。"},
 		"group_reply_all":                 {typeName: "bool", defaultValue: "false", description: "Reply to every group message without requiring a mention.", zh: "无需 @ 即回复所有群消息。", keywords: []string{"无需@", "群聊全部回复"}},
 		"group_reply_all_chats":           {typeName: "string[]", description: "Enable mention-free replies only in selected Feishu chats.", zh: "仅在指定飞书会话中启用无需 @ 的回复。"},
-		"group_reply_all_guilds":          {typeName: "string[]", description: "Enable mention-free replies only in selected Discord guilds.", zh: "仅在指定 Discord 服务器中启用无需 @ 的回复。"},
+		"group_reply_all_guilds":          {description: "Enable mention-free replies for a comma-separated list of Discord guild IDs.", zh: "为逗号分隔的 Discord 服务器 ID 列表启用无需 @ 的回复。"},
 		"guild_id":                        {description: "Limit Discord command registration to one guild for faster propagation.", zh: "将 Discord 命令注册限制到单个服务器以加快生效。"},
 		"homeserver":                      {description: "Set the Matrix homeserver URL.", zh: "设置 Matrix Homeserver 地址。"},
 		"http_url":                        {description: "Set the NapCat/QQ HTTP API endpoint.", zh: "设置 NapCat/QQ HTTP API 地址。"},
 		"image_batch_window_ms":           {typeName: "integer", description: "Batch Feishu images arriving close together into one turn.", zh: "将在短时间内连续到达的飞书图片合并为一个回合。"},
-		"intents":                         {typeName: "integer", description: "Set the QQ Bot gateway intent bitmask.", zh: "设置 QQ Bot Gateway Intent 位掩码。"},
-		"long_poll_timeout_ms":            {typeName: "integer", defaultValue: "35000", description: "Set the Weixin long-poll timeout in milliseconds.", zh: "设置微信长轮询超时（毫秒）。"},
+		"intents":                         {typeName: "integer", minimum: configFloat64(1), description: "Set the QQ Bot gateway intent bitmask.", zh: "设置 QQ Bot Gateway Intent 位掩码。"},
+		"long_poll_timeout_ms":            {typeName: "integer", defaultValue: "35000", minimum: configFloat64(0), unit: "milliseconds", description: "Set the Weixin long-poll timeout in milliseconds.", zh: "设置微信长轮询超时（毫秒）。"},
 		"markdown_support":                {typeName: "bool", description: "Enable QQ Bot Markdown message support.", zh: "启用 QQ Bot Markdown 消息。"},
 		"mention_map":                     {typeName: "table", description: "Map Feishu mention identities to replacement text or Agent handles.", zh: "将飞书 @ 身份映射为替换文本或 Agent 标识。"},
 		"mode":                            {description: "Select the platform connection mode, such as WebSocket or callback.", zh: "选择平台连接模式，例如 WebSocket 或回调。"},
@@ -388,17 +733,17 @@ func platformOption(key string) ConfigOption {
 		"port":                            {typeName: "string", defaultValue: "adapter default", description: "Set the inbound webhook listening port as a quoted string.", zh: "以带引号的字符串设置入站 Webhook 监听端口。"},
 		"progress_style":                  {defaultValue: "compact", values: []string{"legacy", "compact", "card"}, description: "Choose how progress is rendered on the messaging platform.", zh: "选择消息平台上的进度展示样式。", keywords: []string{"进度卡片", "card"}},
 		"proxy":                           {description: "Route platform HTTP/WebSocket traffic through an HTTP or SOCKS5 proxy.", zh: "通过 HTTP 或 SOCKS5 代理转发平台 HTTP/WebSocket 流量。"},
-		"proxy_password":                  {description: "Authenticate to the configured platform proxy.", zh: "认证已配置的平台代理。", sensitive: true},
-		"proxy_username":                  {description: "Set the username for platform proxy authentication.", zh: "设置平台代理认证用户名。", sensitive: true},
+		"proxy_password":                  {description: "Authenticate to the configured platform proxy.", zh: "认证已配置的平台代理。", sensitive: true, requires: []string{"proxy"}},
+		"proxy_username":                  {description: "Set the username for platform proxy authentication.", zh: "设置平台代理认证用户名。", requires: []string{"proxy"}},
 		"reaction_emoji":                  {description: "Choose the processing reaction emoji.", zh: "选择处理中表情。"},
 		"reply_to_trigger":                {typeName: "bool", description: "Reply in Feishu using the triggering message as the reply target.", zh: "在飞书中回复到触发消息。"},
 		"require_mention":                 {typeName: "bool", description: "Require an explicit mention before replying in group chats.", zh: "群聊中必须明确 @ 机器人才回复。"},
 		"resolve_mentions":                {typeName: "bool", description: "Resolve Feishu mentions to readable names before sending text to the Agent.", zh: "发送给 Agent 前将飞书 @ 解析为可读名称。"},
-		"respond_to_at_everyone_and_here": {typeName: "bool", description: "Treat @everyone/@here as a valid bot mention.", zh: "将 @everyone/@here 视为有效的机器人提及。"},
+		"respond_to_at_everyone_and_here": {typeName: "bool", defaultValue: "false", description: "Treat @everyone/@here as a valid bot mention.", zh: "将 @everyone/@here 视为有效的机器人提及。"},
 		"robot_code":                      {description: "Identify the DingTalk robot used for outbound messages.", zh: "标识用于出站消息的钉钉机器人。"},
 		"route_tag":                       {description: "Set the optional Weixin SKRouteTag request header.", zh: "设置可选的微信 SKRouteTag 请求头。"},
 		"sandbox":                         {typeName: "bool", description: "Use the QQ Bot sandbox environment.", zh: "使用 QQ Bot 沙箱环境。"},
-		"session_scope":                   {defaultValue: "user (or channel when share_session_in_channel=true)", values: []string{"user", "channel", "thread"}, description: "Choose whether Slack sessions are isolated by user, channel, or thread.", zh: "选择 Slack 会话按用户、频道还是线程隔离。"},
+		"session_scope":                   {defaultValue: "user", defaultSource: ConfigDefaultRuntime, values: []string{"user", "channel", "thread"}, description: "Choose whether Slack sessions are isolated by user, channel, or thread. When omitted, legacy share_session_in_channel=true changes the effective default to channel.", zh: "选择 Slack 会话按用户、频道还是线程隔离。省略时，旧 share_session_in_channel=true 会把有效默认值改为 channel。"},
 		"share_session_in_channel":        {typeName: "bool", defaultValue: "false", description: "Share one Agent session among all users in a channel or room.", zh: "让频道或房间内所有用户共享同一个 Agent 会话。", keywords: []string{"共享会话"}},
 		"state_dir":                       {description: "Override the directory used for persistent platform state.", zh: "覆盖平台持久化状态目录。"},
 		"thread_isolation":                {typeName: "bool", defaultValue: "false", description: "Use a separate Agent session for each platform thread or topic.", zh: "为每个话题或线程使用独立 Agent 会话。"},
@@ -425,32 +770,75 @@ func SearchConfigCatalog(catalog ConfigCatalog, query string) ConfigCatalog {
 		return catalog
 	}
 	result := ConfigCatalog{Version: catalog.Version, Agents: append([]string(nil), catalog.Agents...), Platforms: append([]string(nil), catalog.Platforms...)}
-	paths := make(map[string]bool)
+	type scoredCapability struct {
+		value ConfigCapability
+		score int
+	}
+	type scoredOption struct {
+		value ConfigOption
+		score int
+	}
+	paths := make(map[string]int)
+	var matchedCapabilities []scoredCapability
 	for _, capability := range catalog.Capabilities {
 		values := []string{capability.ID, capability.Title, capability.TitleZH, capability.Description, capability.DescriptionZH}
 		values = append(values, capability.Keywords...)
-		if catalogTextMatches(query, values...) {
-			result.Capabilities = append(result.Capabilities, capability)
+		if score := catalogTextMatchScore(query, values...); score > 0 {
+			matchedCapabilities = append(matchedCapabilities, scoredCapability{value: capability, score: score})
 			for _, path := range capability.Paths {
-				paths[path] = true
+				paths[path] = max(paths[path], score/10+1)
 			}
 		}
 	}
+	sort.SliceStable(matchedCapabilities, func(i, j int) bool { return matchedCapabilities[i].score > matchedCapabilities[j].score })
+	for _, matched := range matchedCapabilities {
+		result.Capabilities = append(result.Capabilities, matched.value)
+	}
+	var matchedOptions []scoredOption
 	for _, option := range catalog.Options {
-		values := []string{option.Path, option.Key, option.Owner, option.Description, option.DescriptionZH}
+		values := []string{
+			option.Path, option.Key, option.Owner, string(option.Source), option.Placement, option.Type, option.Default,
+			string(option.DefaultSource), string(option.Requirement), option.Description, option.DescriptionZH,
+			option.Example, option.Unit,
+		}
 		values = append(values, option.Keywords...)
 		values = append(values, option.Values...)
-		if paths[option.Path] || catalogTextMatches(query, values...) {
-			result.Options = append(result.Options, option)
+		values = append(values, option.RequiredWhen...)
+		values = append(values, option.Requires...)
+		values = append(values, option.ConflictsWith...)
+		for _, preset := range option.PresetValues {
+			values = append(values, preset.Preset, preset.Value, preset.Description, preset.DescriptionZH)
 		}
+		score := catalogTextMatchScore(query, values...)
+		if strings.Contains(query, strings.ToLower(option.Path)) {
+			score += 5000
+		}
+		if capabilityScore := paths[option.Path]; capabilityScore > score {
+			score = capabilityScore
+		}
+		if score > 0 {
+			matchedOptions = append(matchedOptions, scoredOption{value: option, score: score})
+		}
+	}
+	sort.SliceStable(matchedOptions, func(i, j int) bool {
+		if matchedOptions[i].score == matchedOptions[j].score {
+			if matchedOptions[i].value.Path == matchedOptions[j].value.Path {
+				return matchedOptions[i].value.Owner < matchedOptions[j].value.Owner
+			}
+			return matchedOptions[i].value.Path < matchedOptions[j].value.Path
+		}
+		return matchedOptions[i].score > matchedOptions[j].score
+	})
+	for _, matched := range matchedOptions {
+		result.Options = append(result.Options, matched.value)
 	}
 	return result
 }
 
-func catalogTextMatches(query string, values ...string) bool {
+func catalogTextMatchScore(query string, values ...string) int {
 	haystack := strings.ToLower(strings.Join(values, " "))
 	if strings.Contains(haystack, query) {
-		return true
+		return 900 + len([]rune(query))
 	}
 	tokens := catalogQueryTokens(query)
 	if len(tokens) > 1 {
@@ -462,16 +850,49 @@ func catalogTextMatches(query string, values ...string) bool {
 			}
 		}
 		if all {
-			return true
+			return 700 + len(tokens)
 		}
 	}
 	for _, value := range values {
 		value = strings.ToLower(value)
 		if len([]rune(value)) >= 2 && strings.Contains(query, value) {
-			return true
+			return 800 + len([]rune(value))
 		}
 	}
-	return false
+	queryBigrams := catalogHanBigrams(query)
+	if len(queryBigrams) >= 2 {
+		haystackBigrams := catalogHanBigrams(haystack)
+		matches := 0
+		for bigram := range queryBigrams {
+			if haystackBigrams[bigram] {
+				matches++
+			}
+		}
+		if matches >= 2 {
+			return 400 + matches
+		}
+	}
+	return 0
+}
+
+func catalogHanBigrams(text string) map[string]bool {
+	var runes []rune
+	result := make(map[string]bool)
+	flush := func() {
+		for i := 0; i+1 < len(runes); i++ {
+			result[string(runes[i:i+2])] = true
+		}
+		runes = runes[:0]
+	}
+	for _, r := range text {
+		if unicode.Is(unicode.Han, r) {
+			runes = append(runes, r)
+			continue
+		}
+		flush()
+	}
+	flush()
+	return result
 }
 
 func catalogQueryTokens(query string) []string {
@@ -501,10 +922,14 @@ func RenderConfigCatalogMarkdown(catalog ConfigCatalog, lang string) string {
 	if zh {
 		fmt.Fprintf(&b, "# cc-connect-next 配置能力参考\n\n当前目录版本：`%s`。本参考描述能力，不读取或显示本机配置值。\n\n", catalog.Version)
 		b.WriteString("生效方式：`live` 表示当前运行态立即生效；`reload` 表示保存后可用 `/config reload` 应用；`new-session` 表示新 Agent 会话生效；`restart` 表示需要重启 cc-connect-next。\n\n")
+		b.WriteString("配置来源：`toml` 表示持久化在 config.toml；`environment` 表示进程环境变量；`cli` 表示启动或安装参数。TOML 字符串支持 `${VAR_NAME}` 环境变量占位符。点路径描述语义位置；Agent/Platform 选项分别写入 `[projects.agent.options]` / `[projects.platforms.options]`，并在相邻表中设置适配器 `type`。\n\n")
+		b.WriteString("优先级：显式 CLI 覆盖对应环境变量，环境覆盖项覆盖对应 TOML，项目级字段逐项覆盖全局字段，之后才使用运行时默认值。预设值只表示生成器/Profile 会显式写入什么，不会覆盖用户已有显式配置。\n\n")
 		b.WriteString("## 能力概览\n\n")
 	} else {
 		fmt.Fprintf(&b, "# cc-connect-next Configuration Capabilities\n\nCatalog version: `%s`. This reference describes capability and never reads or prints local configuration values.\n\n", catalog.Version)
 		b.WriteString("Apply modes: `live` takes effect in the running process; `reload` can be applied with `/config reload` after saving; `new-session` affects newly started Agent sessions; `restart` requires restarting cc-connect-next.\n\n")
+		b.WriteString("Configuration sources: `toml` persists in config.toml; `environment` is read from the process environment; `cli` is a startup or installation flag. TOML strings support `${VAR_NAME}` environment placeholders. Dotted paths describe semantic placement. Agent and Platform options go under `[projects.agent.options]` / `[projects.platforms.options]` with the adjacent adapter `type` selected.\n\n")
+		b.WriteString("Precedence: an explicit CLI flag overrides its corresponding environment variable, an environment override wins over its corresponding TOML option, project fields override global fields per value, and runtime defaults apply last. Preset values describe what a generator/Profile writes explicitly; they never override an existing explicit user value.\n\n")
 		b.WriteString("## Capability overview\n\n")
 	}
 	for _, capability := range catalog.Capabilities {
@@ -534,12 +959,41 @@ func RenderConfigCatalogMarkdown(catalog ConfigCatalog, lang string) string {
 		}
 		fmt.Fprintf(&b, "### %s\n\n%s\n\n", heading, description)
 		if zh {
-			fmt.Fprintf(&b, "- 作用域：`%s`%s\n- 类型：`%s`\n- 默认值：`%s`\n- 生效方式：`%s`\n", option.Scope, ownerSuffix(option), option.Type, option.Default, option.ApplyMode)
+			fmt.Fprintf(&b, "- 来源：`%s`\n- 配置位置：`%s`\n- 作用域：`%s`%s\n- 类型：`%s`\n- 要求：`%s`\n- 默认值：`%s`\n- 默认值来源：`%s`\n- 生效方式：`%s`\n", option.Source, option.Placement, option.Scope, ownerSuffix(option), option.Type, localizedRequirement(option.Requirement, true), option.Default, option.DefaultSource, option.ApplyMode)
 		} else {
-			fmt.Fprintf(&b, "- Scope: `%s`%s\n- Type: `%s`\n- Default: `%s`\n- Takes effect: `%s`\n", option.Scope, ownerSuffix(option), option.Type, option.Default, option.ApplyMode)
+			fmt.Fprintf(&b, "- Source: `%s`\n- Placement: `%s`\n- Scope: `%s`%s\n- Type: `%s`\n- Requirement: `%s`\n- Default: `%s`\n- Default source: `%s`\n- Takes effect: `%s`\n", option.Source, option.Placement, option.Scope, ownerSuffix(option), option.Type, option.Requirement, option.Default, option.DefaultSource, option.ApplyMode)
+		}
+		if len(option.RequiredWhen) > 0 {
+			fmt.Fprintf(&b, "- %s: `%s`\n", map[bool]string{true: "必填条件", false: "Required when"}[zh], strings.Join(option.RequiredWhen, "`, `"))
+		}
+		if len(option.Requires) > 0 {
+			fmt.Fprintf(&b, "- %s: `%s`\n", map[bool]string{true: "依赖", false: "Requires"}[zh], strings.Join(option.Requires, "`, `"))
+		}
+		if len(option.ConflictsWith) > 0 {
+			fmt.Fprintf(&b, "- %s: `%s`\n", map[bool]string{true: "冲突", false: "Conflicts with"}[zh], strings.Join(option.ConflictsWith, "`, `"))
+		}
+		if option.Minimum != nil || option.Maximum != nil {
+			minimum, maximum := "-∞", "+∞"
+			if option.Minimum != nil {
+				minimum = formatConfigContractNumber(*option.Minimum)
+			}
+			if option.Maximum != nil {
+				maximum = formatConfigContractNumber(*option.Maximum)
+			}
+			fmt.Fprintf(&b, "- %s: `%s` %s `%s`", map[bool]string{true: "范围", false: "Range"}[zh], minimum, map[bool]string{true: "到", false: "to"}[zh], maximum)
+			if option.Unit != "" {
+				fmt.Fprintf(&b, " `%s`", option.Unit)
+			}
+			b.WriteString("\n")
+		} else if option.Unit != "" {
+			fmt.Fprintf(&b, "- %s: `%s`\n", map[bool]string{true: "单位", false: "Unit"}[zh], option.Unit)
 		}
 		if len(option.Values) > 0 {
-			fmt.Fprintf(&b, "- %s: `%s`\n", map[bool]string{true: "允许值", false: "Allowed values"}[zh], strings.Join(option.Values, "`, `"))
+			label := map[bool]string{true: "允许值", false: "Allowed values"}[zh]
+			if option.OpenValues {
+				label = map[bool]string{true: "规范值（也接受文档化别名）", false: "Canonical values (documented aliases also accepted)"}[zh]
+			}
+			fmt.Fprintf(&b, "- %s: `%s`\n", label, strings.Join(option.Values, "`, `"))
 		}
 		if option.Sensitive {
 			fmt.Fprintf(&b, "- %s\n", map[bool]string{true: "敏感信息：是；优先使用环境变量占位符。", false: "Sensitive: yes; prefer an environment-variable placeholder."}[zh])
@@ -550,9 +1004,38 @@ func RenderConfigCatalogMarkdown(catalog ConfigCatalog, lang string) string {
 		if option.Example != "" {
 			fmt.Fprintf(&b, "- %s: `%s`\n", map[bool]string{true: "示例", false: "Example"}[zh], option.Example)
 		}
+		for _, preset := range option.PresetValues {
+			description := preset.Description
+			if zh {
+				description = preset.DescriptionZH
+			}
+			fmt.Fprintf(&b, "- %s `%s`: `%s`", map[bool]string{true: "预设", false: "Preset"}[zh], preset.Preset, preset.Value)
+			if description != "" {
+				fmt.Fprintf(&b, " — %s", description)
+			}
+			b.WriteString("\n")
+		}
 		b.WriteString("\n")
 	}
 	return strings.TrimSpace(b.String()) + "\n"
+}
+
+func localizedRequirement(requirement ConfigRequirement, zh bool) string {
+	if !zh {
+		return string(requirement)
+	}
+	switch requirement {
+	case ConfigRequirementRequired:
+		return "必填"
+	case ConfigRequirementConditional:
+		return "条件必填"
+	default:
+		return "可选"
+	}
+}
+
+func formatConfigContractNumber(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func coalescedConfigOptions(options []ConfigOption) []ConfigOption {
@@ -563,14 +1046,18 @@ func coalescedConfigOptions(options []ConfigOption) []ConfigOption {
 	groups := make(map[string]*group)
 	var order []string
 	for _, option := range options {
+		option = FinalizeConfigOption(option)
 		if option.Internal {
 			continue
 		}
 		identity := strings.Join([]string{
-			option.Path, option.Key, string(option.Scope), option.Type, option.Default,
-			strings.Join(option.Values, "\x1f"), option.Description, option.DescriptionZH,
+			option.Path, option.Key, string(option.Scope), string(option.Source), option.Placement, option.Type, option.Default,
+			string(option.DefaultSource), string(option.Requirement), strings.Join(option.RequiredWhen, "\x1f"),
+			strings.Join(option.Requires, "\x1f"), strings.Join(option.ConflictsWith, "\x1f"),
+			formatOptionalConfigNumber(option.Minimum), formatOptionalConfigNumber(option.Maximum), option.Unit,
+			strings.Join(option.Values, "\x1f"), fmt.Sprintf("%t/%t", option.ClosedValues, option.OpenValues), option.Description, option.DescriptionZH,
 			strings.Join(option.Keywords, "\x1f"), string(option.ApplyMode),
-			fmt.Sprintf("%t/%t", option.Sensitive, option.Deprecated), option.Example,
+			fmt.Sprintf("%t/%t", option.Sensitive, option.Deprecated), option.Example, formatPresetIdentity(option.PresetValues),
 		}, "\x1e")
 		current := groups[identity]
 		if current == nil {
@@ -598,6 +1085,21 @@ func coalescedConfigOptions(options []ConfigOption) []ConfigOption {
 		return out[i].Path < out[j].Path
 	})
 	return out
+}
+
+func formatOptionalConfigNumber(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	return formatConfigContractNumber(*value)
+}
+
+func formatPresetIdentity(values []ConfigPresetValue) string {
+	var parts []string
+	for _, value := range values {
+		parts = append(parts, strings.Join([]string{value.Preset, value.Value, value.Description, value.DescriptionZH}, "\x1f"))
+	}
+	return strings.Join(parts, "\x1e")
 }
 
 func ownerSuffix(option ConfigOption) string {
@@ -639,7 +1141,7 @@ func BuildConfigurationCapabilityBrief(catalog ConfigCatalog, agent string, plat
 	fmt.Fprintf(&b, "[cc-connect-next capability brief]\nThis conversation is bridged through cc-connect-next %s. The active Agent is %q and the active platform adapters are %q.\n", catalog.Version, agent, strings.Join(platforms, ", "))
 	b.WriteString("Users will ask natural-language questions about what cc-connect-next can configure. Before answering a specific configuration question, query the local version-matched, read-only catalog:\n  ")
 	b.WriteString(cmd)
-	b.WriteString("\nThe catalog describes capability only and never reads current credentials or values. Use separate searches for unrelated wishes, and treat a related result without an exact option as unsupported. Explain support status, exact TOML path, purpose, default/allowed values, scope, apply mode, security caveats, and a minimal example; do not invent config keys. If the catalog has no exact match, say this build does not declare that capability and offer `/feedback <description>`. Do not edit config or restart the service unless the user explicitly asks.\n")
+	b.WriteString("\nThe catalog describes capability only and never reads current credentials or values. Add `--all` when the user asks about adapters beyond the active project. Use separate searches for unrelated wishes, and treat a related result without an exact option as unsupported. Explain support status, exact configuration source/location, requirement and dependencies, purpose, omitted default versus preset values, allowed values/range, scope, apply mode, security caveats, and the catalog's validated example; do not invent config keys. If the catalog has no exact match, say this build does not declare that capability and offer `/feedback <description>`. Do not edit config or restart the service unless the user explicitly asks.\n")
 	if len(catalog.Capabilities) > 0 {
 		b.WriteString("Configuration areas: ")
 		limit := len(catalog.Capabilities)

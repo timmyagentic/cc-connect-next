@@ -108,6 +108,30 @@ if info, ok := agent.(AgentDoctorInfo); ok {
 - Use `map[string]any` options for agent/platform factories to stay flexible
 - Add new config fields with sensible defaults so existing configs don't break
 
+#### Configuration Contract
+
+Every public TOML option, environment override, or persistent startup flag must
+be represented in the compiled configuration contract. The contract is the
+single source for Agent queries, bilingual generated reference docs, validated
+examples, and the generated Web settings constants.
+
+When adding or changing configuration:
+
+1. Keep the runtime parser/default and its `ConfigOption` metadata together or
+   share constants so they cannot drift.
+2. Declare source, placement, accepted type(s), requirement/conditions,
+   omitted default and source, allowed values or numeric bounds, apply mode,
+   security sensitivity, dependencies/conflicts, and a parseable example.
+3. Record Starter/recommended Profile values separately from omitted runtime
+   defaults; never overload the default string with both meanings.
+4. Extend side-effect-free validation so a documented type or required value
+   cannot be silently ignored by the constructor.
+5. Add natural-language acceptance coverage for new user intent and regenerate
+   artifacts with `go generate ./cmd/cc-connect`.
+
+Do not hand-edit `docs/configuration.md`, `docs/configuration.zh-CN.md`, or
+`web/src/generated/configContract.ts`.
+
 ### 4. High Cohesion, Low Coupling
 
 - Each `agent/X/` package is self-contained: it handles process lifecycle, output parsing, and session management for agent X

@@ -53,6 +53,23 @@ func TestStarterConfigTOML_WritesTheRecommendedFeishuProfile(t *testing.T) {
 	}
 }
 
+func TestStarterConfigTOML_AccessControlExamplesUseAcceptedStrings(t *testing.T) {
+	starter := StarterConfigTOML()
+	for _, want := range []string{
+		`# allow_from = "ou_your_feishu_open_id"`,
+		`# allow_chat = "oc_your_group_chat_id"`,
+	} {
+		if !strings.Contains(starter, want) {
+			t.Errorf("starter access-control guidance missing %q", want)
+		}
+	}
+	for _, rejected := range []string{`allow_from = [`, `allow_chat = [`} {
+		if strings.Contains(starter, rejected) {
+			t.Errorf("starter still advertises unsupported allowlist array syntax %q", rejected)
+		}
+	}
+}
+
 func TestStarterConfigTOML_KeepsPresentationOutOfTheGlobalTable(t *testing.T) {
 	tables := rawTables(t, StarterConfigTOML())
 

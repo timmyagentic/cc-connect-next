@@ -3,7 +3,17 @@ package tmux
 import "github.com/timmyagentic/cc-connect-next/core"
 
 func init() {
-	core.RegisterAgentConfigOptions("tmux", core.DescribeAgentOptions((&Agent{}).KnownOptionKeys()))
+	options := core.DescribeAgentOptions((&Agent{}).KnownOptionKeys())
+	options = core.RefineConfigOption(options, "session", func(option *core.ConfigOption) {
+		option.Example = `session = "agent-session"`
+	})
+	options = core.ConfigureOption(options, "prompt_pattern", `[❯\$#>%]\s*$`)
+	options = core.RefineConfigOption(options, "strip_patterns", func(option *core.ConfigOption) {
+		option.Default = "built-in Claude mode-status pattern"
+		option.DefaultSource = core.ConfigDefaultBuiltin
+		option.Example = `strip_patterns = ["^status:"]`
+	})
+	core.RegisterAgentConfigOptions("tmux", options)
 }
 
 // KnownOptionKeys implements core.AgentOptionSchema: the exhaustive set of
