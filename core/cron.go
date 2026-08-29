@@ -590,15 +590,13 @@ func (cs *CronScheduler) UpdateJob(id string, field string, value any) error {
 		}
 	}
 
-	if field == "project" || field == "session_key" || field == "enabled" {
-		candidate := *job
-		if err := updateJobField(&candidate, field, value); err != nil {
-			return fmt.Errorf("invalid %s: %w", field, err)
-		}
-		if field != "enabled" || candidate.Enabled {
-			if err := cs.validatePersistentTarget(candidate.Project, candidate.SessionKey); err != nil {
-				return err
-			}
+	candidate := *job
+	if err := updateJobField(&candidate, field, value); err != nil {
+		return fmt.Errorf("invalid %s: %w", field, err)
+	}
+	if candidate.Enabled || field == "project" || field == "session_key" {
+		if err := cs.validatePersistentTarget(candidate.Project, candidate.SessionKey); err != nil {
+			return err
 		}
 	}
 

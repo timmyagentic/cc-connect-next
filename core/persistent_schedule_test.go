@@ -141,4 +141,19 @@ func TestCronSchedulerRejectsPersistentBridgeTargetOnUpdateAndRun(t *testing.T) 
 	if got := store.Get(legacy.ID).Enabled; got {
 		t.Fatal("failed enable mutated the legacy Bridge job")
 	}
+
+	enabledLegacy := &CronJob{
+		ID: "enabled-legacy-bridge", Project: "test-project",
+		SessionKey: "bridge:web-admin:test-project", CronExpr: "0 9 * * *",
+		Prompt: "legacy", Enabled: true, CreatedAt: time.Now(),
+	}
+	if err := store.Add(enabledLegacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := scheduler.UpdateJob(enabledLegacy.ID, "cron_expr", "5 9 * * *"); err == nil {
+		t.Fatal("UpdateJob() rescheduled an enabled non-persistent Bridge target")
+	}
+	if got := store.Get(enabledLegacy.ID).CronExpr; got != "0 9 * * *" {
+		t.Fatalf("failed update mutated cron_expr to %q", got)
+	}
 }

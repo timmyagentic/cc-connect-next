@@ -1946,11 +1946,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "✅ Tarea shell programada creada\nID: `%s`\nProgramación: `%s`\nComando: `%s`",
 	},
 	MsgCronTargetUnsupported: {
-		LangEnglish:            "This session depends on a live connection and cannot receive persistent scheduled delivery. Choose a durable messaging session, such as Feishu.",
-		LangChinese:            "该会话依赖实时连接，不能接收持久定时投递。请选择飞书等持久消息会话。",
-		LangTraditionalChinese: "此工作階段依賴即時連線，無法接收持久排程投遞。請選擇飛書等持久訊息工作階段。",
-		LangJapanese:           "このセッションはライブ接続に依存するため、永続的なスケジュール配信を受信できません。Feishu などの永続的なメッセージセッションを選択してください。",
-		LangSpanish:            "Esta sesión depende de una conexión activa y no admite entrega programada persistente. Elige una sesión de mensajería duradera, como Feishu.",
+		LangEnglish:            "This session depends on a live connection and cannot receive persistent scheduled delivery. Choose a durable messaging session.",
+		LangChinese:            "该会话依赖实时连接，不能接收持久定时投递。请选择可持久主动投递的消息会话。",
+		LangTraditionalChinese: "此工作階段依賴即時連線，無法接收持久排程投遞。請選擇可持久主動投遞的訊息工作階段。",
+		LangJapanese:           "このセッションはライブ接続に依存するため、永続的なスケジュール配信を受信できません。永続的に配信できるメッセージセッションを選択してください。",
+		LangSpanish:            "Esta sesión depende de una conexión activa y no admite entrega programada persistente. Elige una sesión de mensajería con entrega duradera.",
 	},
 	MsgCronAddExecUsage: {
 		LangEnglish:            "Usage: /cron addexec <min> <hour> <day> <month> <weekday> <shell command>\nExample: /cron addexec 0 6 * * * df -h",

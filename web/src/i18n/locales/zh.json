@@ -124,7 +124,7 @@
     "promptPlaceholder": "发送给 Agent 的提示词...",
     "selectSessionKey": "选择会话（留空使用默认）",
     "sessionNotSchedulable": "不支持持久定时投递",
-    "sessionNotSchedulableHint": "浏览器连接型 Web 会话不能接收持久定时投递，请选择飞书等持久消息会话。",
+    "sessionNotSchedulableHint": "浏览器连接型 Web 会话不能接收持久定时投递，请选择可持久主动投递的消息会话。",
     "taskType": "任务类型",
     "mode": "权限模式",
     "modeDefault": "跟随项目默认"

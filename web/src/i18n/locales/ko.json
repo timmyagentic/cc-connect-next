@@ -124,7 +124,7 @@
     "promptPlaceholder": "에이전트에게 보낼 프롬프트...",
     "selectSessionKey": "세션 선택 (기본값은 비워두기)",
     "sessionNotSchedulable": "지속 예약 전송을 사용할 수 없음",
-    "sessionNotSchedulableHint": "브라우저 연결형 Web 세션은 지속 예약 전송을 받을 수 없습니다. Feishu와 같은 지속형 메시징 세션을 선택하세요.",
+    "sessionNotSchedulableHint": "브라우저 연결형 Web 세션은 지속 예약 전송을 받을 수 없습니다. 지속 전송이 가능한 메시징 세션을 선택하세요.",
     "taskType": "작업 유형",
     "mode": "권한 모드",
     "modeDefault": "프로젝트 기본값 사용"
