@@ -50,60 +50,34 @@ type bridgePublishedCommand struct {
 	ArgsMode          string `json:"args_mode"`
 }
 
-// GetBridgePublishedCommands returns the subset of commands that a bridge
-// control-plane client can safely expose as slash commands. It intentionally
-// excludes skills and other richer command models until the bridge protocol
-// grows beyond the single free-form "args" text bucket.
+// GetBridgePublishedCommands projects the unified Agent Capability Manifest's
+// chat-command contracts onto the legacy Bridge command shape. Skills remain a
+// separate Manifest section because capabilities_snapshot_v1 has no Skill
+// model; commands, permissions, disabled policy, and availability therefore
+// still come from one runtime source of truth.
 func (e *Engine) GetBridgePublishedCommands() []bridgePublishedCommand {
-	e.userRolesMu.RLock()
-	disabledCmds := e.disabledCmds
-	e.userRolesMu.RUnlock()
-
-	seen := make(map[string]bool)
 	var commands []bridgePublishedCommand
-
-	for _, c := range builtinCommands {
-		if len(c.names) == 0 || disabledCmds[c.id] {
+	for _, capability := range e.agentCommandCapabilities("") {
+		if capability.Availability.State == CapabilityUnavailable {
 			continue
 		}
-		if seen[c.id] {
-			continue
+		source := bridgeCommandSourceBuiltin
+		if strings.HasPrefix(capability.Source, "custom-") {
+			source = bridgeCommandSourceCustom
 		}
-		seen[c.id] = true
+		description := capability.Description
+		if e.i18n.IsZhLike() && capability.DescriptionZH != "" {
+			description = capability.DescriptionZH
+		}
 		commands = append(commands, bridgePublishedCommand{
-			Name:              c.id,
-			Description:       e.i18n.T(MsgKey(c.id)),
-			Source:            bridgeCommandSourceBuiltin,
+			Name:              capability.ID,
+			Description:       description,
+			Source:            source,
 			RequiresWorkspace: false,
 			ArgsMode:          bridgeCommandArgsModeText,
 		})
 	}
-
-	customCommands := e.commands.ListAll()
-	sort.Slice(customCommands, func(i, j int) bool {
-		return strings.ToLower(customCommands[i].Name) < strings.ToLower(customCommands[j].Name)
-	})
-	for _, c := range customCommands {
-		lowerName := strings.ToLower(strings.TrimSpace(c.Name))
-		if lowerName == "" || seen[lowerName] || disabledCmds[lowerName] {
-			continue
-		}
-		seen[lowerName] = true
-
-		desc := strings.TrimSpace(c.Description)
-		if desc == "" {
-			desc = "Custom command"
-		}
-
-		commands = append(commands, bridgePublishedCommand{
-			Name:              c.Name,
-			Description:       desc,
-			Source:            bridgeCommandSourceCustom,
-			RequiresWorkspace: false,
-			ArgsMode:          bridgeCommandArgsModeText,
-		})
-	}
-
+	sort.Slice(commands, func(i, j int) bool { return strings.ToLower(commands[i].Name) < strings.ToLower(commands[j].Name) })
 	return commands
 }
 

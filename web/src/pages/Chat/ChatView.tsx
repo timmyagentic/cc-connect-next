@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
 import {
@@ -10,11 +10,12 @@ import {
   listSessions, getSession, switchSession as activateSession,
   type Session, type SessionDetail,
 } from '@/api/sessions';
+import { getProjectCapabilities } from '@/api/projects';
 import {
   useBridgeSocket, fetchBridgeConfig,
   type BridgeConfig, type BridgeIncoming, type BridgeStatus,
 } from '@/hooks/useBridgeSocket';
-import CommandPalette, { type SlashCommand, slashCommands } from './CommandPalette';
+import CommandPalette, { manifestToSlashCommands, type SlashCommand, slashCommands } from './CommandPalette';
 import SessionDrawer from './SessionDrawer';
 import CommandResultPanel, { type CommandResult } from './CommandResultPanel';
 import { loadSelectedSession, selectDefaultWebSession } from './sessionSelection.js';
@@ -109,6 +110,8 @@ interface ChatMsg {
   streaming?: boolean;
   timestamp?: string;
 }
+
+const chatCommandNames = new Set(['/new', '/stop', '/switch', '/delete-mode', '/upgrade']);
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -303,6 +306,7 @@ export default function ChatView() {
   const [loading, setLoading] = useState(true);
   const [typing, setTyping] = useState(false);
   const [bridgeCfg, setBridgeCfg] = useState<BridgeConfig | null>(null);
+  const [capabilityCommands, setCapabilityCommands] = useState<SlashCommand[]>(slashCommands);
   // Whether the user explicitly picked a session from the drawer
   const [userPickedSession, setUserPickedSession] = useState(false);
 
@@ -367,6 +371,24 @@ export default function ChatView() {
   }, [projectName, webSessionKey]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // The running Engine's Manifest is the command/Skill source of truth. Keep a
+  // static fallback so an older daemon or a transient API failure never makes
+  // the Web chat unusable.
+  useEffect(() => {
+    let cancelled = false;
+    if (!projectName) return undefined;
+    getProjectCapabilities(projectName, sessionKey)
+      .then((manifest) => {
+        if (!cancelled) setCapabilityCommands(manifestToSlashCommands(manifest));
+      })
+      .catch(() => {
+        if (!cancelled) setCapabilityCommands(slashCommands);
+      });
+    return () => { cancelled = true; };
+  }, [projectName, sessionKey]);
+
+  const knownCommands = useMemo(() => new Set(capabilityCommands.map((command) => command.cmd)), [capabilityCommands]);
 
   // Keep ref in sync with cmdResult so callbacks avoid stale closures
   useEffect(() => {
@@ -516,14 +538,14 @@ export default function ChatView() {
 
     const cmdToken = content.split(' ')[0];
     const isKnownCmd = knownCommands.has(cmdToken);
-    if (isKnownCmd && !chatCommands.has(cmdToken)) {
+    if (isKnownCmd && !chatCommandNames.has(cmdToken)) {
       pendingCmdRef.current = cmdToken;
     } else {
       setMessages(prev => [...prev, { id: `user-${Date.now()}`, role: 'user', content }]);
     }
     bridgeSend(content);
     setTimeout(() => setSending(false), 300);
-  }, [input, bridgeStatus, bridgeSend]);
+  }, [input, bridgeStatus, bridgeSend, knownCommands]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -536,15 +558,11 @@ export default function ChatView() {
     }
   };
 
-  // Commands whose result should go to the message stream (they change state)
-  const chatCommands = new Set(['/new', '/stop', '/switch', '/delete-mode', '/upgrade']);
-  const knownCommands = new Set(slashCommands.map(c => c.cmd));
-
   const handleCmdSelect = useCallback((cmd: SlashCommand) => {
     setCmdOpen(false);
     if (bridgeStatus !== 'connected') return;
 
-    if (chatCommands.has(cmd.cmd)) {
+    if (chatCommandNames.has(cmd.cmd)) {
       setMessages(prev => [...prev, { id: `user-${Date.now()}`, role: 'user', content: cmd.cmd }]);
     } else {
       pendingCmdRef.current = cmd.cmd;
@@ -702,6 +720,7 @@ export default function ChatView() {
                 onClose={() => setCmdOpen(false)}
                 onSelect={handleCmdSelect}
                 anchorRef={cmdBtnRef}
+                commands={capabilityCommands}
               />
             </div>
 

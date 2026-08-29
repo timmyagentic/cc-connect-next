@@ -85,6 +85,32 @@ func registerWithMetadata(t *testing.T, conn *websocket.Conn, platform string, c
 	}
 }
 
+func TestBridgeRuntimeCapabilityManifestUsesNegotiatedAdapterCapabilities(t *testing.T) {
+	bridge, wsURL := startTestBridge(t, "")
+	conn := dialWS(t, wsURL, nil)
+	register(t, conn, "web", []string{"text", "card", "image"})
+
+	platform := bridge.NewPlatform("demo")
+	engine := NewEngine("demo", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+	bridge.RegisterEngine("demo", engine, platform)
+	engine.interactiveStates["web:chat:user"] = &interactiveState{
+		platform: platform,
+		replyCtx: newBridgeReplyCtx(bridge.getAdapter("web"), "web:chat:user", "reply"),
+	}
+	manifest := engine.AgentCapabilityManifest("web:chat:user")
+	adapter := findRuntimeAdapter(t, manifest.Runtime, "platform", "bridge")
+	if findRuntimeFeature(t, adapter.Capabilities, "structured_cards").Availability.State != CapabilityAvailable {
+		t.Fatalf("negotiated card capability missing: %#v", adapter)
+	}
+	if findRuntimeFeature(t, adapter.Capabilities, "images").Availability.State != CapabilityAvailable {
+		t.Fatalf("negotiated image capability missing: %#v", adapter)
+	}
+	audio := findRuntimeFeature(t, adapter.Capabilities, "audio")
+	if audio.Availability.State != CapabilityUnavailable || !strings.Contains(audio.Availability.Reason, "does not declare audio") {
+		t.Fatalf("undeclared audio capability = %#v", audio)
+	}
+}
+
 func readMsg(t *testing.T, conn *websocket.Conn) map[string]any {
 	t.Helper()
 	if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {

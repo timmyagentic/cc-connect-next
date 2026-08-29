@@ -251,6 +251,9 @@ func main() {
 		case "config":
 			runConfig(os.Args[2:])
 			return
+		case "capabilities", "capability", "manifest":
+			runCapabilities(os.Args[2:])
+			return
 		case "update":
 			runUpdate()
 			return
@@ -539,14 +542,16 @@ func main() {
 		}
 		engine.SetFeedbackConfig(cfg.FeedbackEnabled(), feedbackEndpoint, core.EnsureInstallID(cfg.DataDir))
 		engine.SetFeedbackCapabilityGaps(cfg.UnknownConfigKeys)
-		// Give the Agent a bounded, version-matched configuration capsule and
-		// teach it to query the read-only local catalog for exact details when
-		// users ask natural-language configuration questions.
+		engine.SetConfigCatalog(configCatalog)
+		engine.SetConfigCatalogSearch(config.SearchCapabilities)
+		// Give the Agent a bounded, version-matched capability capsule and teach
+		// it to query the read-only runtime Manifest for exact configuration,
+		// command, Skill, side-effect, fallback, and adapter availability details.
 		platformTypes := make([]string, 0, len(proj.Platforms))
 		for _, platform := range proj.Platforms {
 			platformTypes = append(platformTypes, platform.Type)
 		}
-		engine.SetCapabilityBrief(core.BuildConfigurationCapabilityBrief(configCatalog, proj.Agent.Type, platformTypes))
+		engine.SetCapabilityBrief(core.BuildAgentCapabilityBrief(configCatalog, proj.Agent.Type, platformTypes))
 		engine.SetFilterExternalSessions(proj.FilterExternalSessions != nil && *proj.FilterExternalSessions)
 		engine.SetBaseWorkDir(workDir)
 		engine.SetProjectStateStore(projectState)
@@ -1758,6 +1763,9 @@ Commands:
     format           Format the config file (alias: fmt)
     path             Print the resolved config file path
 
+  capabilities       Query the running project's unified Agent Capability Manifest
+                     (configuration, tools, commands, Skills, runtime adapters)
+
   doctor             Check config, agent CLI, platforms, dependencies and network
                      (--config <path>, --project <name>)
     user-isolation   Audit run_as_user projects and emit an isolation report
@@ -1781,6 +1789,7 @@ Examples:
   cc-connect-next update                   Update to the latest stable version
   cc-connect-next migrate --dry-run        Preview migration from official CC Connect
   cc-connect-next config format            Format the config file
+  cc-connect-next capabilities --search "switch model"
   cc-connect-next config capabilities --search "hide reasoning"
   cc-connect-next config example > c.toml  Save example config to a file
 

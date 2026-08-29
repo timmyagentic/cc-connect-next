@@ -71,11 +71,15 @@ cc-connect-next
 
 Startup refuses to run while any `REPLACE` placeholder remains, naming the key and the step that resolves it — instead of reporting healthy and then failing to connect. `doctor` checks config, agent CLI login state, platforms, dependencies, and network without opening a platform connection.
 
-When you are unsure whether something is configurable, ask the connected Agent
-in natural language. It queries the read-only catalog built into the installed
-version instead of guessing keys; you can also run
-`cc-connect-next config capabilities --search "keywords"`. See the generated
-[configuration capability reference](docs/configuration.md) for every declared option.
+When you are unsure what the active project can do, how to invoke it, whether it
+is available, or whether it is configurable, ask the connected Agent in natural
+language. It queries the version/project/session-matched, read-only
+[Agent Capability Manifest](docs/agent-capability-manifest.md), which unifies
+configuration, CLI tools, chat commands, Skills, runtime adapters, parameters,
+permissions, side effects, fallbacks, and availability reasons. You can also run
+`cc-connect-next capabilities --search "keywords"`. For configuration-only lookup,
+`cc-connect-next config capabilities --search "keywords"` remains available; see the
+[configuration capability reference](docs/configuration.md) for every option.
 
 Install as a service once things work:
 
@@ -202,6 +206,7 @@ cc-connect-next forked from CC Connect v1.4.1 and tracks upstream through per-ch
 |---|---|
 | [INSTALL.md](INSTALL.md) | npm / standalone / source install, updates, daemon setup |
 | [Usage guide](docs/usage.md) | sessions, queue vs steer, permissions, providers, models, cron, relay, TTS/STT |
+| [Agent Capability Manifest](docs/agent-capability-manifest.md) | unified Agent-queryable capabilities, permissions, side effects, fallbacks, and runtime availability |
 | [Feishu setup](docs/feishu.md) | app creation, permissions, event subscription |
 | [Answer-card contract](docs/feishu-card-contract.md) | the exact card lifecycle and privacy guarantees |
 | [Coming from CC Connect](docs/coming-from-cc-connect.md) | honest comparison, direct migration, and safe rollback |

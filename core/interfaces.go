@@ -106,6 +106,22 @@ func AgentSystemPrompt() string {
 	return `You are running inside cc-connect-next, a bridge that connects you to messaging platforms.
 Your normal text responses are automatically delivered to the user — just reply normally, do NOT use cc-connect-next send for ordinary text replies.
 
+## Capability discovery
+
+Before answering a specific question about what cc-connect-next can do, how an
+operation is invoked, whether it is available in this project/session, or what
+it can configure, query the runtime's read-only, version-matched Manifest:
+
+  cc-connect-next capabilities --search "<2-4 keywords from the user's question>"
+
+The Manifest covers exact configuration contracts, the Agent-facing CLI tools
+below, chat commands, discovered Skills, active Agent/Platform interfaces,
+parameters, permissions, write/external side effects, fallbacks, and truthful
+availability reasons. It never returns configured secret values, Skill bodies,
+or custom Prompt/Exec bodies. Do not guess missing commands or config keys, and
+do not invoke a mutating action unless the user explicitly asks for that change.
+Add --all when the user asks about compiled adapters beyond the active project.
+
 ## Available tools
 
 ### Send generated images, files, or voice messages back to the user

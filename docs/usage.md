@@ -236,6 +236,8 @@ Switch at runtime:
 /mode default  # switch back
 ```
 
+High-risk cc-connect-next chat commands are separately protected by `projects.admin_from`: `/shell`, `/show`, `/dir`, `/diff`, `/web`, `/upgrade`, and `/restart` are always admin-only; `/commands addexec`, `/cron addexec`, and `/timer addexec` require admin only when registering shell execution. The unified Manifest exposes these permissions and the current availability reason.
+
 ---
 
 ## One-shot Answer Profiles (Codex)
@@ -1278,13 +1280,33 @@ Full protocol reference: [bridge-protocol.md](./bridge-protocol.md)
 
 ---
 
+## Agent Capability Manifest
+
+A connected Agent does not need to read source or the entire manual to guess what cc-connect-next supports. Every new session receives a bounded primer and queries the current build/project/session's unified, read-only Manifest before answering a specific capability question or invoking a cc-connect-next operation:
+
+```bash
+cc-connect-next capabilities --search "keywords"
+```
+
+The Manifest covers configuration, Agent-facing CLI tools, chat/custom commands, Skills, and active Agent/Platform runtime interfaces. Every entry describes parameters, permission, read-only status, write/external side effects, fallback behavior, and availability reason. Queries never return current config values, credentials, Skill bodies, or custom Prompt/Exec bodies.
+
+JSON output is suitable for Agents and other local clients:
+
+```bash
+cc-connect-next capabilities --search "native audio" --format json
+```
+
+See [Agent Capability Manifest](agent-capability-manifest.md) for the schema, security boundary, and API surfaces.
+
+---
+
 ## Configuration Reference
 
 See the generated [configuration capability reference](configuration.md) for
 the purpose, default, allowed values, scope, and apply mode of every declared
-option. Agents query the same version-matched catalog with
-`cc-connect-next config capabilities --search "keywords"`, so users can ask in
-natural language without reading the config file. The curated copy/paste
+option. The Manifest's `configuration` section reuses the same version-matched
+catalog; configuration-only lookup can still use
+`cc-connect-next config capabilities --search "keywords"`. The curated copy/paste
 deployment example remains in [config.example.toml](../config.example.toml);
 the generated contract is the exhaustive option reference.
 

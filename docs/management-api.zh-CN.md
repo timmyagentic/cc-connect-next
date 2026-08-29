@@ -402,6 +402,23 @@ GET /api/v1/status?token=mgmt-secret
 
 ---
 
+#### GET /api/v1/projects/{name}/capabilities
+
+返回项目统一、只读的 Agent Capability Manifest。结果包含配置契约、Agent CLI 工具、聊天/自定义命令、Skills、活动 Agent/session/Platform 接口、参数、权限、副作用、退化行为和可用性原因。
+
+**查询参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `session_key` | string | 否 | 提供活动会话和平台运行态上下文；调用者授权仍在真实调用时检查 |
+| `search` / `q` | string | 否 | 对 Manifest 全部区段应用自然语言过滤 |
+| `all` | boolean | 否 | 包含全部已编译适配器的配置与激活条目 |
+| `sections` | string | 否 | 逗号分隔的投影：`configuration,tools,commands,skills,runtime` |
+
+响应 Schema 为 `cc-connect-next.agent-capabilities/v1`。它不会包含当前配置值、凭证、Skill 正文、本地 Skill 路径或自定义 Prompt/Exec 正文。详见 [Agent Capability Manifest](agent-capability-manifest.zh-CN.md)。
+
+---
+
 #### PATCH /api/v1/projects/{name}
 
 更新项目设置。仅更新提供的字段。

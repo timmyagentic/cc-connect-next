@@ -54,10 +54,48 @@ export interface ProjectSettingsUpdate {
   platform_allow_from?: Record<string, string>;
 }
 
+export interface CapabilityAvailability {
+  state: 'available' | 'conditional' | 'unavailable';
+  reason: string;
+  reason_zh: string;
+}
+
+export interface ManifestCommandCapability {
+  id: string;
+  invocation: string;
+  source: string;
+  category: string;
+  description: string;
+  description_zh: string;
+  availability: CapabilityAvailability;
+}
+
+export interface ManifestSkillCapability {
+  name: string;
+  display_name?: string;
+  invocation: string;
+  description: string;
+  availability: CapabilityAvailability;
+}
+
+export interface AgentCapabilityManifest {
+  schema: string;
+  version: string;
+  project: string;
+  read_only: boolean;
+  commands: ManifestCommandCapability[];
+  skills: ManifestSkillCapability[];
+}
+
 export const listAgentTypes = () => api.get<{ agents: string[]; platforms: string[] }>('/agents');
 
 export const listProjects = () => api.get<{ projects: ProjectSummary[] }>('/projects');
 export const getProject = (name: string) => api.get<ProjectDetail>(`/projects/${name}`);
+export const getProjectCapabilities = (name: string, sessionKey?: string) =>
+  api.get<AgentCapabilityManifest>(`/projects/${name}/capabilities`, {
+    sections: 'commands,skills',
+    ...(sessionKey ? { session_key: sessionKey } : {}),
+  });
 export const updateProject = (name: string, body: ProjectSettingsUpdate) => api.patch(`/projects/${name}`, body);
 
 export const addPlatformToProject = (projectName: string, body: {

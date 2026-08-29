@@ -33,6 +33,11 @@ func TestIsPrivilegedCommandInvocation_ExecRegistration(t *testing.T) {
 		{command: "cron", arguments: []string{"list"}, privileged: false},
 		{command: "cron", arguments: []string{"addexec"}, privileged: true},
 		{command: "cron", arguments: []string{"ADDEXEC"}, privileged: true},
+		{command: "timer", arguments: nil, privileged: false},
+		{command: "timer", arguments: []string{"add"}, privileged: false},
+		{command: "timer", arguments: []string{"list"}, privileged: false},
+		{command: "timer", arguments: []string{"addexec"}, privileged: true},
+		{command: "timer", arguments: []string{"ADDEXEC"}, privileged: true},
 		{command: "help", arguments: []string{"addexec"}, privileged: false},
 	}
 
@@ -47,6 +52,7 @@ func TestHandleCommand_ExecRegistrationRequiresAdmin(t *testing.T) {
 	for _, command := range []string{
 		"/commands addexec deploy echo deploy",
 		"/cron addexec daily echo daily",
+		"/timer addexec delayed echo delayed",
 	} {
 		t.Run(strings.Fields(command)[0], func(t *testing.T) {
 			platform := &stubPlatformEngine{n: "test"}
