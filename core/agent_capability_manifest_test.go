@@ -99,6 +99,7 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 	})
 
 	e.AddCommand("deploy", "Deploy the project", "", "echo DO_NOT_LEAK_EXEC_BODY", "", "config")
+	e.AddCommand("summarize", "Summarize the project", "summarize", "", "", "config")
 	skillRoot := t.TempDir()
 	skillDir := filepath.Join(skillRoot, "release-check")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
@@ -108,6 +109,11 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 		t.Fatal(err)
 	}
 	e.skills.SetDirs([]string{skillRoot})
+	commandDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(commandDir, "private-command.md"), []byte("DO_NOT_LEAK_AGENT_COMMAND_BODY\nprivate instructions"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.commands.SetAgentDirs([]string{commandDir})
 	e.platformLifecycleMu.Lock()
 	e.platformReady[platform] = true
 	e.platformLifecycleMu.Unlock()
@@ -155,8 +161,17 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 		t.Fatalf("timer permission contract = %#v", timer)
 	}
 	deploy := findManifestCommand(t, manifest.Commands, "deploy")
-	if deploy.Permission != CapabilityPermissionMember || !hasManifestEffect(deploy.SideEffects, "shell_execution") {
+	if deploy.Permission != CapabilityPermissionAdmin || deploy.Availability.State != CapabilityUnavailable || !hasManifestEffect(deploy.SideEffects, "shell_execution") {
 		t.Fatalf("custom exec contract = %#v", deploy)
+	}
+	summarize := findManifestCommand(t, manifest.Commands, "summarize")
+	if summarize.Permission != CapabilityPermissionMember || summarize.Availability.State != CapabilityAvailable || !hasManifestEffect(summarize.SideEffects, "agent_turn") {
+		t.Fatalf("custom prompt contract = %#v", summarize)
+	}
+	e.SetAdminFrom("admin-user")
+	deployWithAdminConfigured := findManifestCommand(t, e.AgentCapabilityManifest("").Commands, "deploy")
+	if deployWithAdminConfigured.Permission != CapabilityPermissionAdmin || deployWithAdminConfigured.Availability.State != CapabilityConditional {
+		t.Fatalf("custom exec with admin_from configured = %#v", deployWithAdminConfigured)
 	}
 	if len(manifest.Skills) != 1 || manifest.Skills[0].Name != "release-check" || manifest.Skills[0].Description != "Verify a release safely" {
 		t.Fatalf("skills = %#v", manifest.Skills)
@@ -180,7 +195,7 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 		t.Fatal(err)
 	}
 	text := string(encoded)
-	for _, forbidden := range []string{"DO_NOT_LEAK_EXEC_BODY", "DO_NOT_LEAK_SKILL_BODY", skillRoot} {
+	for _, forbidden := range []string{"DO_NOT_LEAK_EXEC_BODY", "DO_NOT_LEAK_SKILL_BODY", "DO_NOT_LEAK_AGENT_COMMAND_BODY", skillRoot, commandDir} {
 		if strings.Contains(text, forbidden) {
 			t.Errorf("manifest leaked %q", forbidden)
 		}

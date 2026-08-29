@@ -81,8 +81,9 @@ Manifest 会保留不支持的运行态能力条目，而不是静默删除。�
 
 - `/shell`、`/show`、`/dir`、`/diff`、`/web`、`/upgrade`、`/restart` 需要 `projects.admin_from`；
 - `/commands addexec`、`/cron addexec` 和 `/timer addexec` 仅对应 Shell 注册子操作需要管理员权限；
+- 所有带 `Exec` 正文的已注册自定义命令在实际调用时同样需要管理员；Prompt 自定义命令保持 member 权限；
 - 项目级 `disabled_commands` 会反映为 `unavailable`；用户角色级禁用和具体调用者身份仍由真实命令分发在调用时检查，因此 Manifest 将其保留为权限条件而不猜测身份；
-- 自定义 Prompt/Exec 命令和 Skills 按当前真实调用规则展示，并明确其 Agent turn 或 Shell 副作用。
+- 自定义 Prompt/Exec 命令和 Skills 按当前真实调用规则展示，并明确其 Agent turn 或 Shell 副作用。Agent 命令文件只有显式 frontmatter `description` 可进入 Manifest，Markdown Prompt 正文的首行也不会被当作说明发布。
 
 Manifest 不把“命令存在”误写成“当前一定能执行”：模型、Provider、TTS、多工作区、Cron/Timer、Relay、Web、活动回合等都会检查对应运行态接口或组件。
 

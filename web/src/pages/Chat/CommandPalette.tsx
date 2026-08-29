@@ -72,8 +72,7 @@ export function manifestToSlashCommands(manifest: AgentCapabilityManifest): Slas
       labelKey: fallback?.labelKey || 'cmd.commands',
       icon: fallback?.icon || Terminal,
       group: manifestGroup(command.category),
-      label: command.description,
-      labelZh: command.description_zh,
+      ...(fallback ? {} : { label: command.description, labelZh: command.description_zh }),
       availability: command.availability.state,
       availabilityReason: command.availability.reason,
       availabilityReasonZh: command.availability.reason_zh,
@@ -132,7 +131,9 @@ export default function CommandPalette({ open, onClose, onSelect, anchorRef, com
     if (!query) return availableCommands;
     const q = query.toLowerCase().replace(/^\//, '');
     return availableCommands.filter(
-      (c) => c.cmd.toLowerCase().includes(q) || (c.label || c.labelZh || t(c.labelKey)).toLowerCase().includes(q),
+      (c) => [c.cmd, c.label, c.labelZh, t(c.labelKey)]
+        .filter((label): label is string => Boolean(label))
+        .some((label) => label.toLowerCase().includes(q)),
     );
   }, [commands, query, t]);
 
@@ -215,7 +216,9 @@ export default function CommandPalette({ open, onClose, onSelect, anchorRef, com
               const idx = flatIdx++;
               const Icon = cmd.icon;
               const unavailable = cmd.availability === 'unavailable';
-              const label = i18n.language.toLowerCase().startsWith('zh') ? (cmd.labelZh || cmd.label) : cmd.label;
+              const label = cmd.label
+                ? (i18n.language.toLowerCase().startsWith('zh') ? (cmd.labelZh || cmd.label) : cmd.label)
+                : t(cmd.labelKey);
               const reason = i18n.language.toLowerCase().startsWith('zh') ? (cmd.availabilityReasonZh || cmd.availabilityReason) : cmd.availabilityReason;
               return (
                 <button
@@ -235,7 +238,7 @@ export default function CommandPalette({ open, onClose, onSelect, anchorRef, com
                 >
                   <Icon size={15} className={idx === activeIdx ? 'text-accent' : 'text-gray-400'} />
                   <span className="font-mono text-xs text-gray-500 dark:text-gray-400 w-24 text-left">{cmd.cmd}</span>
-                  <span className="flex-1 text-left truncate">{label || t(cmd.labelKey)}</span>
+                  <span className="flex-1 text-left truncate">{label}</span>
                 </button>
               );
             })}

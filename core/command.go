@@ -165,11 +165,7 @@ func (r *CommandRegistry) ListAll() []*CustomCommand {
 			desc := ""
 			data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
 			if err == nil {
-				first, _, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
-				if len([]rune(first)) > 60 {
-					first = string([]rune(first)[:60]) + "..."
-				}
-				desc = first
+				desc = agentCommandFrontmatterDescription(string(data))
 			}
 
 			result = append(result, &CustomCommand{
@@ -181,6 +177,27 @@ func (r *CommandRegistry) ListAll() []*CustomCommand {
 	}
 
 	return result
+}
+
+// agentCommandFrontmatterDescription publishes only explicit metadata. The
+// first Markdown body line is executable Agent prompt content and must never
+// be copied into capability/menu surfaces.
+func agentCommandFrontmatterDescription(raw string) string {
+	content := strings.TrimSpace(raw)
+	if !strings.HasPrefix(content, "---") {
+		return ""
+	}
+	rest := content[3:]
+	end := strings.Index(rest, "\n---")
+	if end < 0 {
+		return ""
+	}
+	description := strings.TrimSpace(parseFrontmatter(rest[:end])["description"])
+	runes := []rune(description)
+	if len(runes) > 120 {
+		description = string(runes[:120]) + "..."
+	}
+	return description
 }
 
 // placeholderRe matches {{1}}, {{2*}}, {{args}}, and variants with defaults like {{1:foo}}.

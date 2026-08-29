@@ -470,7 +470,7 @@ func (e *Engine) agentCommandCapabilities(sessionKey string) []AgentCommandCapab
 		permission := commandPermission(definition.id, contract)
 		availability := e.commandCapabilityAvailability(definition.id, contract.probe, sessionKey)
 		if disabled[definition.id] {
-			availability = unavailable("Disabled by the effective project or user-role command policy.", "已被当前项目或用户角色的命令策略禁用。")
+			availability = unavailable("Disabled by the project-level command policy; user-role policy is checked at invocation time.", "已被项目级命令策略禁用；用户角色策略在真实调用时检查。")
 		} else if permission == CapabilityPermissionAdmin {
 			switch {
 			case strings.TrimSpace(adminFrom) == "":
@@ -499,10 +499,11 @@ func (e *Engine) agentCommandCapabilities(sessionKey string) []AgentCommandCapab
 	for _, custom := range customs {
 		id := strings.ToLower(strings.TrimSpace(custom.Name))
 		availability := available("Registered for the active project.", "已为当前项目注册。")
+		permission := CapabilityPermissionMember
 		if builtinIDs[id] {
 			availability = unavailable("Shadowed by a built-in command with the same name.", "被同名内置命令遮蔽。")
 		} else if disabled[id] {
-			availability = unavailable("Disabled by the effective project or user-role command policy.", "已被当前项目或用户角色的命令策略禁用。")
+			availability = unavailable("Disabled by the project-level command policy; user-role policy is checked at invocation time.", "已被项目级命令策略禁用；用户角色策略在真实调用时检查。")
 		}
 		description := strings.TrimSpace(redactFeedbackText(custom.Description))
 		if description == "" {
@@ -512,13 +513,21 @@ func (e *Engine) agentCommandCapabilities(sessionKey string) []AgentCommandCapab
 		kind := "prompt"
 		if strings.TrimSpace(custom.Exec) != "" {
 			kind = "exec"
+			permission = CapabilityPermissionAdmin
 			effects = []string{"shell_execution", "process_control", "filesystem_read", "filesystem_write", "network"}
+			if availability.State == CapabilityAvailable {
+				if strings.TrimSpace(adminFrom) == "" {
+					availability = unavailable("Exec-backed custom commands require admin permission, but projects.admin_from is not configured.", "Exec 自定义命令需要管理员权限，但 projects.admin_from 尚未配置。")
+				} else {
+					availability = conditional("Exec-backed custom commands require projects.admin_from authorization at invocation time.", "Exec 自定义命令在调用时需要 projects.admin_from 授权。")
+				}
+			}
 		}
 		result = append(result, AgentCommandCapability{
 			ID: id, Invocation: "/" + custom.Name, Source: "custom-" + custom.Source, Category: "custom",
 			Usage: "/" + custom.Name + " [arguments]", Description: description, DescriptionZH: description,
 			Parameters: []CapabilityParameter{capabilityParam("arguments", "string", false, "Arguments expanded into the registered "+kind+" template.", "展开到已注册 "+kind+" 模板中的参数。")},
-			Permission: CapabilityPermissionMember, ReadOnly: false, SideEffects: expandSideEffects(effects),
+			Permission: permission, ReadOnly: false, SideEffects: expandSideEffects(effects),
 			Fallback: defaultRejectFallback(), Availability: availability,
 		})
 	}
@@ -660,7 +669,7 @@ func (e *Engine) agentSkillCapabilities(_ string) []AgentSkillCapability {
 		case custom[id]:
 			availability = unavailable("Shadowed by a project custom command with the same normalized name.", "被规范化名称相同的项目自定义命令遮蔽。")
 		case disabled[strings.ToLower(skill.Name)]:
-			availability = unavailable("Disabled by the effective project or user-role command policy.", "已被当前项目或用户角色的命令策略禁用。")
+			availability = unavailable("Disabled by the project-level command policy; user-role policy is checked at invocation time.", "已被项目级命令策略禁用；用户角色策略在真实调用时检查。")
 		}
 		result = append(result, AgentSkillCapability{
 			Name: skill.Name, DisplayName: redactFeedbackText(skill.DisplayName), Invocation: "/" + skill.Name + " [arguments]",

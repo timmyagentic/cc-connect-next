@@ -150,8 +150,9 @@ When adding or changing an operational capability:
 3. Preserve unavailable optional capabilities in the runtime Manifest with a
    truthful reason and degradation path instead of silently omitting them.
 4. Never include current config values, credentials, Skill bodies/paths, custom
-   Prompt/Exec bodies, or shell bodies. Redact dynamic descriptions and runtime
-   errors before publication.
+   Prompt/Exec bodies, Agent command-file Markdown bodies, or shell bodies.
+   Command-file metadata must come from explicit frontmatter only. Redact
+   dynamic descriptions and runtime errors before publication.
 5. Keep the local CLI/API, Management API, Bridge command projection, Web
    command palette, Agent brief, and bilingual Manifest docs covered by drift
    tests or a shared Manifest projection.
