@@ -132,6 +132,31 @@ When adding or changing configuration:
 Do not hand-edit `docs/configuration.md`, `docs/configuration.zh-CN.md`, or
 `web/src/generated/configContract.ts`.
 
+#### Agent Capability Manifest Contract
+
+The running Engine's `AgentCapabilityManifest` is the source of truth for what
+a connected Agent can do in the current project/session. It must describe
+configuration, Agent-facing CLI tools, built-in/custom chat commands, Skills,
+and active Agent/session/Platform optional interfaces without reading or
+publishing secret values.
+
+When adding or changing an operational capability:
+
+1. Update the canonical command/tool/runtime contract with parameters,
+   permission, read-only status, write/external side effects, fallback, and an
+   availability probe/reason.
+2. Keep dispatch permission checks and Manifest permission metadata together;
+   Shell-registration variants must fail closed behind `admin_from`.
+3. Preserve unavailable optional capabilities in the runtime Manifest with a
+   truthful reason and degradation path instead of silently omitting them.
+4. Never include current config values, credentials, Skill bodies/paths, custom
+   Prompt/Exec bodies, Agent command-file Markdown bodies, or shell bodies.
+   Command-file metadata must come from explicit frontmatter only. Redact
+   dynamic descriptions and runtime errors before publication.
+5. Keep the local CLI/API, Management API, Bridge command projection, Web
+   command palette, Agent brief, and bilingual Manifest docs covered by drift
+   tests or a shared Manifest projection.
+
 ### 4. High Cohesion, Low Coupling
 
 - Each `agent/X/` package is self-contained: it handles process lifecycle, output parsing, and session management for agent X

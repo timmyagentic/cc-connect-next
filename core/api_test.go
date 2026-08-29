@@ -79,6 +79,53 @@ func TestHandleHealthWithoutEnginesIsNotReady(t *testing.T) {
 	}
 }
 
+func TestHandleCapabilitiesReturnsReadOnlyProjectManifestAndSearches(t *testing.T) {
+	engine := NewEngine("alpha", &stubAgent{}, []Platform{&stubPlatformEngine{n: "feishu"}}, "", LangEnglish)
+	engine.SetConfigCatalog(ConfigCatalog{Version: "v-test", Options: []ConfigOption{{
+		Path: "display.thinking_messages", Key: "thinking_messages", Description: "Hide reasoning progress", DescriptionZH: "隐藏思考进度",
+	}}})
+	api := &APIServer{engines: map[string]*Engine{"alpha": engine}}
+	req := httptest.NewRequest(http.MethodGet, "/capabilities?search=%E9%9A%90%E8%97%8F%E6%80%9D%E8%80%83", nil)
+	rec := httptest.NewRecorder()
+	api.handleCapabilities(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var manifest AgentCapabilityManifest
+	if err := json.Unmarshal(rec.Body.Bytes(), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Project != "alpha" || manifest.Query != "隐藏思考" || !manifest.ReadOnly || len(manifest.Configuration.Options) != 1 {
+		t.Fatalf("manifest = %#v", manifest)
+	}
+	if strings.Contains(rec.Body.String(), "app_secret") {
+		t.Fatalf("unexpected credential value in manifest: %s", rec.Body.String())
+	}
+}
+
+func TestHandleCapabilitiesRequiresGETAndUnambiguousProject(t *testing.T) {
+	api := &APIServer{engines: map[string]*Engine{
+		"alpha": NewEngine("alpha", &stubAgent{}, nil, "", LangEnglish),
+		"beta":  NewEngine("beta", &stubAgent{}, nil, "", LangEnglish),
+	}}
+	for _, test := range []struct {
+		method string
+		url    string
+		want   int
+	}{
+		{method: http.MethodPost, url: "/capabilities", want: http.StatusMethodNotAllowed},
+		{method: http.MethodGet, url: "/capabilities", want: http.StatusBadRequest},
+		{method: http.MethodGet, url: "/capabilities?project=missing", want: http.StatusNotFound},
+	} {
+		req := httptest.NewRequest(test.method, test.url, nil)
+		rec := httptest.NewRecorder()
+		api.handleCapabilities(rec, req)
+		if rec.Code != test.want {
+			t.Errorf("%s %s status = %d, want %d: %s", test.method, test.url, rec.Code, test.want, rec.Body.String())
+		}
+	}
+}
+
 func TestHandleSend_AllowsAttachmentOnly(t *testing.T) {
 	engine := NewEngine("test", &stubAgent{}, []Platform{&stubMediaPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}}, "", LangEnglish)
 	engine.interactiveStates["session-1"] = &interactiveState{

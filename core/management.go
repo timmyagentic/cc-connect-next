@@ -633,6 +633,8 @@ func (m *ManagementServer) handleProjectRoutes(w http.ResponseWriter, r *http.Re
 		m.handleProjectHeartbeat(w, r, projName, rest)
 	case "users":
 		m.handleProjectUsers(w, r, engine)
+	case "capabilities":
+		m.handleProjectCapabilities(w, r, engine)
 	default:
 		mgmtError(w, http.StatusNotFound, "not found")
 	}
@@ -836,6 +838,29 @@ func (m *ManagementServer) handleProjectDetail(w http.ResponseWriter, r *http.Re
 	}
 
 	mgmtError(w, http.StatusMethodNotAllowed, "GET, PATCH or DELETE only")
+}
+
+func (m *ManagementServer) handleProjectCapabilities(w http.ResponseWriter, r *http.Request, e *Engine) {
+	if r.Method != http.MethodGet {
+		mgmtError(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	sessionKey := strings.TrimSpace(r.URL.Query().Get("session_key"))
+	query := strings.TrimSpace(r.URL.Query().Get("search"))
+	if query == "" {
+		query = strings.TrimSpace(r.URL.Query().Get("q"))
+	}
+	includeAll := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all")), "true")
+	var manifest AgentCapabilityManifest
+	if query != "" {
+		manifest = e.SearchAgentCapabilityManifestWithAllAdapters(sessionKey, query, includeAll)
+	} else if includeAll {
+		manifest = e.AgentCapabilityManifestWithAllAdapters(sessionKey)
+	} else {
+		manifest = e.AgentCapabilityManifest(sessionKey)
+	}
+	manifest = SelectAgentCapabilityManifestSections(manifest, r.URL.Query().Get("sections"))
+	mgmtJSON(w, http.StatusOK, manifest)
 }
 
 // ── Users endpoints ──────────────────────────────────────────

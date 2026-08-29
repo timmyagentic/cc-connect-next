@@ -7,6 +7,7 @@ import {
   FolderOpen, HelpCircle, User, BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import type { AgentCapabilityManifest } from '@/api/projects';
 
 export interface SlashCommand {
   cmd: string;
@@ -14,6 +15,11 @@ export interface SlashCommand {
   icon: React.ElementType;
   group: 'session' | 'settings' | 'info' | 'advanced';
   local?: boolean; // handled locally, not sent to bridge
+  label?: string;
+  labelZh?: string;
+  availability?: 'available' | 'conditional' | 'unavailable';
+  availabilityReason?: string;
+  availabilityReasonZh?: string;
 }
 
 export const slashCommands: SlashCommand[] = [
@@ -48,6 +54,56 @@ export const slashCommands: SlashCommand[] = [
   { cmd: '/delete-mode', labelKey: 'cmd.deleteMode', icon: Trash2, group: 'advanced' },
 ];
 
+const fallbackByCommand = new Map(slashCommands.map((command) => [command.cmd, command]));
+
+const manifestGroup = (category: string): SlashCommand['group'] => {
+  if (category === 'session') return 'session';
+  if (category === 'agent') return 'settings';
+  if (category === 'system') return 'info';
+  return 'advanced';
+};
+
+export function manifestToSlashCommands(manifest: AgentCapabilityManifest): SlashCommand[] {
+  const commands: SlashCommand[] = manifest.commands.map((command) => {
+    const token = command.invocation.split(/\s+/)[0];
+    const fallback = fallbackByCommand.get(token);
+    return {
+      cmd: token,
+      labelKey: fallback?.labelKey || 'cmd.commands',
+      icon: fallback?.icon || Terminal,
+      group: manifestGroup(command.category),
+      ...(fallback ? {} : { label: command.description, labelZh: command.description_zh }),
+      availability: command.availability.state,
+      availabilityReason: command.availability.reason,
+      availabilityReasonZh: command.availability.reason_zh,
+    };
+  });
+  const seen = new Set(commands.map((command) => command.cmd));
+  for (const skill of manifest.skills) {
+    const token = skill.invocation.split(/\s+/)[0];
+    if (seen.has(token)) continue;
+    seen.add(token);
+    commands.push({
+      cmd: token,
+      labelKey: 'cmd.skills',
+      icon: BookOpen,
+      group: 'advanced',
+      label: skill.display_name || skill.description || skill.name,
+      labelZh: skill.display_name || skill.description || skill.name,
+      availability: skill.availability.state,
+      availabilityReason: skill.availability.reason,
+      availabilityReasonZh: skill.availability.reason_zh,
+    });
+  }
+  // Preserve Web-only navigation actions that are not ordinary chat commands.
+  for (const fallback of slashCommands) {
+    if (!seen.has(fallback.cmd) && fallback.cmd === '/delete-mode') {
+      commands.push(fallback);
+    }
+  }
+  return commands;
+}
+
 const groupOrder: { key: string; labelKey: string }[] = [
   { key: 'session', labelKey: 'cmd.groupSession' },
   { key: 'settings', labelKey: 'cmd.groupSettings' },
@@ -60,22 +116,26 @@ interface Props {
   onClose: () => void;
   onSelect: (cmd: SlashCommand) => void;
   anchorRef: React.RefObject<HTMLElement | null>;
+  commands?: SlashCommand[];
 }
 
-export default function CommandPalette({ open, onClose, onSelect, anchorRef }: Props) {
-  const { t } = useTranslation();
+export default function CommandPalette({ open, onClose, onSelect, anchorRef, commands }: Props) {
+  const { t, i18n } = useTranslation();
   const [query, setQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(() => {
-    if (!query) return slashCommands;
+    const availableCommands = commands || slashCommands;
+    if (!query) return availableCommands;
     const q = query.toLowerCase().replace(/^\//, '');
-    return slashCommands.filter(
-      (c) => c.cmd.toLowerCase().includes(q) || t(c.labelKey).toLowerCase().includes(q),
+    return availableCommands.filter(
+      (c) => [c.cmd, c.label, c.labelZh, t(c.labelKey)]
+        .filter((label): label is string => Boolean(label))
+        .some((label) => label.toLowerCase().includes(q)),
     );
-  }, [query, t]);
+  }, [commands, query, t]);
 
   useEffect(() => {
     if (open) {
@@ -104,7 +164,7 @@ export default function CommandPalette({ open, onClose, onSelect, anchorRef }: P
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveIdx((i) => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter' && filtered[activeIdx]) {
+    } else if (e.key === 'Enter' && filtered[activeIdx] && filtered[activeIdx].availability !== 'unavailable') {
       e.preventDefault();
       onSelect(filtered[activeIdx]);
     } else if (e.key === 'Escape') {
@@ -155,14 +215,22 @@ export default function CommandPalette({ open, onClose, onSelect, anchorRef }: P
             {g.items.map((cmd) => {
               const idx = flatIdx++;
               const Icon = cmd.icon;
+              const unavailable = cmd.availability === 'unavailable';
+              const label = cmd.label
+                ? (i18n.language.toLowerCase().startsWith('zh') ? (cmd.labelZh || cmd.label) : cmd.label)
+                : t(cmd.labelKey);
+              const reason = i18n.language.toLowerCase().startsWith('zh') ? (cmd.availabilityReasonZh || cmd.availabilityReason) : cmd.availabilityReason;
               return (
                 <button
                   key={cmd.cmd}
                   type="button"
-                  onClick={() => onSelect(cmd)}
+                  onClick={() => { if (!unavailable) onSelect(cmd); }}
                   onMouseEnter={() => setActiveIdx(idx)}
+                  disabled={unavailable}
+                  title={reason}
                   className={cn(
                     'w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-colors',
+                    unavailable && 'opacity-45 cursor-not-allowed',
                     idx === activeIdx
                       ? 'bg-accent/15 text-gray-900 dark:text-white'
                       : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100/80 dark:hover:bg-white/[0.06]',
@@ -170,7 +238,7 @@ export default function CommandPalette({ open, onClose, onSelect, anchorRef }: P
                 >
                   <Icon size={15} className={idx === activeIdx ? 'text-accent' : 'text-gray-400'} />
                   <span className="font-mono text-xs text-gray-500 dark:text-gray-400 w-24 text-left">{cmd.cmd}</span>
-                  <span className="flex-1 text-left truncate">{t(cmd.labelKey)}</span>
+                  <span className="flex-1 text-left truncate">{label}</span>
                 </button>
               );
             })}

@@ -220,6 +220,8 @@ mode = "default"
 /mode default  # 切回默认
 ```
 
+cc-connect-next 自身的高风险聊天命令另受 `projects.admin_from` 保护：`/shell`、`/show`、`/dir`、`/diff`、`/web`、`/upgrade`、`/restart` 始终需要管理员；`/commands addexec`、`/cron addexec`、`/timer addexec` 仅在注册 Shell 执行时需要管理员。统一 Manifest 会按当前项目/会话显示这些权限和可用性原因。
+
 ---
 
 ## 单条消息回答档位（Codex）
@@ -1175,12 +1177,31 @@ WebSocket 支持双向通信 —— 向 Agent 发送消息，并实时接收 Age
 
 ---
 
+## Agent Capability Manifest
+
+连接中的 Agent 不需要阅读源码或完整文档来猜 cc-connect-next 的能力。每个新会话会收到有界提示，并在回答具体能力问题或调用 cc-connect-next 操作前查询当前版本、项目和会话的统一只读 Manifest：
+
+```bash
+cc-connect-next capabilities --search "关键词"
+```
+
+Manifest 同时覆盖配置、Agent CLI 工具、聊天命令、自定义命令、Skills，以及活动 Agent/Platform 的运行态接口；每项都说明参数、权限、是否只读、写入/外部副作用、退化行为和可用性原因。查询不会返回当前配置值、凭证、Skill 正文或自定义 Prompt/Exec 正文。
+
+JSON 输出适合 Agent 或其他本机客户端消费：
+
+```bash
+cc-connect-next capabilities --search "原生音频" --format json
+```
+
+详细契约、安全边界和 API 入口见 [Agent Capability Manifest](agent-capability-manifest.zh-CN.md)。
+
+---
+
 ## 配置参考
 
 按用户意图组织的能力概览、每个配置项的作用、默认值、允许值、作用域和
-生效方式，见 [配置能力参考](configuration.zh-CN.md)。运行中的 Agent 也会按需调用
-`cc-connect-next config capabilities --search "关键词"` 查询当前安装版本的同一份目录，
-不需要用户阅读配置文件。可复制的精选部署示例见
+生效方式，见 [配置能力参考](configuration.zh-CN.md)。统一 Manifest 中的 configuration 区段复用同一份契约；只查询配置时也可以直接调用
+`cc-connect-next config capabilities --search "关键词"`。可复制的精选部署示例见
 [config.example.toml](../config.example.toml)；穷举配置项以生成契约为准。
 
 ### 项目结构

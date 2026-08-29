@@ -485,9 +485,14 @@ type Engine struct {
 	feedbackEndpoint  string
 	feedbackInstallID string
 	feedbackGapKeys   []string
+	// configCatalog is the version/build-matched, value-free configuration
+	// contract included in the unified Agent Capability Manifest. It is set at
+	// bootstrap and never reads the operator's current config values.
+	configCatalog       ConfigCatalog
+	configCatalogSearch func(ConfigCatalog, string) ConfigCatalog
 	// capabilityBrief is prepended once per interactive session so the LLM
-	// knows this deployment's real configuration surface (see
-	// BuildCapabilityBrief). Set at bootstrap, read-only afterwards.
+	// knows how to query this deployment's real Agent Capability Manifest.
+	// Set at bootstrap, read-only afterwards.
 	capabilityBrief     string
 	feedbackErrors      map[string]*feedbackError
 	feedbackErrorHintAt map[string]time.Time
@@ -1192,8 +1197,8 @@ func (e *Engine) SetInjectSender(v bool) {
 	e.injectSender = v
 }
 
-// SetCapabilityBrief wires the configuration-capability primer built at
-// bootstrap (BuildCapabilityBrief). Must be called before Start.
+// SetCapabilityBrief wires the unified capability primer built at bootstrap
+// (BuildAgentCapabilityBrief). Must be called before Start.
 func (e *Engine) SetCapabilityBrief(brief string) {
 	e.capabilityBrief = strings.TrimSpace(brief)
 }
@@ -1453,6 +1458,10 @@ func isPrivilegedCommandInvocation(cmdID string, args []string) bool {
 		return matchSubCommand(subcommand, []string{
 			"add", "addexec", "list", "del", "delete", "rm", "remove",
 			"enable", "disable", "mute", "unmute", "setup",
+		}) == "addexec"
+	case "timer":
+		return matchSubCommand(subcommand, []string{
+			"add", "addexec", "list", "del", "delete", "rm", "remove", "mute", "unmute",
 		}) == "addexec"
 	default:
 		return false
@@ -11096,79 +11105,31 @@ func (e *Engine) renderHelpGroupCard(groupKey string) *Card {
 }
 
 // GetAllCommands returns all available commands for bot menu registration.
-// It includes built-in commands (with localized descriptions) and custom commands.
+// It projects the unified Manifest's built-in/custom command and Skill entries
+// into the compact platform menu shape.
 func (e *Engine) GetAllCommands() []BotCommandInfo {
 	var commands []BotCommandInfo
-
-	e.userRolesMu.RLock()
-	disabledCmds := e.disabledCmds
-	e.userRolesMu.RUnlock()
-
-	// Collect built-in  commands (use primary name, first in names list)
-	seenCmds := make(map[string]bool)
-	for _, c := range builtinCommands {
-		if len(c.names) == 0 {
+	for _, capability := range e.agentCommandCapabilities("") {
+		if capability.Availability.State == CapabilityUnavailable {
 			continue
 		}
-		// Use id as primary
-		primaryName := c.id
-		if seenCmds[primaryName] {
-			continue
+		description := capability.Description
+		if e.i18n.IsZhLike() && capability.DescriptionZH != "" {
+			description = capability.DescriptionZH
 		}
-		seenCmds[primaryName] = true
-
-		// Skip disabled commands
-		if disabledCmds[c.id] {
-			continue
-		}
-
-		commands = append(commands, BotCommandInfo{
-			Command:     primaryName,
-			Description: e.i18n.T(MsgKey(primaryName)),
-		})
+		name := strings.TrimPrefix(strings.Fields(capability.Invocation)[0], "/")
+		commands = append(commands, BotCommandInfo{Command: name, Description: description})
 	}
-
-	// Collect custom commands from CommandRegistry
-	for _, c := range e.commands.ListAll() {
-		if seenCmds[strings.ToLower(c.Name)] {
+	for _, skill := range e.agentSkillCapabilities("") {
+		if skill.Availability.State == CapabilityUnavailable {
 			continue
 		}
-		seenCmds[strings.ToLower(c.Name)] = true
-
-		desc := c.Description
-		if desc == "" {
-			desc = "Custom command"
+		description := skill.Description
+		if description == "" {
+			description = "Skill"
 		}
-
-		commands = append(commands, BotCommandInfo{
-			Command:     c.Name,
-			Description: desc,
-		})
+		commands = append(commands, BotCommandInfo{Command: skill.Name, Description: description, IsSkill: true})
 	}
-
-	// Collect skills
-	for _, s := range e.skills.ListAll() {
-		lowerName := strings.ToLower(s.Name)
-		if seenCmds[lowerName] {
-			continue
-		}
-		if disabledCmds[lowerName] {
-			continue
-		}
-		seenCmds[lowerName] = true
-
-		desc := s.Description
-		if desc == "" {
-			desc = "Skill"
-		}
-
-		commands = append(commands, BotCommandInfo{
-			Command:     s.Name,
-			Description: desc,
-			IsSkill:     true,
-		})
-	}
-
 	return commands
 }
 
@@ -17496,6 +17457,9 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 			"CC_SESSION_KEY=" + sourceSessionKey,
 			"CC_AGENT_TYPE=" + agent.Name(),
 			"CC_PLATFORM_TYPES=" + strings.Join(e.platformNames(), ","),
+		}
+		if e.dataDir != "" {
+			envVars = append(envVars, "CC_DATA_DIR="+e.dataDir)
 		}
 		if exePath, err := os.Executable(); err == nil {
 			binDir := filepath.Dir(exePath)

@@ -302,6 +302,7 @@ func TestHandleRelay_ResumeFailureFallsBackToFreshSession(t *testing.T) {
 
 func TestHandleRelay_SingleWorkspaceUsesGlobalAgentAndSourceSessionKey(t *testing.T) {
 	e := newTestEngine()
+	e.SetDataDir("/tmp/cc-connect-next-manifest-test")
 	agent := &sessionEnvRecordingAgent{session: newResultAgentSession("global")}
 	e.agent = agent
 
@@ -315,6 +316,9 @@ func TestHandleRelay_SingleWorkspaceUsesGlobalAgentAndSourceSessionKey(t *testin
 	}
 	if got := agent.EnvValue("CC_SESSION_KEY"); got != sourceSessionKey {
 		t.Fatalf("CC_SESSION_KEY = %q, want %q", got, sourceSessionKey)
+	}
+	if got := agent.EnvValue("CC_DATA_DIR"); got != "/tmp/cc-connect-next-manifest-test" {
+		t.Fatalf("CC_DATA_DIR = %q, want relay Agent CLI tools to use the runtime socket", got)
 	}
 	if got := e.sessions.ActiveSessionID("relay:source:discord:C1"); got == "" {
 		t.Fatal("expected relay session to be stored under platform-qualified relay key")

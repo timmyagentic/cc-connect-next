@@ -402,6 +402,23 @@ Returns detailed information for a single project.
 
 ---
 
+#### GET /api/v1/projects/{name}/capabilities
+
+Returns the project's unified, read-only Agent Capability Manifest. The result includes configuration contracts, Agent CLI tools, chat/custom commands, Skills, active Agent/session/Platform interfaces, parameters, permissions, side effects, fallbacks, and availability reasons.
+
+**Query parameters:**
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session_key` | string | no | Adds active-session and platform runtime context; caller authorization remains an invocation-time check |
+| `search` / `q` | string | no | Natural-language filter applied to every Manifest section |
+| `all` | boolean | no | Include configuration and activation entries for every compiled adapter |
+| `sections` | string | no | Comma-separated projection: `configuration,tools,commands,skills,runtime` |
+
+The response schema is `cc-connect-next.agent-capabilities/v1`. It never contains current config values, credentials, Skill bodies, local Skill paths, or custom Prompt/Exec bodies. See [Agent Capability Manifest](agent-capability-manifest.md).
+
+---
+
 #### PATCH /api/v1/projects/{name}
 
 Updates project settings. Only provided fields are updated.

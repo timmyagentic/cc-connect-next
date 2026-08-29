@@ -146,6 +146,29 @@ func TestCommandRegistry_ListAll(t *testing.T) {
 	}
 }
 
+func TestCommandRegistry_ListAllDoesNotExposeAgentCommandBody(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "private.md"), []byte("PRIVATE PROMPT INSTRUCTION\nDo work"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "documented.md"), []byte("---\ndescription: Safe public metadata\n---\nPRIVATE BODY"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := NewCommandRegistry()
+	r.SetAgentDirs([]string{dir})
+	all := r.ListAll()
+	descriptions := make(map[string]string)
+	for _, command := range all {
+		descriptions[command.Name] = command.Description
+	}
+	if descriptions["private"] != "" {
+		t.Fatalf("plain command body leaked as description: %q", descriptions["private"])
+	}
+	if descriptions["documented"] != "Safe public metadata" {
+		t.Fatalf("frontmatter description = %q", descriptions["documented"])
+	}
+}
+
 func TestExpandPrompt_NoPlaceholders(t *testing.T) {
 	got := ExpandPrompt("Do the thing", []string{"arg1"})
 	if got != "Do the thing\n\narg1" {

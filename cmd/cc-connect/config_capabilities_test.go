@@ -52,11 +52,11 @@ func TestWriteConfigCapabilities_FiltersCurrentAdaptersAndSearches(t *testing.T)
 }
 
 func TestConfigurationCapabilityBrief_IsBoundedAndActiveAdapterSpecific(t *testing.T) {
-	brief := core.BuildConfigurationCapabilityBrief(config.CapabilityCatalog("v-test"), "codex", []string{"feishu"})
+	brief := core.BuildAgentCapabilityBrief(config.CapabilityCatalog("v-test"), "codex", []string{"feishu"})
 	if len(brief) > 16_000 {
 		t.Fatalf("capability brief is too large: %d bytes", len(brief))
 	}
-	for _, want := range []string{"config capabilities", "codex.service_tier", "feishu.allow_from", "do not invent"} {
+	for _, want := range []string{"cc-connect-next capabilities", "Skills", "side effects", "codex.service_tier", "feishu.allow_from", "do not invent"} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief missing %q", want)
 		}
@@ -68,11 +68,11 @@ func TestConfigurationCapabilityBrief_IsBoundedAndActiveAdapterSpecific(t *testi
 
 func TestConfigurationCapabilityBrief_RemainsBoundedForEveryPlatform(t *testing.T) {
 	catalog := config.CapabilityCatalog("v-test")
-	brief := core.BuildConfigurationCapabilityBrief(catalog, "codex", catalog.Platforms)
+	brief := core.BuildAgentCapabilityBrief(catalog, "codex", catalog.Platforms)
 	if len(brief) > 16_000 {
 		t.Fatalf("all-platform capability brief is too large: %d bytes", len(brief))
 	}
-	if !strings.Contains(brief, "more are available through the catalog command") {
+	if !strings.Contains(brief, "more are available through the Manifest command") {
 		t.Fatalf("all-platform brief did not explain truncation:\n%s", brief)
 	}
 }

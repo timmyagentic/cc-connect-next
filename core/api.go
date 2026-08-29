@@ -119,6 +119,7 @@ func NewAPIServer(dataDir string) (*APIServer, error) {
 	}
 	s.mux.HandleFunc("/send", s.handleSend)
 	s.mux.HandleFunc("/healthz", s.handleHealth)
+	s.mux.HandleFunc("/capabilities", s.handleCapabilities)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
 	s.mux.HandleFunc("/cron/add", s.handleCronAdd)
 	s.mux.HandleFunc("/cron/list", s.handleCronList)
@@ -188,6 +189,53 @@ func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusServiceUnavailable
 	}
 	apiJSON(w, statusCode, health)
+}
+
+func (s *APIServer) handleCapabilities(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "GET only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	s.mu.RLock()
+	if project == "" && len(s.engines) == 1 {
+		for name := range s.engines {
+			project = name
+		}
+	}
+	engine := s.engines[project]
+	s.mu.RUnlock()
+	if project == "" {
+		http.Error(w, "project is required (multiple projects configured)", http.StatusBadRequest)
+		return
+	}
+	if engine == nil {
+		http.Error(w, "project not found: "+project, http.StatusNotFound)
+		return
+	}
+
+	sessionKey := strings.TrimSpace(r.URL.Query().Get("session_key"))
+	if sessionKey == "" {
+		if keys := engine.ActiveSessionKeys(); len(keys) == 1 {
+			sessionKey = keys[0]
+		}
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("search"))
+	if query == "" {
+		query = strings.TrimSpace(r.URL.Query().Get("q"))
+	}
+	includeAll := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all")), "true")
+	var manifest AgentCapabilityManifest
+	if query != "" {
+		manifest = engine.SearchAgentCapabilityManifestWithAllAdapters(sessionKey, query, includeAll)
+	} else if includeAll {
+		manifest = engine.AgentCapabilityManifestWithAllAdapters(sessionKey)
+	} else {
+		manifest = engine.AgentCapabilityManifest(sessionKey)
+	}
+	manifest = SelectAgentCapabilityManifestSections(manifest, r.URL.Query().Get("sections"))
+	apiJSON(w, http.StatusOK, manifest)
 }
 
 func (s *APIServer) SocketPath() string {

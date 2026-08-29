@@ -64,7 +64,7 @@ func TestSearchConfigCatalog_MapsNaturalLanguageIntentToOptions(t *testing.T) {
 	}
 }
 
-func TestBuildConfigurationCapabilityBrief_TeachesNaturalLanguageLookup(t *testing.T) {
+func TestBuildAgentCapabilityBrief_TeachesUnifiedNaturalLanguageLookup(t *testing.T) {
 	catalog := ConfigCatalog{
 		Version:      "v2.0.0",
 		Capabilities: []ConfigCapability{{ID: "display", Title: "Display", TitleZH: "消息展示", Description: "Control replies.", DescriptionZH: "控制回复展示。"}},
@@ -73,10 +73,10 @@ func TestBuildConfigurationCapabilityBrief_TeachesNaturalLanguageLookup(t *testi
 			{Path: "projects.platforms.options.allow_from", Key: "allow_from", Scope: ConfigScopePlatform, Owner: "feishu", Description: "Allow users", DescriptionZH: "限制用户"},
 		},
 	}
-	brief := BuildConfigurationCapabilityBrief(catalog, "codex", []string{"feishu"})
+	brief := BuildAgentCapabilityBrief(catalog, "codex", []string{"feishu"})
 	for _, want := range []string{
-		"[cc-connect-next capability brief]", "v2.0.0", "natural-language", "config capabilities",
-		"--agent codex", "--platform feishu", "--all", "do not invent", "validated example", "model", "allow_from", "/feedback",
+		"[cc-connect-next capability brief]", "v2.0.0", "natural-language", "cc-connect-next capabilities",
+		"Skills", "side effects", "do not invent", "validated example", "model", "allow_from", "/feedback",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief missing %q:\n%s", want, brief)

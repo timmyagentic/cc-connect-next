@@ -71,8 +71,9 @@ cc-connect-next
 
 只要还有 `REPLACE` 占位符没替换，启动就会拒绝执行并指名是哪个键、下一步该做什么——而不是先自称运行正常、再连不上。`doctor` 检查配置、Agent 命令行及登录态、平台、依赖与网络，全程不建立平台连接。
 
-不知道某个能力能不能配置时，直接用自然语言问连接的 Agent。Agent 会查询当前安装版本内置的只读配置目录，而不是猜配置键；也可以手动运行
-`cc-connect-next config capabilities --search "关键词"`。完整逐项说明见[配置能力参考](docs/configuration.zh-CN.md)。
+不知道当前项目能做什么、怎样调用、是否可用或能否配置时，直接用自然语言问连接的 Agent。Agent 会查询当前版本/项目/会话的只读
+[Agent Capability Manifest](docs/agent-capability-manifest.zh-CN.md)，其中统一包含配置、CLI 工具、聊天命令、Skills、运行态适配器能力、参数、权限、副作用、退化行为和可用性原因；也可以手动运行
+`cc-connect-next capabilities --search "关键词"`。只查配置时仍可使用 `cc-connect-next config capabilities --search "关键词"`，完整逐项说明见[配置能力参考](docs/configuration.zh-CN.md)。
 
 跑通后安装为系统服务：
 
@@ -199,6 +200,7 @@ cc-connect-next 从 CC Connect v1.4.1 分叉，通过逐项审计而非整体合
 |---|---|
 | [INSTALL.md](INSTALL.md) | npm / 独立二进制 / 源码安装、更新、daemon |
 | [使用指南](docs/usage.zh-CN.md) | 会话、排队 vs steer、权限、provider、模型、cron、relay、语音 |
+| [Agent Capability Manifest](docs/agent-capability-manifest.zh-CN.md) | Agent 可查询的统一能力、权限、副作用、退化与运行态可用性契约 |
 | [飞书配置](docs/feishu.md) | 应用创建、权限、事件订阅 |
 | [回答卡片契约](docs/feishu-card-contract.md) | 卡片生命周期与隐私保证的精确定义 |
 | [写给官方 CC Connect 用户](docs/coming-from-cc-connect.zh-CN.md) | 诚实对比、直接迁移与安全回滚 |

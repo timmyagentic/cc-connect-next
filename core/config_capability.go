@@ -1109,10 +1109,11 @@ func ownerSuffix(option ConfigOption) string {
 	return fmt.Sprintf(" (`%s`)", option.Owner)
 }
 
-// BuildConfigurationCapabilityBrief creates the bounded standing contract
-// injected once per Agent session. Exact detail remains on demand through the
-// local, version-matched catalog command.
-func BuildConfigurationCapabilityBrief(catalog ConfigCatalog, agent string, platforms []string) string {
+// BuildAgentCapabilityBrief creates the bounded standing contract injected
+// once per Agent session. Exact configuration, tools, commands, Skills, and
+// runtime adapter availability remain on demand through the local unified
+// manifest command.
+func BuildAgentCapabilityBrief(catalog ConfigCatalog, agent string, platforms []string) string {
 	platforms = append([]string(nil), platforms...)
 	sort.Strings(platforms)
 	var active []ConfigOption
@@ -1128,20 +1129,13 @@ func BuildConfigurationCapabilityBrief(catalog ConfigCatalog, agent string, plat
 		return active[i].Owner < active[j].Owner
 	})
 
-	cmd := "cc-connect-next config capabilities"
-	if agent != "" {
-		cmd += " --agent " + agent
-	}
-	if len(platforms) > 0 {
-		cmd += " --platform " + strings.Join(platforms, ",")
-	}
-	cmd += " --search \"<2-4 keywords from the user's question>\""
+	cmd := "cc-connect-next capabilities --search \"<2-4 keywords from the user's question>\""
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "[cc-connect-next capability brief]\nThis conversation is bridged through cc-connect-next %s. The active Agent is %q and the active platform adapters are %q.\n", catalog.Version, agent, strings.Join(platforms, ", "))
-	b.WriteString("Users will ask natural-language questions about what cc-connect-next can configure. Before answering a specific configuration question, query the local version-matched, read-only catalog:\n  ")
+	b.WriteString("Users will ask natural-language questions about what cc-connect-next can do or configure. Before answering a specific capability question or invoking a cc-connect-next operation, query the local version/project/session-matched, read-only Agent Capability Manifest:\n  ")
 	b.WriteString(cmd)
-	b.WriteString("\nThe catalog describes capability only and never reads current credentials or values. Add `--all` when the user asks about adapters beyond the active project. Use separate searches for unrelated wishes, and treat a related result without an exact option as unsupported. Explain support status, exact configuration source/location, requirement and dependencies, purpose, omitted default versus preset values, allowed values/range, scope, apply mode, security caveats, and the catalog's validated example; do not invent config keys. If the catalog has no exact match, say this build does not declare that capability and offer `/feedback <description>`. Do not edit config or restart the service unless the user explicitly asks.\n")
+	b.WriteString("\nThe Manifest contains configuration contracts, Agent CLI tools, chat commands, discovered Skills, and active Agent/Platform runtime capabilities. Add `--all` when the user asks about compiled adapters beyond the active project. It describes parameters, permission, read-only status, write/external side effects, fallback behavior, and truthful availability reasons; it never returns configured secret values, Skill bodies, or custom Prompt/Exec bodies. Use separate searches for unrelated wishes. Treat a related result without an exact action/option as unsupported. For configuration, explain exact source/location, requirements, omitted default versus preset values, accepted values/range, scope, apply mode, security caveats, and the validated example; do not invent commands or config keys. If there is no exact match, say this runtime does not declare that capability and offer `/feedback <description>`. Do not invoke a mutating action, edit config, or restart the service unless the user explicitly asks.\n")
 	if len(catalog.Capabilities) > 0 {
 		b.WriteString("Configuration areas: ")
 		limit := len(catalog.Capabilities)
@@ -1179,10 +1173,16 @@ func BuildConfigurationCapabilityBrief(catalog ConfigCatalog, agent string, plat
 			}
 		}
 		if remaining := publicCount - visible; remaining > 0 {
-			fmt.Fprintf(&b, "; … %d more are available through the catalog command", remaining)
+			fmt.Fprintf(&b, "; … %d more are available through the Manifest command", remaining)
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// BuildConfigurationCapabilityBrief is retained for source compatibility.
+// New runtime sessions should use BuildAgentCapabilityBrief.
+func BuildConfigurationCapabilityBrief(catalog ConfigCatalog, agent string, platforms []string) string {
+	return BuildAgentCapabilityBrief(catalog, agent, platforms)
 }
 
 func containsString(values []string, target string) bool {

@@ -121,6 +121,29 @@ func mgmtPost(t *testing.T, url, token string, body any) mgmtResponse {
 	return r
 }
 
+func TestMgmt_ProjectCapabilitiesReturnsUnifiedReadOnlyManifest(t *testing.T) {
+	_, ts, engine := testManagementServer(t, "tok")
+	engine.SetConfigCatalog(ConfigCatalog{Version: "v-test", Options: []ConfigOption{{
+		Path: "queue.busy_message_mode", Key: "busy_message_mode", Description: "Queue or steer busy messages", DescriptionZH: "忙时排队或并入",
+	}}})
+	r := mgmtGet(t, ts.URL+"/api/v1/projects/test-project/capabilities?q=%E5%BF%99%E6%97%B6", "tok")
+	if !r.OK {
+		t.Fatalf("capabilities response = %+v", r)
+	}
+	var manifest AgentCapabilityManifest
+	if err := json.Unmarshal(r.Data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest.Project != "test-project" || manifest.Query != "忙时" || !manifest.ReadOnly || len(manifest.Configuration.Options) != 1 {
+		t.Fatalf("manifest = %#v", manifest)
+	}
+
+	post := mgmtPost(t, ts.URL+"/api/v1/projects/test-project/capabilities", "tok", nil)
+	if post.OK || !strings.Contains(post.Error, "GET only") {
+		t.Fatalf("POST capabilities = %+v", post)
+	}
+}
+
 func mgmtPatch(t *testing.T, url, token string, body any) mgmtResponse {
 	t.Helper()
 	var buf bytes.Buffer

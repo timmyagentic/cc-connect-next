@@ -19,7 +19,24 @@
   `false` map to `off`, while legacy `true` preserves the historical
   `topic_per_message` behavior.
 
-### Agent-friendly configuration knowledge
+### Agent-native capability and configuration knowledge
+
+- A unified, read-only Agent Capability Manifest now combines the active
+  project's configuration contract, Agent-facing CLI tools, built-in/custom
+  chat commands, discovered Skills, and Agent/session/Platform runtime
+  interfaces. Entries declare parameters, caller permission, read-only status,
+  write/external side effects, fallback behavior, and a truthful availability
+  reason. `cc-connect-next capabilities --search ...` exposes the live,
+  version/project/session-matched contract through the local `0600` Unix
+  socket; the Management API and Web command palette consume the same source.
+- Manifest output excludes current config values and credentials, Skill bodies
+  and paths, and custom Prompt/Exec or shell bodies. Runtime error/description
+  metadata is aggressively redacted. Unsupported runtime features remain
+  visible with their reason and degradation contract instead of disappearing.
+- Delayed shell registration through `/timer addexec` now requires the same
+  `admin_from` authorization already enforced for `/cron addexec` and
+  `/commands addexec`, closing a permission inconsistency exposed while making
+  the command contract machine-readable.
 
 - The catalog is now an executable configuration contract rather than a
   key/description index. Public entries declare TOML/environment/CLI source,

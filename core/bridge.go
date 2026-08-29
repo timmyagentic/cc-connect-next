@@ -355,25 +355,76 @@ type BridgePlatform struct {
 
 // Compile-time interface checks.
 var (
-	_ Platform                           = (*BridgePlatform)(nil)
-	_ CardSender                         = (*BridgePlatform)(nil)
-	_ InlineButtonSender                 = (*BridgePlatform)(nil)
-	_ MessageUpdater                     = (*BridgePlatform)(nil)
-	_ PreviewStarter                     = (*BridgePlatform)(nil)
-	_ PreviewCleaner                     = (*BridgePlatform)(nil)
-	_ TypingIndicator                    = (*BridgePlatform)(nil)
-	_ AudioSender                        = (*BridgePlatform)(nil)
-	_ VideoSender                        = (*BridgePlatform)(nil)
-	_ ImageSender                        = (*BridgePlatform)(nil)
-	_ FileSender                         = (*BridgePlatform)(nil)
-	_ CardNavigable                      = (*BridgePlatform)(nil)
-	_ ReplyContextReconstructor          = (*BridgePlatform)(nil)
-	_ PersistentProactiveTargetValidator = (*BridgePlatform)(nil)
-	_ SessionKeyTargetMatcher            = (*BridgePlatform)(nil)
-	_ PlatformHealth                     = (*BridgePlatform)(nil)
+	_ Platform                              = (*BridgePlatform)(nil)
+	_ CardSender                            = (*BridgePlatform)(nil)
+	_ InlineButtonSender                    = (*BridgePlatform)(nil)
+	_ MessageUpdater                        = (*BridgePlatform)(nil)
+	_ PreviewStarter                        = (*BridgePlatform)(nil)
+	_ PreviewCleaner                        = (*BridgePlatform)(nil)
+	_ TypingIndicator                       = (*BridgePlatform)(nil)
+	_ AudioSender                           = (*BridgePlatform)(nil)
+	_ VideoSender                           = (*BridgePlatform)(nil)
+	_ ImageSender                           = (*BridgePlatform)(nil)
+	_ FileSender                            = (*BridgePlatform)(nil)
+	_ CardNavigable                         = (*BridgePlatform)(nil)
+	_ ReplyContextReconstructor             = (*BridgePlatform)(nil)
+	_ PersistentProactiveTargetValidator    = (*BridgePlatform)(nil)
+	_ SessionKeyTargetMatcher               = (*BridgePlatform)(nil)
+	_ PlatformHealth                        = (*BridgePlatform)(nil)
+	_ RuntimeCapabilityAvailabilityProvider = (*BridgePlatform)(nil)
 )
 
 func (bp *BridgePlatform) Name() string { return "bridge" }
+
+// RuntimeCapabilityAvailability refines BridgePlatform's structural
+// interfaces with the capabilities negotiated by the external adapter that
+// owns this session key. BridgePlatform implements a transport superset so it
+// can serve different adapters; interface assertions alone would otherwise
+// advertise card/media/update support that the connected adapter rejected.
+func (bp *BridgePlatform) RuntimeCapabilityAvailability(sessionKey string, replyCtx any) map[string]CapabilityAvailability {
+	featureKeys := map[string]string{
+		"structured_cards":             "card",
+		"buttons":                      "buttons",
+		"message_update":               "update_message",
+		"preview":                      "preview",
+		"typing":                       "typing",
+		"audio":                        "audio",
+		"video":                        "video",
+		"images":                       "image",
+		"files":                        "file",
+		"reply_context_reconstruction": "reconstruct_reply",
+		"card_navigation":              "card",
+	}
+	result := make(map[string]CapabilityAvailability, len(featureKeys))
+	platform := ""
+	if rc, ok := replyCtx.(*bridgeReplyCtx); ok {
+		platform = rc.Platform
+	}
+	if platform == "" {
+		platform = bp.server.platformFromSessionKey(sessionKey)
+	}
+	if platform == "" {
+		for id := range featureKeys {
+			result[id] = conditional("A Bridge session key is required to select the external adapter.", "需要 Bridge session key 才能选择外部适配器。")
+		}
+		return result
+	}
+	adapter := bp.server.getAdapter(platform)
+	if adapter == nil {
+		for id := range featureKeys {
+			result[id] = unavailable(fmt.Sprintf("Bridge adapter %q is not connected.", platform), "Bridge 外部适配器当前未连接。")
+		}
+		return result
+	}
+	for id, key := range featureKeys {
+		if adapter.capabilities[key] {
+			result[id] = available(fmt.Sprintf("Connected Bridge adapter %q declares %s.", platform, key), "已连接 Bridge 外部适配器声明该能力。")
+		} else {
+			result[id] = unavailable(fmt.Sprintf("Connected Bridge adapter %q does not declare %s.", platform, key), "已连接 Bridge 外部适配器未声明该能力。")
+		}
+	}
+	return result
+}
 
 func (bp *BridgePlatform) Start(handler MessageHandler) error {
 	bp.handler = handler
