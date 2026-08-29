@@ -7,10 +7,10 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/timmyagentic/cc-connect-next/core"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 func plainText(content string) map[string]any {
@@ -44,7 +44,7 @@ func (p *interactivePlatform) SendCard(ctx context.Context, rctx any, card *core
 		return fmt.Errorf("%s: chatID is empty, cannot send card", p.tag())
 	}
 
-	if !p.noReplyToTrigger && p.shouldReplyInThread(rc) {
+	if p.shouldReplyInThread(rc) {
 		return p.ReplyCard(ctx, rctx, card)
 	}
 

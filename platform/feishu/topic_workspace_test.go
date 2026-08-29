@@ -7,7 +7,7 @@ import (
 )
 
 func TestPopulateWorkspaceChannelKeysUsesTopicScope(t *testing.T) {
-	p := &Platform{platformName: "feishu", threadIsolation: true}
+	p := &Platform{platformName: "feishu", threadMode: threadIsolationTopicsOnly}
 	msg := &core.Message{ReplyCtx: replyContext{
 		chatID:     "oc_chat",
 		sessionKey: "feishu:oc_chat:root:om_root",
@@ -24,7 +24,7 @@ func TestPopulateWorkspaceChannelKeysUsesTopicScope(t *testing.T) {
 }
 
 func TestPopulateWorkspaceChannelKeysKeepsChatScopeOutsideTopicMode(t *testing.T) {
-	p := &Platform{platformName: "lark", threadIsolation: false}
+	p := &Platform{platformName: "lark", threadMode: threadIsolationOff}
 	msg := &core.Message{ReplyCtx: replyContext{
 		chatID:     "oc_chat",
 		sessionKey: "lark:oc_chat:ou_user",

@@ -37,21 +37,34 @@ func TestNew_DefaultsToInteractivePlatform(t *testing.T) {
 	}
 }
 
-func TestNew_ThreadIsolationCompatibilityAndExplicitValues(t *testing.T) {
+func TestNew_ThreadIsolationModesAndLegacyBooleans(t *testing.T) {
+	chatType := "group"
+	plainMessageID := "om_plain"
+	topicMessageID := "om_topic_reply"
+	topicRootID := "om_topic_root"
+	threadID := "omt_topic"
+	plainMessage := &larkim.EventMessage{ChatType: &chatType, MessageId: &plainMessageID}
+	topicMessage := &larkim.EventMessage{ChatType: &chatType, MessageId: &topicMessageID, RootId: &topicRootID, ThreadId: &threadID}
+
 	tests := []struct {
-		name string
-		set  bool
-		want bool
+		name      string
+		value     any
+		set       bool
+		wantPlain string
+		wantTopic string
 	}{
-		{name: "omitted keeps legacy fallback", want: false},
-		{name: "explicit false", set: true, want: false},
-		{name: "explicit true", set: true, want: true},
+		{name: "omitted maps to off", wantPlain: "feishu:oc_group:ou_user", wantTopic: "feishu:oc_group:ou_user"},
+		{name: "legacy false maps to off", set: true, value: false, wantPlain: "feishu:oc_group:ou_user", wantTopic: "feishu:oc_group:ou_user"},
+		{name: "legacy true preserves topic per message", set: true, value: true, wantPlain: "feishu:oc_group:root:om_plain", wantTopic: "feishu:oc_group:root:om_topic_root"},
+		{name: "off mode", set: true, value: "off", wantPlain: "feishu:oc_group:ou_user", wantTopic: "feishu:oc_group:ou_user"},
+		{name: "topics only mode", set: true, value: "topics_only", wantPlain: "feishu:oc_group:ou_user", wantTopic: "feishu:oc_group:root:om_topic_root"},
+		{name: "topic per message mode", set: true, value: "topic_per_message", wantPlain: "feishu:oc_group:root:om_plain", wantTopic: "feishu:oc_group:root:om_topic_root"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := map[string]any{"app_id": "cli_xxx", "app_secret": "secret"}
 			if tt.set {
-				opts["thread_isolation"] = tt.want
+				opts["thread_isolation"] = tt.value
 			}
 			p, err := New(opts)
 			if err != nil {
@@ -61,15 +74,27 @@ func TestNew_ThreadIsolationCompatibilityAndExplicitValues(t *testing.T) {
 			if !ok {
 				t.Fatalf("platform type = %T, want *interactivePlatform", p)
 			}
-			if interactive.threadIsolation != tt.want {
-				t.Fatalf("threadIsolation = %v, want %v", interactive.threadIsolation, tt.want)
+			if got := interactive.makeSessionKey(plainMessage, "oc_group", "ou_user"); got != tt.wantPlain {
+				t.Fatalf("plain session key = %q, want %q", got, tt.wantPlain)
+			}
+			if got := interactive.makeSessionKey(topicMessage, "oc_group", "ou_user"); got != tt.wantTopic {
+				t.Fatalf("topic session key = %q, want %q", got, tt.wantTopic)
+			}
+		})
+	}
+
+	for _, value := range []any{"everything", 1, []string{"topics_only"}} {
+		t.Run("invalid value", func(t *testing.T) {
+			_, err := New(map[string]any{"app_id": "cli_xxx", "app_secret": "secret", "thread_isolation": value})
+			if err == nil || !strings.Contains(err.Error(), "thread_isolation") {
+				t.Fatalf("New(thread_isolation=%#v) error = %v", value, err)
 			}
 		})
 	}
 }
 
 func TestMakeSessionKey_ThreadIsolationSeparatesGroupRoots(t *testing.T) {
-	p := &Platform{platformName: "feishu", threadIsolation: true}
+	p := &Platform{platformName: "feishu", threadMode: threadIsolationTopicsOnly}
 	chatType := "group"
 	rootA, rootB := "om_root_a", "om_root_b"
 	threadA, threadB := "omt_thread_a", "omt_thread_b"
@@ -120,7 +145,7 @@ func TestMakeSessionKey_ThreadIsolationOnlyAppliesToRealTopics(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &Platform{platformName: "feishu", threadIsolation: true}
+			p := &Platform{platformName: "feishu", threadMode: threadIsolationTopicsOnly}
 			if got := p.makeSessionKey(tt.msg, "oc_group", "ou_user"); got != tt.want {
 				t.Fatalf("makeSessionKey() = %q, want %q", got, tt.want)
 			}
@@ -128,7 +153,7 @@ func TestMakeSessionKey_ThreadIsolationOnlyAppliesToRealTopics(t *testing.T) {
 	}
 
 	t.Run("plain group message still honors shared channel sessions", func(t *testing.T) {
-		p := &Platform{platformName: "feishu", threadIsolation: true, shareSessionInChannel: true}
+		p := &Platform{platformName: "feishu", threadMode: threadIsolationTopicsOnly, shareSessionInChannel: true}
 		msg := &larkim.EventMessage{ChatType: &chatType, MessageId: &messageID}
 		if got := p.makeSessionKey(msg, "oc_group", "ou_user"); got != "feishu:oc_group" {
 			t.Fatalf("makeSessionKey() = %q, want channel session", got)
@@ -883,7 +908,7 @@ func TestLark_ThreadIsolationUsesRootSessionKey(t *testing.T) {
 func TestLark_GroupReplyAllWithThreadIsolationKeepsPlainGroupSessionWithoutMention(t *testing.T) {
 	p, err := newPlatform("lark", lark.LarkBaseUrl, map[string]any{
 		"app_id": "cli_xxx", "app_secret": "secret", "enable_feishu_card": true,
-		"group_reply_all": true, "thread_isolation": true,
+		"group_reply_all": true, "thread_isolation": "topics_only",
 	})
 	if err != nil {
 		t.Fatalf("newPlatform(lark) error = %v", err)
@@ -952,13 +977,13 @@ func TestBuildReplyMessageReqBody_SetsReplyInThreadFlag(t *testing.T) {
 	}{
 		{
 			name:          "thread isolation enabled",
-			platform:      &Platform{threadIsolation: true},
+			platform:      &Platform{threadMode: threadIsolationTopicsOnly},
 			replyCtx:      replyContext{messageID: "om_reply", sessionKey: "feishu:oc_chat:root:om_root"},
 			wantThreading: true,
 		},
 		{
 			name:          "thread isolation does not affect p2p session",
-			platform:      &Platform{threadIsolation: true},
+			platform:      &Platform{threadMode: threadIsolationTopicsOnly},
 			replyCtx:      replyContext{messageID: "om_reply", sessionKey: "feishu:oc_chat:ou_user"},
 			wantThreading: false,
 		},
@@ -990,7 +1015,7 @@ func TestBuildReplyMessageReqBody_SetsReplyInThreadFlag(t *testing.T) {
 }
 
 func TestBuildReplyMessageReqBody_ThreadIsolationDoesNotPromotePlainGroupMessage(t *testing.T) {
-	p := &Platform{platformName: "feishu", threadIsolation: true}
+	p := &Platform{platformName: "feishu", threadMode: threadIsolationTopicsOnly}
 	chatType := "group"
 	messageID := "om_plain"
 	plainKey := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, MessageId: &messageID}, "oc_group", "ou_user")
@@ -1004,6 +1029,23 @@ func TestBuildReplyMessageReqBody_ThreadIsolationDoesNotPromotePlainGroupMessage
 	topicBody := p.buildReplyMessageReqBody(replyContext{messageID: messageID, sessionKey: topicKey}, larkim.MsgTypeText, `{"text":"hello"}`)
 	if topicBody.ReplyInThread == nil || !*topicBody.ReplyInThread {
 		t.Fatal("real topic reply did not remain in the topic")
+	}
+}
+
+func TestShouldUseThreadOrReplyAPI_TopicLocalityOverridesReplyToTrigger(t *testing.T) {
+	p := &Platform{threadMode: threadIsolationTopicsOnly, noReplyToTrigger: true}
+	topic := replyContext{messageID: "om_reply", sessionKey: "feishu:oc_group:root:om_root"}
+	if !p.shouldUseThreadOrReplyAPI(topic) {
+		t.Fatal("reply_to_trigger=false would incorrectly send a real topic response to the main chat")
+	}
+	body := p.buildReplyMessageReqBody(topic, larkim.MsgTypeText, `{"text":"hello"}`)
+	if body.ReplyInThread == nil || !*body.ReplyInThread {
+		t.Fatal("real topic response did not keep ReplyInThread=true")
+	}
+
+	plain := replyContext{messageID: "om_plain", sessionKey: "feishu:oc_group:ou_user"}
+	if p.shouldUseThreadOrReplyAPI(plain) {
+		t.Fatal("reply_to_trigger=false should still create a standalone main-chat response")
 	}
 }
 

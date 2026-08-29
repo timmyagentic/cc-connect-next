@@ -127,12 +127,20 @@ func TestCodexModeCatalogDistinguishesStarterFromOmissionFallback(t *testing.T) 
 func TestFeishuThreadIsolationCatalogDistinguishesProfileFromOmissionFallback(t *testing.T) {
 	for _, owner := range []string{"feishu", "lark"} {
 		option := findCatalogOption(t, core.PlatformConfigOptions(owner), "thread_isolation")
-		for _, want := range []string{"false", "omitted", "Starter", "recommended", "true"} {
+		for _, want := range []string{"off", "omitted", "Starter", "topics_only", "true", "topic_per_message"} {
 			if !strings.Contains(option.Default, want) {
 				t.Errorf("%s thread_isolation default %q missing %q", owner, option.Default, want)
 			}
 		}
-		if !strings.Contains(option.Description, "Omitting") || !strings.Contains(option.Description, "workspace binding") || !strings.Contains(option.Description, "Ordinary group messages") {
+		if option.Type != "string | boolean (legacy)" {
+			t.Errorf("%s thread_isolation type = %q", owner, option.Type)
+		}
+		for _, value := range []string{"off", "topics_only", "topic_per_message"} {
+			if !slices.Contains(option.Values, value) {
+				t.Errorf("%s thread_isolation allowed values %v missing %q", owner, option.Values, value)
+			}
+		}
+		if !strings.Contains(option.Description, "Omitting") || !strings.Contains(option.Description, "workspace binding") || !strings.Contains(strings.ToLower(option.Description), "ordinary group messages") {
 			t.Errorf("%s description does not explain compatibility and topic scope: %q", owner, option.Description)
 		}
 		if !strings.Contains(option.DescriptionZH, "省略") || !strings.Contains(option.DescriptionZH, "工作区绑定") || !strings.Contains(option.DescriptionZH, "普通群消息") {
@@ -144,15 +152,15 @@ func TestFeishuThreadIsolationCatalogDistinguishesProfileFromOmissionFallback(t 
 	if discord.Default != "false" || strings.Contains(discord.Description, "Starter") {
 		t.Fatalf("Feishu-specific default leaked into Discord metadata: %#v", discord)
 	}
-	if !strings.Contains(config.StarterConfigTOML(), "thread_isolation = true") {
-		t.Fatal("generated Starter config no longer writes thread_isolation = true")
+	if !strings.Contains(config.StarterConfigTOML(), `thread_isolation = "topics_only"`) {
+		t.Fatal("generated Starter config no longer writes thread_isolation = topics_only")
 	}
 
 	var out bytes.Buffer
 	if err := writeConfigCapabilities(&out, []string{"--platform", "feishu", "--search", "同一个群多个话题", "--lang", "zh"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"projects.platforms.options.thread_isolation", "新 Starter", "省略该键"} {
+	for _, want := range []string{"projects.platforms.options.thread_isolation", "topics_only", "topic_per_message", "新 Starter", "省略该键"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("natural-language topic query missing %q:\n%s", want, out.String())
 		}

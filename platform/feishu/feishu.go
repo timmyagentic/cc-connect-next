@@ -258,6 +258,52 @@ type replyContext struct {
 	bootstrapDone   chan struct{}
 }
 
+type threadIsolationMode uint8
+
+const (
+	threadIsolationOff threadIsolationMode = iota
+	threadIsolationTopicsOnly
+	threadIsolationTopicPerMessage
+)
+
+func (m threadIsolationMode) String() string {
+	switch m {
+	case threadIsolationTopicsOnly:
+		return "topics_only"
+	case threadIsolationTopicPerMessage:
+		return "topic_per_message"
+	default:
+		return "off"
+	}
+}
+
+func parseThreadIsolationMode(raw any) (threadIsolationMode, error) {
+	switch value := raw.(type) {
+	case nil:
+		return threadIsolationOff, nil
+	case bool:
+		if value {
+			// Preserve the historical boolean behavior: every top-level group
+			// message becomes an isolated topic root.
+			return threadIsolationTopicPerMessage, nil
+		}
+		return threadIsolationOff, nil
+	case string:
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "off":
+			return threadIsolationOff, nil
+		case "topics_only":
+			return threadIsolationTopicsOnly, nil
+		case "topic_per_message":
+			return threadIsolationTopicPerMessage, nil
+		default:
+			return threadIsolationOff, fmt.Errorf("thread_isolation %q is invalid (want off, topics_only, or topic_per_message)", value)
+		}
+	default:
+		return threadIsolationOff, fmt.Errorf("thread_isolation must be a mode string or legacy boolean, got %T", raw)
+	}
+}
+
 type Platform struct {
 	mu                         sync.RWMutex
 	platformName               string
@@ -276,7 +322,7 @@ type Platform struct {
 	groupReplyAllChats         map[string]struct{}
 	respondToAtEveryoneAndHere bool
 	shareSessionInChannel      bool
-	threadIsolation            bool
+	threadMode                 threadIsolationMode
 	// noReplyToTrigger: when true, send via Create instead of Im.Message.Reply (no quote to the user's message).
 	noReplyToTrigger bool
 	resolveMentions  bool
@@ -484,7 +530,10 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 	}
 	respondToAtEveryoneAndHere, _ := opts["respond_to_at_everyone_and_here"].(bool)
 	shareSessionInChannel, _ := opts["share_session_in_channel"].(bool)
-	threadIsolation, _ := opts["thread_isolation"].(bool)
+	threadMode, err := parseThreadIsolationMode(opts["thread_isolation"])
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
 	resolveMentionsOpt, _ := opts["resolve_mentions"].(bool)
 	noReplyToTrigger := false
 	if v, ok := opts["reply_to_trigger"].(bool); ok && !v {
@@ -567,7 +616,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		groupReplyAllChats:         groupReplyAllChats,
 		respondToAtEveryoneAndHere: respondToAtEveryoneAndHere,
 		shareSessionInChannel:      shareSessionInChannel,
-		threadIsolation:            threadIsolation,
+		threadMode:                 threadMode,
 		resolveMentions:            resolveMentionsOpt,
 		noReplyToTrigger:           noReplyToTrigger,
 		client:                     lark.NewClient(appID, appSecret, clientOpts...),
@@ -591,6 +640,10 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 }
 
 func (p *Platform) Name() string { return p.platformName }
+
+func (p *Platform) threadIsolationEnabled() bool {
+	return p.threadMode != threadIsolationOff
+}
 
 func (p *Platform) SetLifecycleHandler(handler core.PlatformLifecycleHandler) {
 	p.mu.Lock()
@@ -1501,7 +1554,7 @@ func (p *Platform) populateWorkspaceChannelKeys(msg *core.Message) {
 		return
 	}
 	msg.ChannelKey = rctx.chatID
-	if !p.threadIsolation {
+	if !p.threadIsolationEnabled() {
 		return
 	}
 	parts := strings.SplitN(rctx.sessionKey, ":", 3)
@@ -1736,7 +1789,7 @@ func (p *Platform) shouldDispatchGroupMessage(msg *larkim.EventMessage, msgType,
 		return true
 	// Once a thread has been engaged via @bot, allow follow-up attachment-only
 	// messages in that thread without requiring another mention.
-	case p.threadIsolation && isAttachmentMsgType(msgType) && p.isActiveThreadSession(sessionKey):
+	case p.threadIsolationEnabled() && isAttachmentMsgType(msgType) && p.isActiveThreadSession(sessionKey):
 		slog.Debug(p.tag()+": passing attachment through active thread without mention",
 			"chat_id", chatID, "session_key", sessionKey, "msg_type", msgType)
 		return true
@@ -1806,7 +1859,7 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 		"mentions", mentionCount,
 		"group_reply_all", groupReplyAllForChat,
 		"group_reply_all_chats", len(p.groupReplyAllChats),
-		"thread_isolation", p.threadIsolation,
+		"thread_isolation", p.threadMode.String(),
 	)
 
 	// Pre-compute sessionKey so the @bot filter below can consult the active
@@ -1918,7 +1971,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 	// The first accepted mention is the exception because earlier unmentioned
 	// root content never reached the new agent session.
 	var quoted quotedMessage
-	if parentID != "" && (!p.threadIsolation || !isThreadSessionKey(sessionKey) || rctx.bootstrapThread) {
+	if parentID != "" && (!p.threadIsolationEnabled() || !isThreadSessionKey(sessionKey) || rctx.bootstrapThread) {
 		var fetched bool
 		quoted, fetched = p.fetchQuotedMessageWithStatus(ctx, parentID)
 		if rctx.bootstrapThread {
@@ -4456,7 +4509,7 @@ type threadBootstrapEntry struct {
 // and reports whether this caller reserved its one-time bootstrap. A failed
 // bootstrap can release the reservation without revoking attachment admission.
 func (p *Platform) markThreadSessionActive(sessionKey string) bool {
-	if !p.threadIsolation || !isThreadSessionKey(sessionKey) {
+	if !p.threadIsolationEnabled() || !isThreadSessionKey(sessionKey) {
 		return false
 	}
 	p.activeThreadSessions.Store(sessionKey, time.Now())
@@ -4478,7 +4531,7 @@ func (p *Platform) markThreadSessionActive(sessionKey string) bool {
 }
 
 func (p *Platform) prepareThreadBootstrapDispatch(sessionKey string) (bootstrap, queued bool, wait <-chan struct{}, done chan struct{}) {
-	if !p.threadIsolation || !isThreadSessionKey(sessionKey) {
+	if !p.threadIsolationEnabled() || !isThreadSessionKey(sessionKey) {
 		return false, false, nil, nil
 	}
 	p.activeThreadSessions.Store(sessionKey, time.Now())
@@ -4552,7 +4605,7 @@ func (p *Platform) releaseThreadBootstrapDispatch(sessionKey string, done chan s
 // isActiveThreadSession reports whether the given sessionKey corresponds to a
 // thread that has previously been engaged by an @bot message.
 func (p *Platform) isActiveThreadSession(sessionKey string) bool {
-	if !p.threadIsolation || !isThreadSessionKey(sessionKey) {
+	if !p.threadIsolationEnabled() || !isThreadSessionKey(sessionKey) {
 		return false
 	}
 	_, ok := p.activeThreadSessions.Load(sessionKey)
@@ -4596,8 +4649,18 @@ func topicRootMessageID(msg *larkim.EventMessage) string {
 }
 
 func (p *Platform) makeSessionKey(msg *larkim.EventMessage, chatID, userID string) string {
-	if p.threadIsolation && msg != nil && stringValue(msg.ChatType) == "group" {
-		if rootID := topicRootMessageID(msg); rootID != "" {
+	if p.threadIsolationEnabled() && msg != nil && stringValue(msg.ChatType) == "group" {
+		var rootID string
+		switch p.threadMode {
+		case threadIsolationTopicsOnly:
+			rootID = topicRootMessageID(msg)
+		case threadIsolationTopicPerMessage:
+			rootID = stringValue(msg.RootId)
+			if rootID == "" {
+				rootID = stringValue(msg.MessageId)
+			}
+		}
+		if rootID != "" {
 			return fmt.Sprintf("%s:%s:root:%s", p.tag(), chatID, rootID)
 		}
 	}
@@ -4623,7 +4686,7 @@ func (p *Platform) shouldReplyInThread(rc replyContext) bool {
 	if rc.messageID == "" {
 		return false
 	}
-	return p.threadIsolation && isThreadSessionKey(rc.sessionKey)
+	return p.threadIsolationEnabled() && isThreadSessionKey(rc.sessionKey)
 }
 
 // shouldUseThreadOrReplyAPI is true when we should call Im.Message.Reply (optionally with ReplyInThread).
@@ -4631,7 +4694,10 @@ func (p *Platform) shouldUseThreadOrReplyAPI(rc replyContext) bool {
 	if rc.messageID == "" {
 		return false
 	}
-	return !p.noReplyToTrigger
+	// Staying inside a real/isolated topic is a routing requirement, not a
+	// quote-presentation preference. Feishu requires the Reply API with
+	// ReplyInThread=true to keep the response in that topic.
+	return p.shouldReplyInThread(rc) || !p.noReplyToTrigger
 }
 
 func (p *Platform) sendNewMessageToChat(ctx context.Context, rc replyContext, msgType, content string) error {

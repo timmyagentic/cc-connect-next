@@ -1034,7 +1034,7 @@ func TestMarkAndIsActiveThreadSession(t *testing.T) {
 	const directKey = "feishu:oc_chat:ou_user"
 
 	t.Run("thread isolation disabled is no-op", func(t *testing.T) {
-		p := &Platform{threadIsolation: false}
+		p := &Platform{threadMode: threadIsolationOff}
 		p.markThreadSessionActive(threadKey)
 		if p.isActiveThreadSession(threadKey) {
 			t.Fatal("expected no-op when thread_isolation is off")
@@ -1042,7 +1042,7 @@ func TestMarkAndIsActiveThreadSession(t *testing.T) {
 	})
 
 	t.Run("non-thread sessionKey is ignored", func(t *testing.T) {
-		p := &Platform{threadIsolation: true}
+		p := &Platform{threadMode: threadIsolationTopicsOnly}
 		p.markThreadSessionActive(directKey)
 		if p.isActiveThreadSession(directKey) {
 			t.Fatal("expected non-thread sessionKey to be ignored")
@@ -1050,7 +1050,7 @@ func TestMarkAndIsActiveThreadSession(t *testing.T) {
 	})
 
 	t.Run("thread sessionKey is recorded", func(t *testing.T) {
-		p := &Platform{threadIsolation: true}
+		p := &Platform{threadMode: threadIsolationTopicsOnly}
 		if p.isActiveThreadSession(threadKey) {
 			t.Fatal("thread should not be active before mark")
 		}
@@ -1103,13 +1103,13 @@ func TestOnMessageThreadIsolationAdmitsAttachmentWithoutMention(t *testing.T) {
 
 	received := make(chan *core.Message, 8)
 	p := &Platform{
-		platformName:    "feishu",
-		domain:          srv.URL,
-		appID:           appID,
-		appSecret:       appSecret,
-		botOpenID:       botOpenID,
-		threadIsolation: true,
-		dedup:           &core.MessageDedup{},
+		platformName: "feishu",
+		domain:       srv.URL,
+		appID:        appID,
+		appSecret:    appSecret,
+		botOpenID:    botOpenID,
+		threadMode:   threadIsolationTopicsOnly,
+		dedup:        &core.MessageDedup{},
 		client: lark.NewClient(appID, appSecret,
 			lark.WithOpenBaseUrl(srv.URL),
 			lark.WithHttpClient(srv.Client()),
