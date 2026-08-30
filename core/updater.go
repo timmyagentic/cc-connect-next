@@ -157,43 +157,105 @@ func (e *Engine) currentUpdateService() (UpdateService, error) {
 	return service, nil
 }
 
-const pendingUpdatePlanTTL = 10 * time.Minute
+const (
+	pendingUpdatePlanTTL = 10 * time.Minute
+	pendingUpdatePlanMax = 64
+)
 
 type pendingUpdatePlan struct {
-	Plan PreparedUpdate
-	At   time.Time
+	Plan       PreparedUpdate
+	At         time.Time
+	SessionKey string
+	UserID     string
 }
 
-func (e *Engine) rememberUpdatePlan(sessionKey string, plan PreparedUpdate) {
+func (e *Engine) rememberUpdatePlan(sessionKey, userID string, plan PreparedUpdate) (string, error) {
 	if sessionKey == "" {
-		return
+		return "", fmt.Errorf("update session is required")
+	}
+	token, err := newPendingActionToken()
+	if err != nil {
+		return "", err
 	}
 	e.updateServiceMu.Lock()
 	defer e.updateServiceMu.Unlock()
 	if e.updatePlans == nil {
 		e.updatePlans = make(map[string]pendingUpdatePlan)
 	}
-	e.updatePlans[sessionKey] = pendingUpdatePlan{Plan: plan, At: time.Now()}
+	now := time.Now()
+	e.pruneUpdatePlansLocked(now)
+	for len(e.updatePlans) >= pendingUpdatePlanMax {
+		e.evictOldestUpdatePlanLocked()
+	}
+	e.updatePlans[token] = pendingUpdatePlan{Plan: plan, At: now, SessionKey: sessionKey, UserID: userID}
+	return token, nil
 }
 
-func (e *Engine) pendingUpdatePlan(sessionKey string) (PreparedUpdate, bool) {
+func (e *Engine) pendingUpdatePlan(sessionKey, userID, token string) (PreparedUpdate, bool) {
 	e.updateServiceMu.Lock()
 	defer e.updateServiceMu.Unlock()
-	pending, exists := e.updatePlans[sessionKey]
+	e.pruneUpdatePlansLocked(time.Now())
+	if token == "" {
+		token = e.uniqueUpdateTokenLocked(sessionKey, userID)
+	}
+	pending, exists := e.updatePlans[token]
 	if !exists {
 		return PreparedUpdate{}, false
 	}
-	if time.Since(pending.At) > pendingUpdatePlanTTL {
-		delete(e.updatePlans, sessionKey)
+	if pending.SessionKey != sessionKey || pending.UserID != userID {
 		return PreparedUpdate{}, false
 	}
 	return pending.Plan, true
 }
 
-func (e *Engine) clearUpdatePlan(sessionKey string) {
+func (e *Engine) clearUpdatePlan(sessionKey, userID, token string) {
 	e.updateServiceMu.Lock()
 	defer e.updateServiceMu.Unlock()
-	delete(e.updatePlans, sessionKey)
+	if token == "" {
+		token = e.uniqueUpdateTokenLocked(sessionKey, userID)
+	}
+	if pending, exists := e.updatePlans[token]; exists && pending.SessionKey == sessionKey && pending.UserID == userID {
+		e.deleteUpdatePlanLocked(token)
+	}
+}
+
+func (e *Engine) uniqueUpdateTokenLocked(sessionKey, userID string) string {
+	match := ""
+	for token, pending := range e.updatePlans {
+		if pending.SessionKey != sessionKey || pending.UserID != userID {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = token
+	}
+	return match
+}
+
+func (e *Engine) deleteUpdatePlanLocked(token string) {
+	delete(e.updatePlans, token)
+}
+
+func (e *Engine) pruneUpdatePlansLocked(now time.Time) {
+	for token, pending := range e.updatePlans {
+		if now.Sub(pending.At) > pendingUpdatePlanTTL {
+			e.deleteUpdatePlanLocked(token)
+		}
+	}
+}
+
+func (e *Engine) evictOldestUpdatePlanLocked() {
+	oldestToken := ""
+	var oldest pendingUpdatePlan
+	for token, pending := range e.updatePlans {
+		if oldestToken == "" || pending.At.Before(oldest.At) {
+			oldestToken, oldest = token, pending
+		}
+	}
+	if oldestToken != "" {
+		e.deleteUpdatePlanLocked(oldestToken)
+	}
 }
 
 func terminalUpdatePlanError(err error) bool {

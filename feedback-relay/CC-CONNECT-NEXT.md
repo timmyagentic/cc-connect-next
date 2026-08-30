@@ -27,3 +27,14 @@ npm audit --audit-level=high
 
 This integration does not deploy the Worker, set secrets, or prove the current
 public endpoint has been cut over to the new structured contract.
+
+## Existing-client migration
+
+The host-owned `wrangler.jsonc` selects the extra `src/compat.js` entrypoint.
+It preserves the strict Foundation Relay for new structured requests while
+translating the exact legacy CC Connect schema-1 shape into the structured
+request before validation and server-side rendering. The legacy `install_id`
+is discarded, and legacy clients cannot select the repository or credential.
+This permits an in-place Worker rollout before a new CC Connect binary is
+released; remove the compatibility entrypoint only after the supported legacy
+client window has ended.

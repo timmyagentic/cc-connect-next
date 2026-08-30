@@ -20,6 +20,12 @@
 - Added `agent-app-features.lock.json` and exact-source validation so future
   Agents can reject mixed module/subtree revisions without adding a second
   lifecycle database.
+- Feedback approvals and Update confirmations now carry opaque one-time tokens
+  bound to the exact displayed Draft/Plan, session, initiating user, and TTL;
+  stale cards cannot approve a later replacement value.
+- The host-owned Relay entrypoint translates the exact legacy CC Connect
+  schema-1 request into the new structured Foundation request, allowing an
+  in-place Worker rollout without breaking existing installed clients.
 
 ## v0.2.1 (2026-08-30)
 

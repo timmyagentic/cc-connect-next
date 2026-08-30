@@ -66,6 +66,8 @@ jobs:
           npm audit --audit-level=high
           cd ..
           node --test internal/appfeatures/feedback_contract.test.mjs
+          node --test internal/appfeatures/feedback_relay_compat.test.mjs
+          node --check feedback-relay/src/compat.js
 
       - name: Set up Go
         uses: actions/setup-go@v7

@@ -233,13 +233,14 @@ func localizedReleaseBodyPreview(body string, lang Language) string {
 //     *is* the CTA and therefore must be stated outright. Also used when a
 //     card or button send fails, so delivery never degrades into
 //     button-copy without a button.
-func (e *Engine) replyUpdateActionable(p Platform, replyCtx any, actionCopy, textCopy string) {
+func (e *Engine) replyUpdateActionable(p Platform, replyCtx any, token, actionCopy, textCopy string) {
 	btnNow := e.i18n.T(MsgUpdateBtnNow)
 	hint := e.i18n.T(MsgUpdateHintReplyConfirm)
+	confirmCommand := "/upgrade confirm " + token
 	if cs, ok := p.(CardSender); ok {
 		card := e.renderCardForPlatform(p, NewCard().
 			Markdown(actionCopy).
-			Buttons(CardButton{Text: btnNow, Type: "primary", Value: "cmd:/upgrade confirm"}).
+			Buttons(CardButton{Text: btnNow, Type: "primary", Value: "cmd:" + confirmCommand}).
 			Note(hint).
 			Build())
 		if err := cs.ReplyCard(e.ctx, replyCtx, card); err == nil {
@@ -247,10 +248,10 @@ func (e *Engine) replyUpdateActionable(p Platform, replyCtx any, actionCopy, tex
 		}
 	}
 	if bs, ok := p.(InlineButtonSender); ok {
-		row := []ButtonOption{{Text: btnNow, Data: "cmd:/upgrade confirm"}}
+		row := []ButtonOption{{Text: btnNow, Data: "cmd:" + confirmCommand}}
 		if err := bs.SendWithButtons(e.ctx, replyCtx, withUpdateHint(actionCopy, hint), [][]ButtonOption{row}); err == nil {
 			return
 		}
 	}
-	e.reply(p, replyCtx, textCopy)
+	e.reply(p, replyCtx, textCopy+"\n\n`"+confirmCommand+"`")
 }

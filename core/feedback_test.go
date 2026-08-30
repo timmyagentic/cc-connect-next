@@ -294,7 +294,7 @@ func TestFeedbackErrorPreview_CardCarriesEveryFieldAndButtons(t *testing.T) {
 		}
 	}
 	buttons := feedbackAskButtons(t, cards[0])
-	if len(buttons) != 2 || buttons[0].Value != "act:/feedback submit" || buttons[1].Value != "act:/feedback dismiss" {
+	if len(buttons) != 2 || !strings.HasPrefix(buttons[0].Value, "cmd:/feedback confirm ") || !strings.HasPrefix(buttons[1].Value, "cmd:/feedback cancel ") || strings.TrimPrefix(buttons[0].Value, "cmd:/feedback confirm ") != strings.TrimPrefix(buttons[1].Value, "cmd:/feedback cancel ") {
 		t.Errorf("expected submit/dismiss buttons, got %#v", buttons)
 	}
 }
@@ -324,16 +324,19 @@ func TestNotifyCapabilityGap_CardPreviewOnCardPlatforms(t *testing.T) {
 	}
 }
 
-func TestHandleFeedbackCardAction_SubmitsOnlyStoredPreview(t *testing.T) {
-	engine, _ := newFeedbackCardEngine(t)
+func TestFeedbackTokenCommandsSubmitOnlyStoredPreview(t *testing.T) {
+	engine, platform := newFeedbackCardEngine(t)
 	submitted := captureFeedbackSubmissions(engine)
 	draft, err := engine.buildFeedbackDraft("feishu:oc_chat:ou_user", "", []string{"display.sparkles"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine.rememberPendingFeedback("feishu:oc_chat:ou_user", draft)
+	token, err := engine.rememberPendingFeedback("feishu:oc_chat:ou_user", "ou_user", draft)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	engine.handleFeedbackCardAction("submit", "feishu:oc_chat:ou_user")
+	engine.cmdFeedback(platform, feedbackTestMsg(), "confirm "+token)
 	select {
 	case report := <-submitted:
 		if len(report.CapabilityGaps) != 1 || report.CapabilityGaps[0] != "display.sparkles" {
@@ -343,13 +346,70 @@ func TestHandleFeedbackCardAction_SubmitsOnlyStoredPreview(t *testing.T) {
 		t.Fatal("button agreement must submit the pending preview")
 	}
 
-	engine.rememberPendingFeedback("feishu:oc_chat:ou_user", draft)
-	engine.handleFeedbackCardAction("dismiss", "feishu:oc_chat:ou_user")
-	engine.handleFeedbackCardAction("submit", "feishu:oc_chat:ou_user")
+	token, err = engine.rememberPendingFeedback("feishu:oc_chat:ou_user", "ou_user", draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.cmdFeedback(platform, feedbackTestMsg(), "cancel "+token)
+	engine.cmdFeedback(platform, feedbackTestMsg(), "confirm "+token)
 	select {
 	case <-submitted:
 		t.Fatal("dismissed preview must never submit")
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestFeedbackCardApprovalBindsExactDraftAndInitiatingUser(t *testing.T) {
+	engine, platform := newFeedbackCardEngine(t)
+	submitted := captureFeedbackSubmissions(engine)
+	message := feedbackTestMsg()
+
+	engine.cmdFeedback(platform, message, "first problem")
+	engine.cmdFeedback(platform, message, "second problem")
+	platform.mu.Lock()
+	firstCard := platform.repliedCards[0]
+	secondCard := platform.repliedCards[1]
+	platform.mu.Unlock()
+	firstAction := feedbackAskButtons(t, firstCard)[0].Value
+	secondAction := feedbackAskButtons(t, secondCard)[0].Value
+	if firstAction == secondAction {
+		t.Fatalf("two previews share one approval action: %q", firstAction)
+	}
+
+	engine.handleCommand(platform, message, strings.TrimPrefix(firstAction, "cmd:"))
+	select {
+	case report := <-submitted:
+		if report.Description != "first problem" {
+			t.Fatalf("old card submitted replacement Draft: %#v", report)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first preview approval was not processed")
+	}
+
+	engine.cmdFeedback(platform, message, "owner-only problem")
+	platform.mu.Lock()
+	ownerAction := feedbackAskButtons(t, platform.repliedCards[len(platform.repliedCards)-1])[0].Value
+	platform.mu.Unlock()
+	other := *message
+	other.UserID = "ou_other"
+	engine.handleCommand(platform, &other, strings.TrimPrefix(ownerAction, "cmd:"))
+	select {
+	case report := <-submitted:
+		t.Fatalf("another group user submitted the owner's Draft: %#v", report)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestFeedbackTypedConfirmationRejectsAmbiguousPreviews(t *testing.T) {
+	engine, platform := newFeedbackTestEngine(t)
+	submitted := captureFeedbackSubmissions(engine)
+	engine.cmdFeedback(platform, feedbackTestMsg(), "first problem")
+	engine.cmdFeedback(platform, feedbackTestMsg(), "second problem")
+	engine.cmdFeedback(platform, feedbackTestMsg(), "confirm")
+	select {
+	case report := <-submitted:
+		t.Fatalf("ambiguous typed confirmation submitted a Draft: %#v", report)
+	default:
 	}
 }
 
@@ -358,9 +418,14 @@ func TestCmdFeedback_ExpiredPreviewCannotSubmit(t *testing.T) {
 	submitted := captureFeedbackSubmissions(engine)
 	engine.cmdFeedback(platform, feedbackTestMsg(), "one problem")
 	engine.feedbackMu.Lock()
-	pending := engine.feedbackPending[feedbackTestMsg().SessionKey]
+	var token string
+	var pending pendingFeedback
+	for candidate, value := range engine.feedbackPending {
+		token, pending = candidate, value
+		break
+	}
 	pending.At = time.Now().Add(-feedbackPendingTTL - time.Second)
-	engine.feedbackPending[feedbackTestMsg().SessionKey] = pending
+	engine.feedbackPending[token] = pending
 	engine.feedbackMu.Unlock()
 
 	engine.cmdFeedback(platform, feedbackTestMsg(), "confirm")

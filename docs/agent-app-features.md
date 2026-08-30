@@ -16,18 +16,20 @@ bounds, opaque approval value, and no-redirect HTTP client.
 
 1. `/feedback <description>` builds a fully redacted Draft.
 2. The host renders every `Draft.Report()` field and keeps that exact Draft for
-   ten minutes.
-3. A separate button or `/feedback confirm` calls `Approve(true)` and sends the
-   same Draft. Cancel, expiry, and missing approval make no request.
+   ten minutes under an opaque token bound to the session and initiating user.
+3. A separate token-bearing button or unambiguous `/feedback confirm` calls
+   `Approve(true)` and sends the same Draft. Stale cards, another group user,
+   cancel, expiry, ambiguity, and missing approval make no request.
 4. The Relay owns GitHub repository selection, title/body rendering, label,
    token, rate limiting, and best-effort deduplication.
 
 ## Updates
 
 The daemon notice is discovery only. `/upgrade` prepares an immutable Plan,
-shows the exact Release notes and selected artifact, and retains the Plan for
-confirmation. `/upgrade confirm` applies that exact Plan without resolving
-latest again.
+shows the exact Release notes and selected artifact, and retains the Plan under
+an opaque session/user token. The token-bearing action applies only that Plan
+without resolving latest again; a generic confirmation is rejected when more
+than one Plan is pending.
 
 - Standalone macOS/Linux uses the Foundation checksum, staging, two version
   probes, per-target lock, no-clobber backup, replacement, and rollback.
@@ -46,6 +48,12 @@ latest again.
 `worker-configuration.d.ts` may differ. The Worker name and server-side target
 repository are host mappings; the Rate Limiting namespace remains a dry-run
 placeholder until an operator performs a separately authorized deployment.
+
+The host-owned Wrangler entrypoint is `src/compat.js`. It passes new structured
+requests to the byte-identical Foundation Relay and translates only the exact
+legacy CC Connect schema-1 shape first, discarding `install_id` and retaining
+server-owned destination/rendering. This permits deploying the Worker before
+releasing the new client without breaking existing installations.
 
 Run all Relay commands from `feedback-relay/`; do not use an external absolute
 `npm --prefix` invocation as a substitute for testing the final target.

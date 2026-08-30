@@ -374,7 +374,7 @@ func (service *UpdateService) applyHostStandalone(ctx context.Context, state *up
 	if err != nil {
 		return "", fmt.Errorf("download release archive: %w", err)
 	}
-	defer os.Remove(archivePath)
+	defer func() { _ = os.Remove(archivePath) }()
 	if err := verifyUpdateChecksum(archivePath, state.checksum); err != nil {
 		return "", err
 	}
@@ -384,7 +384,7 @@ func (service *UpdateService) applyHostStandalone(ctx context.Context, state *up
 	if err != nil {
 		return "", err
 	}
-	defer os.Remove(staged)
+	defer func() { _ = os.Remove(staged) }()
 	if err := os.Chmod(staged, 0o755); err != nil {
 		return "", fmt.Errorf("prepare staged binary: %w", err)
 	}
@@ -548,7 +548,7 @@ func updateFileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
 		return "", err
@@ -572,7 +572,7 @@ func extractExactZipBinary(archivePath, binaryName, directory string, maximum in
 	if err != nil {
 		return "", fmt.Errorf("open zip archive: %w", err)
 	}
-	defer archive.Close()
+	defer func() { _ = archive.Close() }()
 	var match *zip.File
 	for _, entry := range archive.File {
 		if entry.Name != binaryName {
@@ -596,7 +596,7 @@ func extractExactZipBinary(archivePath, binaryName, directory string, maximum in
 	if err != nil {
 		return "", err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	file, err := os.CreateTemp(directory, ".cc-connect-next-staged-*")
 	if err != nil {
 		return "", err

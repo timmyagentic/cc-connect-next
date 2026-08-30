@@ -161,6 +161,8 @@ jobs:
           npm audit --audit-level=high
           cd ..
           node --test internal/appfeatures/feedback_contract.test.mjs
+          node --test internal/appfeatures/feedback_relay_compat.test.mjs
+          node --check feedback-relay/src/compat.js
 
       - name: Verify exact Foundation source and host lock
         run: ./scripts/verify-agent-app-features.sh

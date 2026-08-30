@@ -28,6 +28,7 @@ const (
 	feedbackFallbackURL       = "https://github.com/timmyagentic/cc-connect-next/issues/new"
 	feedbackSubmitTimeout     = 15 * time.Second
 	feedbackPendingTTL        = 10 * time.Minute
+	feedbackPendingMax        = 64
 	feedbackErrorHintCooldown = 10 * time.Minute
 	feedbackErrorAttachWindow = 30 * time.Minute
 )
@@ -38,8 +39,10 @@ type feedbackError struct {
 }
 
 type pendingFeedback struct {
-	Draft appfeatures.FeedbackDraft
-	At    time.Time
+	Draft      appfeatures.FeedbackDraft
+	At         time.Time
+	SessionKey string
+	UserID     string
 }
 
 type feedbackSubmitFunc func(context.Context, appfeatures.FeedbackDraft, bool) (appfeatures.FeedbackReceipt, error)
@@ -94,15 +97,17 @@ func (e *Engine) cmdFeedback(platform Platform, message *Message, raw string) {
 	}
 	key := feedbackSessionKey(platform, message)
 	argument := strings.TrimSpace(raw)
-	switch strings.ToLower(argument) {
+	control, token, controlled := feedbackControl(argument)
+	switch control {
 	case "confirm", "submit":
-		e.submitPendingFeedback(platform, message, key)
+		e.submitPendingFeedback(platform, message, key, message.UserID, token)
 		return
 	case "cancel", "dismiss":
-		e.clearPendingFeedback(key)
+		e.clearPendingFeedback(key, message.UserID, token)
 		e.reply(platform, message.ReplyCtx, e.i18n.T(MsgFeedbackDismissed))
 		return
-	case "error", "config":
+	}
+	if controlled {
 		argument = ""
 	}
 
@@ -111,10 +116,31 @@ func (e *Engine) cmdFeedback(platform Platform, message *Message, raw string) {
 		e.reply(platform, message.ReplyCtx, e.i18n.T(MsgFeedbackUsage))
 		return
 	}
-	e.rememberPendingFeedback(key, draft)
-	if err := e.deliverFeedbackPreview(platform, message.ReplyCtx, draft.Report(), false); err != nil {
-		e.clearPendingFeedback(key)
+	token, err = e.rememberPendingFeedback(key, message.UserID, draft)
+	if err != nil {
+		e.reply(platform, message.ReplyCtx, e.i18n.Tf(MsgError, err))
+		return
+	}
+	if err := e.deliverFeedbackPreview(platform, message.ReplyCtx, draft.Report(), token, false); err != nil {
+		e.clearPendingFeedback(key, message.UserID, token)
 		slog.Warn("feedback: preview delivery failed", "platform", platform.Name(), "error", err)
+	}
+}
+
+func feedbackControl(argument string) (control, token string, ok bool) {
+	fields := strings.Fields(argument)
+	if len(fields) == 0 || len(fields) > 2 {
+		return "", "", false
+	}
+	control = strings.ToLower(fields[0])
+	switch control {
+	case "confirm", "submit", "cancel", "dismiss", "error", "config":
+		if len(fields) == 2 {
+			token = fields[1]
+		}
+		return control, token, true
+	default:
+		return "", "", false
 	}
 }
 
@@ -147,40 +173,100 @@ func (e *Engine) buildFeedbackDraft(sessionKey, description string, overrideGaps
 	return appfeatures.BuildFeedbackDraft(input)
 }
 
-func (e *Engine) rememberPendingFeedback(sessionKey string, draft appfeatures.FeedbackDraft) {
+func (e *Engine) rememberPendingFeedback(sessionKey, userID string, draft appfeatures.FeedbackDraft) (string, error) {
 	if sessionKey == "" {
-		return
+		return "", fmt.Errorf("feedback session is required")
+	}
+	token, err := newPendingActionToken()
+	if err != nil {
+		return "", err
 	}
 	e.feedbackMu.Lock()
 	defer e.feedbackMu.Unlock()
 	if e.feedbackPending == nil {
 		e.feedbackPending = make(map[string]pendingFeedback)
 	}
-	e.feedbackPending[sessionKey] = pendingFeedback{Draft: draft, At: time.Now()}
+	now := time.Now()
+	e.prunePendingFeedbackLocked(now)
+	for len(e.feedbackPending) >= feedbackPendingMax {
+		e.evictOldestFeedbackLocked()
+	}
+	e.feedbackPending[token] = pendingFeedback{Draft: draft, At: now, SessionKey: sessionKey, UserID: userID}
+	return token, nil
 }
 
-func (e *Engine) takePendingFeedback(sessionKey string) (appfeatures.FeedbackDraft, bool) {
+func (e *Engine) takePendingFeedback(sessionKey, userID, token string) (appfeatures.FeedbackDraft, bool) {
 	e.feedbackMu.Lock()
 	defer e.feedbackMu.Unlock()
-	pending, exists := e.feedbackPending[sessionKey]
+	now := time.Now()
+	e.prunePendingFeedbackLocked(now)
+	if token == "" {
+		token = e.uniqueFeedbackTokenLocked(sessionKey, userID)
+	}
+	pending, exists := e.feedbackPending[token]
 	if !exists {
 		return appfeatures.FeedbackDraft{}, false
 	}
-	delete(e.feedbackPending, sessionKey)
-	if time.Since(pending.At) > feedbackPendingTTL {
+	if pending.SessionKey != sessionKey || (pending.UserID != "" && pending.UserID != userID) {
 		return appfeatures.FeedbackDraft{}, false
 	}
+	e.deletePendingFeedbackLocked(token)
 	return pending.Draft, true
 }
 
-func (e *Engine) clearPendingFeedback(sessionKey string) {
+func (e *Engine) clearPendingFeedback(sessionKey, userID, token string) {
 	e.feedbackMu.Lock()
 	defer e.feedbackMu.Unlock()
-	delete(e.feedbackPending, sessionKey)
+	e.prunePendingFeedbackLocked(time.Now())
+	if token == "" {
+		token = e.uniqueFeedbackTokenLocked(sessionKey, userID)
+	}
+	if pending, exists := e.feedbackPending[token]; exists && pending.SessionKey == sessionKey && (pending.UserID == "" || pending.UserID == userID) {
+		e.deletePendingFeedbackLocked(token)
+	}
 }
 
-func (e *Engine) submitPendingFeedback(platform Platform, message *Message, sessionKey string) {
-	draft, exists := e.takePendingFeedback(sessionKey)
+func (e *Engine) uniqueFeedbackTokenLocked(sessionKey, userID string) string {
+	match := ""
+	for token, pending := range e.feedbackPending {
+		if pending.SessionKey != sessionKey || (pending.UserID != "" && pending.UserID != userID) {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = token
+	}
+	return match
+}
+
+func (e *Engine) deletePendingFeedbackLocked(token string) {
+	delete(e.feedbackPending, token)
+}
+
+func (e *Engine) prunePendingFeedbackLocked(now time.Time) {
+	for token, pending := range e.feedbackPending {
+		if now.Sub(pending.At) > feedbackPendingTTL {
+			e.deletePendingFeedbackLocked(token)
+		}
+	}
+}
+
+func (e *Engine) evictOldestFeedbackLocked() {
+	oldestToken := ""
+	var oldest pendingFeedback
+	for token, pending := range e.feedbackPending {
+		if oldestToken == "" || pending.At.Before(oldest.At) {
+			oldestToken, oldest = token, pending
+		}
+	}
+	if oldestToken != "" {
+		e.deletePendingFeedbackLocked(oldestToken)
+	}
+}
+
+func (e *Engine) submitPendingFeedback(platform Platform, message *Message, sessionKey, userID, token string) {
+	draft, exists := e.takePendingFeedback(sessionKey, userID, token)
 	if !exists {
 		e.reply(platform, message.ReplyCtx, e.i18n.T(MsgFeedbackPendingMissing))
 		return
@@ -234,21 +320,21 @@ func (e *Engine) feedbackPreview(report appfeatures.FeedbackReport) string {
 	)
 }
 
-func (e *Engine) feedbackPreviewCard(report appfeatures.FeedbackReport) *Card {
+func (e *Engine) feedbackPreviewCard(report appfeatures.FeedbackReport, token string) *Card {
 	return NewCard().
 		Title(e.i18n.T(MsgFeedbackAskTitle), "orange").
 		Markdown(e.feedbackPreview(report)).
 		Buttons(
-			PrimaryBtn(e.i18n.T(MsgFeedbackBtnSubmit), "act:/feedback submit"),
-			DefaultBtn(e.i18n.T(MsgFeedbackBtnDismiss), "act:/feedback dismiss"),
+			PrimaryBtn(e.i18n.T(MsgFeedbackBtnSubmit), "cmd:/feedback confirm "+token),
+			DefaultBtn(e.i18n.T(MsgFeedbackBtnDismiss), "cmd:/feedback cancel "+token),
 		).
 		Build()
 }
 
-func (e *Engine) deliverFeedbackPreview(platform Platform, replyCtx any, report appfeatures.FeedbackReport, proactive bool) error {
+func (e *Engine) deliverFeedbackPreview(platform Platform, replyCtx any, report appfeatures.FeedbackReport, token string, proactive bool) error {
 	preview := e.feedbackPreview(report)
 	if sender, ok := platform.(CardSender); ok {
-		card := e.renderCardForPlatform(platform, e.feedbackPreviewCard(report))
+		card := e.renderCardForPlatform(platform, e.feedbackPreviewCard(report, token))
 		ctx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
 		defer cancel()
 		var err error
@@ -263,14 +349,15 @@ func (e *Engine) deliverFeedbackPreview(platform Platform, replyCtx any, report 
 	}
 	if sender, ok := platform.(InlineButtonSender); ok {
 		buttons := [][]ButtonOption{{
-			{Text: e.i18n.T(MsgFeedbackBtnSubmit), Data: "cmd:/feedback confirm"},
-			{Text: e.i18n.T(MsgFeedbackBtnDismiss), Data: "cmd:/feedback cancel"},
+			{Text: e.i18n.T(MsgFeedbackBtnSubmit), Data: "cmd:/feedback confirm " + token},
+			{Text: e.i18n.T(MsgFeedbackBtnDismiss), Data: "cmd:/feedback cancel " + token},
 		}}
 		if err := sender.SendWithButtons(e.ctx, replyCtx, preview, buttons); err == nil {
 			return nil
 		}
 	}
-	text := preview + "\n\n" + e.i18n.T(MsgFeedbackPreviewConfirm)
+	confirmation := strings.Replace(e.i18n.T(MsgFeedbackPreviewConfirm), "/feedback confirm", "/feedback confirm "+token, 1)
+	text := preview + "\n\n" + confirmation
 	if proactive {
 		return e.sendWithError(platform, replyCtx, text)
 	}
@@ -311,9 +398,12 @@ func (e *Engine) maybeSendFeedbackErrorHint(platform Platform, replyCtx any, ses
 	if err != nil {
 		return
 	}
-	e.rememberPendingFeedback(sessionKey, draft)
-	if err := e.deliverFeedbackPreview(platform, replyCtx, draft.Report(), true); err != nil {
-		e.clearPendingFeedback(sessionKey)
+	token, err := e.rememberPendingFeedback(sessionKey, "", draft)
+	if err != nil {
+		return
+	}
+	if err := e.deliverFeedbackPreview(platform, replyCtx, draft.Report(), token, true); err != nil {
+		e.clearPendingFeedback(sessionKey, "", token)
 		slog.Debug("feedback: proactive preview failed", "session_key", sessionKey, "error", err)
 	}
 }
@@ -327,52 +417,17 @@ func (e *Engine) NotifyCapabilityGap(keys []string) bool {
 		return false
 	}
 	_, delivered := e.notifyMostRecentSessionFn("feedback notice", func(sessionKey string, platform Platform, replyCtx any) error {
-		e.rememberPendingFeedback(sessionKey, draft)
-		if err := e.deliverFeedbackPreview(platform, replyCtx, draft.Report(), true); err != nil {
-			e.clearPendingFeedback(sessionKey)
+		token, err := e.rememberPendingFeedback(sessionKey, "", draft)
+		if err != nil {
+			return err
+		}
+		if err := e.deliverFeedbackPreview(platform, replyCtx, draft.Report(), token, true); err != nil {
+			e.clearPendingFeedback(sessionKey, "", token)
 			return err
 		}
 		return nil
 	})
 	return delivered
-}
-
-// handleFeedbackCardAction is called by the platform's card callback. The
-// approved POST runs asynchronously so the callback itself remains bounded.
-func (e *Engine) handleFeedbackCardAction(args, sessionKey string) {
-	switch strings.TrimSpace(args) {
-	case "dismiss":
-		e.clearPendingFeedback(sessionKey)
-		return
-	case "submit":
-	default:
-		return
-	}
-	platformName := ""
-	if index := strings.Index(sessionKey, ":"); index > 0 {
-		platformName = sessionKey[:index]
-	}
-	var target Platform
-	for _, platform := range e.platforms {
-		if platform.Name() == platformName {
-			target = platform
-			break
-		}
-	}
-	if target == nil {
-		return
-	}
-	reconstructor, ok := target.(ReplyContextReconstructor)
-	if !ok {
-		return
-	}
-	replyCtx, err := reconstructor.ReconstructReplyCtx(sessionKey)
-	if err != nil {
-		slog.Debug("feedback: reconstruct reply context failed", "session_key", sessionKey, "error", err)
-		return
-	}
-	message := &Message{SessionKey: sessionKey, Platform: target.Name(), ReplyCtx: replyCtx}
-	go e.submitPendingFeedback(target, message, sessionKey)
 }
 
 func (e *Engine) feedbackHint() string {

@@ -13406,11 +13406,6 @@ func (e *Engine) handleCardNav(action string, sessionKey string) *Card {
 		return e.handleModelCardAction(args, sessionKey)
 	}
 
-	if prefix == "act" && cmd == "/feedback" {
-		e.handleFeedbackCardAction(args, sessionKey)
-		return nil
-	}
-
 	if prefix == "act" {
 		e.executeCardAction(cmd, args, sessionKey)
 	}
@@ -16648,7 +16643,11 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 	}
 
 	if subCmd == "confirm" {
-		e.cmdUpgradeConfirm(p, msg)
+		token := ""
+		if len(args) > 1 {
+			token = args[1]
+		}
+		e.cmdUpgradeConfirm(p, msg, token)
 		return
 	}
 
@@ -16683,21 +16682,25 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 
 	// Store the exact immutable plan before opening the consent window. Confirm
 	// never re-resolves latest or swaps the reviewed release/assets/checksum.
-	e.rememberUpdatePlan(msg.SessionKey, plan)
+	token, err := e.rememberUpdatePlan(msg.SessionKey, msg.UserID, plan)
+	if err != nil {
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		return
+	}
 	e.updateIntents.recordAsk(msg.SessionKey)
-	e.replyUpdateActionable(p, msg.ReplyCtx,
+	e.replyUpdateActionable(p, msg.ReplyCtx, token,
 		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailableAction), cur, plan.Release.TagName, details),
 		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, plan.Release.TagName, details))
 }
 
-func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message) {
+func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message, token string) {
 	cur := CurrentVersion
 	if cur == "" || cur == "dev" {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradeDevBuild))
 		return
 	}
 
-	plan, exists := e.pendingUpdatePlan(msg.SessionKey)
+	plan, exists := e.pendingUpdatePlan(msg.SessionKey, msg.UserID, token)
 	if !exists {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradePlanMissing))
 		return
@@ -16713,12 +16716,12 @@ func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message) {
 	result, err := service.Apply(e.ctx, plan)
 	if err != nil {
 		if terminalUpdatePlanError(err) {
-			e.clearUpdatePlan(msg.SessionKey)
+			e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
 		}
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
 	}
-	e.clearUpdatePlan(msg.SessionKey)
+	e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
 	if !result.Updated {
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeUpToDate), cur))
 		return

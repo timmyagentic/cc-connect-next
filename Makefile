@@ -143,6 +143,8 @@ test-feature-foundation:
 	cd feedback-relay && npm run types:check && npm run validate:worker
 	cd feedback-relay && npm audit --audit-level=high
 	node --test internal/appfeatures/feedback_contract.test.mjs
+	node --test internal/appfeatures/feedback_relay_compat.test.mjs
+	node --check feedback-relay/src/compat.js
 	./scripts/verify-agent-app-features.sh
 
 # Legacy: runs unit tests only

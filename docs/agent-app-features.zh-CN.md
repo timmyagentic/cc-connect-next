@@ -14,15 +14,17 @@ CC Connect Next 继续负责命令、卡片、文本回退、本地化、最近�
 批准值以及拒绝重定向的 HTTP Client。
 
 1. `/feedback <描述>` 生成完整脱敏 Draft。
-2. 宿主展示 `Draft.Report()` 的全部字段，并保存这份精确 Draft 十分钟。
-3. 独立按钮或 `/feedback confirm` 才调用 `Approve(true)` 并发送同一份 Draft；取消、
-   过期和未批准始终零请求。
+2. 宿主展示 `Draft.Report()` 的全部字段，并用绑定 session 与发起用户的 opaque token
+   保存这份精确 Draft 十分钟。
+3. 只有携带 token 的独立按钮或无歧义的 `/feedback confirm` 才调用 `Approve(true)`；
+   旧卡片、其他群成员、取消、过期、歧义和未批准始终零请求。
 4. Relay 在服务端固定 GitHub 仓库，负责 title/body、label、Token、限流和尽力去重。
 
 ## Update
 
 daemon 提醒只负责发现。`/upgrade` 准备 immutable Plan，展示同一 Release 的 notes
-和选定产物；`/upgrade confirm` 只 Apply 这份 Plan，不会重新解析 latest。
+和选定产物，并用 session/user opaque token 保存。携带 token 的确认只 Apply 这份
+Plan，不会重新解析 latest；存在多份待确认 Plan 时，泛化确认会被拒绝。
 
 - macOS/Linux 独立安装使用 Foundation checksum、staging、双版本探针、目标锁、
   no-clobber backup、替换与回滚。
@@ -37,6 +39,11 @@ daemon 提醒只负责发现。`/upgrade` 准备 immutable Plan，展示同一 R
 `feedback-relay/` 来自同一 Foundation 提交的 `relay/cloudflare`。只有
 `wrangler.jsonc` 与生成的 `worker-configuration.d.ts` 允许变化。Worker 名称和服务端
 目标仓库是宿主映射；Rate Limiting namespace 在单独授权部署前保持 dry-run 占位值。
+
+宿主自有的 Wrangler 入口为 `src/compat.js`：新结构化请求直接进入逐字节一致的
+Foundation Relay；旧 CC Connect schema-1 请求会先被精确识别和转换，`install_id`
+被丢弃，目标仓库与 Issue 渲染继续由服务端控制。这样可以先升级 Worker，再发布新
+客户端，而不会中断已有安装。
 
 所有 Relay 命令必须进入 `feedback-relay/` 后执行，不能用从其他 cwd 指向外部绝对
 目录的 `npm --prefix` 代替最终目标验证。
