@@ -3,8 +3,8 @@
 [中文](agent-app-features.zh-CN.md)
 
 CC Connect Next consumes `github.com/timmyagentic/awesome-agent-app-features`
-at immutable version `v0.1.0` and source commit
-`1634667face06c20ba1e71d1b1599c959e882376`. There is no local `replace`,
+at immutable version `v0.1.1` and source commit
+`2e30c73ee6c3192f057ef24fa5bb4f77b8346c81`. There is no local `replace`,
 submodule, or floating `main` dependency.
 
 ## Feedback
@@ -66,10 +66,10 @@ Validate it against a temporary full extraction of the same source commit:
 
 ```bash
 GOWORK=off go run \
-  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@v0.1.0 \
+  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@v0.1.1 \
   validate \
   --source "$EXACT_SOURCE_ROOT" \
-  --source-commit 1634667face06c20ba1e71d1b1599c959e882376 \
+  --source-commit 2e30c73ee6c3192f057ef24fa5bb4f77b8346c81 \
   --host "$CC_CONNECT_NEXT_ROOT" \
   --lock "$CC_CONNECT_NEXT_ROOT/agent-app-features.lock.json"
 ```

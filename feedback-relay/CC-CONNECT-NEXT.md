@@ -1,7 +1,7 @@
 # CC Connect Next host mapping
 
-This directory is copied from `awesome-agent-app-features v0.1.0`
-(`1634667face06c20ba1e71d1b1599c959e882376`) and remains independently
+This directory is copied from `awesome-agent-app-features v0.1.1`
+(`2e30c73ee6c3192f057ef24fa5bb4f77b8346c81`) and remains independently
 testable. `wrangler.jsonc` and its generated `worker-configuration.d.ts` are
 the only Foundation files intentionally owned by this host.
 

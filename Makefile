@@ -138,10 +138,7 @@ test-release-local:
 	go test ./platform/feishu -run 'TestUserIDFromEventFallsBackToUserID|TestResolveUserNameSkipsInvalidLookupID|TestNew_CanDisableInteractiveCards'
 
 test-feature-foundation:
-	cd feedback-relay && npm ci --ignore-scripts
-	cd feedback-relay && npm test && npm run check && npm run typecheck
-	cd feedback-relay && npm run types:check && npm run validate:worker
-	cd feedback-relay && npm audit --audit-level=high
+	sh feedback-relay/verify.sh
 	node --test internal/appfeatures/feedback_contract.test.mjs
 	node --test internal/appfeatures/feedback_relay_compat.test.mjs
 	node --check feedback-relay/src/compat.js
