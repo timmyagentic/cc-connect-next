@@ -57,7 +57,7 @@ type bridgePublishedCommand struct {
 // still come from one runtime source of truth.
 func (e *Engine) GetBridgePublishedCommands() []bridgePublishedCommand {
 	var commands []bridgePublishedCommand
-	for _, capability := range e.agentCommandCapabilities("") {
+	for _, capability := range e.agentCommandCapabilities(capabilitySnapshot{}) {
 		if capability.Availability.State == CapabilityUnavailable {
 			continue
 		}

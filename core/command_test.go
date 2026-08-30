@@ -243,14 +243,11 @@ func TestMatchSubCommand(t *testing.T) {
 }
 
 func TestMatchPrefix(t *testing.T) {
-	candidates := []struct {
-		names []string
-		id    string
-	}{
-		{[]string{"help"}, "help"},
-		{[]string{"provider", "pro"}, "provider"},
-		{[]string{"list", "ls"}, "list"},
-		{[]string{"new"}, "new"},
+	candidates := []builtinCommandDefinition{
+		{id: "help"},
+		{id: "provider", aliases: []string{"pro"}},
+		{id: "list", aliases: []string{"ls"}},
+		{id: "new"},
 	}
 
 	tests := []struct {

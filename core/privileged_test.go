@@ -6,13 +6,27 @@ import (
 )
 
 func TestIsPrivilegedCommandInvocation_StaticListUnchanged(t *testing.T) {
-	for cmd := range privilegedCommands {
-		if !isPrivilegedCommandInvocation(cmd, nil) {
-			t.Errorf("%q should still be privileged without arguments", cmd)
+	want := map[string]bool{
+		"shell": true, "show": true, "dir": true, "restart": true,
+		"upgrade": true, "web": true, "diff": true,
+	}
+	for _, command := range builtinCommands {
+		if !command.admin {
+			continue
 		}
-		if !isPrivilegedCommandInvocation(cmd, []string{"anything"}) {
-			t.Errorf("%q should still be privileged with arguments", cmd)
+		if !want[command.id] {
+			t.Errorf("%q unexpectedly became statically privileged", command.id)
 		}
+		delete(want, command.id)
+		if !isPrivilegedCommandInvocation(command.id, nil) {
+			t.Errorf("%q should still be privileged without arguments", command.id)
+		}
+		if !isPrivilegedCommandInvocation(command.id, []string{"anything"}) {
+			t.Errorf("%q should still be privileged with arguments", command.id)
+		}
+	}
+	for command := range want {
+		t.Errorf("%q lost its static admin requirement", command)
 	}
 }
 

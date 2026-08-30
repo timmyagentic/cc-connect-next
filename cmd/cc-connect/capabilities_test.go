@@ -88,8 +88,7 @@ func TestRunCapabilitiesCommandRejectsUnsupportedFormat(t *testing.T) {
 func TestUnifiedManifestUsesFullConfigurationIntentExpansion(t *testing.T) {
 	engine := core.NewEngine("demo", &capabilityManifestTestAgent{}, nil, "", core.LangChinese)
 	engine.SetConfigCatalog(config.CapabilityCatalog("v-test"))
-	engine.SetConfigCatalogSearch(config.SearchCapabilities)
-	manifest := engine.SearchAgentCapabilityManifest("", "消息忙的时候直接追加给当前回答")
+	manifest := engine.QueryAgentCapabilityManifest("", "消息忙的时候直接追加给当前回答", false)
 	for _, option := range manifest.Configuration.Options {
 		if option.Path == "queue.busy_message_mode" {
 			return
@@ -102,7 +101,7 @@ func TestUnifiedManifestAllIncludesEveryCompiledAdapterContract(t *testing.T) {
 	catalog := config.CapabilityCatalog("v-test")
 	engine := core.NewEngine("demo", &capabilityManifestTestAgent{}, nil, "", core.LangEnglish)
 	engine.SetConfigCatalog(catalog)
-	manifest := engine.AgentCapabilityManifestWithAllAdapters("")
+	manifest := engine.QueryAgentCapabilityManifest("", "", true)
 	if len(manifest.CompiledAgents) != len(catalog.Agents) || len(manifest.CompiledPlatforms) != len(catalog.Platforms) {
 		t.Fatalf("compiled inventory = %d/%d, want %d/%d", len(manifest.CompiledAgents), len(manifest.CompiledPlatforms), len(catalog.Agents), len(catalog.Platforms))
 	}
@@ -143,7 +142,6 @@ func TestCapabilitiesCLIToLocalRuntimeAPIEndToEnd(t *testing.T) {
 	}
 	engine := core.NewEngine("demo", &capabilityManifestTestAgent{}, nil, "", core.LangChinese)
 	engine.SetConfigCatalog(config.CapabilityCatalog("v-test"))
-	engine.SetConfigCatalogSearch(config.SearchCapabilities)
 	api.RegisterEngine("demo", engine)
 	api.Start()
 	t.Cleanup(api.Stop)

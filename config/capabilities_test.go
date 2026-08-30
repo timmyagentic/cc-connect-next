@@ -57,7 +57,7 @@ func TestCapabilityCatalog_CoversTypedConfigurationWithDescriptions(t *testing.T
 }
 
 func TestCapabilityCatalog_NaturalLanguageSearchFindsMessageDisplay(t *testing.T) {
-	got := SearchCapabilities(CapabilityCatalog("v-test"), "隐藏思考")
+	got := core.SearchConfigCatalog(CapabilityCatalog("v-test"), "隐藏思考")
 	if len(got.Options) == 0 {
 		t.Fatal("search returned no options")
 	}

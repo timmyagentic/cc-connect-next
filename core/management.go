@@ -851,14 +851,7 @@ func (m *ManagementServer) handleProjectCapabilities(w http.ResponseWriter, r *h
 		query = strings.TrimSpace(r.URL.Query().Get("q"))
 	}
 	includeAll := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all")), "true")
-	var manifest AgentCapabilityManifest
-	if query != "" {
-		manifest = e.SearchAgentCapabilityManifestWithAllAdapters(sessionKey, query, includeAll)
-	} else if includeAll {
-		manifest = e.AgentCapabilityManifestWithAllAdapters(sessionKey)
-	} else {
-		manifest = e.AgentCapabilityManifest(sessionKey)
-	}
+	manifest := e.QueryAgentCapabilityManifest(sessionKey, query, includeAll)
 	manifest = SelectAgentCapabilityManifestSections(manifest, r.URL.Query().Get("sections"))
 	mgmtJSON(w, http.StatusOK, manifest)
 }

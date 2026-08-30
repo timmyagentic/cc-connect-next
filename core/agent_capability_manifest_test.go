@@ -30,36 +30,33 @@ func (*manifestSteerSession) Steer(string, []ImageAttachment, []FileAttachment) 
 
 func TestBuiltinCommandManifestContractsCoverDispatchSurface(t *testing.T) {
 	seen := make(map[string]bool)
+	seenNames := make(map[string]string)
 	for _, command := range builtinCommands {
 		if seen[command.id] {
 			t.Errorf("duplicate built-in command %q", command.id)
 		}
 		seen[command.id] = true
-		contract, ok := commandManifestContracts[command.id]
-		if !ok {
-			t.Errorf("built-in command %q has no manifest contract", command.id)
-			continue
+		for _, name := range builtinCommandNames(command) {
+			if owner, ok := seenNames[name]; ok {
+				t.Errorf("built-in command name %q belongs to both %q and %q", name, owner, command.id)
+			}
+			seenNames[name] = command.id
 		}
-		if contract.category == "" || contract.usage == "" {
-			t.Errorf("built-in command %q has incomplete category/usage: %#v", command.id, contract)
+		if command.category == "" || command.usage == "" {
+			t.Errorf("built-in command %q has incomplete category/usage: %#v", command.id, command)
 		}
-		if !contract.readOnly && len(contract.effects) == 0 {
+		if !command.readOnly && len(command.effects) == 0 {
 			t.Errorf("mutating built-in command %q declares no side effects", command.id)
 		}
-		for _, effect := range contract.effects {
+		for _, effect := range command.effects {
 			if _, ok := sideEffectDescriptions[effect]; !ok {
 				t.Errorf("built-in command %q references undocumented side effect %q", command.id, effect)
 			}
 		}
-		for _, subcommand := range contract.privilegedWhen {
+		for _, subcommand := range command.privilegedWhen {
 			if !isPrivilegedCommandInvocation(command.id, []string{subcommand}) {
 				t.Errorf("manifest says %s %s is privileged, but dispatch does not", command.id, subcommand)
 			}
-		}
-	}
-	for id := range commandManifestContracts {
-		if !seen[id] {
-			t.Errorf("manifest contract %q does not map to a dispatched built-in command", id)
 		}
 	}
 	for _, tool := range agentToolDefinitions {
@@ -118,7 +115,7 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 	e.platformReady[platform] = true
 	e.platformLifecycleMu.Unlock()
 
-	manifest := e.AgentCapabilityManifest("manifest-platform:chat:user")
+	manifest := e.QueryAgentCapabilityManifest("manifest-platform:chat:user", "", false)
 	if manifest.Schema != AgentCapabilityManifestSchema || !manifest.ReadOnly || !manifest.SessionBound {
 		t.Fatalf("manifest header = %#v", manifest)
 	}
@@ -143,7 +140,7 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 			t.Fatalf("inactive adapter leaked into configuration: %#v", option)
 		}
 	}
-	allAdapters := e.AgentCapabilityManifestWithAllAdapters("")
+	allAdapters := e.QueryAgentCapabilityManifest("", "", true)
 	if !allAdapters.AllAdapters || len(allAdapters.Configuration.Options) != 4 {
 		t.Fatalf("all-adapter configuration = %#v", allAdapters.Configuration)
 	}
@@ -169,7 +166,7 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 		t.Fatalf("custom prompt contract = %#v", summarize)
 	}
 	e.SetAdminFrom("admin-user")
-	deployWithAdminConfigured := findManifestCommand(t, e.AgentCapabilityManifest("").Commands, "deploy")
+	deployWithAdminConfigured := findManifestCommand(t, e.QueryAgentCapabilityManifest("", "", false).Commands, "deploy")
 	if deployWithAdminConfigured.Permission != CapabilityPermissionAdmin || deployWithAdminConfigured.Availability.State != CapabilityConditional {
 		t.Fatalf("custom exec with admin_from configured = %#v", deployWithAdminConfigured)
 	}
@@ -251,17 +248,12 @@ func TestSelectAgentCapabilityManifestSectionsKeepsRequestedProjection(t *testin
 	}
 }
 
-func TestEngineSearchAgentCapabilityManifestUsesInjectedConfigIntentSearch(t *testing.T) {
+func TestEngineSearchAgentCapabilityManifestUsesCanonicalConfigSearch(t *testing.T) {
 	e := NewEngine("demo", &stubAgent{}, nil, "", LangEnglish)
-	e.SetConfigCatalog(ConfigCatalog{Version: "v-test", Options: []ConfigOption{{Path: "queue.busy_message_mode", Key: "busy_message_mode", Description: "Queue mode", DescriptionZH: "排队模式"}}})
-	called := false
-	e.SetConfigCatalogSearch(func(catalog ConfigCatalog, query string) ConfigCatalog {
-		called = query == "消息忙的时候直接追加给当前回答"
-		return ConfigCatalog{Version: catalog.Version, Options: append([]ConfigOption(nil), catalog.Options...)}
-	})
-	manifest := e.SearchAgentCapabilityManifest("", "消息忙的时候直接追加给当前回答")
-	if !called || len(manifest.Configuration.Options) != 1 || manifest.Configuration.Options[0].Path != "queue.busy_message_mode" {
-		t.Fatalf("injected configuration search not used: called=%t manifest=%#v", called, manifest.Configuration)
+	e.SetConfigCatalog(ConfigCatalog{Version: "v-test", Options: []ConfigOption{{Path: "queue.busy_message_mode", Key: "busy_message_mode", Description: "Queue mode", DescriptionZH: "排队模式", Keywords: []string{"消息忙的时候直接追加给当前回答"}}}})
+	manifest := e.QueryAgentCapabilityManifest("", "消息忙的时候直接追加给当前回答", false)
+	if len(manifest.Configuration.Options) != 1 || manifest.Configuration.Options[0].Path != "queue.busy_message_mode" {
+		t.Fatalf("canonical configuration search not used: manifest=%#v", manifest.Configuration)
 	}
 }
 
@@ -270,7 +262,7 @@ func TestAgentCapabilityManifest_RedactsDynamicDescriptionsAndRuntimeErrors(t *t
 	e := NewEngine("demo", &stubAgent{}, []Platform{platform}, "", LangEnglish)
 	e.AddCommand("unsafe-description", "token=abcdefghijklmnopqrstuvwxyz123456", "prompt", "", "", "config")
 	e.OnPlatformReady(platform)
-	manifest := e.AgentCapabilityManifest("")
+	manifest := e.QueryAgentCapabilityManifest("", "", false)
 	encoded, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)

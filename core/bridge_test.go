@@ -97,7 +97,7 @@ func TestBridgeRuntimeCapabilityManifestUsesNegotiatedAdapterCapabilities(t *tes
 		platform: platform,
 		replyCtx: newBridgeReplyCtx(bridge.getAdapter("web"), "web:chat:user", "reply"),
 	}
-	manifest := engine.AgentCapabilityManifest("web:chat:user")
+	manifest := engine.QueryAgentCapabilityManifest("web:chat:user", "", false)
 	adapter := findRuntimeAdapter(t, manifest.Runtime, "platform", "bridge")
 	if findRuntimeFeature(t, adapter.Capabilities, "structured_cards").Availability.State != CapabilityAvailable {
 		t.Fatalf("negotiated card capability missing: %#v", adapter)

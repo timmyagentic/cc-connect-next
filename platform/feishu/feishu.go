@@ -4513,31 +4513,6 @@ type threadBootstrapEntry struct {
 	tail  chan struct{}
 }
 
-// markThreadSessionActive records that a thread sessionKey has been engaged
-// and reports whether this caller reserved its one-time bootstrap. A failed
-// bootstrap can release the reservation without revoking attachment admission.
-func (p *Platform) markThreadSessionActive(sessionKey string) bool {
-	if !p.threadIsolationEnabled() || !isThreadSessionKey(sessionKey) {
-		return false
-	}
-	p.activeThreadSessions.Store(sessionKey, time.Now())
-	p.threadBootstrapMu.Lock()
-	defer p.threadBootstrapMu.Unlock()
-	if p.threadBootstrapStates == nil {
-		p.threadBootstrapStates = make(map[string]*threadBootstrapEntry)
-	}
-	entry := p.threadBootstrapStates[sessionKey]
-	if entry == nil {
-		p.threadBootstrapStates[sessionKey] = &threadBootstrapEntry{state: threadBootstrapInFlight}
-		return true
-	}
-	if entry.state == threadBootstrapPending && entry.tail == nil {
-		entry.state = threadBootstrapInFlight
-		return true
-	}
-	return false
-}
-
 func (p *Platform) prepareThreadBootstrapDispatch(sessionKey string) (bootstrap, queued bool, wait <-chan struct{}, done chan struct{}) {
 	if !p.threadIsolationEnabled() || !isThreadSessionKey(sessionKey) {
 		return false, false, nil, nil
