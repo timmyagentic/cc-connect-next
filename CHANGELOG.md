@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.2.1 (2026-08-30)
+
+Stable release focused on Agent-native capability discovery, an executable
+configuration contract, precise Feishu topic isolation, safer Bridge delivery,
+and clearer session UX and defaults.
+
+See `changelogs/v0.2.1.md` for the bilingual release notes and upgrade notes.
+
 ### Defaults
 
 - Fresh starter configs now use Codex `mode = "yolo"`, so new installations
