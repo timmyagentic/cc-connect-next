@@ -281,6 +281,19 @@ func TestSessionManifestDoesNotAdvertiseInterfaceOnlySteerWhenBackendRejectsIt(t
 	}
 }
 
+func TestSessionManifestMarksUnreadableContextUsageUnavailable(t *testing.T) {
+	e := NewEngine("demo", &stubAgent{}, nil, "", LangEnglish)
+	manifest := e.QueryAgentCapabilityManifest("", "", false)
+	session := findRuntimeAdapter(t, manifest.Runtime, "session", "stub:unbound")
+	capability := findRuntimeFeature(t, session.Capabilities, "context_usage")
+	if capability.Availability.State != CapabilityUnavailable || !strings.Contains(capability.Availability.Reason, "no production tool or API") {
+		t.Fatalf("context_usage availability = %#v, want explicit unavailable reason", capability.Availability)
+	}
+	if capability.Fallback.Mode != "degrade" || !strings.Contains(capability.Fallback.Description, "No live context percentage") {
+		t.Fatalf("context_usage fallback = %#v", capability.Fallback)
+	}
+}
+
 func TestPlatformCommandMenusProjectManifestAvailability(t *testing.T) {
 	e := NewEngine("demo", &stubAgent{}, nil, "", LangEnglish)
 	e.SetAdminFrom("")

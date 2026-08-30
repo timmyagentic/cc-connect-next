@@ -47,20 +47,6 @@ func TestHandleSessionEvent_AssistantMessage(t *testing.T) {
 		t.Fatal("no event emitted")
 	}
 
-	// Verify context usage was updated
-	usage := cs.GetContextUsage()
-	if usage == nil {
-		t.Fatal("context usage is nil")
-	}
-	if usage.OutputTokens != 42 {
-		t.Fatalf("usage.OutputTokens = %d, want 42", usage.OutputTokens)
-	}
-	if usage.InputTokens != 100 {
-		t.Fatalf("usage.InputTokens = %d, want 100", usage.InputTokens)
-	}
-	if usage.TotalTokens != 142 {
-		t.Fatalf("usage.TotalTokens = %d, want 142", usage.TotalTokens)
-	}
 }
 
 func TestHandleSessionEvent_MessageDelta(t *testing.T) {
@@ -133,10 +119,6 @@ func TestHandleSessionEvent_KindAndCurrentCopilotEvents(t *testing.T) {
 		t.Fatal("no final event emitted")
 	}
 
-	got := cs.GetContextUsage()
-	if got == nil || got.InputTokens != 12 || got.OutputTokens != 3 {
-		t.Fatalf("usage = %+v, want 12 input and 3 output", got)
-	}
 }
 
 func TestHandlePermissionRequest_AutoApprove(t *testing.T) {
@@ -490,13 +472,6 @@ func TestCopilotSession_CurrentSessionID(t *testing.T) {
 	cs.sessionID.Store("abc-123")
 	if got := cs.CurrentSessionID(); got != "abc-123" {
 		t.Fatalf("CurrentSessionID() = %q, want abc-123", got)
-	}
-}
-
-func TestCopilotSession_GetContextUsage_Nil(t *testing.T) {
-	cs := &copilotSession{}
-	if got := cs.GetContextUsage(); got != nil {
-		t.Fatalf("GetContextUsage() = %v, want nil", got)
 	}
 }
 

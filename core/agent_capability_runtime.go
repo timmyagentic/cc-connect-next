@@ -259,16 +259,17 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 }
 
 type sessionRuntimeCapabilitySpec struct {
-	id, description, zh           string
-	unboundDescription, unboundZH string
-	fallback, fallbackZH          string
-	supported                     func(AgentSession) bool
+	id, description, zh                    string
+	unboundDescription, unboundZH          string
+	fallback, fallbackZH                   string
+	unavailableReason, unavailableReasonZH string
+	supported                              func(AgentSession) bool
 }
 
 var sessionRuntimeCapabilitySpecs = []sessionRuntimeCapabilitySpec{
 	{id: "turn_options", description: "Apply model, reasoning, service tier, or answer profile to one turn.", zh: "为单个回合应用模型、推理强度、服务等级或回答档位。", unboundDescription: "Apply runtime settings to one turn.", unboundZH: "为单个回合应用运行时设置。", fallback: "Use persistent Agent defaults.", fallbackZH: "使用 Agent 持久默认值。", supported: func(session AgentSession) bool { _, ok := session.(TurnOptionsSession); return ok }},
 	{id: "steer", description: "Append input to the active turn.", zh: "把输入并入当前回合。", unboundDescription: "Append input to the active turn.", unboundZH: "把输入并入当前回合。", fallback: "Use FIFO for ordinary busy messages; /ps rejects when it cannot safely supplement.", fallbackZH: "普通忙时消息使用 FIFO；/ps 无法安全补充时会拒绝。", supported: func(session AgentSession) bool { _, ok := session.(SteerableSession); return ok }},
-	{id: "context_usage", description: "Report live context-window usage.", zh: "报告实时上下文窗口用量。", unboundDescription: "Report live context-window usage.", unboundZH: "报告实时上下文窗口用量。", fallback: "No live context percentage is shown.", fallbackZH: "不显示实时上下文百分比。", supported: func(session AgentSession) bool { _, ok := session.(ContextUsageReporter); return ok }},
+	{id: "context_usage", description: "Report live context-window usage.", zh: "报告实时上下文窗口用量。", unboundDescription: "Report live context-window usage.", unboundZH: "报告实时上下文窗口用量。", fallback: "No live context percentage is shown.", fallbackZH: "不显示实时上下文百分比。", unavailableReason: "Session context usage is intentionally unavailable because no production tool or API reads a session-level value.", unavailableReasonZH: "会话上下文用量已明确不可用，因为当前没有生产工具或 API 读取会话级数值。"},
 	{id: "cancel_turn", description: "Cancel the current turn without destroying the process.", zh: "取消当前回合而不销毁进程。", unboundDescription: "Cancel the active turn.", unboundZH: "取消活动回合。", fallback: "Close and recreate the Agent session when cancellation is required.", fallbackZH: "需要取消时关闭并重建 Agent 会话。", supported: func(session AgentSession) bool { _, ok := session.(AgentSessionCanceller); return ok }},
 	{id: "live_mode", description: "Apply a permission-mode change to the live process.", zh: "把权限模式变更应用到活动进程。", unboundDescription: "Apply a permission-mode change live.", unboundZH: "实时应用权限模式变更。", fallback: "Apply the mode on the next session.", fallbackZH: "在下一个会话中应用模式。", supported: func(session AgentSession) bool { _, ok := session.(LiveModeSwitcher); return ok }},
 	{id: "set_session_title", description: "Persist a title in the backing Agent session.", zh: "在 Agent 后端会话中持久化标题。", unboundDescription: "Persist a backing Agent session title.", unboundZH: "持久化 Agent 后端会话标题。", fallback: "Keep the title in cc-connect-next session metadata.", fallbackZH: "仅在 cc-connect-next 会话元数据中保存标题。", supported: func(session AgentSession) bool { _, ok := session.(SessionTitleSetter); return ok }},
@@ -278,7 +279,10 @@ var sessionRuntimeCapabilitySpecs = []sessionRuntimeCapabilitySpec{
 func (e *Engine) sessionRuntimeCapabilities(session AgentSession) RuntimeAdapterCapabilities {
 	result := RuntimeAdapterCapabilities{Kind: "session", Name: e.agent.Name() + ":active", State: CapabilityAvailable}
 	for _, item := range sessionRuntimeCapabilitySpecs {
-		availability := interfaceAvailability(item.supported(session), "The active session implements this capability.", "当前活动会话实现了该能力。", "The active session does not implement this capability.", "当前活动会话未实现该能力。")
+		availability := unavailable(item.unavailableReason, item.unavailableReasonZH)
+		if item.unavailableReason == "" {
+			availability = interfaceAvailability(item.supported(session), "The active session implements this capability.", "当前活动会话实现了该能力。", "The active session does not implement this capability.", "当前活动会话未实现该能力。")
+		}
 		if item.id == "steer" {
 			if info, ok := e.agent.(NativeSteerDoctorInfo); ok {
 				native, detail := info.NativeSteerStatus()
@@ -297,8 +301,14 @@ func (e *Engine) sessionRuntimeCapabilities(session AgentSession) RuntimeAdapter
 func (e *Engine) unboundSessionRuntimeCapabilities() RuntimeAdapterCapabilities {
 	result := RuntimeAdapterCapabilities{Kind: "session", Name: e.agent.Name() + ":unbound", State: CapabilityConditional, Reason: "No active Agent session is bound to this query."}
 	for _, item := range sessionRuntimeCapabilitySpecs {
+		availability := conditional("Availability is resolved after an Agent session is active.", "Agent 会话启动后才能判断可用性。")
+		fallback := defaultRejectFallback()
+		if item.unavailableReason != "" {
+			availability = unavailable(item.unavailableReason, item.unavailableReasonZH)
+			fallback = CapabilityFallback{Mode: "degrade", Description: item.fallback, DescriptionZH: item.fallbackZH}
+		}
 		result.Capabilities = append(result.Capabilities, feature(item.id, item.unboundDescription, item.unboundZH,
-			conditional("Availability is resolved after an Agent session is active.", "Agent 会话启动后才能判断可用性。"), defaultRejectFallback()))
+			availability, fallback))
 	}
 	return result
 }
