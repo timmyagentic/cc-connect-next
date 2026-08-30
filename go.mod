@@ -18,7 +18,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.23.1
 	github.com/stretchr/testify v1.11.1
-	github.com/timmyagentic/awesome-agent-app-features v1.0.0
+	github.com/timmyagentic/awesome-agent-app-features v0.1.0
 	maunium.net/go/mautrix v0.27.0
 	modernc.org/sqlite v1.49.1
 	rsc.io/qr v0.2.0

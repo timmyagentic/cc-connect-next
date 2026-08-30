@@ -3,8 +3,8 @@
 [English](agent-app-features.md)
 
 CC Connect Next 固定使用
-`github.com/timmyagentic/awesome-agent-app-features v1.0.0`，对应源码提交
-`9c70f43e53f36fa42f63ef040162db3e39d5b9b1`。没有本地 `replace`、Git
+`github.com/timmyagentic/awesome-agent-app-features v0.1.0`，对应源码提交
+`1634667face06c20ba1e71d1b1599c959e882376`。没有本地 `replace`、Git
 submodule 或浮动 `main` 依赖。
 
 ## Feedback
@@ -48,10 +48,10 @@ daemon 提醒只负责发现。`/upgrade` 准备 immutable Plan，展示同一 R
 
 ```bash
 GOWORK=off go run \
-  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@v1.0.0 \
+  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@v0.1.0 \
   validate \
   --source "$EXACT_SOURCE_ROOT" \
-  --source-commit 9c70f43e53f36fa42f63ef040162db3e39d5b9b1 \
+  --source-commit 1634667face06c20ba1e71d1b1599c959e882376 \
   --host "$CC_CONNECT_NEXT_ROOT" \
   --lock "$CC_CONNECT_NEXT_ROOT/agent-app-features.lock.json"
 ```

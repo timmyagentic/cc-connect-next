@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### Awesome Agent App Features v1 integration
+### Awesome Agent App Features contract v1 integration
 
 - Feedback now builds the complete structured, redacted Foundation draft and
   renders every outbound field before a separate submit/dismiss action. The
@@ -14,7 +14,7 @@
   lock, backup and rollback guarantees; npm and Windows remain explicit host
   install-kind adapters while pinning the reviewed release.
 - The old client-rendered Feedback Relay was replaced by the self-contained
-  `v1.0.0` source subtree with strict structured validation, server-owned issue
+  `v0.1.0` source subtree with strict structured validation, server-owned issue
   rendering/destination, Rate Limiting binding, locked workerd tests, generated
   types, Wrangler dry-run and dependency audit. No deployment is implied.
 - Added `agent-app-features.lock.json` and exact-source validation so future

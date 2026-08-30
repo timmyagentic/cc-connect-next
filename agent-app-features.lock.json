@@ -2,7 +2,7 @@
   "schema": 1,
   "source": {
     "repository": "timmyagentic/awesome-agent-app-features",
-    "commit": "9c70f43e53f36fa42f63ef040162db3e39d5b9b1"
+    "commit": "1634667face06c20ba1e71d1b1599c959e882376"
   },
   "features": [
     {
@@ -13,13 +13,13 @@
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/feedback",
           "target": "go.mod",
-          "version": "v1.0.0"
+          "version": "v0.1.0"
         },
         {
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/feedback/httpclient",
           "target": "go.mod",
-          "version": "v1.0.0"
+          "version": "v0.1.0"
         },
         {
           "mode": "source-subtree",
@@ -76,7 +76,7 @@
         "internal/appfeatures/testdata/approved-feedback-v1.json",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-08-30T07:20:34Z",
+      "verified_at": "2026-08-30T10:47:10Z",
       "checks": [
 		"GOWORK=off go test -race ./... -count=1",
 		"GOWORK=off go test ./core -run TestCUJ -count=1",
@@ -96,13 +96,13 @@
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/updater",
           "target": "go.mod",
-          "version": "v1.0.0"
+          "version": "v0.1.0"
         },
         {
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/updater/github",
           "target": "go.mod",
-          "version": "v1.0.0"
+          "version": "v0.1.0"
         }
       ],
       "files": [
@@ -136,7 +136,7 @@
         "internal/appfeatures/live_test.go",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-08-30T07:20:34Z",
+      "verified_at": "2026-08-30T10:47:10Z",
       "checks": [
 		"GOWORK=off go test -race ./... -count=1",
 		"GOWORK=off go test ./core -run TestCUJ -count=1",
