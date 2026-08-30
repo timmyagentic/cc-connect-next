@@ -1468,12 +1468,6 @@ func TestProcessInteractiveEvents_ReplyFooterPrefersSessionRuntimeState(t *testi
 			}},
 		}},
 	}
-	agentSession.contextUsage = &ContextUsage{
-		UsedTokens:     181424,
-		BaselineTokens: 12000,
-		TotalTokens:    50821769,
-		ContextWindow:  258400,
-	}
 	state := &interactiveState{
 		agentSession: agentSession,
 		platform:     p,
@@ -9461,7 +9455,6 @@ type controllableAgentSession struct {
 	reasoningEffort string
 	workDir         string
 	report          *UsageReport
-	contextUsage    *ContextUsage
 	usageErr        error
 	closeOnce       sync.Once
 }
@@ -9490,8 +9483,7 @@ func (s *controllableAgentSession) GetUsage(_ context.Context) (*UsageReport, er
 	}
 	return s.report, s.usageErr
 }
-func (s *controllableAgentSession) GetContextUsage() *ContextUsage { return s.contextUsage }
-func (s *controllableAgentSession) Alive() bool                    { return s.alive }
+func (s *controllableAgentSession) Alive() bool { return s.alive }
 func (s *controllableAgentSession) Close() error {
 	s.closeOnce.Do(func() {
 		s.alive = false

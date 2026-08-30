@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -123,32 +122,6 @@ type appServerMessageRoute struct {
 	TurnID   string `json:"turnId"`
 }
 
-type appServerRateLimitsResponse struct {
-	RateLimits          appServerRateLimitSnapshot            `json:"rateLimits"`
-	RateLimitsByLimitID map[string]appServerRateLimitSnapshot `json:"rateLimitsByLimitId"`
-}
-
-type appServerRateLimitSnapshot struct {
-	LimitID   string                    `json:"limitId"`
-	LimitName string                    `json:"limitName"`
-	PlanType  string                    `json:"planType"`
-	Primary   *appServerRateLimitWindow `json:"primary"`
-	Secondary *appServerRateLimitWindow `json:"secondary"`
-	Credits   *appServerCreditsSnapshot `json:"credits"`
-}
-
-type appServerRateLimitWindow struct {
-	UsedPercent        int   `json:"usedPercent"`
-	WindowDurationMins int   `json:"windowDurationMins"`
-	ResetsAt           int64 `json:"resetsAt"`
-}
-
-type appServerCreditsSnapshot struct {
-	Balance    *string `json:"balance"`
-	HasCredits bool    `json:"hasCredits"`
-	Unlimited  bool    `json:"unlimited"`
-}
-
 type appServerRequestUserInputParams struct {
 	ThreadID  string                              `json:"threadId"`
 	TurnID    string                              `json:"turnId"`
@@ -232,15 +205,12 @@ type appServerSession struct {
 	explicitTitleRev    uint64
 
 	runtimeMu   sync.RWMutex
-	usage       *core.UsageReport
-	context     *core.ContextUsage
 	turnOptions *core.TurnOptions
 }
 
 const (
 	appServerRequestTimeout       = 120 * time.Second
 	appServerResponseWriteTimeout = 1500 * time.Millisecond
-	appServerUsageRefreshTimeout  = 1500 * time.Millisecond
 	appServerTitleUpdateTimeout   = 1500 * time.Millisecond
 )
 
@@ -315,9 +285,6 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 	if err := s.ensureThread(p.resumeID); err != nil {
 		_ = s.Close()
 		return nil, err
-	}
-	if err := s.refreshUsage(context.Background()); err != nil {
-		slog.Debug("codex app-server: initial rate limit fetch failed", "error", err)
 	}
 
 	return s, nil
@@ -497,54 +464,6 @@ func (s *appServerSession) applyThreadRuntimeState(workDir, model string, effort
 		s.model = m
 	}
 	s.effort = normalizeRuntimeReasoningEffort(stringValue(effort))
-}
-
-func (s *appServerSession) refreshUsage(ctx context.Context) error {
-	timeout := appServerUsageRefreshTimeout
-	if ctx != nil {
-		if deadline, ok := ctx.Deadline(); ok {
-			if until := time.Until(deadline); until > 0 && until < timeout {
-				timeout = until
-			}
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-	}
-	if timeout <= 0 {
-		return context.DeadlineExceeded
-	}
-
-	var resp appServerRateLimitsResponse
-	if err := s.requestWithTimeout("account/rateLimits/read", map[string]any{}, &resp, timeout); err != nil {
-		return err
-	}
-	s.storeUsage(mapAppServerRateLimits(resp))
-	return nil
-}
-
-func (s *appServerSession) cachedUsage() *core.UsageReport {
-	s.runtimeMu.RLock()
-	defer s.runtimeMu.RUnlock()
-	return cloneUsageReport(s.usage)
-}
-
-func (s *appServerSession) cachedContextUsage() *core.ContextUsage {
-	s.runtimeMu.RLock()
-	defer s.runtimeMu.RUnlock()
-	return cloneContextUsage(s.context)
-}
-
-func (s *appServerSession) storeUsage(report *core.UsageReport) {
-	s.runtimeMu.Lock()
-	defer s.runtimeMu.Unlock()
-	s.usage = cloneUsageReport(report)
-}
-
-func (s *appServerSession) storeContextUsage(usage *core.ContextUsage) {
-	s.runtimeMu.Lock()
-	defer s.runtimeMu.Unlock()
-	s.context = cloneContextUsage(usage)
 }
 
 func (s *appServerSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
@@ -1272,23 +1191,6 @@ func (s *appServerSession) GetReasoningEffort() string {
 	return strings.TrimSpace(s.effort)
 }
 
-func (s *appServerSession) GetUsage(ctx context.Context) (*core.UsageReport, error) {
-	if err := s.refreshUsage(ctx); err != nil {
-		if cached := s.cachedUsage(); cached != nil {
-			return cached, nil
-		}
-		return nil, err
-	}
-	if cached := s.cachedUsage(); cached != nil {
-		return cached, nil
-	}
-	return nil, fmt.Errorf("codex app-server usage unavailable")
-}
-
-func (s *appServerSession) GetContextUsage() *core.ContextUsage {
-	return s.cachedContextUsage()
-}
-
 func (s *appServerSession) Alive() bool {
 	return s.alive.Load()
 }
@@ -1464,7 +1366,6 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 			s.currentTurn = notif.Turn.ID
 			s.pendingMsgs = s.pendingMsgs[:0]
 			s.stateMu.Unlock()
-			s.storeContextUsage(nil)
 		}
 
 	case "item/started":
@@ -1499,18 +1400,6 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 		if err := json.Unmarshal(paramsRaw, &notif); err == nil && notif.Status.Type == "idle" && s.ownsThread(method, notif.ThreadID) {
 			// In codex 0.125+, thread going idle signals turn completion.
 			s.completeTurn()
-		}
-
-	case "account/rateLimits/updated":
-		var notif appServerRateLimitsResponse
-		if err := json.Unmarshal(paramsRaw, &notif); err == nil {
-			s.storeUsage(mapAppServerRateLimits(notif))
-		}
-
-	case "thread/tokenUsage/updated":
-		var notif appServerThreadTokenUsageNotification
-		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsActiveTurn(method, notif.ThreadID, notif.TurnID) {
-			s.storeContextUsage(mapAppServerTokenUsage(notif))
 		}
 
 	case "error":
@@ -1735,119 +1624,6 @@ func appServerToolSuccess(status string, exitCode *int) bool {
 		return *exitCode == 0
 	}
 	return s == "completed" || s == "success" || s == "succeeded" || s == "ok"
-}
-
-func mapAppServerRateLimits(payload appServerRateLimitsResponse) *core.UsageReport {
-	report := &core.UsageReport{Provider: "codex"}
-
-	var snapshots []appServerRateLimitSnapshot
-	if len(payload.RateLimitsByLimitID) > 0 {
-		keys := make([]string, 0, len(payload.RateLimitsByLimitID))
-		for key := range payload.RateLimitsByLimitID {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			snapshots = append(snapshots, payload.RateLimitsByLimitID[key])
-		}
-	} else if payload.RateLimits.LimitID != "" || payload.RateLimits.Primary != nil || payload.RateLimits.Secondary != nil || payload.RateLimits.Credits != nil {
-		snapshots = append(snapshots, payload.RateLimits)
-	}
-
-	for _, snapshot := range snapshots {
-		if report.Plan == "" && strings.TrimSpace(snapshot.PlanType) != "" {
-			report.Plan = strings.TrimSpace(snapshot.PlanType)
-		}
-		if report.Credits == nil && snapshot.Credits != nil {
-			report.Credits = &core.UsageCredits{
-				HasCredits: snapshot.Credits.HasCredits,
-				Unlimited:  snapshot.Credits.Unlimited,
-			}
-			if snapshot.Credits.Balance != nil {
-				report.Credits.Balance = strings.TrimSpace(*snapshot.Credits.Balance)
-			}
-		}
-
-		windows := appServerUsageWindows(snapshot)
-		if len(windows) == 0 {
-			continue
-		}
-		limitReached := false
-		for _, window := range windows {
-			if window.UsedPercent >= 100 {
-				limitReached = true
-				break
-			}
-		}
-
-		report.Buckets = append(report.Buckets, core.UsageBucket{
-			Name:         appServerBucketName(snapshot),
-			Allowed:      !limitReached,
-			LimitReached: limitReached,
-			Windows:      windows,
-		})
-	}
-
-	return report
-}
-
-func appServerBucketName(snapshot appServerRateLimitSnapshot) string {
-	if name := strings.TrimSpace(snapshot.LimitName); name != "" {
-		return name
-	}
-	if id := strings.TrimSpace(snapshot.LimitID); id != "" {
-		return id
-	}
-	return "Rate limit"
-}
-
-func appServerUsageWindows(snapshot appServerRateLimitSnapshot) []core.UsageWindow {
-	var windows []core.UsageWindow
-	if snapshot.Primary != nil {
-		windows = append(windows, appServerUsageWindow("Primary", snapshot.Primary))
-	}
-	if snapshot.Secondary != nil {
-		windows = append(windows, appServerUsageWindow("Secondary", snapshot.Secondary))
-	}
-	return windows
-}
-
-func appServerUsageWindow(name string, window *appServerRateLimitWindow) core.UsageWindow {
-	resetAfter := 0
-	if window != nil && window.ResetsAt > 0 {
-		resetAfter = int(time.Until(time.Unix(window.ResetsAt, 0)).Seconds())
-		if resetAfter < 0 {
-			resetAfter = 0
-		}
-	}
-	return core.UsageWindow{
-		Name:              name,
-		UsedPercent:       window.UsedPercent,
-		WindowSeconds:     window.WindowDurationMins * 60,
-		ResetAfterSeconds: resetAfter,
-		ResetAtUnix:       window.ResetsAt,
-	}
-}
-
-func cloneUsageReport(report *core.UsageReport) *core.UsageReport {
-	if report == nil {
-		return nil
-	}
-	cloned := *report
-	if len(report.Buckets) > 0 {
-		cloned.Buckets = make([]core.UsageBucket, len(report.Buckets))
-		for i, bucket := range report.Buckets {
-			cloned.Buckets[i] = bucket
-			if len(bucket.Windows) > 0 {
-				cloned.Buckets[i].Windows = append([]core.UsageWindow(nil), bucket.Windows...)
-			}
-		}
-	}
-	if report.Credits != nil {
-		credits := *report.Credits
-		cloned.Credits = &credits
-	}
-	return &cloned
 }
 
 func normalizeRuntimeReasoningEffort(raw string) string {

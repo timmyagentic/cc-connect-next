@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-
-	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 func TestLSPWriter_WriteMessage(t *testing.T) {
@@ -173,4 +171,3 @@ func TestSummarizeToolInput(t *testing.T) {
 }
 
 // Verify interface compliance at compile time
-var _ core.ContextUsageReporter = (*copilotSession)(nil)

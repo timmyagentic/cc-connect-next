@@ -37,6 +37,12 @@
   `admin_from` authorization already enforced for `/cron addexec` and
   `/commands addexec`, closing a permission inconsistency exposed while making
   the command contract machine-readable.
+- Removed the orphaned session-level context/usage telemetry surface. No
+  production tool or API could read those cached values, so Codex no longer
+  scans rollout files after every turn or performs an app-server rate-limit RPC
+  during session startup. The Manifest now reports session context usage as
+  explicitly unavailable instead of implying that a readable value exists;
+  Agent-level `/usage` provider quota reporting remains unchanged.
 
 - The catalog is now an executable configuration contract rather than a
   key/description index. Public entries declare TOML/environment/CLI source,

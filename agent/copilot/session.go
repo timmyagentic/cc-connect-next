@@ -46,10 +46,6 @@ type copilotSession struct {
 	pendingPermMu      sync.Mutex
 	pendingPermissions map[string]json.RawMessage
 	eventPermissions   map[string]struct{}
-
-	// context usage tracking
-	contextMu    sync.RWMutex
-	contextUsage *core.ContextUsage
 }
 
 type copilotWireProviderConfig struct {
@@ -412,8 +408,6 @@ func (cs *copilotSession) handleSessionEvent(params json.RawMessage) {
 	case "assistant.message":
 		usage := copilotEventUsage(evt.Event.Data)
 		if len(evt.Event.Data) > 0 {
-			cs.addContextUsage(usage.inputTokens, usage.outputTokens)
-
 			e := core.Event{
 				Type:         core.EventResult,
 				SessionID:    cs.CurrentSessionID(),
@@ -427,8 +421,7 @@ func (cs *copilotSession) handleSessionEvent(params json.RawMessage) {
 		}
 
 	case "assistant.usage":
-		usage := copilotEventUsage(evt.Event.Data)
-		cs.addContextUsage(usage.inputTokens, usage.outputTokens)
+		slog.Debug("copilotSession: usage update has no session-level consumer")
 
 	case "permission.requested":
 		cs.handlePermissionRequestedEvent(evt.Event.Data)
@@ -557,21 +550,6 @@ func copilotEventUsage(raw json.RawMessage) copilotUsage {
 		usage.outputTokens = data.Usage.CompletionTokens
 	}
 	return usage
-}
-
-func (cs *copilotSession) addContextUsage(inputTokens, outputTokens int) {
-	if inputTokens == 0 && outputTokens == 0 {
-		return
-	}
-	cs.contextMu.Lock()
-	defer cs.contextMu.Unlock()
-	if cs.contextUsage == nil {
-		cs.contextUsage = &core.ContextUsage{}
-	}
-	cs.contextUsage.OutputTokens += outputTokens
-	cs.contextUsage.InputTokens += inputTokens
-	cs.contextUsage.TotalTokens = cs.contextUsage.InputTokens + cs.contextUsage.OutputTokens
-	cs.contextUsage.UsedTokens = cs.contextUsage.TotalTokens
 }
 
 func (cs *copilotSession) handlePermissionRequestedEvent(data json.RawMessage) {
@@ -808,17 +786,6 @@ func (cs *copilotSession) CurrentSessionID() string {
 
 func (cs *copilotSession) Alive() bool {
 	return cs.alive.Load()
-}
-
-// GetContextUsage implements core.ContextUsageReporter.
-func (cs *copilotSession) GetContextUsage() *core.ContextUsage {
-	cs.contextMu.RLock()
-	defer cs.contextMu.RUnlock()
-	if cs.contextUsage == nil {
-		return nil
-	}
-	cu := *cs.contextUsage
-	return &cu
 }
 
 var (

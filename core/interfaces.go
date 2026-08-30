@@ -630,30 +630,6 @@ type UsageCredits struct {
 	Balance    string
 }
 
-// ContextUsageReporter is an optional interface for running agent sessions that
-// can report real runtime context usage for the active conversation.
-type ContextUsageReporter interface {
-	GetContextUsage() *ContextUsage
-}
-
-// ContextUsage describes runtime context consumption for the active session.
-type ContextUsage struct {
-	// UsedTokens is the current token load to compare against ContextWindow when
-	// computing remaining context capacity for the next turn.
-	UsedTokens int
-	// BaselineTokens is the portion of the context window always occupied by
-	// fixed runtime/system instructions and therefore excluded from user-visible
-	// "left" calculations when the agent provides it.
-	BaselineTokens           int
-	TotalTokens              int
-	InputTokens              int
-	CachedInputTokens        int // cache-read tokens (prior context retrieved from cache)
-	CacheCreationInputTokens int // cache-write tokens (new content written to cache)
-	OutputTokens             int
-	ReasoningOutputTokens    int
-	ContextWindow            int
-}
-
 // ContextCompressor is implemented only by agents that support compacting the
 // conversation context within a running session. CompressCommand returns the
 // non-empty native slash command forwarded to the agent process.
