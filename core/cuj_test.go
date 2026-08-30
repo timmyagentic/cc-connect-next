@@ -40,6 +40,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/timmyagentic/cc-connect-next/internal/appfeatures"
 )
 
 // ---------------------------------------------------------------------------
@@ -2191,6 +2193,110 @@ func TestCUJ_G4_AgentCrashReturnsErrorAndRecovers(t *testing.T) {
 	env.agent.mu.Unlock()
 	if gotSessions == 0 {
 		t.Fatalf("after recovery, agent.StartSession was never called successfully (sessions=%d)", gotSessions)
+	}
+}
+
+// CUJ-J1 · Feedback is previewed, can be cancelled with zero requests, and
+// only a later explicit action submits the exact pending Foundation Draft.
+func TestCUJ_J1_FeedbackPreviewCancelAndExactApproval(t *testing.T) {
+	env := newCUJEnv(t)
+	env.engine.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
+	previousVersion := CurrentVersion
+	CurrentVersion = "v0.2.1"
+	t.Cleanup(func() { CurrentVersion = previousVersion })
+	submitted := make(chan appfeatures.FeedbackReport, 1)
+	env.engine.feedbackSubmitFn = func(_ context.Context, draft appfeatures.FeedbackDraft, approved bool) (appfeatures.FeedbackReceipt, error) {
+		if !approved {
+			t.Fatal("submission was not explicitly approved")
+		}
+		submitted <- draft.Report()
+		return appfeatures.FeedbackReceipt{ReferenceURL: "https://github.com/timmyagentic/cc-connect-next/issues/7"}, nil
+	}
+
+	// 1. Preview, but do not submit.
+	env.userSends("feedback", "/feedback first problem")
+	if !env.sentContains("Complete feedback preview") || !env.sentContains("first problem") || !env.sentContains("OS/Arch") {
+		t.Fatalf("user did not see every preview section: %v", env.plat.getSent())
+	}
+	select {
+	case <-submitted:
+		t.Fatal("preview made a request")
+	default:
+	}
+
+	// 2. Cancel and prove the first draft can never be submitted.
+	env.userSends("feedback", "/feedback cancel")
+	if !env.sentContains("Nothing was submitted") {
+		t.Fatalf("cancel acknowledgement missing: %v", env.plat.getSent())
+	}
+
+	// 3/4. Create a different draft, then approve it separately.
+	env.userSends("feedback", "/feedback second problem")
+	env.userSends("feedback", "/feedback confirm")
+	select {
+	case report := <-submitted:
+		if report.Description != "second problem" {
+			t.Fatalf("submitted report drifted: %#v", report)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("approved draft was not submitted")
+	}
+	if !env.sentContains("issues/7") {
+		t.Fatalf("user did not receive the relay reference: %v", env.plat.getSent())
+	}
+}
+
+// CUJ-J2 · Update review and approval are separate user actions; Apply gets
+// the exact Plan the user saw and a repeated confirm cannot consume it twice.
+func TestCUJ_J2_UpdateReviewAppliesExactPlanOnce(t *testing.T) {
+	drainTestRestartRequests()
+	t.Cleanup(drainTestRestartRequests)
+	env := newCUJEnv(t)
+	env.engine.SetAdminFrom("updater")
+	previousVersion := CurrentVersion
+	CurrentVersion = "v1.0.0"
+	t.Cleanup(func() { CurrentVersion = previousVersion })
+	service := &stubCoreUpdateService{
+		plan: PreparedUpdate{
+			Release:      ReleaseInfo{TagName: "v1.1.0", Body: "reviewed notes"},
+			ArchiveAsset: "reviewed-asset.tar.gz",
+			Available:    true,
+			token:        "reviewed-plan",
+		},
+		result: UpdateResult{Release: ReleaseInfo{TagName: "v1.1.0"}, Updated: true},
+	}
+	env.engine.SetUpdateService(service)
+
+	// 1. Review the immutable Plan.
+	env.userSends("updater", "/upgrade")
+	if !env.sentContains("reviewed notes") || !env.sentContains("reviewed-asset.tar.gz") {
+		t.Fatalf("user did not see exact release details: %v", env.plat.getSent())
+	}
+	if service.applyCalls != 0 {
+		t.Fatal("review unexpectedly installed the update")
+	}
+
+	// Move the fake latest endpoint after review; confirmation must still use
+	// the prior token and release.
+	service.plan = PreparedUpdate{Release: ReleaseInfo{TagName: "v9.9.9"}, Available: true, token: "moving-latest"}
+	// 2. Confirm and install the reviewed Plan.
+	env.userSends("updater", "/upgrade confirm")
+	if service.prepareCalls != 1 || service.applyCalls != 1 || service.appliedPlan.token != "reviewed-plan" {
+		t.Fatalf("exact plan contract failed: prepare=%d apply=%d plan=%#v", service.prepareCalls, service.applyCalls, service.appliedPlan)
+	}
+	select {
+	case request := <-RestartCh:
+		if request.SessionKey != "test:updater" || request.Platform != "test" {
+			t.Fatalf("restart request = %#v", request)
+		}
+	default:
+		t.Fatal("successful update did not request restart")
+	}
+
+	// 3. A repeated confirm has no pending Plan and cannot install twice.
+	env.userSends("updater", "/upgrade confirm")
+	if service.applyCalls != 1 || !env.sentContains("reviewed update plan") {
+		t.Fatalf("repeated confirm was not rejected: calls=%d sent=%v", service.applyCalls, env.plat.getSent())
 	}
 }
 

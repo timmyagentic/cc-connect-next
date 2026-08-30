@@ -1,338 +1,263 @@
 package core
 
 import (
-	"archive/tar"
-	"archive/zip"
-	"bytes"
-	"compress/gzip"
-	"encoding/json"
+	"context"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"os"
-	"path/filepath"
-	"regexp"
-	"runtime"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/timmyagentic/cc-connect-next/internal/appfeatures"
 )
 
-const (
-	githubReleasesAPI = "https://api.github.com/repos/timmyagentic/cc-connect-next/releases"
-	githubDownload    = "https://github.com/timmyagentic/cc-connect-next/releases/download"
-)
-
+// ReleaseInfo is the host projection used by notices and localized cards.
+// Body is publisher-controlled text from the exact GitHub Release.
 type ReleaseInfo struct {
 	TagName    string `json:"tag_name"`
 	Name       string `json:"name"`
 	Body       string `json:"body"`
+	HTMLURL    string `json:"html_url"`
 	Prerelease bool   `json:"prerelease"`
 	CreatedAt  string `json:"created_at"`
 }
 
-// CheckForUpdate queries the cc-connect-next GitHub repository for newer
-// releases. The legacy preferGitee argument is retained for API compatibility
-// but intentionally ignored because this project has no mirrored release feed.
-func CheckForUpdate(currentVersion string, _ bool) (*ReleaseInfo, error) {
-	releases, err := fetchReleases()
+// PreparedUpdate is the complete presentation-safe view of one immutable
+// plan. token remains opaque to product UI and can only be consumed by the
+// UpdateService that created it.
+type PreparedUpdate struct {
+	Release      ReleaseInfo
+	ArchiveAsset string
+	Available    bool
+	token        any
+}
+
+type UpdateResult struct {
+	Release          ReleaseInfo
+	Updated          bool
+	ArchiveAsset     string
+	BackupRetainedAt string
+}
+
+// UpdateService separates the product confirmation flow from installation.
+// Implementations must apply exactly the plan returned by Prepare.
+type UpdateService interface {
+	Prepare(context.Context) (PreparedUpdate, error)
+	Apply(context.Context, PreparedUpdate) (UpdateResult, error)
+}
+
+type foundationUpdateService struct {
+	service *appfeatures.UpdateService
+}
+
+func newFoundationUpdateService() (*foundationUpdateService, error) {
+	service, err := appfeatures.NewUpdateService(appfeatures.UpdateConfig{
+		CurrentVersion: CurrentVersion,
+		Progress: func(event appfeatures.UpdateEvent) {
+			slog.Info("updater: progress",
+				"stage", event.Stage,
+				"current", event.CurrentVersion,
+				"target", event.TargetVersion,
+				"asset", event.Asset,
+				"bytes", event.Bytes,
+			)
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
-	if len(releases) == 0 {
-		return nil, nil
-	}
+	return &foundationUpdateService{service: service}, nil
+}
 
-	// Find the newest release by semver comparison
-	var best *ReleaseInfo
-	for i := range releases {
-		r := &releases[i]
-		if r.TagName == "" {
+func (service *foundationUpdateService) Prepare(ctx context.Context) (PreparedUpdate, error) {
+	plan, err := service.service.Prepare(ctx)
+	if err != nil {
+		return PreparedUpdate{}, err
+	}
+	release := plan.Release()
+	return PreparedUpdate{
+		Release:      releaseInfo(release),
+		ArchiveAsset: plan.ArchiveAsset().Name,
+		Available:    plan.Available(),
+		token:        plan,
+	}, nil
+}
+
+func (service *foundationUpdateService) Apply(ctx context.Context, prepared PreparedUpdate) (UpdateResult, error) {
+	plan, ok := prepared.token.(appfeatures.UpdatePlan)
+	if !ok {
+		return UpdateResult{}, fmt.Errorf("update plan is invalid")
+	}
+	result, err := service.service.Apply(ctx, plan)
+	return UpdateResult{
+		Release:          releaseInfo(result.Release),
+		Updated:          result.Updated,
+		ArchiveAsset:     result.ArchiveAsset,
+		BackupRetainedAt: result.BackupRetainedAt,
+	}, err
+}
+
+func releaseInfo(release appfeatures.UpdateRelease) ReleaseInfo {
+	return ReleaseInfo{
+		TagName:    release.Tag,
+		Name:       release.Tag,
+		Body:       release.Notes,
+		HTMLURL:    release.URL,
+		Prerelease: release.Prerelease,
+	}
+}
+
+// CheckForUpdate performs read-only stable discovery for notices. Interactive
+// flows still call UpdateService.Prepare before showing an approval prompt.
+func CheckForUpdate(currentVersion string, _ bool) (*ReleaseInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	release, err := appfeatures.CheckForUpdate(ctx, currentVersion, nil)
+	if err != nil || release == nil {
+		return nil, err
+	}
+	value := releaseInfo(*release)
+	return &value, nil
+}
+
+// SelfUpdate remains for callers that already represent an authorized,
+// non-interactive action. Interactive chat uses Prepare/Apply directly.
+func SelfUpdate(tag string, _ bool) error {
+	service, err := newFoundationUpdateService()
+	if err != nil {
+		return err
+	}
+	plan, err := service.Prepare(context.Background())
+	if err != nil {
+		return err
+	}
+	if plan.Release.TagName != tag {
+		return fmt.Errorf("prepared release %s does not match requested %s", plan.Release.TagName, tag)
+	}
+	_, err = service.Apply(context.Background(), plan)
+	return err
+}
+
+func (e *Engine) SetUpdateService(service UpdateService) {
+	e.updateServiceMu.Lock()
+	defer e.updateServiceMu.Unlock()
+	e.updateService = service
+	e.updatePlans = nil
+}
+
+func (e *Engine) currentUpdateService() (UpdateService, error) {
+	e.updateServiceMu.Lock()
+	defer e.updateServiceMu.Unlock()
+	if e.updateService != nil {
+		return e.updateService, nil
+	}
+	service, err := newFoundationUpdateService()
+	if err != nil {
+		return nil, err
+	}
+	e.updateService = service
+	return service, nil
+}
+
+const (
+	pendingUpdatePlanTTL = 10 * time.Minute
+	pendingUpdatePlanMax = 64
+)
+
+type pendingUpdatePlan struct {
+	Plan       PreparedUpdate
+	At         time.Time
+	SessionKey string
+	UserID     string
+}
+
+func (e *Engine) rememberUpdatePlan(sessionKey, userID string, plan PreparedUpdate) (string, error) {
+	if sessionKey == "" {
+		return "", fmt.Errorf("update session is required")
+	}
+	token, err := newPendingActionToken()
+	if err != nil {
+		return "", err
+	}
+	e.updateServiceMu.Lock()
+	defer e.updateServiceMu.Unlock()
+	if e.updatePlans == nil {
+		e.updatePlans = make(map[string]pendingUpdatePlan)
+	}
+	now := time.Now()
+	e.pruneUpdatePlansLocked(now)
+	for len(e.updatePlans) >= pendingUpdatePlanMax {
+		e.evictOldestUpdatePlanLocked()
+	}
+	e.updatePlans[token] = pendingUpdatePlan{Plan: plan, At: now, SessionKey: sessionKey, UserID: userID}
+	return token, nil
+}
+
+func (e *Engine) pendingUpdatePlan(sessionKey, userID, token string) (PreparedUpdate, bool) {
+	e.updateServiceMu.Lock()
+	defer e.updateServiceMu.Unlock()
+	e.pruneUpdatePlansLocked(time.Now())
+	if token == "" {
+		token = e.uniqueUpdateTokenLocked(sessionKey, userID)
+	}
+	pending, exists := e.updatePlans[token]
+	if !exists {
+		return PreparedUpdate{}, false
+	}
+	if pending.SessionKey != sessionKey || pending.UserID != userID {
+		return PreparedUpdate{}, false
+	}
+	return pending.Plan, true
+}
+
+func (e *Engine) clearUpdatePlan(sessionKey, userID, token string) {
+	e.updateServiceMu.Lock()
+	defer e.updateServiceMu.Unlock()
+	if token == "" {
+		token = e.uniqueUpdateTokenLocked(sessionKey, userID)
+	}
+	if pending, exists := e.updatePlans[token]; exists && pending.SessionKey == sessionKey && pending.UserID == userID {
+		e.deleteUpdatePlanLocked(token)
+	}
+}
+
+func (e *Engine) uniqueUpdateTokenLocked(sessionKey, userID string) string {
+	match := ""
+	for token, pending := range e.updatePlans {
+		if pending.SessionKey != sessionKey || pending.UserID != userID {
 			continue
 		}
-		if best == nil || semverCompare(r.TagName, best.TagName) > 0 {
-			best = r
+		if match != "" {
+			return ""
+		}
+		match = token
+	}
+	return match
+}
+
+func (e *Engine) deleteUpdatePlanLocked(token string) {
+	delete(e.updatePlans, token)
+}
+
+func (e *Engine) pruneUpdatePlansLocked(now time.Time) {
+	for token, pending := range e.updatePlans {
+		if now.Sub(pending.At) > pendingUpdatePlanTTL {
+			e.deleteUpdatePlanLocked(token)
 		}
 	}
-
-	if best == nil {
-		return nil, nil
-	}
-
-	cur := normalizeVersion(currentVersion)
-	latest := normalizeVersion(best.TagName)
-	if cur == latest || semverCompare(best.TagName, currentVersion) <= 0 {
-		return nil, nil
-	}
-
-	return best, nil
 }
 
-func fetchReleases() ([]ReleaseInfo, error) {
-	return fetchReleasesFrom(githubReleasesAPI + "?per_page=20")
-}
-
-func fetchReleasesFrom(apiURL string) ([]ReleaseInfo, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "cc-connect-next-updater")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned %d", resp.StatusCode)
-	}
-
-	var releases []ReleaseInfo
-	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-		return nil, err
-	}
-	return releases, nil
-}
-
-// SelfUpdate downloads and installs the given release version. The legacy
-// preferGitee argument is retained for API compatibility and ignored.
-func SelfUpdate(tag string, _ bool) error {
-	goos := runtime.GOOS
-	goarch := runtime.GOARCH
-
-	ext := ".tar.gz"
-	if goos == "windows" {
-		ext = ".zip"
-	}
-	filename := fmt.Sprintf("cc-connect-next-%s-%s-%s%s", tag, goos, goarch, ext)
-
-	githubURL := fmt.Sprintf("%s/%s/%s", githubDownload, tag, filename)
-	slog.Info("updater: downloading", "url", githubURL)
-	data, err := downloadFile(githubURL)
-	if err != nil {
-		return fmt.Errorf("download failed: %w", err)
-	}
-
-	var binary []byte
-	if goos == "windows" {
-		binary, err = extractBinaryFromZip(data)
-	} else {
-		binary, err = extractBinaryFromTarGz(data)
-	}
-	if err != nil {
-		return fmt.Errorf("extract binary: %w", err)
-	}
-
-	return replaceBinary(binary)
-}
-
-func downloadFile(url string) ([]byte, error) {
-	client := &http.Client{
-		Timeout: 5 * time.Minute,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) > 10 {
-				return fmt.Errorf("too many redirects")
-			}
-			return nil
-		},
-	}
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "cc-connect-next-updater")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
-	}
-
-	return io.ReadAll(resp.Body)
-}
-
-func extractBinaryFromTarGz(data []byte) ([]byte, error) {
-	r := bytes.NewReader(data)
-	gr, err := gzip.NewReader(r)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = gr.Close() }()
-
-	tr := tar.NewReader(gr)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-		name := filepath.Base(hdr.Name)
-		if strings.HasPrefix(name, "cc-connect-next") && hdr.Typeflag == tar.TypeReg {
-			return io.ReadAll(tr)
+func (e *Engine) evictOldestUpdatePlanLocked() {
+	oldestToken := ""
+	var oldest pendingUpdatePlan
+	for token, pending := range e.updatePlans {
+		if oldestToken == "" || pending.At.Before(oldest.At) {
+			oldestToken, oldest = token, pending
 		}
 	}
-	return nil, fmt.Errorf("cc-connect-next binary not found in archive")
+	if oldestToken != "" {
+		e.deleteUpdatePlanLocked(oldestToken)
+	}
 }
 
-func extractBinaryFromZip(data []byte) ([]byte, error) {
-	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		return nil, err
-	}
-	for _, f := range r.File {
-		name := filepath.Base(f.Name)
-		if strings.HasPrefix(name, "cc-connect-next") && !f.FileInfo().IsDir() {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, err
-			}
-			binary, readErr := io.ReadAll(rc)
-			closeErr := rc.Close()
-			if readErr != nil {
-				return nil, readErr
-			}
-			if closeErr != nil {
-				return nil, closeErr
-			}
-			return binary, nil
-		}
-	}
-	return nil, fmt.Errorf("cc-connect-next binary not found in zip archive")
-}
-
-func replaceBinary(newBinary []byte) error {
-	execPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("get executable path: %w", err)
-	}
-	execPath, err = filepath.EvalSymlinks(execPath)
-	if err != nil {
-		return fmt.Errorf("resolve symlinks: %w", err)
-	}
-
-	dir := filepath.Dir(execPath)
-	tmpFile, err := os.CreateTemp(dir, "cc-connect-next-update-*")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-
-	if _, err := tmpFile.Write(newBinary); err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("write new binary: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("close new binary: %w", err)
-	}
-
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("chmod: %w", err)
-	}
-
-	oldPath := execPath + ".old"
-	_ = os.Remove(oldPath)
-
-	if err := os.Rename(execPath, oldPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("backup old binary: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, execPath); err != nil {
-		// Try to restore
-		if restoreErr := os.Rename(oldPath, execPath); restoreErr != nil {
-			slog.Error("updater: failed to restore old binary after install failed", "error", restoreErr)
-		}
-		return fmt.Errorf("install new binary: %w", err)
-	}
-
-	// Don't remove .old file on Linux - the running process may still need it
-	// for os.Executable() to work correctly after restart.
-	// The .old file will be overwritten on next update.
-
-	slog.Info("updater: binary replaced successfully", "path", execPath)
-	return nil
-}
-
-// --- semver comparison ---
-
-var semverRe = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$`)
-
-type semver struct {
-	major, minor, patch int
-	pre                 string
-	preNum              int
-}
-
-func parseSemver(v string) semver {
-	m := semverRe.FindStringSubmatch(strings.TrimSpace(v))
-	if m == nil {
-		return semver{}
-	}
-	major, _ := strconv.Atoi(m[1])
-	minor, _ := strconv.Atoi(m[2])
-	patch, _ := strconv.Atoi(m[3])
-	pre := m[4]
-	preNum := 0
-	if idx := strings.LastIndex(pre, "."); idx >= 0 {
-		preNum, _ = strconv.Atoi(pre[idx+1:])
-	}
-	return semver{major: major, minor: minor, patch: patch, pre: pre, preNum: preNum}
-}
-
-func normalizeVersion(v string) string {
-	v = strings.TrimSpace(v)
-	if !strings.HasPrefix(v, "v") {
-		v = "v" + v
-	}
-	return v
-}
-
-// semverCompare returns >0 if a > b, <0 if a < b, 0 if equal.
-func semverCompare(a, b string) int {
-	sa := parseSemver(a)
-	sb := parseSemver(b)
-
-	if d := sa.major - sb.major; d != 0 {
-		return d
-	}
-	if d := sa.minor - sb.minor; d != 0 {
-		return d
-	}
-	if d := sa.patch - sb.patch; d != 0 {
-		return d
-	}
-	// No pre-release > has pre-release (1.0.0 > 1.0.0-beta.1)
-	if sa.pre == "" && sb.pre != "" {
-		return 1
-	}
-	if sa.pre != "" && sb.pre == "" {
-		return -1
-	}
-	// Both have pre-release: compare lexicographically, then by number
-	if sa.pre != sb.pre {
-		if d := strings.Compare(sa.pre, sb.pre); d != 0 {
-			// "beta" prefix comparison; if same prefix, compare numbers
-			aPre := strings.TrimRight(sa.pre, "0123456789.")
-			bPre := strings.TrimRight(sb.pre, "0123456789.")
-			if aPre == bPre {
-				return sa.preNum - sb.preNum
-			}
-			return d
-		}
-	}
-	return 0
+func terminalUpdatePlanError(err error) bool {
+	return appfeatures.IsTerminalUpdatePlanError(err)
 }

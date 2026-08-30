@@ -65,7 +65,7 @@ endif
 _BUILD_TAGS := $(strip $(_EXCLUDE_TAGS) goolm)
 _TAGS_FLAG  := $(if $(_BUILD_TAGS),-tags '$(_BUILD_TAGS)',)
 
-.PHONY: build run clean test test-fast test-full test-smoke test-e2e test-release test-release-local test-performance pre-test lint release release-all web
+.PHONY: build run clean test test-fast test-full test-smoke test-e2e test-release test-release-local test-feature-foundation test-performance pre-test lint release release-all web
 
 web:
 	@if [ ! -d web/node_modules ]; then cd web && npm install; fi
@@ -136,6 +136,13 @@ test-release-local:
 	go test ./config
 	go test ./core -run 'TestEngineSendToSessionWithAttachments|TestProcessInteractiveEvents_SuppressesDuplicateSideChannelText|TestCmdList_AllSessionsVisibleAfterRepeatedNew|TestCmdList_SessionVisibleDuringAgentProcessing|TestEngine_Alias|TestEngine_BannedWords|TestEngine_DisabledCommands'
 	go test ./platform/feishu -run 'TestUserIDFromEventFallsBackToUserID|TestResolveUserNameSkipsInvalidLookupID|TestNew_CanDisableInteractiveCards'
+
+test-feature-foundation:
+	sh feedback-relay/verify.sh
+	node --test internal/appfeatures/feedback_contract.test.mjs
+	node --test internal/appfeatures/feedback_relay_compat.test.mjs
+	node --check feedback-relay/src/compat.js
+	./scripts/verify-agent-app-features.sh
 
 # Legacy: runs unit tests only
 test:

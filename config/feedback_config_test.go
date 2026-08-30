@@ -69,3 +69,27 @@ func TestFeedbackEnabled_DefaultTrue(t *testing.T) {
 		t.Error("explicit false must disable feedback")
 	}
 }
+
+func TestValidateFeedbackEndpointRequiresExactSecureV1Route(t *testing.T) {
+	valid := []string{
+		"https://relay.example/v1/feedback",
+		"http://localhost:8787/v1/feedback",
+		"http://127.0.0.1:8787/v1/feedback",
+	}
+	for _, endpoint := range valid {
+		if err := validateFeedbackEndpoint(endpoint); err != nil {
+			t.Errorf("validateFeedbackEndpoint(%q): %v", endpoint, err)
+		}
+	}
+	invalid := []string{
+		"http://relay.example/v1/feedback",
+		"https://relay.example/feedback",
+		"https://relay.example/v1/feedback?token=value",
+		"https://user:pass@relay.example/v1/feedback",
+	}
+	for _, endpoint := range invalid {
+		if err := validateFeedbackEndpoint(endpoint); err == nil {
+			t.Errorf("validateFeedbackEndpoint(%q) succeeded", endpoint)
+		}
+	}
+}

@@ -126,6 +126,41 @@ jobs:
       - name: Run tests with race detector
         run: go test ./... -race
 
+  feedback-relay:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '24']
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: feedback-relay/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify extracted Feedback Relay delivery
+        working-directory: feedback-relay
+        run: |
+          sh verify.sh
+          cd ..
+          node --test internal/appfeatures/feedback_contract.test.mjs
+          node --test internal/appfeatures/feedback_relay_compat.test.mjs
+          node --check feedback-relay/src/compat.js
+
+      - name: Verify exact Foundation source and host lock
+        run: ./scripts/verify-agent-app-features.sh
+
   e2e-test:
     runs-on: ubuntu-latest
 

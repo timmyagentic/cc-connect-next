@@ -844,7 +844,7 @@ Enable /feedback and capability-gap prompts; every submission still requires con
 
 ### `feedback.endpoint`
 
-Override the author-operated anonymous feedback relay endpoint.
+Override the author-operated anonymous Feedback v1 relay; requires exact /v1/feedback over HTTPS (loopback HTTP is development-only).
 
 - Source: `toml`
 - Placement: `[feedback]`
@@ -5621,7 +5621,7 @@ Set the provider-specific voice ID used by tts.
 
 ### `update_notice`
 
-Notify the most recently active chat once when a newer stable release is available.
+Notify the most recently active chat once per stable release; the user reviews an exact immutable Plan before confirmation.
 
 - Source: `toml`
 - Placement: `config.toml root`

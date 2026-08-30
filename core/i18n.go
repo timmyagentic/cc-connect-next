@@ -514,6 +514,8 @@ const (
 	MsgUpgradeUpToDate        MsgKey = "upgrade_up_to_date"
 	MsgUpgradeAvailable       MsgKey = "upgrade_available"
 	MsgUpgradeAvailableAction MsgKey = "upgrade_available_action"
+	MsgUpgradePlanDetails     MsgKey = "upgrade_plan_details"
+	MsgUpgradePlanMissing     MsgKey = "upgrade_plan_missing"
 	MsgUpgradeDownloading     MsgKey = "upgrade_downloading"
 	MsgUpgradeSuccess         MsgKey = "upgrade_success"
 	MsgUpgradeDevBuild        MsgKey = "upgrade_dev_build"
@@ -589,19 +591,19 @@ const (
 	MsgUpdateHintReplyConfirm MsgKey = "update_hint_reply_confirm"
 
 	// Feedback channel (/feedback and proactive capability-gap prompts)
-	MsgFeedbackUsage         MsgKey = "feedback_usage"
-	MsgFeedbackSubmitted     MsgKey = "feedback_submitted"
-	MsgFeedbackSubmitFailed  MsgKey = "feedback_submit_failed"
-	MsgFeedbackDisabled      MsgKey = "feedback_disabled"
-	MsgFeedbackHint          MsgKey = "feedback_hint"
-	MsgFeedbackErrorHint     MsgKey = "feedback_error_hint"
-	MsgFeedbackAskTitle      MsgKey = "feedback_ask_title"
-	MsgFeedbackAskError      MsgKey = "feedback_ask_error"
-	MsgFeedbackAskGap        MsgKey = "feedback_ask_gap"
-	MsgFeedbackBtnSubmit     MsgKey = "feedback_btn_submit"
-	MsgFeedbackBtnDismiss    MsgKey = "feedback_btn_dismiss"
-	MsgFeedbackNoError       MsgKey = "feedback_no_error"
-	MsgFeedbackCapabilityGap MsgKey = "feedback_capability_gap"
+	MsgFeedbackUsage          MsgKey = "feedback_usage"
+	MsgFeedbackSubmitted      MsgKey = "feedback_submitted"
+	MsgFeedbackSubmitFailed   MsgKey = "feedback_submit_failed"
+	MsgFeedbackDisabled       MsgKey = "feedback_disabled"
+	MsgFeedbackHint           MsgKey = "feedback_hint"
+	MsgFeedbackAskTitle       MsgKey = "feedback_ask_title"
+	MsgFeedbackBtnSubmit      MsgKey = "feedback_btn_submit"
+	MsgFeedbackBtnDismiss     MsgKey = "feedback_btn_dismiss"
+	MsgFeedbackPreview        MsgKey = "feedback_preview"
+	MsgFeedbackPreviewEmpty   MsgKey = "feedback_preview_empty"
+	MsgFeedbackPreviewConfirm MsgKey = "feedback_preview_confirm"
+	MsgFeedbackPendingMissing MsgKey = "feedback_pending_missing"
+	MsgFeedbackDismissed      MsgKey = "feedback_dismissed"
 
 	MsgWhoamiTitle     MsgKey = "whoami_title"
 	MsgWhoamiCardTitle MsgKey = "whoami_card_title"
@@ -3287,6 +3289,20 @@ var messages = map[MsgKey]map[Language]string{
 			"Última: **%s**\n\n\n" +
 			"%s",
 	},
+	MsgUpgradePlanDetails: {
+		LangEnglish:            "Selected artifact: `%s`\n\n%s",
+		LangChinese:            "已选定产物：`%s`\n\n%s",
+		LangTraditionalChinese: "已選定產物：`%s`\n\n%s",
+		LangJapanese:           "選択された成果物: `%s`\n\n%s",
+		LangSpanish:            "Artefacto seleccionado: `%s`\n\n%s",
+	},
+	MsgUpgradePlanMissing: {
+		LangEnglish:            "The reviewed update plan is missing or expired. Run `/upgrade` again to review the current exact release before installing.",
+		LangChinese:            "已审阅的更新计划不存在或已过期。请重新发送 `/upgrade`，查看当前精确 Release 后再安装。",
+		LangTraditionalChinese: "已審閱的更新計畫不存在或已過期。請重新傳送 `/upgrade`，查看目前精確 Release 後再安裝。",
+		LangJapanese:           "確認済みの更新プランがないか期限切れです。`/upgrade` を再実行し、現在の正確なリリースを確認してからインストールしてください。",
+		LangSpanish:            "El plan de actualización revisado no existe o caducó. Ejecuta `/upgrade` de nuevo para revisar la versión exacta antes de instalar.",
+	},
 	MsgUpgradeDownloading: {
 		LangEnglish:            "⬇️ Downloading %s ...",
 		LangChinese:            "⬇️ 正在下载 %s ...",
@@ -3662,11 +3678,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "↪️ Tu añadido fue aceptado justo cuando la tarea terminó; consulta la respuesta anterior.",
 	},
 	MsgUpdateNoticeAvailable: {
-		LangEnglish:            "📦 cc-connect-next %s has been released (you are on %s). Reply “update” to upgrade now.",
-		LangChinese:            "📦 cc-connect-next %s 已发布（当前版本 %s）。回复「更新」即可升级。",
-		LangTraditionalChinese: "📦 cc-connect-next %s 已發布（目前版本 %s）。回覆「更新」即可升級。",
-		LangJapanese:           "📦 cc-connect-next %s がリリースされました（現在のバージョン %s）。「update」と返信すると更新します。",
-		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s). Responde “update” para actualizar ahora.",
+		LangEnglish:            "📦 cc-connect-next %s has been released (you are on %s). Reply “update” to review the exact release plan before installing.",
+		LangChinese:            "📦 cc-connect-next %s 已发布（当前版本 %s）。回复「更新」可先查看精确 Release 计划，再确认安装。",
+		LangTraditionalChinese: "📦 cc-connect-next %s 已發布（目前版本 %s）。回覆「更新」可先查看精確 Release 計畫，再確認安裝。",
+		LangJapanese:           "📦 cc-connect-next %s がリリースされました（現在のバージョン %s）。「update」と返信すると、正確なリリースプランを確認してからインストールできます。",
+		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s). Responde “update” para revisar el plan exacto antes de instalar.",
 	},
 	MsgUpdateNoticeAvailableAction: {
 		LangEnglish:            "📦 cc-connect-next %s has been released (you are on %s).",
@@ -3676,18 +3692,18 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s).",
 	},
 	MsgUpdateBtnNow: {
-		LangEnglish:            "Update now",
-		LangChinese:            "立即更新",
-		LangTraditionalChinese: "立即更新",
-		LangJapanese:           "今すぐ更新",
-		LangSpanish:            "Actualizar ahora",
+		LangEnglish:            "Review update",
+		LangChinese:            "查看并更新",
+		LangTraditionalChinese: "查看並更新",
+		LangJapanese:           "確認して更新",
+		LangSpanish:            "Revisar actualización",
 	},
 	MsgUpdateHintReplyUpdate: {
-		LangEnglish:            "or just reply “update”",
-		LangChinese:            "也可以直接回复「更新」",
-		LangTraditionalChinese: "也可以直接回覆「更新」",
-		LangJapanese:           "「update」と返信するだけでも更新できます",
-		LangSpanish:            "o simplemente responde “update”",
+		LangEnglish:            "or reply “update” to review the exact plan",
+		LangChinese:            "也可以回复「更新」查看精确计划",
+		LangTraditionalChinese: "也可以回覆「更新」查看精確計畫",
+		LangJapanese:           "「update」と返信して正確なプランを確認できます",
+		LangSpanish:            "o responde “update” para revisar el plan exacto",
 	},
 	MsgUpdateHintReplyConfirm: {
 		LangEnglish:            "or just reply “confirm”",
@@ -3704,11 +3720,46 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Novedades",
 	},
 	MsgFeedbackUsage: {
-		LangEnglish:            "\U0001F4EE Report any problem or wish straight to the project author:\n`/feedback <describe it>`\nRecent errors and unsupported config keys are attached automatically, everything is redacted, and no GitHub account is needed.",
-		LangChinese:            "\U0001F4EE 把使用中的任何问题或想要的能力直接反馈给项目作者：\n`/feedback <描述>`\n最近的错误和不支持的配置项会自动附上，内容自动脱敏，无需 GitHub 账号。",
-		LangTraditionalChinese: "\U0001F4EE 把使用中的任何問題或想要的能力直接回饋給專案作者：\n`/feedback <描述>`\n最近的錯誤和不支援的設定項會自動附上，內容自動去敏，無需 GitHub 帳號。",
-		LangJapanese:           "\U0001F4EE 利用中の問題や欲しい機能をそのまま作者に報告できます：\n`/feedback <内容を記述>`\n直近のエラーや未対応の設定キーは自動的に添付され、内容はマスキングされます。GitHub アカウントは不要です。",
-		LangSpanish:            "\U0001F4EE Informa de cualquier problema o deseo directamente al autor del proyecto:\n`/feedback <descr\u00edbelo>`\nLos errores recientes y las claves de configuraci\u00f3n no admitidas se adjuntan autom\u00e1ticamente, todo se redacta y no se necesita cuenta de GitHub.",
+		LangEnglish:            "\U0001F4EE Build a complete redacted preview for any problem or wish:\n`/feedback <describe it>`\nReview every field, then explicitly submit or dismiss it. Recent errors and unsupported config keys are attached automatically; no GitHub account is needed.",
+		LangChinese:            "\U0001F4EE 为使用中的问题或想要的能力生成完整脱敏预览：\n`/feedback <描述>`\n检查全部字段后再明确提交或取消。最近的错误和不支持的配置项会自动附上，无需 GitHub 账号。",
+		LangTraditionalChinese: "\U0001F4EE 為使用中的問題或想要的能力產生完整去敏預覽：\n`/feedback <描述>`\n檢查全部欄位後再明確提交或取消。最近的錯誤和不支援的設定項會自動附上，無需 GitHub 帳號。",
+		LangJapanese:           "\U0001F4EE 問題や要望の完全なマスキング済みプレビューを作成します：\n`/feedback <内容を記述>`\n全項目を確認してから明示的に送信または破棄します。直近のエラーや未対応キーは自動添付され、GitHub アカウントは不要です。",
+		LangSpanish:            "\U0001F4EE Crea una vista previa completa y redactada de cualquier problema o deseo:\n`/feedback <descr\u00edbelo>`\nRevisa todos los campos y luego env\u00edala o desc\u00e1rtala expl\u00edcitamente. Los errores recientes y las claves no admitidas se adjuntan autom\u00e1ticamente; no se necesita cuenta de GitHub.",
+	},
+	MsgFeedbackPreview: {
+		LangEnglish:            "📋 **Complete feedback preview**\n\n**Description**\n%s\n\n**Recent error**\n%s\n\n**Capability gaps**\n%s\n\n**Environment**\n- Product: `%s`\n- Version: `%s`\n- OS/Arch: `%s/%s`\n- Agent: `%s`",
+		LangChinese:            "📋 **完整反馈预览**\n\n**描述**\n%s\n\n**最近错误**\n%s\n\n**能力缺口**\n%s\n\n**环境**\n- 产品：`%s`\n- 版本：`%s`\n- OS/Arch：`%s/%s`\n- Agent：`%s`",
+		LangTraditionalChinese: "📋 **完整回饋預覽**\n\n**描述**\n%s\n\n**最近錯誤**\n%s\n\n**能力缺口**\n%s\n\n**環境**\n- 產品：`%s`\n- 版本：`%s`\n- OS/Arch：`%s/%s`\n- Agent：`%s`",
+		LangJapanese:           "📋 **フィードバックの完全プレビュー**\n\n**説明**\n%s\n\n**直近のエラー**\n%s\n\n**不足している機能**\n%s\n\n**環境**\n- 製品: `%s`\n- バージョン: `%s`\n- OS/Arch: `%s/%s`\n- Agent: `%s`",
+		LangSpanish:            "📋 **Vista previa completa del feedback**\n\n**Descripción**\n%s\n\n**Error reciente**\n%s\n\n**Capacidades faltantes**\n%s\n\n**Entorno**\n- Producto: `%s`\n- Versión: `%s`\n- OS/Arch: `%s/%s`\n- Agent: `%s`",
+	},
+	MsgFeedbackPreviewEmpty: {
+		LangEnglish:            "None",
+		LangChinese:            "无",
+		LangTraditionalChinese: "無",
+		LangJapanese:           "なし",
+		LangSpanish:            "Ninguno",
+	},
+	MsgFeedbackPreviewConfirm: {
+		LangEnglish:            "Review every field above. Send `/feedback confirm` to submit this exact preview, or `/feedback cancel` to discard it.",
+		LangChinese:            "请检查上面的全部字段。发送 `/feedback confirm` 提交这份精确预览，或发送 `/feedback cancel` 取消。",
+		LangTraditionalChinese: "請檢查上面的全部欄位。傳送 `/feedback confirm` 提交這份精確預覽，或傳送 `/feedback cancel` 取消。",
+		LangJapanese:           "上の全項目を確認してください。`/feedback confirm` でこのプレビューを送信し、`/feedback cancel` で破棄します。",
+		LangSpanish:            "Revisa todos los campos. Envía `/feedback confirm` para enviar exactamente esta vista previa o `/feedback cancel` para descartarla.",
+	},
+	MsgFeedbackPendingMissing: {
+		LangEnglish:            "There is no current feedback preview to submit. Start with `/feedback <describe it>`.",
+		LangChinese:            "当前没有可提交的反馈预览，请先发送 `/feedback <描述>`。",
+		LangTraditionalChinese: "目前沒有可提交的回饋預覽，請先傳送 `/feedback <描述>`。",
+		LangJapanese:           "送信待ちのフィードバックプレビューがありません。まず `/feedback <内容>` を送信してください。",
+		LangSpanish:            "No hay una vista previa pendiente. Empieza con `/feedback <descríbelo>`.",
+	},
+	MsgFeedbackDismissed: {
+		LangEnglish:            "Feedback preview discarded. Nothing was submitted.",
+		LangChinese:            "反馈预览已取消，没有提交任何内容。",
+		LangTraditionalChinese: "回饋預覽已取消，沒有提交任何內容。",
+		LangJapanese:           "フィードバックのプレビューを破棄しました。何も送信されていません。",
+		LangSpanish:            "Vista previa descartada. No se envió nada.",
 	},
 	MsgFeedbackAskTitle: {
 		LangEnglish:            "Report to the author?",
@@ -3716,20 +3767,6 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "要回饋給作者嗎？",
 		LangJapanese:           "作者に報告しますか？",
 		LangSpanish:            "\u00bfInformar al autor?",
-	},
-	MsgFeedbackAskError: {
-		LangEnglish:            "A problem just occurred:\n\n%s\n\nWould you like to report it straight to the project author? The details are attached and redacted automatically; no GitHub account is needed.",
-		LangChinese:            "刚才遇到了一个问题：\n\n%s\n\n是否需要直接反馈给项目作者？详情会自动附上并脱敏，无需 GitHub 账号。",
-		LangTraditionalChinese: "剛才遇到了一個問題：\n\n%s\n\n是否需要直接回饋給專案作者？詳情會自動附上並去敏，無需 GitHub 帳號。",
-		LangJapanese:           "問題が発生しました：\n\n%s\n\nこの問題をそのまま作者に報告しますか？詳細は自動的に添付・マスキングされ、GitHub アカウントは不要です。",
-		LangSpanish:            "Acaba de ocurrir un problema:\n\n%s\n\n\u00bfQuieres informarlo directamente al autor del proyecto? Los detalles se adjuntan y redactan autom\u00e1ticamente; no se necesita cuenta de GitHub.",
-	},
-	MsgFeedbackAskGap: {
-		LangEnglish:            "Your config contains key(s) this version does not support: %s.\n\nWould you like to report this need straight to the project author? The details are attached and redacted automatically; no GitHub account is needed.",
-		LangChinese:            "你的配置里有当前版本不支持的配置项：%s。\n\n是否需要把这个需求直接反馈给项目作者？详情会自动附上并脱敏，无需 GitHub 账号。",
-		LangTraditionalChinese: "你的設定裡有目前版本不支援的設定項：%s。\n\n是否需要把這個需求直接回饋給專案作者？詳情會自動附上並去敏，無需 GitHub 帳號。",
-		LangJapanese:           "設定に現在のバージョンが対応していないキーがあります：%s。\n\nこの要望をそのまま作者に報告しますか？詳細は自動的に添付・マスキングされ、GitHub アカウントは不要です。",
-		LangSpanish:            "Tu configuraci\u00f3n contiene clave(s) que esta versi\u00f3n no admite: %s.\n\n\u00bfQuieres informar esta necesidad directamente al autor del proyecto? Los detalles se adjuntan y redactan autom\u00e1ticamente; no se necesita cuenta de GitHub.",
 	},
 	MsgFeedbackBtnSubmit: {
 		LangEnglish:            "Report to author",
@@ -3744,13 +3781,6 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "忽略",
 		LangJapanese:           "無視する",
 		LangSpanish:            "Ignorar",
-	},
-	MsgFeedbackErrorHint: {
-		LangEnglish:            "\U0001F4A1 Hit a problem? Send `/feedback` to report it straight to the author \u2014 the error details are attached automatically, redacted, no GitHub account needed.",
-		LangChinese:            "\U0001F4A1 遇到问题了？发送 `/feedback` 直接反馈给作者——错误详情自动附上、自动脱敏，无需 GitHub 账号。",
-		LangTraditionalChinese: "\U0001F4A1 遇到問題了？傳送 `/feedback` 直接回饋給作者——錯誤詳情自動附上、自動去敏，無需 GitHub 帳號。",
-		LangJapanese:           "\U0001F4A1 問題が発生しましたか？`/feedback` でそのまま作者に報告できます。エラーの詳細は自動的に添付・マスキングされ、GitHub アカウントは不要です。",
-		LangSpanish:            "\U0001F4A1 \u00bfEncontraste un problema? Env\u00eda `/feedback` para informar directamente al autor: los detalles del error se adjuntan y redactan autom\u00e1ticamente, sin cuenta de GitHub.",
 	},
 	MsgFeedbackSubmitted: {
 		LangEnglish:            "✅ Feedback submitted. The author will see it here: %s",
@@ -3774,18 +3804,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "El canal de feedback está deshabilitado en este despliegue ([feedback] en config.toml).",
 	},
 	MsgFeedbackHint: {
-		LangEnglish:            "\U0001F4A1 Missing a capability? Send `/feedback <describe it>` to report it straight to the author \u2014 redacted automatically, no GitHub account needed.",
-		LangChinese:            "\U0001F4A1 需要的能力不存在？发送 `/feedback <描述>` 直接反馈给作者——内容自动脱敏，无需 GitHub 账号。",
-		LangTraditionalChinese: "\U0001F4A1 需要的能力不存在？傳送 `/feedback <描述>` 直接回饋給作者——內容自動去敏，無需 GitHub 帳號。",
-		LangJapanese:           "\U0001F4A1 必要な機能がありませんか？`/feedback <内容>` でそのまま作者に報告できます。内容は自動マスキングされ、GitHub アカウントは不要です。",
-		LangSpanish:            "\U0001F4A1 \u00bfFalta una capacidad? Env\u00eda `/feedback <descr\u00edbela>` para informar directamente al autor: se redacta autom\u00e1ticamente y no se necesita cuenta de GitHub.",
-	},
-	MsgFeedbackCapabilityGap: {
-		LangEnglish:            "\u2699\uFE0F Your config contains key(s) this version does not support: %s.\nIf you need this capability, send `/feedback` to report it straight to the author (attached and redacted automatically; no GitHub account needed). Otherwise just ignore this notice.",
-		LangChinese:            "\u2699\uFE0F 你的配置里有当前版本不支持的配置项：%s。\n如果你需要这个能力，发送 `/feedback` 直接反馈给作者（自动附上并脱敏，无需 GitHub 账号）；不需要则忽略本条即可。",
-		LangTraditionalChinese: "\u2699\uFE0F 你的設定裡有目前版本不支援的設定項：%s。\n如果你需要這個能力，傳送 `/feedback` 直接回饋給作者（自動附上並去敏，無需 GitHub 帳號）；不需要則忽略本條即可。",
-		LangJapanese:           "\u2699\uFE0F 設定に現在のバージョンが対応していないキーがあります：%s。\nこの機能が必要な場合は `/feedback` でそのまま作者に報告できます（自動的に添付・マスキングされ、GitHub アカウントは不要です）。不要であればこの通知は無視してください。",
-		LangSpanish:            "\u2699\uFE0F Tu configuraci\u00f3n contiene clave(s) que esta versi\u00f3n no admite: %s.\nSi necesitas esta capacidad, env\u00eda `/feedback` para informar directamente al autor (adjuntado y redactado autom\u00e1ticamente; sin cuenta de GitHub). Si no, ignora este aviso.",
+		LangEnglish:            "\U0001F4A1 Missing a capability? Send `/feedback <describe it>` to review the complete redacted draft before submitting it to the author.",
+		LangChinese:            "\U0001F4A1 需要的能力不存在？发送 `/feedback <描述>`，先检查完整脱敏草稿，再提交给作者。",
+		LangTraditionalChinese: "\U0001F4A1 需要的能力不存在？傳送 `/feedback <描述>`，先檢查完整去敏草稿，再提交給作者。",
+		LangJapanese:           "\U0001F4A1 必要な機能がありませんか？`/feedback <内容>` で完全なマスキング済み草稿を確認してから作者へ送信できます。",
+		LangSpanish:            "\U0001F4A1 \u00bfFalta una capacidad? Env\u00eda `/feedback <descr\u00edbela>` para revisar el borrador completo y redactado antes de enviarlo al autor.",
 	},
 	MsgWhoamiTitle: {
 		LangEnglish:            "🪪 **Your Identity**",

@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Awesome Agent App Features contract v1 integration
+
+- Feedback now builds the complete structured, redacted Foundation draft and
+  renders every outbound field before a separate submit/dismiss action. The
+  exact pending draft is the only value that can be approved and sent; cancel,
+  expiry, missing approval, and stale errors perform no request.
+- Chat and CLI updates now share the Foundation stable-release source and
+  immutable `Prepare -> render exact Plan -> confirm -> Apply(same Plan)`
+  transaction. Standalone macOS/Linux keeps checksum, staged/installed version,
+  lock, backup and rollback guarantees; npm and Windows remain explicit host
+  install-kind adapters while pinning the reviewed release.
+- The old client-rendered Feedback Relay was replaced by the self-contained
+  `v0.1.1` source subtree with strict structured validation, server-owned issue
+  rendering/destination, Rate Limiting binding, locked workerd tests, generated
+  types, Wrangler dry-run and dependency audit. No deployment is implied.
+- Added `agent-app-features.lock.json` and exact-source validation so future
+  Agents can reject mixed module/subtree revisions without adding a second
+  lifecycle database.
+- Feedback approvals and Update confirmations now carry opaque one-time tokens
+  bound to the exact displayed Draft/Plan, session, initiating user, and TTL;
+  stale cards cannot approve a later replacement value.
+- The host-owned Relay entrypoint translates the exact legacy CC Connect
+  schema-1 request into the new structured Foundation request, allowing an
+  in-place Worker rollout without breaking existing installed clients.
+- Windows standalone updates now remove a retained `.old` file before the next
+  transaction only after the current executable passes an exact, non-mutating
+  version probe; an unverified current binary keeps the recovery backup intact.
+
 ## v0.2.1 (2026-08-30)
 
 Stable release focused on Agent-native capability discovery, an executable

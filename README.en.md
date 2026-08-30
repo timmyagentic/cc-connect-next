@@ -29,11 +29,11 @@ Run Claude Code, Codex, Cursor, or any of 14 coding agents on your own machine �
 - 🎛️ **Steer the running turn** — messages that arrive while the agent is busy join the task **already running** (the default) via Codex's native `turn/steer`, with the live card handing over to the newest message; agents without the capability fall back to the FIFO queue transparently, and `busy_message_mode = "queue"` restores queue-always. `/ps` steers explicitly on any mode.
 - 🚚 **Auditable one-command migration** — `cc-connect-next migrate` inventories the official install, hashes every source file, stages, verifies, and activates atomically with timestamped backups and a full SHA-256 manifest. It fails closed rather than ever activating an incomplete target.
 - 🪶 **One bot, an official lark-cli ready to use** — new installs and migrations can install the official `lark-cli`, reuse the Feishu bot Next already verified, create or reuse an isolated profile, and make it the default bot profile while preserving old profiles, user OAuth, and the secret boundary.
-- 🔔 **Self-maintaining installs** — `cc-connect-next update` follows the stable channel with checksum verification for both npm and standalone binaries, and a running daemon reminds each project's most recent chat **once per new release** (`update_notice = false` to opt out). The reminder carries an **[update now] button**, and a plain reply like “update” upgrades — no command syntax required.
+- 🔔 **Self-maintaining installs** — `cc-connect-next update` follows the stable channel. Standalone binaries use the Foundation's immutable Plan, same-release checksum, two version probes, lock, backup, and rollback; npm/Windows remain explicit host adapters. Each release is announced once, and **Review update** or a plain “update” first shows the exact Release/artifact before confirmation—approval can never drift to a different latest release.
 - 🤖 **14 agents × 15 platforms** — one process hosts multiple projects, each binding a code directory to its own agent and platforms, with per-project permissions, providers, models, and display settings.
 - 🌍 **Production niceties** — `doctor` diagnostics, launchd/systemd/Windows daemon, web admin (beta), cron & webhooks, bot-to-bot relay, voice in/out (STT/TTS), multi-workspace routing, and full i18n in five languages (en, zh, zh-TW, ja, es).
 
-- **One-command feedback.** Hit a bug or a missing capability? `/feedback` reports it straight to the author as a GitHub issue — redacted automatically, no GitHub account needed, and the daemon points you at it whenever a turn fails.
+- **Reviewable one-command feedback.** `/feedback` first renders every field of the complete Foundation-redacted preview. Only a separate submit button or `confirm` sends that exact draft; cancel and missing approval make no request. The author-side Relay owns the repository and Issue rendering, so no GitHub account is needed.
 
 ## 🎬 What it looks like
 
@@ -80,6 +80,8 @@ permissions, side effects, fallbacks, and availability reasons. You can also run
 `cc-connect-next capabilities --search "keywords"`. For configuration-only lookup,
 `cc-connect-next config capabilities --search "keywords"` remains available; see the
 [configuration capability reference](docs/configuration.md) for every option.
+The Feedback/Update Foundation mapping, exact Plan flow, and Relay boundary are
+documented in [Awesome Agent App Features integration](docs/agent-app-features.md).
 
 Install as a service once things work:
 

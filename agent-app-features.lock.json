@@ -1,0 +1,157 @@
+{
+  "schema": 1,
+  "source": {
+    "repository": "timmyagentic/awesome-agent-app-features",
+    "commit": "2e30c73ee6c3192f057ef24fa5bb4f77b8346c81"
+  },
+  "features": [
+    {
+      "id": "feedback",
+      "contract": "v1",
+      "deliveries": [
+        {
+          "mode": "go-module",
+          "source": "github.com/timmyagentic/awesome-agent-app-features/feedback",
+          "target": "go.mod",
+          "version": "v0.1.1"
+        },
+        {
+          "mode": "go-module",
+          "source": "github.com/timmyagentic/awesome-agent-app-features/feedback/httpclient",
+          "target": "go.mod",
+          "version": "v0.1.1"
+        },
+        {
+          "mode": "source-subtree",
+          "source": "relay/cloudflare",
+          "target": "feedback-relay"
+        }
+      ],
+      "files": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml",
+        ".gitignore",
+        "CHANGELOG.md",
+        "Makefile",
+        "README.en.md",
+        "README.md",
+        "agent-app-features.lock.json",
+        "cmd/cc-connect/main.go",
+        "config.example.toml",
+        "config/capabilities.go",
+        "config/config.go",
+        "config/feedback_config_test.go",
+        "core/engine.go",
+        "core/cuj_test.go",
+        "core/feedback.go",
+        "core/feedback_test.go",
+        "core/i18n.go",
+        "core/pending_action.go",
+        "docs/agent-app-features.md",
+        "docs/agent-app-features.zh-CN.md",
+        "docs/coming-from-cc-connect.md",
+        "docs/coming-from-cc-connect.zh-CN.md",
+        "docs/configuration.md",
+        "docs/configuration.zh-CN.md",
+        "docs/usage.md",
+        "docs/usage.zh-CN.md",
+        "feedback-relay/.gitignore",
+        "feedback-relay/CC-CONNECT-NEXT.md",
+        "feedback-relay/README.md",
+        "feedback-relay/package-lock.json",
+        "feedback-relay/package.json",
+        "feedback-relay/src/index.js",
+        "feedback-relay/src/compat.js",
+        "feedback-relay/src/relay.js",
+        "feedback-relay/test/index.test.js",
+        "feedback-relay/test/runtime.spec.js",
+        "feedback-relay/tsconfig.json",
+        "feedback-relay/verify.sh",
+        "feedback-relay/vitest.config.js",
+        "feedback-relay/worker-configuration.d.ts",
+        "feedback-relay/wrangler.jsonc",
+        "go.mod",
+        "go.sum",
+        "internal/appfeatures/feedback.go",
+        "internal/appfeatures/feedback_contract.test.mjs",
+        "internal/appfeatures/feedback_relay_compat.test.mjs",
+        "internal/appfeatures/feedback_test.go",
+        "internal/appfeatures/live_test.go",
+        "internal/appfeatures/testdata/approved-feedback-v1.json",
+        "scripts/verify-agent-app-features.sh"
+      ],
+      "verified_at": "2026-08-30T17:02:37Z",
+      "checks": [
+		"GOWORK=off go test -race ./... -count=1",
+		"GOWORK=off go test ./core -run TestCUJ -count=1",
+		"node --test internal/appfeatures/feedback_contract.test.mjs",
+		"make test-feature-foundation"
+      ],
+      "unverified": [
+        "The public Cloudflare endpoint was not deployed or probed with a real approved report",
+        "No real GitHub issue, production credential, formal daemon, or messaging client was used"
+      ]
+    },
+    {
+      "id": "updater",
+      "contract": "v1",
+      "deliveries": [
+        {
+          "mode": "go-module",
+          "source": "github.com/timmyagentic/awesome-agent-app-features/updater",
+          "target": "go.mod",
+          "version": "v0.1.1"
+        },
+        {
+          "mode": "go-module",
+          "source": "github.com/timmyagentic/awesome-agent-app-features/updater/github",
+          "target": "go.mod",
+          "version": "v0.1.1"
+        }
+      ],
+      "files": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml",
+        "CHANGELOG.md",
+        "Makefile",
+        "README.en.md",
+        "README.md",
+        "agent-app-features.lock.json",
+        "cmd/cc-connect/update.go",
+        "cmd/cc-connect/update_test.go",
+        "core/engine.go",
+        "core/cuj_test.go",
+        "core/i18n.go",
+        "core/pending_action.go",
+        "core/update_intent.go",
+        "core/update_intent_test.go",
+        "core/update_notice.go",
+        "core/updater.go",
+        "core/updater_test.go",
+        "docs/agent-app-features.md",
+        "docs/agent-app-features.zh-CN.md",
+        "docs/coming-from-cc-connect.md",
+        "docs/coming-from-cc-connect.zh-CN.md",
+        "docs/usage.md",
+        "docs/usage.zh-CN.md",
+        "go.mod",
+        "go.sum",
+        "internal/appfeatures/updater.go",
+        "internal/appfeatures/updater_test.go",
+        "internal/appfeatures/live_test.go",
+        "scripts/verify-agent-app-features.sh"
+      ],
+      "verified_at": "2026-08-30T17:02:37Z",
+      "checks": [
+		"GOWORK=off go test -race ./... -count=1",
+		"GOWORK=off go test ./core -run TestCUJ -count=1",
+		"CC_NEXT_RUN_LIVE_FEATURE_FOUNDATION=1 GOWORK=off go test ./internal/appfeatures -run TestLiveUpdateServiceAgainstPublishedStableRelease -count=1",
+		"GOWORK=off GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags no_web ./..."
+      ],
+      "unverified": [
+        "No formal installed binary or daemon was replaced or restarted",
+        "No production npm global installation or Windows machine was mutated"
+      ]
+    }
+  ]
+}

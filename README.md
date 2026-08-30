@@ -29,11 +29,11 @@
 - 🎛️ **并入正在执行的回合（steer）** —— 忙时消息默认直接并入**正在运行**的任务（Codex 原生 `turn/steer`），进度卡片同步交接到最新消息；不支持该能力的 agent 透明回退到 FIFO 队列，`busy_message_mode = "queue"` 可恢复始终排队。`/ps` 在任何模式下都是显式 steer。
 - 🚚 **可审计的一键迁移** —— `cc-connect-next migrate` 清点官方安装、对每个源文件计算哈希、staging 构建校验后原子启用，附带时间戳备份和完整 SHA-256 manifest；宁可安全失败也绝不启用不完整的目标。
 - 🪶 **同一个机器人，开箱即用的官方 lark-cli** —— 新装与迁移可直接安装官方 `lark-cli`，复用 Next 已验证的飞书机器人，创建或复用隔离 profile，并把它设为默认 bot profile；旧 profile、用户 OAuth 与密钥边界完整保留。
-- 🔔 **自我维护的安装** —— `cc-connect-next update` 只走稳定通道并校验 checksums（npm 与独立二进制都支持）；运行中的 daemon 会在新稳定版发布后向每个项目最近活跃的会话**每版本提醒一次**（`update_notice = false` 可关）。提醒卡片带**[立即更新]按钮**，回复「更新」这样的自然语言即可完成升级——不需要输入任何指令。
+- 🔔 **自我维护的安装** —— `cc-connect-next update` 只走稳定通道；独立二进制使用 Foundation 的 immutable Plan、同 Release checksum、双版本探针、锁、备份与回滚，npm/Windows 保留显式宿主 adapter。daemon 对每个新稳定版只提醒一次；点击【查看并更新】或回复「更新」先展示精确 Release/产物，再确认安装，不会批准 A 却安装 B。
 - 🤖 **14 种 Agent × 15 个平台** —— 单进程承载多个项目，每个项目把一个代码目录绑定到独立的 Agent 与平台，各自拥有权限、provider、模型与展示配置。
 - 🌍 **生产级配套** —— `doctor` 诊断、launchd/systemd/Windows daemon、Web 管理台（Beta）、定时任务与 webhook、机器人间 relay、语音输入/输出（STT/TTS）、多工作区路由，五语言 i18n（en、zh、zh-TW、ja、es）。
 
-- **一句话反馈。** 遇到 bug 或缺失的能力？`/feedback` 直接把问题提交为作者仓库的 GitHub issue——自动脱敏、无需 GitHub 账号，回合失败时 daemon 还会主动提示你。
+- **可审阅的一句话反馈。** 遇到 bug 或缺失能力时，`/feedback` 先展示 Foundation 生成的完整脱敏预览；只有独立的提交按钮或 `confirm` 才会发送同一份草稿。作者侧 Relay 固定目标仓库并渲染 Issue，无需 GitHub 账号，取消和未批准始终零请求。
 
 ## 🎬 实际效果
 
@@ -74,6 +74,8 @@ cc-connect-next
 不知道当前项目能做什么、怎样调用、是否可用或能否配置时，直接用自然语言问连接的 Agent。Agent 会查询当前版本/项目/会话的只读
 [Agent Capability Manifest](docs/agent-capability-manifest.zh-CN.md)，其中统一包含配置、CLI 工具、聊天命令、Skills、运行态适配器能力、参数、权限、副作用、退化行为和可用性原因；也可以手动运行
 `cc-connect-next capabilities --search "关键词"`。只查配置时仍可使用 `cc-connect-next config capabilities --search "关键词"`，完整逐项说明见[配置能力参考](docs/configuration.zh-CN.md)。
+Feedback 与 Update 的 Foundation/宿主职责、精确 Plan 和 Relay 边界见
+[Awesome Agent App Features 接入说明](docs/agent-app-features.zh-CN.md)。
 
 跑通后安装为系统服务：
 

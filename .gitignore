@@ -55,6 +55,10 @@ config.*.toml
 package-lock.json
 node_modules/
 .vite/
+# The Feedback Relay is a declared source-subtree delivery. Its lockfile and
+# self-contained tests must remain versioned even though root-level copies are
+# ignored elsewhere in this Go repository.
+!feedback-relay/package-lock.json
 
 # ============================================================================
 # Build & distribution
@@ -73,9 +77,12 @@ web/tsconfig.tsbuildinfo
 # Testing & temporary files
 # ============================================================================
 test/
+!feedback-relay/test/
+!feedback-relay/test/**
 scripts/*
 !scripts/check-release-assets.js
 !scripts/check-release-version.js
+!scripts/verify-agent-app-features.sh
 !scripts/release-channel-policy.js
 !scripts/release-policy.test.js
 !scripts/web-cron-session-targets.test.js

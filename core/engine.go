@@ -423,10 +423,11 @@ type Engine struct {
 	// recency so natural-language consent ("更新", "confirm") can be
 	// honored without hijacking unrelated messages.
 	updateIntents updateIntentState
-	// updateCheckFn / selfUpdateFn are test seams; production uses
-	// CheckForUpdate / SelfUpdate.
-	updateCheckFn func(currentVersion string, useGitee bool) (*ReleaseInfo, error)
-	selfUpdateFn  func(tag string, useGitee bool) error
+	// updateService prepares one immutable Foundation-backed Plan and applies
+	// that same Plan only after the host receives explicit approval.
+	updateServiceMu sync.Mutex
+	updateService   UpdateService
+	updatePlans     map[string]pendingUpdatePlan
 
 	hooks              *HookManager
 	cronScheduler      *CronScheduler
@@ -478,13 +479,12 @@ type Engine struct {
 	// The reply footer contains model and reasoning effort only.
 	replyFooterEnabled bool
 
-	// Feedback channel state (see core/feedback.go). feedbackPostFn is a
-	// test seam; production uses postFeedback.
-	feedbackMu        sync.Mutex
-	feedbackEnabled   bool
-	feedbackEndpoint  string
-	feedbackInstallID string
-	feedbackGapKeys   []string
+	// Feedback channel state (see core/feedback.go). The pending map stores
+	// only fully redacted Foundation drafts awaiting a separate user action.
+	feedbackMu       sync.Mutex
+	feedbackEnabled  bool
+	feedbackEndpoint string
+	feedbackGapKeys  []string
 	// configCatalog is the version/build-matched, value-free configuration
 	// contract included in the unified Agent Capability Manifest. It is set at
 	// bootstrap and never reads the operator's current config values.
@@ -495,7 +495,8 @@ type Engine struct {
 	capabilityBrief     string
 	feedbackErrors      map[string]*feedbackError
 	feedbackErrorHintAt map[string]time.Time
-	feedbackPostFn      func(endpoint string, sub FeedbackSubmission) (string, error)
+	feedbackPending     map[string]pendingFeedback
+	feedbackSubmitFn    feedbackSubmitFunc
 
 	// When true, /list etc. only show sessions tracked by cc-connect-next,
 	// hiding sessions created by direct CLI usage in the same work_dir.
@@ -13405,11 +13406,6 @@ func (e *Engine) handleCardNav(action string, sessionKey string) *Card {
 		return e.handleModelCardAction(args, sessionKey)
 	}
 
-	if prefix == "act" && cmd == "/feedback" {
-		e.handleFeedbackCardAction(args, sessionKey)
-		return nil
-	}
-
 	if prefix == "act" {
 		e.executeCardAction(cmd, args, sessionKey)
 	}
@@ -16647,7 +16643,11 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 	}
 
 	if subCmd == "confirm" {
-		e.cmdUpgradeConfirm(p, msg)
+		token := ""
+		if len(args) > 1 {
+			token = args[1]
+		}
+		e.cmdUpgradeConfirm(p, msg, token)
 		return
 	}
 
@@ -16660,69 +16660,74 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 		return
 	}
 
-	useGitee := e.i18n.IsZhLike()
-	release, err := e.checkForUpdate(cur, useGitee)
+	service, err := e.currentUpdateService()
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
 	}
-	if release == nil {
+	prepareCtx, cancel := context.WithTimeout(e.ctx, 45*time.Second)
+	defer cancel()
+	plan, err := service.Prepare(prepareCtx)
+	if err != nil {
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		return
+	}
+	if !plan.Available {
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeUpToDate), cur))
 		return
 	}
 
-	body := localizedReleaseBodyPreview(release.Body, e.i18n.CurrentLang())
+	body := localizedReleaseBodyPreview(plan.Release.Body, e.i18n.CurrentLang())
+	details := e.i18n.Tf(MsgUpgradePlanDetails, plan.ArchiveAsset, body)
 
-	// The prompt opens a short natural-language consent window: a following
-	// "确认" / "yes" (or the button) installs without further syntax. The
-	// button copy omits the reply instruction so the card carries one CTA.
+	// Store the exact immutable plan before opening the consent window. Confirm
+	// never re-resolves latest or swaps the reviewed release/assets/checksum.
+	token, err := e.rememberUpdatePlan(msg.SessionKey, msg.UserID, plan)
+	if err != nil {
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		return
+	}
 	e.updateIntents.recordAsk(msg.SessionKey)
-	e.replyUpdateActionable(p, msg.ReplyCtx,
-		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailableAction), cur, release.TagName, body),
-		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, release.TagName, body))
+	e.replyUpdateActionable(p, msg.ReplyCtx, token,
+		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailableAction), cur, plan.Release.TagName, details),
+		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, plan.Release.TagName, details))
 }
 
-// checkForUpdate and selfUpdate route through the engine's test seams.
-func (e *Engine) checkForUpdate(cur string, useGitee bool) (*ReleaseInfo, error) {
-	if e.updateCheckFn != nil {
-		return e.updateCheckFn(cur, useGitee)
-	}
-	return CheckForUpdate(cur, useGitee)
-}
-
-func (e *Engine) selfUpdate(tag string, useGitee bool) error {
-	if e.selfUpdateFn != nil {
-		return e.selfUpdateFn(tag, useGitee)
-	}
-	return SelfUpdate(tag, useGitee)
-}
-
-func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message) {
+func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message, token string) {
 	cur := CurrentVersion
 	if cur == "" || cur == "dev" {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradeDevBuild))
 		return
 	}
 
-	useGitee := e.i18n.IsZhLike()
-	release, err := e.checkForUpdate(cur, useGitee)
+	plan, exists := e.pendingUpdatePlan(msg.SessionKey, msg.UserID, token)
+	if !exists {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradePlanMissing))
+		return
+	}
+
+	service, err := e.currentUpdateService()
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
 	}
-	if release == nil {
+	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeDownloading), plan.Release.TagName))
+
+	result, err := service.Apply(e.ctx, plan)
+	if err != nil {
+		if terminalUpdatePlanError(err) {
+			e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
+		}
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		return
+	}
+	e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
+	if !result.Updated {
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeUpToDate), cur))
 		return
 	}
 
-	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeDownloading), release.TagName))
-
-	if err := e.selfUpdate(release.TagName, useGitee); err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
-		return
-	}
-
-	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeSuccess), release.TagName))
+	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeSuccess), result.Release.TagName))
 
 	// Auto-restart to apply the update
 	select {
