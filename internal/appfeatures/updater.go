@@ -368,6 +368,10 @@ func (service *UpdateService) applyHostStandalone(ctx context.Context, state *up
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return "", fmt.Errorf("current executable is missing or unsafe")
 	}
+	backup := target + ".old"
+	if err := service.removeVerifiedStaleWindowsBackup(ctx, target, backup); err != nil {
+		return backup, err
+	}
 
 	service.emit(featureupdater.Event{Stage: featureupdater.StageDownloadingArchive, TargetVersion: state.release.Tag, Asset: state.asset.Name})
 	archivePath, archiveBytes, err := service.downloadFile(ctx, state.asset, maxHostArchiveBytes, filepath.Dir(target))
@@ -400,7 +404,6 @@ func (service *UpdateService) applyHostStandalone(ctx context.Context, state *up
 	}
 	service.emit(featureupdater.Event{Stage: featureupdater.StageStagedVerified, TargetVersion: state.release.Tag, Asset: state.asset.Name})
 
-	backup := target + ".old"
 	if _, err := os.Lstat(backup); err == nil {
 		return backup, fmt.Errorf("refusing to overwrite existing update backup %s", backup)
 	} else if !os.IsNotExist(err) {
@@ -434,6 +437,33 @@ func (service *UpdateService) applyHostStandalone(ctx context.Context, state *up
 		return backup, nil
 	}
 	return "", nil
+}
+
+func (service *UpdateService) removeVerifiedStaleWindowsBackup(ctx context.Context, target, backup string) error {
+	info, err := os.Lstat(backup)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect stale update backup: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return fmt.Errorf("existing update backup is unsafe: %s", backup)
+	}
+	targetHash, err := updateFileSHA256(target)
+	if err != nil {
+		return fmt.Errorf("hash current executable before removing stale update backup: %w", err)
+	}
+	if err := service.verifier.Verify(ctx, target, service.config.CurrentVersion); err != nil {
+		return fmt.Errorf("verify current executable before removing stale update backup: %w", err)
+	}
+	if err := requireUpdateFileHash(target, targetHash, "current version probe modified the binary before stale backup cleanup"); err != nil {
+		return err
+	}
+	if err := os.Remove(backup); err != nil {
+		return fmt.Errorf("remove verified stale update backup: %w", err)
+	}
+	return nil
 }
 
 func exactUpdateAsset(release featureupdater.Release, name string) (featureupdater.Asset, error) {

@@ -26,6 +26,9 @@
 - The host-owned Relay entrypoint translates the exact legacy CC Connect
   schema-1 request into the new structured Foundation request, allowing an
   in-place Worker rollout without breaking existing installed clients.
+- Windows standalone updates now remove a retained `.old` file before the next
+  transaction only after the current executable passes an exact, non-mutating
+  version probe; an unverified current binary keeps the recovery backup intact.
 
 ## v0.2.1 (2026-08-30)
 

@@ -80,7 +80,7 @@
         "internal/appfeatures/testdata/approved-feedback-v1.json",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-08-30T16:52:14Z",
+      "verified_at": "2026-08-30T17:02:37Z",
       "checks": [
 		"GOWORK=off go test -race ./... -count=1",
 		"GOWORK=off go test ./core -run TestCUJ -count=1",
@@ -141,7 +141,7 @@
         "internal/appfeatures/live_test.go",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-08-30T16:52:14Z",
+      "verified_at": "2026-08-30T17:02:37Z",
       "checks": [
 		"GOWORK=off go test -race ./... -count=1",
 		"GOWORK=off go test ./core -run TestCUJ -count=1",

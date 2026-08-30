@@ -126,6 +126,99 @@ func TestUpdateServiceWindowsHostAdapterPreservesExactPlanAndRollbackBoundaries(
 	assertTargetVersion(t, target, "v1.1.0")
 }
 
+func TestUpdateServiceWindowsHostAdapterRemovesVerifiedStaleBackupBeforeNextUpdate(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, ProductName+".exe")
+	backup := target + ".old"
+	if err := os.WriteFile(target, versionScript("v1.1.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backup, versionScript("v1.0.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	service, err := newUpdateService(UpdateConfig{
+		CurrentVersion: "v1.1.0",
+		ExecutablePath: target,
+		Source:         windowsUpdateSource(t, "v1.2.0"),
+	}, "windows", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := service.Prepare(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Apply(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Apply with verified stale backup: %v", err)
+	}
+	if !result.Updated || result.BackupRetainedAt != "" {
+		t.Fatalf("result = %#v", result)
+	}
+	if _, err := os.Lstat(backup); !os.IsNotExist(err) {
+		t.Fatalf("stale backup still exists: %v", err)
+	}
+	assertTargetVersion(t, target, "v1.2.0")
+}
+
+func TestUpdateServiceWindowsHostAdapterPreservesBackupWhenCurrentTargetIsUnverified(t *testing.T) {
+	directory := t.TempDir()
+	target := filepath.Join(directory, ProductName+".exe")
+	backup := target + ".old"
+	if err := os.WriteFile(target, versionScript("v0.9.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backup, versionScript("v1.0.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := windowsUpdateSource(t, "v1.2.0")
+	service, err := newUpdateService(UpdateConfig{
+		CurrentVersion: "v1.1.0",
+		ExecutablePath: target,
+		Source:         source,
+	}, "windows", "amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	retainedBackup := service.Installation().ExecutablePath + ".old"
+	plan, err := service.Prepare(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Apply(context.Background(), plan)
+	if err == nil || !strings.Contains(err.Error(), "verify current executable before removing stale update backup") {
+		t.Fatalf("Apply error = %v", err)
+	}
+	if result.BackupRetainedAt != retainedBackup {
+		t.Fatalf("backup retained at %q, want %q", result.BackupRetainedAt, retainedBackup)
+	}
+	if source.downloads.Load() != 1 {
+		t.Fatalf("downloads = %d, want checksum-only Prepare", source.downloads.Load())
+	}
+	assertTargetVersion(t, target, "v0.9.0")
+	assertTargetVersion(t, backup, "v1.0.0")
+}
+
+func windowsUpdateSource(t *testing.T, targetVersion string) *memoryUpdateSource {
+	t.Helper()
+	archiveName := releaseArchiveName(targetVersion, "windows", "amd64")
+	binaryName := releaseBinaryName(targetVersion, "windows", "amd64")
+	payload := zipBinary(t, binaryName, versionScript(targetVersion))
+	return &memoryUpdateSource{
+		release: featureupdater.Release{
+			Tag: targetVersion,
+			Assets: []featureupdater.Asset{
+				{Name: archiveName, DownloadURL: "https://example.invalid/" + archiveName, Size: int64(len(payload))},
+				{Name: "checksums.txt", DownloadURL: "https://example.invalid/checksums.txt"},
+			},
+		},
+		payloads: map[string][]byte{
+			archiveName:     payload,
+			"checksums.txt": []byte(fmt.Sprintf("%x  %s\n", sha256.Sum256(payload), archiveName)),
+		},
+	}
+}
+
 func TestUpdateServicesSerializeTheSameExecutableAcrossHostEntryPoints(t *testing.T) {
 	target, baseSource := updateFixture(t, "v1.0.0", "v1.1.0")
 	started := make(chan struct{})
