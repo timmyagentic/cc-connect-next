@@ -155,11 +155,10 @@ func (e *Engine) maybeHandleUpdateIntent(p Platform, msg *Message, content strin
 
 	switch intent {
 	case updateIntentStrong:
-		// Inside an update conversation the prompt has already been shown;
-		// an explicit "更新到最新版" is confirmation. Outside one, show the
-		// release first — installing restarts the daemon, which kills any
-		// running turn, so that deserves one look before it happens.
-		if e.updateIntents.noticeActive(msg.SessionKey) || e.updateIntents.askActive(msg.SessionKey) {
+		// A discovery notice is not an immutable update Plan. First prepare and
+		// render the exact release/assets/checksum; only a reply after that Plan
+		// is shown can confirm installation.
+		if e.updateIntents.askActive(msg.SessionKey) {
 			return e.handleCommand(p, msg, "/upgrade confirm")
 		}
 		return e.handleCommand(p, msg, "/upgrade")
@@ -167,7 +166,10 @@ func (e *Engine) maybeHandleUpdateIntent(p Platform, msg *Message, content strin
 		if !e.updateIntents.noticeActive(msg.SessionKey) && !e.updateIntents.askActive(msg.SessionKey) {
 			return false // ambiguous outside an update conversation → agent
 		}
-		return e.handleCommand(p, msg, "/upgrade confirm")
+		if e.updateIntents.askActive(msg.SessionKey) {
+			return e.handleCommand(p, msg, "/upgrade confirm")
+		}
+		return e.handleCommand(p, msg, "/upgrade")
 	case updateIntentConfirm:
 		if !e.updateIntents.askActive(msg.SessionKey) {
 			return false // generic assent belongs to whatever else is pending
@@ -216,7 +218,7 @@ func localizedReleaseBodyPreview(body string, lang Language) string {
 	return previewReleaseBody(releaseBodyForLanguage(body, lang))
 }
 
-// replyUpdateActionable delivers the release details with an [update now]
+// replyUpdateActionable delivers the exact release Plan with a confirm action
 // action on platforms that support cards or inline buttons, falling back to
 // plain text elsewhere. The buttons reuse the cmd:/ scheme, so a tap goes
 // through exactly the gates a typed command would.

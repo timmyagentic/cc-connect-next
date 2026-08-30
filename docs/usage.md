@@ -153,23 +153,23 @@ support, or a capability you wish existed — you can report it straight to the
 project author from chat. No GitHub account is needed: the daemon submits the
 report through an author-operated relay and replies with the issue link.
 
-```
-/feedback <describe it>   # one command — recent errors and unsupported
-                          # config keys are attached automatically
+```text
+/feedback <describe it>   # build and render the complete redacted draft
+/feedback confirm         # submit that exact pending draft
+/feedback cancel          # discard it without a request
 ```
 
-The daemon also prompts you proactively. On card platforms (Feishu) it
-summarizes the problem and asks "Report to the author?" with agree/ignore
-buttons — agreeing is one tap, no command to learn. After a failed turn the
-ask appears at most once per 10 minutes per chat; unsupported config keys
-are announced once per distinct key set on startup. Platforms without
-buttons fall back to a one-line `/feedback` pointer.
+The daemon also prepares previews proactively. Card platforms show the full
+description, recent error, capability gaps, and allowlisted environment beside
+submit/ignore buttons. Text platforms show the same fields and the confirm or
+cancel commands. Failed-turn previews are throttled per chat; unsupported
+config key sets are announced once across restarts.
 
-Reports are submitted the moment you send the command — invoking `/feedback`
-is the consent. Credentials, chat/user ids, and filesystem paths are redacted
-automatically, and the auto-generated environment section carries only the
-version, OS/arch, and agent type. Disable the whole channel with
-`[feedback] enabled = false` in config.toml.
+`/feedback` itself never submits. Credentials, chat/user ids, email addresses,
+and filesystem paths are redacted and bounded before the preview exists. Only
+the exact pending Foundation Draft can become an opaque Approved value after a
+separate action; cancellation, expiry, and missing approval make zero network
+requests. Disable the channel with `[feedback] enabled = false`.
 
 ---
 

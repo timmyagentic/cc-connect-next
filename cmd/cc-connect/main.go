@@ -540,7 +540,7 @@ func main() {
 		if feedbackEndpoint == "" {
 			feedbackEndpoint = core.DefaultFeedbackEndpoint
 		}
-		engine.SetFeedbackConfig(cfg.FeedbackEnabled(), feedbackEndpoint, core.EnsureInstallID(cfg.DataDir))
+		engine.SetFeedbackConfig(cfg.FeedbackEnabled(), feedbackEndpoint)
 		engine.SetFeedbackCapabilityGaps(cfg.UnknownConfigKeys)
 		engine.SetConfigCatalog(configCatalog)
 		// Give the Agent a bounded, version-matched capability capsule and teach

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -163,6 +165,27 @@ type FeedbackConfig struct {
 // FeedbackEnabled resolves the [feedback] enabled flag (default true).
 func (c *Config) FeedbackEnabled() bool {
 	return c.Feedback.Enabled == nil || *c.Feedback.Enabled
+}
+
+func validateFeedbackEndpoint(raw string) error {
+	value, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || value.Host == "" || value.User != nil || value.RawQuery != "" || value.Fragment != "" || value.Opaque != "" {
+		return fmt.Errorf("config: feedback.endpoint is invalid")
+	}
+	if value.EscapedPath() != "/v1/feedback" {
+		return fmt.Errorf("config: feedback.endpoint path must be /v1/feedback")
+	}
+	if value.Scheme == "https" {
+		return nil
+	}
+	if value.Scheme == "http" {
+		host := value.Hostname()
+		ip := net.ParseIP(host)
+		if strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback()) {
+			return nil
+		}
+	}
+	return fmt.Errorf("config: feedback.endpoint must use HTTPS (HTTP is allowed only for loopback development)")
 }
 
 // CronConfig controls cron job behavior.
@@ -1137,6 +1160,11 @@ func (c *Config) validateInternal(permissive bool) error {
 	}
 	if err := validateDisplayConfig("display", &c.Display); err != nil {
 		return err
+	}
+	if strings.TrimSpace(c.Feedback.Endpoint) != "" {
+		if err := validateFeedbackEndpoint(c.Feedback.Endpoint); err != nil {
+			return err
+		}
 	}
 	if _, known := NormalizeLanguage(c.Language); !known {
 		// Not fatal: official CC Connect also falls back to detection here, and

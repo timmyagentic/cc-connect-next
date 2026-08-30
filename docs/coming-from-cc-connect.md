@@ -28,11 +28,11 @@ Official CC Connect queues busy-time messages FIFO: they wait for the next turn.
 
 ### 4. Installs take care of themselves
 
-`cc-connect-next update` follows the stable channel with checksum verification for both npm and standalone binaries; after a release, the daemon reminds each project's most recent chat **once** (`update_notice = false` to opt out). `doctor` checks config, agent CLI login state, platforms, dependencies, and network in one command.
+`cc-connect-next update` follows the stable channel. Standalone installs use an immutable Foundation Plan with same-release checksums, staged/installed probes, backup, and rollback; npm and Windows remain explicit host adapters. After a release, the daemon reminds each project's most recent chat **once** and asks the user to review the exact plan before confirmation. `doctor` checks config, agent CLI login state, platforms, dependencies, and network in one command.
 
-### 5. When something breaks, feedback is one command
+### 5. When something breaks, feedback stays one short flow
 
-`/feedback` in the chat files the problem as a GitHub issue to the author: automatically redacted, anonymously relayed, no GitHub account needed — and the daemon points you at it whenever a turn fails.
+`/feedback` renders the complete redacted Foundation draft first; a separate button or `confirm` submits that exact preview through the anonymous author relay. Cancel and missing approval make no request, no GitHub account is needed, and failed turns can prepare the same reviewable preview proactively.
 
 Everything else (14 agents × 15 platforms, cron & webhooks, voice in/out, web admin, five-language i18n) is in the [main README](../README.en.md).
 

@@ -54,6 +54,19 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
+      - name: Verify extracted Feedback Relay delivery
+        working-directory: feedback-relay
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run check
+          npm run typecheck
+          npm run types:check
+          npm run validate:worker
+          npm audit --audit-level=high
+          cd ..
+          node --test internal/appfeatures/feedback_contract.test.mjs
+
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
@@ -65,6 +78,7 @@ jobs:
           set -euo pipefail
           go mod download
           go mod verify
+          ./scripts/verify-agent-app-features.sh
           go build ./...
           go test -race ./...
           go test -tags=smoke ./tests/e2e/...

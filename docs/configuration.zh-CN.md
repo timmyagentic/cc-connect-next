@@ -844,7 +844,7 @@ projects.agent.options.codex_home 未设置时选择 Codex Home。
 
 ### `feedback.endpoint`
 
-覆盖作者维护的匿名反馈中继地址。
+覆盖作者维护的匿名 Feedback v1 中继；必须是 HTTPS 的精确 /v1/feedback（仅本机开发可用 HTTP）。
 
 - 来源：`toml`
 - 配置位置：`[feedback]`
@@ -5621,7 +5621,7 @@ Agent 流式输出期间持续更新一条预览消息。
 
 ### `update_notice`
 
-有新稳定版时向最近活跃会话发送一次升级提醒。
+每个稳定版向最近活跃会话提醒一次；用户确认前先查看精确 immutable Plan。
 
 - 来源：`toml`
 - 配置位置：`config.toml root`

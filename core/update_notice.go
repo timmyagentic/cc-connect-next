@@ -205,9 +205,9 @@ func (n *UpdateNotifier) saveState() {
 // delivered, so callers can retry later instead of losing the notice.
 //
 // The notice is actionable: platforms with cards or inline buttons get an
-// [update now] button, and the delivered session opens a natural-language
-// consent window so a plain "更新" reply installs the update — no command
-// syntax required.
+// [review update] button, and the delivered session opens a natural-language
+// discovery window so a plain "更新" reply prepares the exact Plan. A second
+// action is still required before installation.
 func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	if release == nil || release.TagName == "" {
 		return false
@@ -218,7 +218,7 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	// fallback spells out the natural-language route.
 	action := e.i18n.Tf(MsgUpdateNoticeAvailableAction, release.TagName, CurrentVersion)
 	text := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
-	key, ok := e.notifyMostRecentSessionFn("update notice", func(p Platform, replyCtx any) error {
+	key, ok := e.notifyMostRecentSessionFn("update notice", func(_ string, p Platform, replyCtx any) error {
 		return e.sendUpdateNotice(p, replyCtx, action, text)
 	})
 	if ok {
@@ -227,7 +227,7 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	return ok
 }
 
-// sendUpdateNotice delivers the notice with [update now] / [what's new]
+// sendUpdateNotice delivers the notice with [review update] / [what's new]
 // actions where the platform supports them, plain text elsewhere. Buttons
 // use the cmd:/ scheme so a tap passes the same gates as a typed command.
 // actionCopy accompanies the buttons (no typed-reply instruction);
@@ -241,8 +241,8 @@ func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, actionCopy, textCopy
 		card := e.renderCardForPlatform(p, NewCard().
 			Markdown(actionCopy).
 			Buttons(
-				CardButton{Text: btnNow, Type: "primary", Value: "cmd:/upgrade confirm"},
-				CardButton{Text: btnLog, Value: "cmd:/upgrade"},
+				CardButton{Text: btnNow, Type: "primary", Value: "cmd:/upgrade"},
+				CardButton{Text: btnLog, Value: "nav:/upgrade"},
 			).
 			Note(hint).
 			Build())
@@ -252,7 +252,7 @@ func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, actionCopy, textCopy
 	}
 	if bs, ok := p.(InlineButtonSender); ok {
 		buttons := [][]ButtonOption{{
-			{Text: btnNow, Data: "cmd:/upgrade confirm"},
+			{Text: btnNow, Data: "cmd:/upgrade"},
 			{Text: btnLog, Data: "cmd:/upgrade"},
 		}}
 		if err := bs.SendWithButtons(e.ctx, replyCtx, withUpdateHint(actionCopy, hint), buttons); err == nil {
@@ -265,7 +265,7 @@ func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, actionCopy, textCopy
 // notifyMostRecentSessionFn invokes deliver for candidates ordered by recent
 // user activity until one succeeds. It returns the receiving session key so
 // callers can associate follow-up state with that conversation.
-func (e *Engine) notifyMostRecentSessionFn(logTag string, deliver func(Platform, any) error) (string, bool) {
+func (e *Engine) notifyMostRecentSessionFn(logTag string, deliver func(string, Platform, any) error) (string, bool) {
 	sessions := e.sessions.AllSessions()
 	idToKey, _ := e.sessions.SessionKeyMap()
 	type candidate struct {
@@ -319,7 +319,7 @@ func (e *Engine) notifyMostRecentSessionFn(logTag string, deliver func(Platform,
 				"session_key", c.key, "error", err)
 			continue
 		}
-		if err := deliver(target, replyCtx); err != nil {
+		if err := deliver(c.key, target, replyCtx); err != nil {
 			slog.Debug(logTag+": send failed", "session_key", c.key, "error", err)
 			continue
 		}

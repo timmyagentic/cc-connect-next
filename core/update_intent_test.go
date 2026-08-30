@@ -81,17 +81,34 @@ func (p *updateIntentStubPlatform) ReconstructReplyCtx(sessionKey string) (any, 
 // privileged-gate test overrides that.
 func upgradeIntentHarness(t *testing.T) (*Engine, *updateIntentStubPlatform) {
 	t.Helper()
+	drainTestRestartRequests()
+	t.Cleanup(drainTestRestartRequests)
 	p := &updateIntentStubPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
 	e.SetAdminFrom("user1")
 	oldVersion := CurrentVersion
 	CurrentVersion = "v1.0.0"
 	t.Cleanup(func() { CurrentVersion = oldVersion })
-	e.updateCheckFn = func(cur string, useGitee bool) (*ReleaseInfo, error) {
-		return &ReleaseInfo{TagName: "v9.9.9", Body: "notes"}, nil
-	}
-	e.selfUpdateFn = func(tag string, useGitee bool) error { return nil }
+	e.SetUpdateService(&stubCoreUpdateService{
+		plan: PreparedUpdate{
+			Release:      ReleaseInfo{TagName: "v9.9.9", Body: "notes"},
+			ArchiveAsset: "cc-connect-next-v9.9.9-test-arch.tar.gz",
+			Available:    true,
+			token:        "exact-plan",
+		},
+		result: UpdateResult{Release: ReleaseInfo{TagName: "v9.9.9"}, Updated: true},
+	})
 	return e, p
+}
+
+func drainTestRestartRequests() {
+	for {
+		select {
+		case <-RestartCh:
+		default:
+			return
+		}
+	}
 }
 
 func updateIntentMsg(content string) *Message {
@@ -115,7 +132,7 @@ func TestUpdateIntent_BareOutsideContextFallsThrough(t *testing.T) {
 	}
 }
 
-func TestUpdateIntent_BareAfterNoticeInstalls(t *testing.T) {
+func TestUpdateIntent_BareAfterNoticePreparesBeforeInstall(t *testing.T) {
 	e, p := upgradeIntentHarness(t)
 	e.updateIntents.recordNotice("test:user1")
 
@@ -124,11 +141,18 @@ func TestUpdateIntent_BareAfterNoticeInstalls(t *testing.T) {
 		t.Fatal("bare intent after a notice must be consumed")
 	}
 	sent := strings.Join(p.getSent(), "\n")
-	if !strings.Contains(sent, "Downloading") {
-		t.Fatalf("expected download to start, got:\n%s", sent)
+	if strings.Contains(sent, "Downloading") || !strings.Contains(sent, "New version available") {
+		t.Fatalf("a discovery notice must lead to exact-plan review before install:\n%s", sent)
 	}
 	if !strings.Contains(sent, "v9.9.9") {
 		t.Fatalf("expected target version in replies, got:\n%s", sent)
+	}
+	p.clearSent()
+	if !e.maybeHandleUpdateIntent(p, updateIntentMsg("确认"), "确认") {
+		t.Fatal("confirm after exact-plan review must be consumed")
+	}
+	if sent := strings.Join(p.getSent(), "\n"); !strings.Contains(sent, "Downloading") {
+		t.Fatalf("expected install after plan confirmation, got:\n%s", sent)
 	}
 }
 
@@ -330,7 +354,7 @@ func TestUpdateNotice_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
 		t.Fatalf("card copy lost the version: %s", body)
 	}
 	if labels := cardButtonLabels(cards[0]); len(labels) != 2 {
-		t.Fatalf("card buttons = %v, want [立即更新 查看变更]", labels)
+		t.Fatalf("card buttons = %v, want [查看并更新 查看变更]", labels)
 	}
 	// The natural-language route stays discoverable, but as a footnote:
 	// subordinate to the button, never a second competing instruction.
@@ -386,9 +410,9 @@ func TestUpgradePrompt_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
 	oldVersion := CurrentVersion
 	CurrentVersion = "v1.0.0"
 	t.Cleanup(func() { CurrentVersion = oldVersion })
-	e.updateCheckFn = func(string, bool) (*ReleaseInfo, error) {
-		return &ReleaseInfo{TagName: "v9.9.9", Body: "notes"}, nil
-	}
+	e.SetUpdateService(&stubCoreUpdateService{
+		plan: PreparedUpdate{Release: ReleaseInfo{TagName: "v9.9.9", Body: "notes"}, ArchiveAsset: "asset.tar.gz", Available: true, token: "plan"},
+	})
 
 	msg := &Message{SessionKey: "feishu:user1", Platform: "feishu", UserID: "user1", ReplyCtx: "rc"}
 	e.cmdUpgrade(p, msg, nil)
@@ -409,7 +433,7 @@ func TestUpgradePrompt_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
 		t.Fatalf("prompt card lost release details:\n%s", body)
 	}
 	if labels := cardButtonLabels(cards[0]); len(labels) != 1 {
-		t.Fatalf("prompt card buttons = %v, want exactly [立即更新]", labels)
+		t.Fatalf("prompt card buttons = %v, want exactly [查看并更新]", labels)
 	}
 	note := cardNotes(cards[0])
 	if !strings.Contains(note, "回复") || !strings.Contains(note, "确认") {
@@ -424,12 +448,17 @@ func TestUpgradePrompt_CardUsesConfiguredReleaseLanguage(t *testing.T) {
 	oldVersion := CurrentVersion
 	CurrentVersion = "v1.0.0"
 	t.Cleanup(func() { CurrentVersion = oldVersion })
-	e.updateCheckFn = func(string, bool) (*ReleaseInfo, error) {
-		return &ReleaseInfo{
-			TagName: "v9.9.9",
-			Body:    "# release\n\n## 中文\n\n中文说明\n\n## English\n\nEnglish notes",
-		}, nil
-	}
+	e.SetUpdateService(&stubCoreUpdateService{
+		plan: PreparedUpdate{
+			Release: ReleaseInfo{
+				TagName: "v9.9.9",
+				Body:    "# release\n\n## 中文\n\n中文说明\n\n## English\n\nEnglish notes",
+			},
+			ArchiveAsset: "asset.tar.gz",
+			Available:    true,
+			token:        "plan",
+		},
+	})
 
 	e.cmdUpgrade(p, &Message{SessionKey: "feishu:user1", Platform: "feishu", UserID: "user1", ReplyCtx: "rc"}, nil)
 	p.mu.Lock()

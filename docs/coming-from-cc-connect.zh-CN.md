@@ -28,11 +28,11 @@ cc-connect-next 是一个**独立后继**，不是补丁、代理或伴生插件
 
 ### 4. 安装会自己照顾自己
 
-`cc-connect-next update` 跟随 stable 渠道，npm 和独立二进制都带校验和验证；新版本发布后，daemon 会在每个项目最近的会话里**只提醒一次**（`update_notice = false` 关闭）。`doctor` 一条命令检查配置、Agent CLI 登录态、平台、依赖和网络。
+`cc-connect-next update` 跟随 stable 渠道。独立安装使用 Foundation immutable Plan、同 Release checksum、双版本探针、备份和回滚，npm/Windows 保持显式宿主 adapter。新版本发布后，daemon 在每个项目最近会话里**只提醒一次**，并要求先查看精确计划再确认。`doctor` 一条命令检查配置、Agent CLI 登录态、平台、依赖和网络。
 
-### 5. 出了问题，一条命令反馈
+### 5. 出了问题，保持短流程反馈
 
-聊天里 `/feedback` 直接把问题作为 GitHub issue 报给作者：自动脱敏、匿名中继、不需要 GitHub 账号；回合失败时 daemon 也会主动提示这个入口。
+聊天里 `/feedback` 先展示完整脱敏的 Foundation 草稿；独立按钮或 `confirm` 才把同一份预览经匿名作者中继提交。取消和未批准始终零请求，不需要 GitHub 账号；回合失败时 daemon 也能主动准备同样可审阅的预览。
 
 其余能力（14 种 Agent × 15 个平台、cron 与 webhook、语音输入输出、Web 管理台、五种语言 i18n）见[主 README](../README.md)。
 
