@@ -842,6 +842,15 @@ func (p *stubProactiveSendPlatform) ReconstructReplyCtx(sessionKey string) (any,
 	return "proactive-rctx", nil
 }
 
+type stubMatchedProactiveSendPlatform struct {
+	stubProactiveSendPlatform
+	matchPrefix string
+}
+
+func (p *stubMatchedProactiveSendPlatform) MatchesSessionKey(sessionKey string) bool {
+	return strings.HasPrefix(sessionKey, p.matchPrefix)
+}
+
 func TestEngineSendToSessionWithAttachments_WorkspacePrefixedSessionKey(t *testing.T) {
 	p := &stubProactiveSendPlatform{
 		stubMediaPlatform: stubMediaPlatform{stubPlatformEngine: stubPlatformEngine{n: "slack"}},
@@ -855,6 +864,27 @@ func TestEngineSendToSessionWithAttachments_WorkspacePrefixedSessionKey(t *testi
 	}
 	if p.reconstructKey != "slack:C123:U1" {
 		t.Fatalf("ReconstructReplyCtx key = %q, want slack:C123:U1", p.reconstructKey)
+	}
+	if got := p.getSent(); len(got) != 1 || got[0] != "delivery ready" {
+		t.Fatalf("sent text = %#v, want one message", got)
+	}
+}
+
+func TestEngineSendToSessionWithAttachments_SessionKeyMatcher(t *testing.T) {
+	p := &stubMatchedProactiveSendPlatform{
+		stubProactiveSendPlatform: stubProactiveSendPlatform{
+			stubMediaPlatform: stubMediaPlatform{stubPlatformEngine: stubPlatformEngine{n: "bridge"}},
+		},
+		matchPrefix: "external:",
+	}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+
+	const sessionKey = "external:room-1:user-1"
+	if err := e.SendToSessionWithAttachments(sessionKey, "delivery ready", nil, nil, nil, false); err != nil {
+		t.Fatalf("SendToSessionWithAttachments returned error: %v", err)
+	}
+	if p.reconstructKey != sessionKey {
+		t.Fatalf("ReconstructReplyCtx key = %q, want %q", p.reconstructKey, sessionKey)
 	}
 	if got := p.getSent(); len(got) != 1 || got[0] != "delivery ready" {
 		t.Fatalf("sent text = %#v, want one message", got)

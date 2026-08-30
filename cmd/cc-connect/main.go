@@ -312,7 +312,7 @@ func main() {
 			// would silently do the wrong thing. Flags fall through to
 			// flag.Parse below unchanged.
 			if !strings.HasPrefix(os.Args[1], "-") {
-				fmt.Fprintf(os.Stderr, "unknown command %q\n\nSubcommands: config, config-example, update, check-update, migrate, provider,\n  send, cron, timer, at, relay, sessions, agent-sid, daemon, feishu, lark-cli, weixin,\n  doctor, web\nRun 'cc-connect-next --help' for flags.\n", os.Args[1])
+				fmt.Fprintf(os.Stderr, "unknown command %q\n\nSubcommands: config, config-example, capabilities, update, check-update, migrate, provider,\n  send, cron, timer, at, relay, sessions, agent-sid, daemon, feishu, lark-cli, weixin,\n  doctor, web\nRun 'cc-connect-next --help' for flags.\n", os.Args[1])
 				os.Exit(2)
 			}
 		}
@@ -543,7 +543,6 @@ func main() {
 		engine.SetFeedbackConfig(cfg.FeedbackEnabled(), feedbackEndpoint, core.EnsureInstallID(cfg.DataDir))
 		engine.SetFeedbackCapabilityGaps(cfg.UnknownConfigKeys)
 		engine.SetConfigCatalog(configCatalog)
-		engine.SetConfigCatalogSearch(config.SearchCapabilities)
 		// Give the Agent a bounded, version-matched capability capsule and teach
 		// it to query the read-only runtime Manifest for exact configuration,
 		// command, Skill, side-effect, fallback, and adapter availability details.

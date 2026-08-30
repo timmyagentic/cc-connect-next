@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -528,17 +529,6 @@ func inferredConfigUnit(key string) string {
 	}
 }
 
-func OptionKeys(options []ConfigOption) []string {
-	keys := make([]string, 0, len(options))
-	for _, option := range options {
-		if !option.Internal {
-			keys = append(keys, option.Key)
-		}
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 // DescribeAgentOptions attaches stable bilingual semantics to an adapter's
 // exact key list. Adapter-specific schemas stay beside their implementation;
 // shared concepts such as work_dir and model are described only once here.
@@ -676,9 +666,9 @@ func platformOption(key string) ConfigOption {
 	docs := map[string]optionDoc{
 		"access_token":                    {description: "Authenticate the Matrix bot account.", zh: "认证 Matrix 机器人账号。", sensitive: true},
 		"account_id":                      {defaultValue: "default", description: "Separate persistent Weixin state for multiple accounts.", zh: "为多个微信账号隔离持久化状态。"},
-		"agent_id":                        {description: "Identify the bot application Agent in the platform tenant.", zh: "指定平台租户中的机器人应用 Agent ID。"},
+		"agent_id":                        {description: "Identify the bot application Agent in the platform tenant.", zh: "指定平台租户中的机器人应用 Agent ID。", keywords: []string{"钉钉工作通知 Agent ID"}},
 		"allow_chat":                      {description: "Restrict Feishu access to selected chat IDs.", zh: "将飞书访问限制在指定会话 ID。", keywords: []string{"群白名单", "chat allowlist"}, example: `allow_chat = "oc_chat_id"`},
-		"allow_from":                      {defaultValue: "empty", description: "Restrict bot access to selected platform user IDs; empty or '*' allows every platform user.", zh: "将机器人访问限制在指定平台用户 ID；留空或 '*' 表示允许所有平台用户。", keywords: []string{"只允许我", "用户白名单", "access control"}, example: `allow_from = "user-id-1,user-id-2"`},
+		"allow_from":                      {defaultValue: "empty", description: "Restrict bot access to selected platform user IDs; empty or '*' allows every platform user.", zh: "将机器人访问限制在指定平台用户 ID；留空或 '*' 表示允许所有平台用户。", keywords: []string{"只允许我", "飞书只允许我使用", "用户白名单", "access control"}, example: `allow_from = "user-id-1,user-id-2"`},
 		"api_base":                        {description: "Override the platform REST API base URL.", zh: "覆盖平台 REST API 基础地址。"},
 		"api_base_url":                    {description: "Override the platform API base URL.", zh: "覆盖平台 API 基础地址。"},
 		"app_id":                          {description: "Identify the bot application.", zh: "标识机器人应用。"},
@@ -687,10 +677,10 @@ func platformOption(key string) ConfigOption {
 		"auto_join":                       {typeName: "bool", defaultValue: "true", description: "Automatically join invited Matrix rooms.", zh: "自动加入受邀的 Matrix 房间。"},
 		"auto_verify":                     {typeName: "bool", defaultValue: "true", description: "Automatically accept Matrix SAS device verification.", zh: "自动接受 Matrix SAS 设备验证。"},
 		"base_url":                        {description: "Override the platform service base URL.", zh: "覆盖平台服务基础地址。"},
-		"bot_id":                          {description: "Identify a WeCom WebSocket bot.", zh: "标识企业微信 WebSocket 机器人。"},
+		"bot_id":                          {description: "Identify a WeCom WebSocket bot.", zh: "标识企业微信 WebSocket 机器人。", keywords: []string{"企业微信 websocket 模式需要什么凭证"}},
 		"bot_secret":                      {description: "Authenticate a WeCom WebSocket bot.", zh: "认证企业微信 WebSocket 机器人。", sensitive: true},
 		"bot_token":                       {description: "Authenticate the Slack bot user.", zh: "认证 Slack 机器人用户。", sensitive: true},
-		"burst_limit":                     {typeName: "integer", defaultValue: "4", description: "Limit separate Weixin outbound messages within one burst window.", zh: "限制一个窗口内独立发送的微信消息数量。"},
+		"burst_limit":                     {typeName: "integer", defaultValue: "4", description: "Limit separate Weixin outbound messages within one burst window.", zh: "限制一个窗口内独立发送的微信消息数量。", keywords: []string{"微信发送次数限制"}},
 		"burst_window_secs":               {typeName: "integer", defaultValue: "86400", description: "Set the Weixin outbound burst window length in seconds.", zh: "设置微信出站突发窗口长度（秒）。"},
 		"callback_aes_key":                {description: "Decrypt encrypted WeCom callback payloads.", zh: "解密企业微信回调负载。", sensitive: true},
 		"callback_path":                   {description: "Set the inbound webhook callback path.", zh: "设置入站 Webhook 回调路径。"},
@@ -716,7 +706,7 @@ func platformOption(key string) ConfigOption {
 		"enable_reactions":                {typeName: "bool", defaultValue: "false", description: "Add a processing reaction to incoming messages.", zh: "为收到的消息添加处理中表情。"},
 		"encrypt_key":                     {description: "Decrypt encrypted Feishu webhook events.", zh: "解密飞书 Webhook 事件。", sensitive: true},
 		"group_only":                      {typeName: "bool", defaultValue: "false", description: "Accept Feishu messages only from group chats.", zh: "仅接受飞书群聊消息。"},
-		"group_reply_all":                 {typeName: "bool", defaultValue: "false", description: "Reply to every group message without requiring a mention.", zh: "无需 @ 即回复所有群消息。", keywords: []string{"无需@", "群聊全部回复"}},
+		"group_reply_all":                 {typeName: "bool", defaultValue: "false", description: "Reply to every group message without requiring a mention.", zh: "无需 @ 即回复所有群消息。", keywords: []string{"无需@", "群聊全部回复", "群里不 @ 也回复"}},
 		"group_reply_all_chats":           {typeName: "string[]", description: "Enable mention-free replies only in selected Feishu chats.", zh: "仅在指定飞书会话中启用无需 @ 的回复。"},
 		"group_reply_all_guilds":          {description: "Enable mention-free replies for a comma-separated list of Discord guild IDs.", zh: "为逗号分隔的 Discord 服务器 ID 列表启用无需 @ 的回复。"},
 		"guild_id":                        {description: "Limit Discord command registration to one guild for faster propagation.", zh: "将 Discord 命令注册限制到单个服务器以加快生效。"},
@@ -735,8 +725,8 @@ func platformOption(key string) ConfigOption {
 		"proxy":                           {description: "Route platform HTTP/WebSocket traffic through an HTTP or SOCKS5 proxy.", zh: "通过 HTTP 或 SOCKS5 代理转发平台 HTTP/WebSocket 流量。"},
 		"proxy_password":                  {description: "Authenticate to the configured platform proxy.", zh: "认证已配置的平台代理。", sensitive: true, requires: []string{"proxy"}},
 		"proxy_username":                  {description: "Set the username for platform proxy authentication.", zh: "设置平台代理认证用户名。", requires: []string{"proxy"}},
-		"reaction_emoji":                  {description: "Choose the processing reaction emoji.", zh: "选择处理中表情。"},
-		"reply_to_trigger":                {typeName: "bool", description: "Reply in Feishu using the triggering message as the reply target.", zh: "在飞书中回复到触发消息。"},
+		"reaction_emoji":                  {description: "Choose the processing reaction emoji.", zh: "选择处理中表情。", keywords: []string{"飞书机器人不要发表情"}},
+		"reply_to_trigger":                {typeName: "bool", description: "Reply in Feishu using the triggering message as the reply target.", zh: "在飞书中回复到触发消息。", keywords: []string{"飞书回复不要引用原消息"}},
 		"require_mention":                 {typeName: "bool", description: "Require an explicit mention before replying in group chats.", zh: "群聊中必须明确 @ 机器人才回复。"},
 		"resolve_mentions":                {typeName: "bool", description: "Resolve Feishu mentions to readable names before sending text to the Agent.", zh: "发送给 Agent 前将飞书 @ 解析为可读名称。"},
 		"respond_to_at_everyone_and_here": {typeName: "bool", defaultValue: "false", description: "Treat @everyone/@here as a valid bot mention.", zh: "将 @everyone/@here 视为有效的机器人提及。"},
@@ -1050,15 +1040,12 @@ func coalescedConfigOptions(options []ConfigOption) []ConfigOption {
 		if option.Internal {
 			continue
 		}
-		identity := strings.Join([]string{
-			option.Path, option.Key, string(option.Scope), string(option.Source), option.Placement, option.Type, option.Default,
-			string(option.DefaultSource), string(option.Requirement), strings.Join(option.RequiredWhen, "\x1f"),
-			strings.Join(option.Requires, "\x1f"), strings.Join(option.ConflictsWith, "\x1f"),
-			formatOptionalConfigNumber(option.Minimum), formatOptionalConfigNumber(option.Maximum), option.Unit,
-			strings.Join(option.Values, "\x1f"), fmt.Sprintf("%t/%t", option.ClosedValues, option.OpenValues), option.Description, option.DescriptionZH,
-			strings.Join(option.Keywords, "\x1f"), string(option.ApplyMode),
-			fmt.Sprintf("%t/%t", option.Sensitive, option.Deprecated), option.Example, formatPresetIdentity(option.PresetValues),
-		}, "\x1e")
+		identityOption := option
+		identityOption.Owner = ""
+		identity := fmt.Sprintf("%#v", identityOption)
+		if identityJSON, err := json.Marshal(identityOption); err == nil {
+			identity = string(identityJSON)
+		}
 		current := groups[identity]
 		if current == nil {
 			copy := option
@@ -1085,21 +1072,6 @@ func coalescedConfigOptions(options []ConfigOption) []ConfigOption {
 		return out[i].Path < out[j].Path
 	})
 	return out
-}
-
-func formatOptionalConfigNumber(value *float64) string {
-	if value == nil {
-		return ""
-	}
-	return formatConfigContractNumber(*value)
-}
-
-func formatPresetIdentity(values []ConfigPresetValue) string {
-	var parts []string
-	for _, value := range values {
-		parts = append(parts, strings.Join([]string{value.Preset, value.Value, value.Description, value.DescriptionZH}, "\x1f"))
-	}
-	return strings.Join(parts, "\x1e")
 }
 
 func ownerSuffix(option ConfigOption) string {
@@ -1177,12 +1149,6 @@ func BuildAgentCapabilityBrief(catalog ConfigCatalog, agent string, platforms []
 		}
 	}
 	return strings.TrimSpace(b.String())
-}
-
-// BuildConfigurationCapabilityBrief is retained for source compatibility.
-// New runtime sessions should use BuildAgentCapabilityBrief.
-func BuildConfigurationCapabilityBrief(catalog ConfigCatalog, agent string, platforms []string) string {
-	return BuildAgentCapabilityBrief(catalog, agent, platforms)
 }
 
 func containsString(values []string, target string) bool {

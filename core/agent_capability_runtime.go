@@ -95,12 +95,12 @@ var agentToolDefinitions = []agentToolDefinition{
 	},
 }
 
-func (e *Engine) agentToolCapabilities(sessionKey string) []AgentToolCapability {
+func (e *Engine) agentToolCapabilities(snapshot capabilitySnapshot) []AgentToolCapability {
 	result := make([]AgentToolCapability, 0, len(agentToolDefinitions))
 	for _, definition := range agentToolDefinitions {
 		availability := available("This read-only tool is compiled into the current build.", "该只读工具已编译进当前构建。")
 		if definition.probe != "" {
-			availability = e.commandCapabilityAvailability(definition.id, definition.probe, sessionKey)
+			availability = e.commandCapabilityAvailability(definition.id, definition.probe, snapshot)
 		}
 		fallback := definition.fallback
 		if fallback.Mode == "" {
@@ -115,10 +115,10 @@ func (e *Engine) agentToolCapabilities(sessionKey string) []AgentToolCapability 
 	return result
 }
 
-func (e *Engine) runtimeAdapterCapabilities(sessionKey string, includeAll bool) []RuntimeAdapterCapabilities {
+func (e *Engine) runtimeAdapterCapabilities(snapshot capabilitySnapshot, includeAll bool) []RuntimeAdapterCapabilities {
 	result := []RuntimeAdapterCapabilities{e.agentRuntimeCapabilities()}
-	if session := e.activeCapabilitySession(sessionKey); session != nil && session.Alive() {
-		result = append(result, e.sessionRuntimeCapabilities(session))
+	if snapshot.session != nil && snapshot.session.Alive() {
+		result = append(result, e.sessionRuntimeCapabilities(snapshot.session))
 	} else {
 		result = append(result, e.unboundSessionRuntimeCapabilities())
 	}
@@ -131,7 +131,7 @@ func (e *Engine) runtimeAdapterCapabilities(sessionKey string, includeAll bool) 
 	sort.Slice(platforms, func(i, j int) bool { return platforms[i].Name() < platforms[j].Name() })
 	for _, platform := range platforms {
 		status := statusByName[platform.Name()]
-		result = append(result, e.platformRuntimeCapabilities(platform, status, sessionKey))
+		result = append(result, e.platformRuntimeCapabilities(platform, status, snapshot))
 	}
 	if includeAll {
 		activeAgents := map[string]bool{e.agent.Name(): true}
@@ -258,30 +258,27 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 	return result
 }
 
+type sessionRuntimeCapabilitySpec struct {
+	id, description, zh           string
+	unboundDescription, unboundZH string
+	fallback, fallbackZH          string
+	supported                     func(AgentSession) bool
+}
+
+var sessionRuntimeCapabilitySpecs = []sessionRuntimeCapabilitySpec{
+	{id: "turn_options", description: "Apply model, reasoning, service tier, or answer profile to one turn.", zh: "为单个回合应用模型、推理强度、服务等级或回答档位。", unboundDescription: "Apply runtime settings to one turn.", unboundZH: "为单个回合应用运行时设置。", fallback: "Use persistent Agent defaults.", fallbackZH: "使用 Agent 持久默认值。", supported: func(session AgentSession) bool { _, ok := session.(TurnOptionsSession); return ok }},
+	{id: "steer", description: "Append input to the active turn.", zh: "把输入并入当前回合。", unboundDescription: "Append input to the active turn.", unboundZH: "把输入并入当前回合。", fallback: "Use FIFO for ordinary busy messages; /ps rejects when it cannot safely supplement.", fallbackZH: "普通忙时消息使用 FIFO；/ps 无法安全补充时会拒绝。", supported: func(session AgentSession) bool { _, ok := session.(SteerableSession); return ok }},
+	{id: "context_usage", description: "Report live context-window usage.", zh: "报告实时上下文窗口用量。", unboundDescription: "Report live context-window usage.", unboundZH: "报告实时上下文窗口用量。", fallback: "No live context percentage is shown.", fallbackZH: "不显示实时上下文百分比。", supported: func(session AgentSession) bool { _, ok := session.(ContextUsageReporter); return ok }},
+	{id: "cancel_turn", description: "Cancel the current turn without destroying the process.", zh: "取消当前回合而不销毁进程。", unboundDescription: "Cancel the active turn.", unboundZH: "取消活动回合。", fallback: "Close and recreate the Agent session when cancellation is required.", fallbackZH: "需要取消时关闭并重建 Agent 会话。", supported: func(session AgentSession) bool { _, ok := session.(AgentSessionCanceller); return ok }},
+	{id: "live_mode", description: "Apply a permission-mode change to the live process.", zh: "把权限模式变更应用到活动进程。", unboundDescription: "Apply a permission-mode change live.", unboundZH: "实时应用权限模式变更。", fallback: "Apply the mode on the next session.", fallbackZH: "在下一个会话中应用模式。", supported: func(session AgentSession) bool { _, ok := session.(LiveModeSwitcher); return ok }},
+	{id: "set_session_title", description: "Persist a title in the backing Agent session.", zh: "在 Agent 后端会话中持久化标题。", unboundDescription: "Persist a backing Agent session title.", unboundZH: "持久化 Agent 后端会话标题。", fallback: "Keep the title in cc-connect-next session metadata.", fallbackZH: "仅在 cc-connect-next 会话元数据中保存标题。", supported: func(session AgentSession) bool { _, ok := session.(SessionTitleSetter); return ok }},
+	{id: "initial_session_title", description: "Initialize the backing Agent title from the first real request.", zh: "根据首个真实请求初始化 Agent 后端标题。", unboundDescription: "Initialize a fresh backing Agent title.", unboundZH: "初始化新 Agent 后端会话标题。", fallback: "Use the local fallback session title.", fallbackZH: "使用本地回退会话标题。", supported: func(session AgentSession) bool { _, ok := session.(InitialSessionTitleSetter); return ok }},
+}
+
 func (e *Engine) sessionRuntimeCapabilities(session AgentSession) RuntimeAdapterCapabilities {
 	result := RuntimeAdapterCapabilities{Kind: "session", Name: e.agent.Name() + ":active", State: CapabilityAvailable}
-	type probe struct {
-		id, description, zh, fallback, fallbackZH string
-		ok                                        bool
-	}
-	_, turnOptions := session.(TurnOptionsSession)
-	_, steer := session.(SteerableSession)
-	_, contextUsage := session.(ContextUsageReporter)
-	_, cancel := session.(AgentSessionCanceller)
-	_, liveMode := session.(LiveModeSwitcher)
-	_, title := session.(SessionTitleSetter)
-	_, initialTitle := session.(InitialSessionTitleSetter)
-	probes := []probe{
-		{"turn_options", "Apply model, reasoning, service tier, or answer profile to one turn.", "为单个回合应用模型、推理强度、服务等级或回答档位。", "Use persistent Agent defaults.", "使用 Agent 持久默认值。", turnOptions},
-		{"steer", "Append input to the active turn.", "把输入并入当前回合。", "Use FIFO for ordinary busy messages; /ps rejects when it cannot safely supplement.", "普通忙时消息使用 FIFO；/ps 无法安全补充时会拒绝。", steer},
-		{"context_usage", "Report live context-window usage.", "报告实时上下文窗口用量。", "No live context percentage is shown.", "不显示实时上下文百分比。", contextUsage},
-		{"cancel_turn", "Cancel the current turn without destroying the process.", "取消当前回合而不销毁进程。", "Close and recreate the Agent session when cancellation is required.", "需要取消时关闭并重建 Agent 会话。", cancel},
-		{"live_mode", "Apply a permission-mode change to the live process.", "把权限模式变更应用到活动进程。", "Apply the mode on the next session.", "在下一个会话中应用模式。", liveMode},
-		{"set_session_title", "Persist a title in the backing Agent session.", "在 Agent 后端会话中持久化标题。", "Keep the title in cc-connect-next session metadata.", "仅在 cc-connect-next 会话元数据中保存标题。", title},
-		{"initial_session_title", "Initialize the backing Agent title from the first real request.", "根据首个真实请求初始化 Agent 后端标题。", "Use the local fallback session title.", "使用本地回退会话标题。", initialTitle},
-	}
-	for _, item := range probes {
-		availability := interfaceAvailability(item.ok, "The active session implements this capability.", "当前活动会话实现了该能力。", "The active session does not implement this capability.", "当前活动会话未实现该能力。")
+	for _, item := range sessionRuntimeCapabilitySpecs {
+		availability := interfaceAvailability(item.supported(session), "The active session implements this capability.", "当前活动会话实现了该能力。", "The active session does not implement this capability.", "当前活动会话未实现该能力。")
 		if item.id == "steer" {
 			if info, ok := e.agent.(NativeSteerDoctorInfo); ok {
 				native, detail := info.NativeSteerStatus()
@@ -299,22 +296,14 @@ func (e *Engine) sessionRuntimeCapabilities(session AgentSession) RuntimeAdapter
 
 func (e *Engine) unboundSessionRuntimeCapabilities() RuntimeAdapterCapabilities {
 	result := RuntimeAdapterCapabilities{Kind: "session", Name: e.agent.Name() + ":unbound", State: CapabilityConditional, Reason: "No active Agent session is bound to this query."}
-	for _, item := range []struct{ id, description, zh string }{
-		{"turn_options", "Apply runtime settings to one turn.", "为单个回合应用运行时设置。"},
-		{"steer", "Append input to the active turn.", "把输入并入当前回合。"},
-		{"context_usage", "Report live context-window usage.", "报告实时上下文窗口用量。"},
-		{"cancel_turn", "Cancel the active turn.", "取消活动回合。"},
-		{"live_mode", "Apply a permission-mode change live.", "实时应用权限模式变更。"},
-		{"set_session_title", "Persist a backing Agent session title.", "持久化 Agent 后端会话标题。"},
-		{"initial_session_title", "Initialize a fresh backing Agent title.", "初始化新 Agent 后端会话标题。"},
-	} {
-		result.Capabilities = append(result.Capabilities, feature(item.id, item.description, item.zh,
+	for _, item := range sessionRuntimeCapabilitySpecs {
+		result.Capabilities = append(result.Capabilities, feature(item.id, item.unboundDescription, item.unboundZH,
 			conditional("Availability is resolved after an Agent session is active.", "Agent 会话启动后才能判断可用性。"), defaultRejectFallback()))
 	}
 	return result
 }
 
-func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformStatus, sessionKey string) RuntimeAdapterCapabilities {
+func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformStatus, snapshot capabilitySnapshot) RuntimeAdapterCapabilities {
 	state := CapabilityAvailable
 	reason := ""
 	if status.Err != nil {
@@ -357,7 +346,11 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	_, navigation := platform.(CardNavigable)
 	var reported map[string]CapabilityAvailability
 	if provider, ok := platform.(RuntimeCapabilityAvailabilityProvider); ok {
-		reported = provider.RuntimeCapabilityAvailability(sessionKey, e.activeCapabilityReplyContext(sessionKey, platform))
+		var replyCtx any
+		if snapshot.platform == platform {
+			replyCtx = snapshot.replyCtx
+		}
+		reported = provider.RuntimeCapabilityAvailability(snapshot.sessionKey, replyCtx)
 	}
 	probes := []platformProbe{
 		{"rich_answer_lifecycle", "Render the native rich answer lifecycle.", "渲染原生富回答生命周期。", "text", "Fall back to ordinary text/progress delivery.", "退化为普通文本/进度投递。", rich},
@@ -388,9 +381,9 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 
 	proactiveAvailability := platformAvailability(reconstruct)
 	if validator, ok := platform.(PersistentProactiveTargetValidator); ok {
-		if strings.TrimSpace(sessionKey) == "" {
+		if snapshot.sessionKey == "" {
 			proactiveAvailability = conditional("A session key is required to validate persistent proactive delivery.", "需要 session key 才能验证持久主动投递。")
-		} else if err := validator.ValidatePersistentProactiveTarget(sessionKey); err != nil {
+		} else if err := validator.ValidatePersistentProactiveTarget(snapshot.sessionKey); err != nil {
 			proactiveAvailability = unavailable(strings.TrimSpace(redactFeedbackText(err.Error())), "当前会话目标不支持持久主动投递。")
 		}
 	}

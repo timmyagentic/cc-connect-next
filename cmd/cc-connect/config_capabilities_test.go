@@ -323,6 +323,19 @@ func TestWriteConfigCapabilities_CommonNaturalLanguageIntentsReachExactOptions(t
 	}
 	for _, tt := range tests {
 		t.Run(tt.query, func(t *testing.T) {
+			canonical := core.SearchConfigCatalog(config.CapabilityCatalog("v-test"), tt.query)
+			canonicalLimit := min(10, len(canonical.Options))
+			canonicalFound := false
+			for _, option := range canonical.Options[:canonicalLimit] {
+				if option.Path == tt.path {
+					canonicalFound = true
+					break
+				}
+			}
+			if !canonicalFound {
+				t.Fatalf("canonical search did not rank %s in its first ten options; got %v", tt.path, catalogOptionPaths(canonical.Options[:canonicalLimit]))
+			}
+
 			var out bytes.Buffer
 			if err := writeConfigCapabilities(&out, []string{"--all", "--search", tt.query, "--format", "json"}); err != nil {
 				t.Fatal(err)

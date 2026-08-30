@@ -226,14 +226,7 @@ func (s *APIServer) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		query = strings.TrimSpace(r.URL.Query().Get("q"))
 	}
 	includeAll := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all")), "true")
-	var manifest AgentCapabilityManifest
-	if query != "" {
-		manifest = engine.SearchAgentCapabilityManifestWithAllAdapters(sessionKey, query, includeAll)
-	} else if includeAll {
-		manifest = engine.AgentCapabilityManifestWithAllAdapters(sessionKey)
-	} else {
-		manifest = engine.AgentCapabilityManifest(sessionKey)
-	}
+	manifest := engine.QueryAgentCapabilityManifest(sessionKey, query, includeAll)
 	manifest = SelectAgentCapabilityManifestSections(manifest, r.URL.Query().Get("sections"))
 	apiJSON(w, http.StatusOK, manifest)
 }

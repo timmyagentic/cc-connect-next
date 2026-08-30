@@ -142,12 +142,16 @@ type AgentCapabilityManifest struct {
 	Runtime           []RuntimeAdapterCapabilities `json:"runtime"`
 }
 
-type commandManifestContract struct {
+type builtinCommandDefinition struct {
+	id             string
+	aliases        []string
 	category       string
 	usage          string
 	parameters     []CapabilityParameter
 	readOnly       bool
 	effects        []string
+	admin          bool
+	subcommands    []string
 	privilegedWhen []string
 	fallback       CapabilityFallback
 	probe          string
@@ -165,51 +169,64 @@ func defaultRejectFallback() CapabilityFallback {
 	}
 }
 
-var commandManifestContracts = map[string]commandManifestContract{
-	"new":       {category: "session", usage: "/new [prompt]", parameters: []CapabilityParameter{capabilityParam("prompt", "string", false, "Optional first request for the new session.", "新会话可立即处理的首个请求。")}, effects: []string{"session_state", "agent_process"}},
-	"list":      {category: "session", usage: "/list", readOnly: true},
-	"switch":    {category: "session", usage: "/switch <number|name>", parameters: []CapabilityParameter{capabilityParam("session", "string", true, "Session list number or name.", "会话列表序号或名称。")}, effects: []string{"session_state", "agent_process"}},
-	"name":      {category: "session", usage: "/name [number] <text>", parameters: []CapabilityParameter{capabilityParam("session", "integer", false, "Optional session list number; omission selects the current session.", "可选会话序号；省略时使用当前会话。"), capabilityParam("text", "string", true, "New session title.", "新的会话标题。")}, effects: []string{"session_state", "persistent_state"}},
-	"current":   {category: "session", usage: "/current", readOnly: true},
-	"status":    {category: "system", usage: "/status", readOnly: true},
-	"usage":     {category: "agent", usage: "/usage", readOnly: true, probe: "usage"},
-	"history":   {category: "session", usage: "/history [n]", parameters: []CapabilityParameter{capabilityParam("limit", "integer", false, "Maximum number of recent messages; defaults to 10.", "最近消息数量上限；默认 10。")}, readOnly: true},
-	"allow":     {category: "agent", usage: "/allow <tool>", parameters: []CapabilityParameter{capabilityParam("tool", "string", true, "Tool name to allow for the next Agent session.", "为下一个 Agent 会话预授权的工具名。")}, effects: []string{"agent_permission_state"}, probe: "tool_authorizer"},
-	"model":     {category: "agent", usage: "/model [switch <name>]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Optional model action.", "可选模型操作。", "switch"), capabilityParam("name", "string", false, "Provider model identifier or displayed choice.", "Provider 模型标识或显示选项。")}, effects: []string{"configuration", "agent_process"}, probe: "model"},
-	"reasoning": {category: "agent", usage: "/reasoning [level]", parameters: []CapabilityParameter{capabilityParam("level", "string", false, "Reasoning effort supported by the active Agent.", "当前 Agent 支持的推理强度。")}, effects: []string{"configuration", "agent_process"}, probe: "reasoning"},
-	"mode":      {category: "agent", usage: "/mode [name]", parameters: []CapabilityParameter{capabilityParam("name", "string", false, "Permission mode supported by the active Agent.", "当前 Agent 支持的权限模式。")}, effects: []string{"configuration", "agent_permission_state"}, probe: "mode"},
-	"lang":      {category: "agent", usage: "/lang [en|zh|zh-TW|ja|es|auto]", parameters: []CapabilityParameter{capabilityParam("language", "string", false, "Reply language.", "回复语言。", "en", "zh", "zh-TW", "ja", "es", "auto")}, effects: []string{"configuration"}},
-	"quiet":     {category: "agent", usage: "/quiet [on|off]", parameters: []CapabilityParameter{capabilityParam("state", "string", false, "Enable or disable quiet display mode.", "开启或关闭安静显示模式。", "on", "off")}, effects: []string{"configuration"}},
-	"provider":  {category: "agent", usage: "/provider [list|add|remove|switch|clear] [arguments]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Provider operation.", "Provider 操作。", "list", "add", "remove", "switch", "clear"), capabilityParam("arguments", "string", false, "Provider name and operation-specific values.", "Provider 名称及操作所需参数。")}, effects: []string{"configuration", "agent_process"}, probe: "provider"},
-	"memory":    {category: "agent", usage: "/memory [add|global|global add] [text]", parameters: []CapabilityParameter{capabilityParam("scope", "string", false, "Project or global memory operation.", "项目或全局记忆操作。", "add", "global", "global add"), capabilityParam("text", "string", false, "Instruction text appended by an add operation.", "add 操作要追加的指令文本。")}, effects: []string{"filesystem_read", "filesystem_write"}, probe: "memory"},
-	"cron":      {category: "automation", usage: "/cron [add|addexec|list|exec|del|enable|disable|mute|unmute|setup] [arguments]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Recurring-job operation.", "周期任务操作。", "add", "addexec", "list", "exec", "del", "enable", "disable", "mute", "unmute", "setup"), capabilityParam("arguments", "string", false, "Schedule, prompt, command, job ID, or setting required by the action.", "操作所需的计划、Prompt、命令、任务 ID 或设置。")}, effects: []string{"scheduled_state", "persistent_state", "agent_turn", "shell_execution"}, privilegedWhen: []string{"addexec"}, probe: "cron"},
-	"timer":     {category: "automation", usage: "/timer [add|addexec|list|del|mute|unmute] [arguments]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "One-shot timer operation.", "一次性定时器操作。", "add", "addexec", "list", "del", "mute", "unmute"), capabilityParam("arguments", "string", false, "Delay/time, prompt, command, timer ID, or setting required by the action.", "操作所需的延迟/时间、Prompt、命令、定时器 ID 或设置。")}, effects: []string{"scheduled_state", "persistent_state", "agent_turn", "shell_execution"}, privilegedWhen: []string{"addexec"}, probe: "timer"},
-	"heartbeat": {category: "automation", usage: "/heartbeat [status|pause|resume|run|interval] [minutes]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Heartbeat operation.", "Heartbeat 操作。", "status", "pause", "resume", "run", "interval"), capabilityParam("minutes", "integer", false, "New interval for the interval action.", "interval 操作的新间隔分钟数。")}, effects: []string{"scheduled_state", "persistent_state", "agent_turn"}, probe: "heartbeat"},
-	"compress":  {category: "agent", usage: "/compress", effects: []string{"agent_context"}, probe: "compress"},
-	"stop":      {category: "session", usage: "/stop", effects: []string{"agent_process"}, probe: "active_session"},
-	"cancel":    {category: "session", usage: "/cancel", effects: []string{"session_state", "agent_process"}, probe: "active_session"},
-	"help":      {category: "system", usage: "/help", readOnly: true},
-	"version":   {category: "system", usage: "/version", readOnly: true},
-	"commands":  {category: "system", usage: "/commands [list|add|addexec|del] [arguments]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Custom-command registry operation.", "自定义命令注册表操作。", "list", "add", "addexec", "del"), capabilityParam("arguments", "string", false, "Name, description, prompt, shell command, or working directory required by the action.", "操作所需的名称、说明、Prompt、Shell 命令或工作目录。")}, effects: []string{"configuration", "persistent_state"}, privilegedWhen: []string{"addexec"}},
-	"skills":    {category: "system", usage: "/skills", readOnly: true},
-	"config":    {category: "system", usage: "/config [get|set|reload] [key] [value]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Runtime configuration operation.", "运行时配置操作。", "get", "set", "reload"), capabilityParam("key", "string", false, "Supported runtime display key.", "支持的运行时显示配置键。"), capabilityParam("value", "string", false, "New value for set.", "set 操作的新值。")}, effects: []string{"configuration"}},
-	"doctor":    {category: "system", usage: "/doctor", readOnly: true},
-	"feedback":  {category: "system", usage: "/feedback <description>", parameters: []CapabilityParameter{capabilityParam("description", "string", true, "Problem or missing capability to submit after confirmation.", "确认后要提交的问题或缺失能力。")}, effects: []string{"external_service", "network"}, probe: "feedback"},
-	"upgrade":   {category: "system", usage: "/upgrade [confirm]", parameters: []CapabilityParameter{capabilityParam("confirmation", "string", false, "Explicit confirmation after the update prompt.", "更新提示后的明确确认。")}, effects: []string{"network", "filesystem_write", "process_control"}},
-	"restart":   {category: "system", usage: "/restart", effects: []string{"process_control"}},
-	"alias":     {category: "system", usage: "/alias [add|del] [trigger] [command]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Alias registry operation.", "别名注册表操作。", "add", "del"), capabilityParam("trigger", "string", false, "Natural-language alias trigger.", "自然语言别名触发词。"), capabilityParam("command", "string", false, "Target slash command.", "目标 Slash 命令。")}, effects: []string{"configuration", "persistent_state"}},
-	"delete":    {category: "session", usage: "/delete <selection>", parameters: []CapabilityParameter{capabilityParam("selection", "string", true, "Session number, comma list, or range.", "会话序号、逗号列表或范围。")}, effects: []string{"session_state", "persistent_state", "agent_process"}},
-	"bind":      {category: "automation", usage: "/bind [project|-project|remove|status|setup]", parameters: []CapabilityParameter{capabilityParam("operation", "string", false, "Relay project or binding operation.", "Relay 项目或绑定操作。")}, effects: []string{"relay_state", "persistent_state"}, probe: "relay"},
-	"search":    {category: "session", usage: "/search <keyword>", parameters: []CapabilityParameter{capabilityParam("keyword", "string", true, "Session name or ID search text.", "会话名称或 ID 搜索文本。")}, readOnly: true},
-	"shell":     {category: "tools", usage: "/shell [--timeout <seconds>] <command>", parameters: []CapabilityParameter{capabilityParam("timeout", "integer", false, "Execution timeout in seconds.", "执行超时秒数。"), capabilityParam("command", "string", true, "Shell command executed with the configured shell/profile.", "使用已配置 Shell/Profile 执行的命令。")}, effects: []string{"shell_execution", "process_control", "filesystem_read", "filesystem_write", "network"}},
-	"show":      {category: "tools", usage: "/show <reference>", parameters: []CapabilityParameter{capabilityParam("reference", "string", true, "Local file, directory, or code reference.", "本地文件、目录或代码引用。")}, readOnly: true, effects: []string{"filesystem_read"}},
-	"dir":       {category: "tools", usage: "/dir [path|reset]", parameters: []CapabilityParameter{capabilityParam("path", "string", false, "Absolute/local path or reset.", "绝对/本地路径或 reset。")}, effects: []string{"configuration", "agent_process"}, probe: "workdir"},
-	"tts":       {category: "agent", usage: "/tts [always|voice_only]", parameters: []CapabilityParameter{capabilityParam("mode", "string", false, "Text-to-speech mode.", "文字转语音模式。", "always", "voice_only")}, effects: []string{"configuration", "external_message"}, probe: "tts"},
-	"workspace": {category: "tools", usage: "/workspace [init|bind|route|info|unbind] [arguments]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Multi-workspace operation.", "多工作区操作。", "init", "bind", "route", "info", "unbind"), capabilityParam("arguments", "string", false, "Repository URL, workspace name, or local path required by the action.", "操作所需的仓库 URL、工作区名称或本地路径。")}, effects: []string{"workspace_state", "filesystem_write", "network"}, probe: "workspace"},
-	"whoami":    {category: "system", usage: "/whoami", readOnly: true},
-	"web":       {category: "system", usage: "/web [status|setup]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Web management operation.", "Web 管理操作。", "status", "setup")}, effects: []string{"configuration", "process_control"}, probe: "web"},
-	"diff":      {category: "tools", usage: "/diff [git arguments]", parameters: []CapabilityParameter{capabilityParam("arguments", "string", false, "Optional git diff arguments.", "可选 git diff 参数。")}, readOnly: true, effects: []string{"filesystem_read", "process_control"}},
-	"ps":        {category: "session", usage: "/ps <message>", parameters: []CapabilityParameter{capabilityParam("message", "string", true, "Supplement appended to the active turn.", "并入当前回合的补充内容。")}, effects: []string{"agent_turn"}, probe: "ps", fallback: CapabilityFallback{Mode: "legacy-send", Description: "Native steer is used when supported; persistent-process Agents otherwise receive the supplement through their established stdin Send path. No active turn is rejected rather than queued.", DescriptionZH: "支持时使用原生 steer；否则持久进程 Agent 通过既有 stdin Send 路径接收补充。没有活动回合时会拒绝，不会偷偷排队。"}},
+var builtinCommands = []builtinCommandDefinition{
+	{id: "new", category: "session", usage: "/new [prompt]", parameters: []CapabilityParameter{capabilityParam("prompt", "string", false, "Optional first request for the new session.", "新会话可立即处理的首个请求。")}, effects: []string{"session_state", "agent_process"}},
+	{id: "list", aliases: []string{"sessions"}, category: "session", usage: "/list", readOnly: true},
+	{id: "switch", category: "session", usage: "/switch <number|name>", parameters: []CapabilityParameter{capabilityParam("session", "string", true, "Session list number or name.", "会话列表序号或名称。")}, effects: []string{"session_state", "agent_process"}},
+	{id: "name", aliases: []string{"rename"}, category: "session", usage: "/name [number] <text>", parameters: []CapabilityParameter{capabilityParam("session", "integer", false, "Optional session list number; omission selects the current session.", "可选会话序号；省略时使用当前会话。"), capabilityParam("text", "string", true, "New session title.", "新的会话标题。")}, effects: []string{"session_state", "persistent_state"}},
+	{id: "current", category: "session", usage: "/current", readOnly: true},
+	{id: "status", category: "system", usage: "/status", readOnly: true},
+	{id: "usage", aliases: []string{"quota"}, category: "agent", usage: "/usage", readOnly: true, probe: "usage"},
+	{id: "history", category: "session", usage: "/history [n]", parameters: []CapabilityParameter{capabilityParam("limit", "integer", false, "Maximum number of recent messages; defaults to 10.", "最近消息数量上限；默认 10。")}, readOnly: true},
+	{id: "allow", category: "agent", usage: "/allow <tool>", parameters: []CapabilityParameter{capabilityParam("tool", "string", true, "Tool name to allow for the next Agent session.", "为下一个 Agent 会话预授权的工具名。")}, effects: []string{"agent_permission_state"}, probe: "tool_authorizer"},
+	{id: "model", category: "agent", usage: "/model [switch <name>]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Optional model action.", "可选模型操作。", "switch"), capabilityParam("name", "string", false, "Provider model identifier or displayed choice.", "Provider 模型标识或显示选项。")}, effects: []string{"configuration", "agent_process"}, probe: "model"},
+	{id: "reasoning", aliases: []string{"effort"}, category: "agent", usage: "/reasoning [level]", parameters: []CapabilityParameter{capabilityParam("level", "string", false, "Reasoning effort supported by the active Agent.", "当前 Agent 支持的推理强度。")}, effects: []string{"configuration", "agent_process"}, probe: "reasoning"},
+	{id: "mode", category: "agent", usage: "/mode [name]", parameters: []CapabilityParameter{capabilityParam("name", "string", false, "Permission mode supported by the active Agent.", "当前 Agent 支持的权限模式。")}, effects: []string{"configuration", "agent_permission_state"}, probe: "mode"},
+	{id: "lang", category: "agent", usage: "/lang [en|zh|zh-TW|ja|es|auto]", parameters: []CapabilityParameter{capabilityParam("language", "string", false, "Reply language.", "回复语言。", "en", "zh", "zh-TW", "ja", "es", "auto")}, effects: []string{"configuration"}},
+	{id: "quiet", category: "agent", usage: "/quiet [on|off]", parameters: []CapabilityParameter{capabilityParam("state", "string", false, "Enable or disable quiet display mode.", "开启或关闭安静显示模式。", "on", "off")}, effects: []string{"configuration"}},
+	{id: "provider", category: "agent", usage: "/provider [list|add|remove|switch|clear] [arguments]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Provider operation.", "Provider 操作。", "list", "add", "remove", "switch", "clear"), capabilityParam("arguments", "string", false, "Provider name and operation-specific values.", "Provider 名称及操作所需参数。")}, effects: []string{"configuration", "agent_process"}, probe: "provider"},
+	{id: "memory", category: "agent", usage: "/memory [add|global|global add] [text]", parameters: []CapabilityParameter{capabilityParam("scope", "string", false, "Project or global memory operation.", "项目或全局记忆操作。", "add", "global", "global add"), capabilityParam("text", "string", false, "Instruction text appended by an add operation.", "add 操作要追加的指令文本。")}, effects: []string{"filesystem_read", "filesystem_write"}, probe: "memory"},
+	{id: "cron", category: "automation", usage: "/cron [add|addexec|list|exec|del|enable|disable|mute|unmute|setup] [arguments]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Recurring-job operation.", "周期任务操作。", "add", "addexec", "list", "exec", "del", "enable", "disable", "mute", "unmute", "setup"), capabilityParam("arguments", "string", false, "Schedule, prompt, command, job ID, or setting required by the action.", "操作所需的计划、Prompt、命令、任务 ID 或设置。")}, effects: []string{"scheduled_state", "persistent_state", "agent_turn", "shell_execution"}, subcommands: []string{"add", "addexec", "list", "del", "delete", "rm", "remove", "enable", "disable", "mute", "unmute", "setup"}, privilegedWhen: []string{"addexec"}, probe: "cron"},
+	{id: "timer", aliases: []string{"at", "remind"}, category: "automation", usage: "/timer [add|addexec|list|del|mute|unmute] [arguments]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "One-shot timer operation.", "一次性定时器操作。", "add", "addexec", "list", "del", "mute", "unmute"), capabilityParam("arguments", "string", false, "Delay/time, prompt, command, timer ID, or setting required by the action.", "操作所需的延迟/时间、Prompt、命令、定时器 ID 或设置。")}, effects: []string{"scheduled_state", "persistent_state", "agent_turn", "shell_execution"}, subcommands: []string{"add", "addexec", "list", "del", "delete", "rm", "remove", "mute", "unmute"}, privilegedWhen: []string{"addexec"}, probe: "timer"},
+	{id: "heartbeat", aliases: []string{"hb"}, category: "automation", usage: "/heartbeat [status|pause|resume|run|interval] [minutes]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Heartbeat operation.", "Heartbeat 操作。", "status", "pause", "resume", "run", "interval"), capabilityParam("minutes", "integer", false, "New interval for the interval action.", "interval 操作的新间隔分钟数。")}, effects: []string{"scheduled_state", "persistent_state", "agent_turn"}, probe: "heartbeat"},
+	{id: "compress", aliases: []string{"compact"}, category: "agent", usage: "/compress", effects: []string{"agent_context"}, probe: "compress"},
+	{id: "stop", category: "session", usage: "/stop", effects: []string{"agent_process"}, probe: "active_session"},
+	{id: "cancel", category: "session", usage: "/cancel", effects: []string{"session_state", "agent_process"}, probe: "active_session"},
+	{id: "help", category: "system", usage: "/help", readOnly: true},
+	{id: "version", category: "system", usage: "/version", readOnly: true},
+	{id: "commands", aliases: []string{"command", "cmd"}, category: "system", usage: "/commands [list|add|addexec|del] [arguments]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Custom-command registry operation.", "自定义命令注册表操作。", "list", "add", "addexec", "del"), capabilityParam("arguments", "string", false, "Name, description, prompt, shell command, or working directory required by the action.", "操作所需的名称、说明、Prompt、Shell 命令或工作目录。")}, effects: []string{"configuration", "persistent_state"}, subcommands: []string{"list", "add", "addexec", "del", "delete", "rm", "remove"}, privilegedWhen: []string{"addexec"}},
+	{id: "skills", aliases: []string{"skill"}, category: "system", usage: "/skills", readOnly: true},
+	{id: "config", category: "system", usage: "/config [get|set|reload] [key] [value]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Runtime configuration operation.", "运行时配置操作。", "get", "set", "reload"), capabilityParam("key", "string", false, "Supported runtime display key.", "支持的运行时显示配置键。"), capabilityParam("value", "string", false, "New value for set.", "set 操作的新值。")}, effects: []string{"configuration"}},
+	{id: "doctor", category: "system", usage: "/doctor", readOnly: true},
+	{id: "feedback", aliases: []string{"fb"}, category: "system", usage: "/feedback <description>", parameters: []CapabilityParameter{capabilityParam("description", "string", true, "Problem or missing capability to submit after confirmation.", "确认后要提交的问题或缺失能力。")}, effects: []string{"external_service", "network"}, probe: "feedback"},
+	{id: "upgrade", aliases: []string{"update"}, category: "system", usage: "/upgrade [confirm]", parameters: []CapabilityParameter{capabilityParam("confirmation", "string", false, "Explicit confirmation after the update prompt.", "更新提示后的明确确认。")}, effects: []string{"network", "filesystem_write", "process_control"}, admin: true},
+	{id: "restart", category: "system", usage: "/restart", effects: []string{"process_control"}, admin: true},
+	{id: "alias", category: "system", usage: "/alias [add|del] [trigger] [command]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Alias registry operation.", "别名注册表操作。", "add", "del"), capabilityParam("trigger", "string", false, "Natural-language alias trigger.", "自然语言别名触发词。"), capabilityParam("command", "string", false, "Target slash command.", "目标 Slash 命令。")}, effects: []string{"configuration", "persistent_state"}},
+	{id: "delete", aliases: []string{"del", "rm"}, category: "session", usage: "/delete <selection>", parameters: []CapabilityParameter{capabilityParam("selection", "string", true, "Session number, comma list, or range.", "会话序号、逗号列表或范围。")}, effects: []string{"session_state", "persistent_state", "agent_process"}},
+	{id: "bind", category: "automation", usage: "/bind [project|-project|remove|status|setup]", parameters: []CapabilityParameter{capabilityParam("operation", "string", false, "Relay project or binding operation.", "Relay 项目或绑定操作。")}, effects: []string{"relay_state", "persistent_state"}, probe: "relay"},
+	{id: "search", aliases: []string{"find"}, category: "session", usage: "/search <keyword>", parameters: []CapabilityParameter{capabilityParam("keyword", "string", true, "Session name or ID search text.", "会话名称或 ID 搜索文本。")}, readOnly: true},
+	{id: "shell", aliases: []string{"sh", "exec", "run"}, category: "tools", usage: "/shell [--timeout <seconds>] <command>", parameters: []CapabilityParameter{capabilityParam("timeout", "integer", false, "Execution timeout in seconds.", "执行超时秒数。"), capabilityParam("command", "string", true, "Shell command executed with the configured shell/profile.", "使用已配置 Shell/Profile 执行的命令。")}, effects: []string{"shell_execution", "process_control", "filesystem_read", "filesystem_write", "network"}, admin: true},
+	{id: "show", category: "tools", usage: "/show <reference>", parameters: []CapabilityParameter{capabilityParam("reference", "string", true, "Local file, directory, or code reference.", "本地文件、目录或代码引用。")}, readOnly: true, effects: []string{"filesystem_read"}, admin: true},
+	{id: "dir", aliases: []string{"cd", "chdir", "workdir"}, category: "tools", usage: "/dir [path|reset]", parameters: []CapabilityParameter{capabilityParam("path", "string", false, "Absolute/local path or reset.", "绝对/本地路径或 reset。")}, effects: []string{"configuration", "agent_process"}, admin: true, probe: "workdir"},
+	{id: "tts", category: "agent", usage: "/tts [always|voice_only]", parameters: []CapabilityParameter{capabilityParam("mode", "string", false, "Text-to-speech mode.", "文字转语音模式。", "always", "voice_only")}, effects: []string{"configuration", "external_message"}, probe: "tts"},
+	{id: "workspace", aliases: []string{"ws"}, category: "tools", usage: "/workspace [init|bind|route|info|unbind] [arguments]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Multi-workspace operation.", "多工作区操作。", "init", "bind", "route", "info", "unbind"), capabilityParam("arguments", "string", false, "Repository URL, workspace name, or local path required by the action.", "操作所需的仓库 URL、工作区名称或本地路径。")}, effects: []string{"workspace_state", "filesystem_write", "network"}, probe: "workspace"},
+	{id: "whoami", aliases: []string{"myid"}, category: "system", usage: "/whoami", readOnly: true},
+	{id: "web", category: "system", usage: "/web [status|setup]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Web management operation.", "Web 管理操作。", "status", "setup")}, effects: []string{"configuration", "process_control"}, admin: true, probe: "web"},
+	{id: "diff", category: "tools", usage: "/diff [git arguments]", parameters: []CapabilityParameter{capabilityParam("arguments", "string", false, "Optional git diff arguments.", "可选 git diff 参数。")}, readOnly: true, effects: []string{"filesystem_read", "process_control"}, admin: true},
+	{id: "ps", aliases: []string{"btw"}, category: "session", usage: "/ps <message>", parameters: []CapabilityParameter{capabilityParam("message", "string", true, "Supplement appended to the active turn.", "并入当前回合的补充内容。")}, effects: []string{"agent_turn"}, probe: "ps", fallback: CapabilityFallback{Mode: "legacy-send", Description: "Native steer is used when supported; persistent-process Agents otherwise receive the supplement through their established stdin Send path. No active turn is rejected rather than queued.", DescriptionZH: "支持时使用原生 steer；否则持久进程 Agent 通过既有 stdin Send 路径接收补充。没有活动回合时会拒绝，不会偷偷排队。"}},
+}
+
+func builtinCommandNames(definition builtinCommandDefinition) []string {
+	return append([]string{definition.id}, definition.aliases...)
+}
+
+func builtinCommandByID(id string) (builtinCommandDefinition, bool) {
+	for _, definition := range builtinCommands {
+		if definition.id == id {
+			return definition, true
+		}
+	}
+	return builtinCommandDefinition{}, false
 }
 
 var sideEffectDescriptions = map[string]CapabilitySideEffect{
@@ -261,24 +278,11 @@ func (e *Engine) SetConfigCatalog(catalog ConfigCatalog) {
 	e.configCatalog = catalog
 }
 
-// SetConfigCatalogSearch installs the config package's natural-language
-// intent expansion without reversing the core -> config dependency direction.
-// The callback must be side-effect-free and must not read current values.
-func (e *Engine) SetConfigCatalogSearch(search func(ConfigCatalog, string) ConfigCatalog) {
-	e.configCatalogSearch = search
-}
-
-func (e *Engine) SearchAgentCapabilityManifest(sessionKey, query string) AgentCapabilityManifest {
-	return e.SearchAgentCapabilityManifestWithAllAdapters(sessionKey, query, false)
-}
-
-func (e *Engine) SearchAgentCapabilityManifestWithAllAdapters(sessionKey, query string, includeAll bool) AgentCapabilityManifest {
+// QueryAgentCapabilityManifest builds one runtime snapshot and optionally
+// filters it. Empty search text returns the complete selected-adapter view.
+func (e *Engine) QueryAgentCapabilityManifest(sessionKey, search string, includeAll bool) AgentCapabilityManifest {
 	manifest := e.agentCapabilityManifest(sessionKey, includeAll)
-	result := SearchAgentCapabilityManifest(manifest, query)
-	if strings.TrimSpace(query) != "" && e.configCatalogSearch != nil {
-		result.Configuration = e.configCatalogSearch(manifest.Configuration, query)
-	}
-	return result
+	return SearchAgentCapabilityManifest(manifest, search)
 }
 
 func cloneConfigCatalog(catalog ConfigCatalog) ConfigCatalog {
@@ -336,15 +340,8 @@ func filterRuntimeConfigCatalog(catalog ConfigCatalog, agent string, platforms [
 	return result
 }
 
-func (e *Engine) AgentCapabilityManifest(sessionKey string) AgentCapabilityManifest {
-	return e.agentCapabilityManifest(sessionKey, false)
-}
-
-func (e *Engine) AgentCapabilityManifestWithAllAdapters(sessionKey string) AgentCapabilityManifest {
-	return e.agentCapabilityManifest(sessionKey, true)
-}
-
 func (e *Engine) agentCapabilityManifest(sessionKey string, includeAll bool) AgentCapabilityManifest {
+	snapshot := e.captureCapabilitySnapshot(sessionKey)
 	manifestVersion := CurrentVersion
 	if manifestVersion == "" {
 		manifestVersion = e.configCatalog.Version
@@ -373,10 +370,10 @@ func (e *Engine) agentCapabilityManifest(sessionKey string, includeAll bool) Age
 	if includeAll {
 		manifest.Configuration = cloneConfigCatalog(e.configCatalog)
 	}
-	manifest.Tools = e.agentToolCapabilities(sessionKey)
-	manifest.Commands = e.agentCommandCapabilities(sessionKey)
+	manifest.Tools = e.agentToolCapabilities(snapshot)
+	manifest.Commands = e.agentCommandCapabilities(snapshot)
 	manifest.Skills = e.agentSkillCapabilities(sessionKey)
-	manifest.Runtime = e.runtimeAdapterCapabilities(sessionKey, includeAll)
+	manifest.Runtime = e.runtimeAdapterCapabilities(snapshot, includeAll)
 	return manifest
 }
 
@@ -392,83 +389,53 @@ func (e *Engine) capabilityProjectPolicy() (map[string]bool, string) {
 	return copyDisabled, adminFrom
 }
 
-func (e *Engine) activeCapabilitySession(sessionKey string) AgentSession {
-	if strings.TrimSpace(sessionKey) == "" {
-		return nil
+type capabilitySnapshot struct {
+	sessionKey string
+	session    AgentSession
+	platform   Platform
+	replyCtx   any
+}
+
+func (e *Engine) captureCapabilitySnapshot(sessionKey string) capabilitySnapshot {
+	snapshot := capabilitySnapshot{sessionKey: strings.TrimSpace(sessionKey)}
+	if snapshot.sessionKey == "" {
+		return snapshot
 	}
-	key := e.interactiveKeyForSessionKey(sessionKey)
+	key := e.interactiveKeyForSessionKey(snapshot.sessionKey)
 	e.interactiveMu.Lock()
 	state := e.interactiveStates[key]
 	e.interactiveMu.Unlock()
 	if state == nil {
-		return nil
+		return snapshot
 	}
 	state.mu.Lock()
-	session := state.agentSession
+	snapshot.session = state.agentSession
+	snapshot.platform = state.platform
+	snapshot.replyCtx = state.replyCtx
 	state.mu.Unlock()
-	return session
+	return snapshot
 }
 
-func (e *Engine) activeCapabilityPlatform(sessionKey string) Platform {
-	if strings.TrimSpace(sessionKey) == "" {
-		return nil
-	}
-	key := e.interactiveKeyForSessionKey(sessionKey)
-	e.interactiveMu.Lock()
-	state := e.interactiveStates[key]
-	e.interactiveMu.Unlock()
-	if state == nil {
-		return nil
-	}
-	state.mu.Lock()
-	platform := state.platform
-	state.mu.Unlock()
-	return platform
-}
-
-func (e *Engine) activeCapabilityReplyContext(sessionKey string, platform Platform) any {
-	if strings.TrimSpace(sessionKey) == "" {
-		return nil
-	}
-	key := e.interactiveKeyForSessionKey(sessionKey)
-	e.interactiveMu.Lock()
-	state := e.interactiveStates[key]
-	e.interactiveMu.Unlock()
-	if state == nil {
-		return nil
-	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if platform != nil && state.platform != platform {
-		return nil
-	}
-	return state.replyCtx
-}
-
-func commandPermission(id string, contract commandManifestContract) CapabilityPermissionLevel {
-	if privilegedCommands[id] {
+func commandPermission(definition builtinCommandDefinition) CapabilityPermissionLevel {
+	if definition.admin {
 		return CapabilityPermissionAdmin
 	}
-	if len(contract.privilegedWhen) > 0 {
+	if len(definition.privilegedWhen) > 0 {
 		return CapabilityPermissionConditional
 	}
 	return CapabilityPermissionMember
 }
 
-func (e *Engine) agentCommandCapabilities(sessionKey string) []AgentCommandCapability {
+func (e *Engine) agentCommandCapabilities(snapshot capabilitySnapshot) []AgentCommandCapability {
 	disabled, adminFrom := e.capabilityProjectPolicy()
 	english := NewI18n(LangEnglish)
 	chinese := NewI18n(LangChinese)
 	result := make([]AgentCommandCapability, 0, len(builtinCommands)+len(e.commands.ListAll()))
 	builtinIDs := make(map[string]bool, len(builtinCommands))
 	for _, definition := range builtinCommands {
-		contract, ok := commandManifestContracts[definition.id]
-		if !ok {
-			continue
-		}
 		builtinIDs[definition.id] = true
-		permission := commandPermission(definition.id, contract)
-		availability := e.commandCapabilityAvailability(definition.id, contract.probe, sessionKey)
+		permission := commandPermission(definition)
+		availability := e.commandCapabilityAvailability(definition.id, definition.probe, snapshot)
 		if disabled[definition.id] {
 			availability = unavailable("Disabled by the project-level command policy; user-role policy is checked at invocation time.", "已被项目级命令策略禁用；用户角色策略在真实调用时检查。")
 		} else if permission == CapabilityPermissionAdmin {
@@ -479,18 +446,18 @@ func (e *Engine) agentCommandCapabilities(sessionKey string) []AgentCommandCapab
 				availability = conditional("Requires projects.admin_from authorization at invocation time; caller identity is checked by the real command dispatch.", "调用时需要 projects.admin_from 授权；调用者身份由真实命令分发路径检查。")
 			}
 		}
-		fallback := contract.fallback
+		fallback := definition.fallback
 		if fallback.Mode == "" {
 			fallback = defaultRejectFallback()
 		}
-		aliases := append([]string(nil), definition.names...)
+		aliases := builtinCommandNames(definition)
 		result = append(result, AgentCommandCapability{
 			ID: definition.id, Invocation: "/" + definition.id, Aliases: aliases, Source: "builtin",
-			Category: contract.category, Usage: contract.usage,
+			Category: definition.category, Usage: definition.usage,
 			Description: english.T(MsgKey(definition.id)), DescriptionZH: chinese.T(MsgKey(definition.id)),
-			Parameters: append([]CapabilityParameter(nil), contract.parameters...), Permission: permission,
-			PrivilegedWhen: append([]string(nil), contract.privilegedWhen...), ReadOnly: contract.readOnly,
-			SideEffects: expandSideEffects(contract.effects), Fallback: fallback, Availability: availability,
+			Parameters: append([]CapabilityParameter(nil), definition.parameters...), Permission: permission,
+			PrivilegedWhen: append([]string(nil), definition.privilegedWhen...), ReadOnly: definition.readOnly,
+			SideEffects: expandSideEffects(definition.effects), Fallback: fallback, Availability: availability,
 		})
 	}
 
@@ -534,10 +501,10 @@ func (e *Engine) agentCommandCapabilities(sessionKey string) []AgentCommandCapab
 	return result
 }
 
-func (e *Engine) commandCapabilityAvailability(id, probe, sessionKey string) CapabilityAvailability {
+func (e *Engine) commandCapabilityAvailability(id, probe string, snapshot capabilitySnapshot) CapabilityAvailability {
 	switch probe {
 	case "send":
-		if e.activeCapabilityPlatform(sessionKey) == nil {
+		if snapshot.platform == nil {
 			return conditional("Requires a session-bound messaging platform target.", "需要绑定会话的消息平台目标。")
 		}
 		if !e.attachmentSendEnabled {
@@ -600,7 +567,7 @@ func (e *Engine) commandCapabilityAvailability(id, probe, sessionKey string) Cap
 		}
 		return unavailable("The active Agent does not implement context compression.", "当前 Agent 未实现上下文压缩。")
 	case "active_session":
-		if session := e.activeCapabilitySession(sessionKey); session != nil && session.Alive() {
+		if snapshot.session != nil && snapshot.session.Alive() {
 			return available("An active Agent session is bound to this query.", "当前查询已绑定活动 Agent 会话。")
 		}
 		return conditional("Requires an active Agent session.", "需要活动 Agent 会话。")
@@ -638,7 +605,7 @@ func (e *Engine) commandCapabilityAvailability(id, probe, sessionKey string) Cap
 		}
 		return unavailable("Web management is not configured for chat setup.", "未配置聊天内 Web 管理设置能力。")
 	case "ps":
-		if session := e.activeCapabilitySession(sessionKey); session != nil && session.Alive() {
+		if snapshot.session != nil && snapshot.session.Alive() {
 			return conditional("Available only while that session has a turn in flight; native steer or the documented legacy Send path is selected at invocation.", "仅在该会话有进行中回合时可用；调用时选择原生 steer 或已记录的旧 Send 路径。")
 		}
 		return conditional("Requires a live session with a turn in flight.", "需要存在进行中回合的活动会话。")

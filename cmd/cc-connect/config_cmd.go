@@ -88,7 +88,7 @@ func writeConfigCapabilities(w io.Writer, args []string) error {
 	if exact := strings.TrimSpace(*key); exact != "" {
 		catalog = exactConfigCatalogMatch(catalog, exact)
 	} else if query := strings.TrimSpace(*search); query != "" {
-		catalog = config.SearchCapabilities(catalog, query)
+		catalog = core.SearchConfigCatalog(catalog, query)
 	}
 
 	switch strings.ToLower(strings.TrimSpace(*format)) {

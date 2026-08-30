@@ -488,8 +488,7 @@ type Engine struct {
 	// configCatalog is the version/build-matched, value-free configuration
 	// contract included in the unified Agent Capability Manifest. It is set at
 	// bootstrap and never reads the operator's current config values.
-	configCatalog       ConfigCatalog
-	configCatalogSearch func(ConfigCatalog, string) ConfigCatalog
+	configCatalog ConfigCatalog
 	// capabilityBrief is prepended once per interactive session so the LLM
 	// knows how to query this deployment's real Agent Capability Manifest.
 	// Set at bootstrap, read-only afterwards.
@@ -1427,45 +1426,27 @@ func (e *Engine) SetAdminFrom(adminFrom string) {
 	}
 }
 
-// privilegedCommands are commands that require admin_from authorization.
-var privilegedCommands = map[string]bool{
-	"shell":   true,
-	"show":    true,
-	"dir":     true,
-	"restart": true,
-	"upgrade": true,
-	"web":     true,
-	"diff":    true,
-}
-
 // isPrivilegedCommandInvocation extends the static privileged command list to
 // subcommands that can install arbitrary shell execution at runtime. Listing
 // and prompt-only command management remain available to ordinary users.
 func isPrivilegedCommandInvocation(cmdID string, args []string) bool {
-	if privilegedCommands[cmdID] {
+	definition, ok := builtinCommandByID(cmdID)
+	if !ok {
+		return false
+	}
+	if definition.admin {
 		return true
 	}
-	if len(args) == 0 {
+	if len(args) == 0 || len(definition.privilegedWhen) == 0 {
 		return false
 	}
-	subcommand := strings.ToLower(args[0])
-	switch cmdID {
-	case "commands":
-		return matchSubCommand(subcommand, []string{
-			"list", "add", "addexec", "del", "delete", "rm", "remove",
-		}) == "addexec"
-	case "cron":
-		return matchSubCommand(subcommand, []string{
-			"add", "addexec", "list", "del", "delete", "rm", "remove",
-			"enable", "disable", "mute", "unmute", "setup",
-		}) == "addexec"
-	case "timer":
-		return matchSubCommand(subcommand, []string{
-			"add", "addexec", "list", "del", "delete", "rm", "remove", "mute", "unmute",
-		}) == "addexec"
-	default:
-		return false
+	resolved := matchSubCommand(strings.ToLower(args[0]), definition.subcommands)
+	for _, privileged := range definition.privilegedWhen {
+		if resolved == privileged {
+			return true
+		}
 	}
+	return false
 }
 
 // isAdmin checks whether the given user ID is authorized for privileged commands.
@@ -1659,7 +1640,7 @@ func (e *Engine) ActiveSessionKeys() []string {
 // platform prefixes preserve the prior behavior; the execution path will keep
 // producing its existing, more specific platform-resolution error.
 func (e *Engine) ValidatePersistentProactiveTarget(sessionKey string) error {
-	platform, _, resolvedSessionKey, err := e.resolveScheduledPlatform(sessionKey)
+	platform, _, resolvedSessionKey, err := e.resolvePlatformSessionTarget(sessionKey)
 	if err != nil {
 		return nil
 	}
@@ -1678,7 +1659,11 @@ func (e *Engine) PersistentProactiveTargetSupport(sessionKey string) (bool, stri
 	return true, ""
 }
 
-func (e *Engine) resolveScheduledPlatform(sessionKey string) (Platform, string, string, error) {
+// resolvePlatformSessionTarget maps a persisted or explicit session key to the
+// platform that owns it. Ordinary adapters use their literal name, workspace
+// sessions may carry that name after a path prefix, and multiplexing adapters
+// can claim external key shapes through SessionKeyTargetMatcher.
+func (e *Engine) resolvePlatformSessionTarget(sessionKey string) (Platform, string, string, error) {
 	resolvedSessionKey := sessionKey
 	platformName := extractPlatformName(sessionKey)
 	var targetPlatform Platform
@@ -1808,7 +1793,7 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 		Extra:      map[string]any{"job_id": spec.id, "job_description": spec.description},
 	})
 
-	targetPlatform, platformName, sessionKey, err := e.resolveScheduledPlatform(spec.sessionKey)
+	targetPlatform, platformName, sessionKey, err := e.resolvePlatformSessionTarget(spec.sessionKey)
 	if err != nil {
 		return err
 	}
@@ -2192,35 +2177,11 @@ func (e *Engine) finishScheduledShell(p Platform, replyCtx any, cmd *exec.Cmd, m
 // ExecuteHeartbeat runs a heartbeat check by injecting a synthetic message
 // into the main session, similar to cron but designed for periodic awareness.
 func (e *Engine) ExecuteHeartbeat(sessionKey, prompt string, silent bool) error {
-	platformName := ""
-	if idx := strings.Index(sessionKey, ":"); idx > 0 {
-		platformName = sessionKey[:idx]
+	targetPlatform, platformName, resolvedSessionKey, err := e.resolvePlatformSessionTarget(sessionKey)
+	if err != nil {
+		return err
 	}
-
-	var targetPlatform Platform
-	for _, p := range e.platforms {
-		if p.Name() == platformName {
-			targetPlatform = p
-			break
-		}
-	}
-	// Fallback: in multi-workspace mode the stored session key may be prefixed
-	// with the workspace path (e.g. "/home/user/project:slack:C123:U456").
-	// Search for a known platform name within the key and strip the prefix.
-	if targetPlatform == nil {
-		for _, p := range e.platforms {
-			needle := ":" + p.Name() + ":"
-			if idx := strings.Index(sessionKey, needle); idx >= 0 {
-				targetPlatform = p
-				platformName = p.Name()
-				sessionKey = sessionKey[idx+1:] // strip workspace prefix
-				break
-			}
-		}
-	}
-	if targetPlatform == nil {
-		return fmt.Errorf("platform %q not found for session %q", platformName, sessionKey)
-	}
+	sessionKey = resolvedSessionKey
 
 	rc, ok := targetPlatform.(ReplyContextReconstructor)
 	if !ok {
@@ -8275,58 +8236,6 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 // Command handling
 // ──────────────────────────────────────────────────────────────
 
-// builtinCommands maps canonical command names to their aliases/full names.
-// The first entry is the canonical name used for prefix matching.
-var builtinCommands = []struct {
-	names []string
-	id    string
-}{
-	{[]string{"new"}, "new"},
-	{[]string{"list", "sessions"}, "list"},
-	{[]string{"switch"}, "switch"},
-	{[]string{"name", "rename"}, "name"},
-	{[]string{"current"}, "current"},
-	{[]string{"status"}, "status"},
-	{[]string{"usage", "quota"}, "usage"},
-	{[]string{"history"}, "history"},
-	{[]string{"allow"}, "allow"},
-	{[]string{"model"}, "model"},
-	{[]string{"reasoning", "effort"}, "reasoning"},
-	{[]string{"mode"}, "mode"},
-	{[]string{"lang"}, "lang"},
-	{[]string{"quiet"}, "quiet"},
-	{[]string{"provider"}, "provider"},
-	{[]string{"memory"}, "memory"},
-	{[]string{"cron"}, "cron"},
-	{[]string{"timer", "at", "remind"}, "timer"},
-	{[]string{"heartbeat", "hb"}, "heartbeat"},
-	{[]string{"compress", "compact"}, "compress"},
-	{[]string{"stop"}, "stop"},
-	{[]string{"cancel"}, "cancel"},
-	{[]string{"help"}, "help"},
-	{[]string{"version"}, "version"},
-	{[]string{"commands", "command", "cmd"}, "commands"},
-	{[]string{"skills", "skill"}, "skills"},
-	{[]string{"config"}, "config"},
-	{[]string{"doctor"}, "doctor"},
-	{[]string{"feedback", "fb"}, "feedback"},
-	{[]string{"upgrade", "update"}, "upgrade"},
-	{[]string{"restart"}, "restart"},
-	{[]string{"alias"}, "alias"},
-	{[]string{"delete", "del", "rm"}, "delete"},
-	{[]string{"bind"}, "bind"},
-	{[]string{"search", "find"}, "search"},
-	{[]string{"shell", "sh", "exec", "run"}, "shell"},
-	{[]string{"show"}, "show"},
-	{[]string{"dir", "cd", "chdir", "workdir"}, "dir"},
-	{[]string{"tts"}, "tts"},
-	{[]string{"workspace", "ws"}, "workspace"},
-	{[]string{"whoami", "myid"}, "whoami"},
-	{[]string{"web"}, "web"},
-	{[]string{"diff"}, "diff"},
-	{[]string{"ps", "btw"}, "ps"},
-}
-
 func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
 	text := strings.TrimSpace(strings.Join(args, " "))
 	if text == "" {
@@ -8424,14 +8333,14 @@ func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
 
 // matchPrefix finds a unique command matching the given prefix.
 // Returns the command id or "" if no match / ambiguous.
-func matchPrefix(prefix string, candidates []struct {
-	names []string
-	id    string
-}) string {
+func matchPrefix(prefix string, candidates []builtinCommandDefinition) string {
 	// Exact match first
 	for _, c := range candidates {
-		for _, n := range c.names {
-			if prefix == n {
+		if prefix == c.id {
+			return c.id
+		}
+		for _, alias := range c.aliases {
+			if prefix == alias {
 				return c.id
 			}
 		}
@@ -8439,15 +8348,22 @@ func matchPrefix(prefix string, candidates []struct {
 	// Prefix match
 	var matched string
 	for _, c := range candidates {
-		for _, n := range c.names {
-			if strings.HasPrefix(n, prefix) {
-				if matched != "" && matched != c.id {
-					return "" // ambiguous
+		matches := strings.HasPrefix(c.id, prefix)
+		if !matches {
+			for _, alias := range c.aliases {
+				if strings.HasPrefix(alias, prefix) {
+					matches = true
+					break
 				}
-				matched = c.id
-				break
 			}
 		}
+		if !matches {
+			continue
+		}
+		if matched != "" && matched != c.id {
+			return "" // ambiguous
+		}
+		matched = c.id
 	}
 	return matched
 }
@@ -11109,7 +11025,7 @@ func (e *Engine) renderHelpGroupCard(groupKey string) *Card {
 // into the compact platform menu shape.
 func (e *Engine) GetAllCommands() []BotCommandInfo {
 	var commands []BotCommandInfo
-	for _, capability := range e.agentCommandCapabilities("") {
+	for _, capability := range e.agentCommandCapabilities(capabilitySnapshot{}) {
 		if capability.Availability.State == CapabilityUnavailable {
 			continue
 		}
@@ -12620,10 +12536,11 @@ func (e *Engine) SendToSessionWithOptions(sessionKey, message string, images []I
 		}
 	}
 
-	state, p, replyCtx, err := e.resolveOutboundSessionTarget(sessionKey, len(images) > 0 || len(files) > 0)
+	target, err := e.resolveSessionTarget(sessionKey, len(images) > 0 || len(files) > 0)
 	if err != nil {
 		return err
 	}
+	p, replyCtx := target.platform, target.replyCtx
 
 	if message == "" && len(images) == 0 && len(files) == 0 {
 		return fmt.Errorf("message or attachment is required")
@@ -12670,10 +12587,10 @@ func (e *Engine) SendToSessionWithOptions(sessionKey, message string, images []I
 				return err
 			}
 		}
-		if state != nil {
-			state.mu.Lock()
-			state.sideText = strings.TrimSpace(message)
-			state.mu.Unlock()
+		if target.state != nil {
+			target.state.mu.Lock()
+			target.state.sideText = strings.TrimSpace(message)
+			target.state.mu.Unlock()
 		}
 	}
 	for _, img := range images {
@@ -12710,12 +12627,9 @@ func (e *Engine) SendToSessionInWorkDir(sessionKey, message string, images []Ima
 		return ErrAttachmentSendDisabled
 	}
 
-	target, err := e.resolveSendTarget(sessionKey, len(images) > 0 || len(files) > 0)
+	target, err := e.resolveSessionTarget(sessionKey, len(images) > 0 || len(files) > 0)
 	if err != nil {
 		return err
-	}
-	if target.platform == nil {
-		return fmt.Errorf("no active session found (key=%q)", sessionKey)
 	}
 
 	_, sessions, err := e.getOrCreateWorkspaceAgent(workDir)
@@ -12789,7 +12703,7 @@ func (e *Engine) SendToSessionInWorkDir(sessionKey, message string, images []Ima
 	return nil
 }
 
-func (e *Engine) resolveSendTarget(sessionKey string, attachments bool) (sendTarget, error) {
+func (e *Engine) resolveSessionTarget(sessionKey string, attachments bool) (sendTarget, error) {
 	e.interactiveMu.Lock()
 
 	resolvedSessionKey := sessionKey
@@ -12829,29 +12743,8 @@ func (e *Engine) resolveSendTarget(sessionKey string, attachments bool) (sendTar
 	}
 
 	if p == nil && resolvedSessionKey != "" {
-		strippedKey := resolvedSessionKey
-		platformName := ""
-		if idx := strings.Index(strippedKey, ":"); idx > 0 {
-			platformName = strippedKey[:idx]
-		}
-		var targetPlatform Platform
-		for _, candidate := range e.platforms {
-			if candidate.Name() == platformName {
-				targetPlatform = candidate
-				break
-			}
-		}
-		if targetPlatform == nil {
-			for _, candidate := range e.platforms {
-				needle := ":" + candidate.Name() + ":"
-				if idx := strings.Index(strippedKey, needle); idx >= 0 {
-					targetPlatform = candidate
-					strippedKey = strippedKey[idx+1:]
-					break
-				}
-			}
-		}
-		if targetPlatform != nil {
+		targetPlatform, _, strippedKey, resolveErr := e.resolvePlatformSessionTarget(resolvedSessionKey)
+		if resolveErr == nil {
 			rc, ok := targetPlatform.(ReplyContextReconstructor)
 			if !ok {
 				return sendTarget{}, fmt.Errorf("platform %q does not support proactive messaging", targetPlatform.Name())
@@ -12864,6 +12757,9 @@ func (e *Engine) resolveSendTarget(sessionKey string, attachments bool) (sendTar
 			replyCtx = reconstructed
 			resolvedSessionKey = strippedKey
 		}
+	}
+	if p == nil {
+		return sendTarget{}, fmt.Errorf("no active session found (key=%q)", sessionKey)
 	}
 
 	return sendTarget{
@@ -12953,10 +12849,11 @@ func (e *Engine) SendTTSToSession(sessionKey, text string) error {
 	if text == "" {
 		return fmt.Errorf("tts text is required")
 	}
-	_, p, replyCtx, err := e.resolveOutboundSessionTarget(sessionKey, false)
+	target, err := e.resolveSessionTarget(sessionKey, false)
 	if err != nil {
 		return err
 	}
+	p, replyCtx := target.platform, target.replyCtx
 	return e.synthesizeAndSendTTS(p, replyCtx, text)
 }
 
@@ -12969,10 +12866,11 @@ func (e *Engine) SendAudiosToSession(sessionKey string, audios []FileAttachment)
 	if len(audios) == 0 {
 		return nil
 	}
-	_, p, replyCtx, err := e.resolveOutboundSessionTarget(sessionKey, true)
+	target, err := e.resolveSessionTarget(sessionKey, true)
 	if err != nil {
 		return err
 	}
+	p, replyCtx := target.platform, target.replyCtx
 	if !e.attachmentSendEnabled {
 		return ErrAttachmentSendDisabled
 	}
@@ -13013,10 +12911,11 @@ func (e *Engine) SendVideosToSession(sessionKey string, videos []FileAttachment)
 	if len(videos) == 0 {
 		return nil
 	}
-	_, p, replyCtx, err := e.resolveOutboundSessionTarget(sessionKey, true)
+	target, err := e.resolveSessionTarget(sessionKey, true)
 	if err != nil {
 		return err
 	}
+	p, replyCtx := target.platform, target.replyCtx
 	if !e.attachmentSendEnabled {
 		return ErrAttachmentSendDisabled
 	}
@@ -13071,92 +12970,6 @@ func audioFormatHint(a FileAttachment) string {
 // videoFormatHint mirrors audioFormatHint for video clips.
 func videoFormatHint(v FileAttachment) string {
 	return audioFormatHint(v)
-}
-
-func (e *Engine) resolveOutboundSessionTarget(sessionKey string, hasAttachments bool) (*interactiveState, Platform, any, error) {
-	e.interactiveMu.Lock()
-
-	var state *interactiveState
-	if sessionKey != "" {
-		state = e.interactiveStates[sessionKey]
-		if state == nil && e.multiWorkspace {
-			// We already hold interactiveMu, so call the *Locked variant
-			// to avoid a self-deadlock on the non-reentrant mutex.
-			if iKey := e.interactiveKeyForSessionKeyLocked(sessionKey); iKey != sessionKey {
-				state = e.interactiveStates[iKey]
-			}
-		}
-	} else if len(e.interactiveStates) == 1 {
-		// Single session: use it when no sessionKey is provided (backward compatible)
-		for _, s := range e.interactiveStates {
-			state = s
-			break
-		}
-	} else if len(e.interactiveStates) > 1 && hasAttachments {
-		// Multiple sessions with attachments but no explicit sessionKey: ambiguous
-		e.interactiveMu.Unlock()
-		return nil, nil, nil, fmt.Errorf("multiple active sessions; must specify --session to send attachments")
-	} else {
-		// Multiple sessions but text-only: pick the first (legacy behavior)
-		for _, s := range e.interactiveStates {
-			state = s
-			break
-		}
-	}
-	e.interactiveMu.Unlock()
-
-	var p Platform
-	var replyCtx any
-	if state != nil {
-		state.mu.Lock()
-		p = state.platform
-		replyCtx = state.replyCtx
-		state.mu.Unlock()
-	}
-
-	if p == nil && sessionKey != "" {
-		strippedKey := sessionKey
-		platformName := ""
-		if idx := strings.Index(strippedKey, ":"); idx > 0 {
-			platformName = strippedKey[:idx]
-		}
-		var targetPlatform Platform
-		for _, candidate := range e.platforms {
-			if candidate.Name() == platformName {
-				targetPlatform = candidate
-				break
-			}
-		}
-		// Fallback: multi-workspace mode may prefix the session key with the
-		// workspace path (same heuristic as ExecuteCronJob / ExecuteHeartbeat).
-		if targetPlatform == nil {
-			for _, candidate := range e.platforms {
-				needle := ":" + candidate.Name() + ":"
-				if idx := strings.Index(strippedKey, needle); idx >= 0 {
-					targetPlatform = candidate
-					strippedKey = strippedKey[idx+1:]
-					break
-				}
-			}
-		}
-		if targetPlatform != nil {
-			rc, ok := targetPlatform.(ReplyContextReconstructor)
-			if !ok {
-				return nil, nil, nil, fmt.Errorf("platform %q does not support proactive messaging", targetPlatform.Name())
-			}
-			reconstructed, err := rc.ReconstructReplyCtx(strippedKey)
-			if err != nil {
-				return nil, nil, nil, fmt.Errorf("reconstruct reply context: %w", err)
-			}
-			p = targetPlatform
-			replyCtx = reconstructed
-		}
-	}
-
-	if p == nil {
-		return nil, nil, nil, fmt.Errorf("no active session found (key=%q)", sessionKey)
-	}
-	return state, p, replyCtx, nil
 }
 
 // sendPermissionPrompt sends a permission prompt with interactive buttons when
@@ -18626,8 +18439,11 @@ func looksLikeLocalDir(s string) bool {
 	if strings.HasPrefix(s, "/") {
 		name := strings.ToLower(strings.SplitN(s[1:], " ", 2)[0])
 		for _, c := range builtinCommands {
-			for _, n := range c.names {
-				if name == n {
+			if name == c.id {
+				return false
+			}
+			for _, alias := range c.aliases {
+				if name == alias {
 					return false
 				}
 			}

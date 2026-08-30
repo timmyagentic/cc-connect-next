@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/timmyagentic/cc-connect-next/core"
 )
@@ -75,7 +74,7 @@ func environmentConfigOptions() []core.ConfigOption {
 		{Path: "CC_DATA_DIR", Key: "CC_DATA_DIR", Source: core.ConfigSourceEnvironment, Scope: core.ConfigScopeGlobal, Type: "string", Default: "inherit data_dir", DefaultSource: core.ConfigDefaultInherit, Description: "Override the data directory used by standalone send operations.", DescriptionZH: "覆盖独立 send 操作使用的数据目录。", ApplyMode: core.ConfigApplyLive, Example: `export CC_DATA_DIR=/path/to/data`},
 		{Path: "CC_PROJECT", Key: "CC_PROJECT", Source: core.ConfigSourceEnvironment, Scope: core.ConfigScopeProject, Type: "string", Default: "unset", DefaultSource: core.ConfigDefaultUnset, Description: "Provide the default project context for send, relay, cron, timer, and session helper commands.", DescriptionZH: "为 send、relay、cron、timer 和 session 辅助命令提供默认项目上下文。", ApplyMode: core.ConfigApplyLive, Example: `export CC_PROJECT=my-project`},
 		{Path: "CC_SESSION_KEY", Key: "CC_SESSION_KEY", Source: core.ConfigSourceEnvironment, Scope: core.ConfigScopeProject, Type: "string", Default: "unset", DefaultSource: core.ConfigDefaultUnset, Description: "Provide the default session context for send, relay, cron, timer, and session helper commands.", DescriptionZH: "为 send、relay、cron、timer 和 session 辅助命令提供默认会话上下文。", ApplyMode: core.ConfigApplyLive, Example: `export CC_SESSION_KEY=feishu:oc_chat:ou_user`},
-		{Path: "CODEX_HOME", Key: "CODEX_HOME", Source: core.ConfigSourceEnvironment, Scope: core.ConfigScopeAgent, Owner: "codex", Type: "string", Default: "~/.codex", DefaultSource: core.ConfigDefaultRuntime, Description: "Choose the Codex home used when projects.agent.options.codex_home is unset.", DescriptionZH: "projects.agent.options.codex_home 未设置时选择 Codex Home。", ApplyMode: core.ConfigApplyRestart, Example: `export CODEX_HOME=/path/to/codex-home`},
+		{Path: "CODEX_HOME", Key: "CODEX_HOME", Source: core.ConfigSourceEnvironment, Scope: core.ConfigScopeAgent, Owner: "codex", Type: "string", Default: "~/.codex", DefaultSource: core.ConfigDefaultRuntime, Description: "Choose the Codex home used when projects.agent.options.codex_home is unset.", DescriptionZH: "projects.agent.options.codex_home 未设置时选择 Codex Home。", Keywords: []string{"Codex home 放在哪里"}, ApplyMode: core.ConfigApplyRestart, Example: `export CODEX_HOME=/path/to/codex-home`},
 		{Path: "CLAUDE_CONFIG_DIR", Key: "CLAUDE_CONFIG_DIR", Source: core.ConfigSourceEnvironment, Scope: core.ConfigScopeAgent, Owner: "claudecode", Type: "string", Default: "~/.claude", DefaultSource: core.ConfigDefaultRuntime, Description: "Override the Claude Code configuration directory.", DescriptionZH: "覆盖 Claude Code 配置目录。", ApplyMode: core.ConfigApplyRestart, Example: `export CLAUDE_CONFIG_DIR=/path/to/claude-config`},
 		{Path: "PI_CODING_AGENT_DIR", Key: "PI_CODING_AGENT_DIR", Source: core.ConfigSourceEnvironment, Scope: core.ConfigScopeAgent, Owner: "pi", Type: "string", Default: "upstream pi default", DefaultSource: core.ConfigDefaultAdapter, Description: "Override the pi coding-agent state directory.", DescriptionZH: "覆盖 pi coding-agent 状态目录。", ApplyMode: core.ConfigApplyRestart, Example: `export PI_CODING_AGENT_DIR=/path/to/pi-agent`},
 		{Path: "MATRIX_CROSS_SIGNING_PASSWORD", Key: "MATRIX_CROSS_SIGNING_PASSWORD", Source: core.ConfigSourceEnvironment, Scope: core.ConfigScopePlatform, Owner: "matrix", Type: "string", Default: "unset", DefaultSource: core.ConfigDefaultUnset, Sensitive: true, Description: "Provide the Matrix cross-signing password without storing it in TOML.", DescriptionZH: "无需写入 TOML 即可提供 Matrix 跨签名密码。", ApplyMode: core.ConfigApplyRestart, Example: `export MATRIX_CROSS_SIGNING_PASSWORD='${MATRIX_PASSWORD}'`},
@@ -95,83 +94,6 @@ func environmentConfigOptions() []core.ConfigOption {
 }
 
 func configNumber(value float64) *float64 { return &value }
-
-func SearchCapabilities(catalog core.ConfigCatalog, query string) core.ConfigCatalog {
-	queries := configSearchQueries(query)
-	if len(queries) == 1 {
-		return core.SearchConfigCatalog(catalog, query)
-	}
-	result := core.ConfigCatalog{Version: catalog.Version, Agents: append([]string(nil), catalog.Agents...), Platforms: append([]string(nil), catalog.Platforms...)}
-	seenCapabilities := make(map[string]bool)
-	seenOptions := make(map[string]bool)
-	for _, current := range queries {
-		matched := core.SearchConfigCatalog(catalog, current)
-		for _, capability := range matched.Capabilities {
-			if !seenCapabilities[capability.ID] {
-				seenCapabilities[capability.ID] = true
-				result.Capabilities = append(result.Capabilities, capability)
-			}
-		}
-		for _, option := range matched.Options {
-			identity := option.Path + "\x00" + option.Owner
-			if !seenOptions[identity] {
-				seenOptions[identity] = true
-				result.Options = append(result.Options, option)
-			}
-		}
-	}
-	return result
-}
-
-func configSearchQueries(query string) []string {
-	normalized := strings.ToLower(strings.TrimSpace(query))
-	compact := strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
-			return -1
-		}
-		return r
-	}, normalized)
-	type alias struct {
-		all  []string
-		hint string
-	}
-	aliases := []alias{
-		{all: []string{"思考", "隐藏"}, hint: "隐藏思考 reasoning display.thinking_messages"},
-		{all: []string{"忙", "追加"}, hint: "忙时消息 追加问题 steer queue.busy_message_mode"},
-		{all: []string{"群", "不", "回复"}, hint: "无需@ 群聊全部回复 group_reply_all"},
-		{all: []string{"表情", "不要"}, hint: "关闭表情 none reaction_emoji"},
-		{all: []string{"引用", "不要"}, hint: "不引用触发消息 reply_to_trigger"},
-		{all: []string{"限制", "收到", "消息"}, hint: "入站限流 rate_limit.max_messages"},
-		{all: []string{"webhook", "认证"}, hint: "webhook.token webhook token 认证"},
-		{all: []string{"管理后台", "端口"}, hint: "管理 API 端口 management.port"},
-		{all: []string{"空闲", "重置", "会话"}, hint: "空闲重置会话 reset_on_idle_mins"},
-		{all: []string{"hook", "执行"}, hint: "hooks event 事件执行"},
-		{all: []string{"微信", "发送", "限制"}, hint: "微信发送突发限制 burst_limit"},
-		{all: []string{"钉钉", "通知", "agent"}, hint: "projects.platforms.options.agent_id 钉钉工作通知 Agent ID"},
-		{all: []string{"多工作区", "workdir"}, hint: "projects.base_dir multi-workspace work_dir conflict"},
-	}
-	queries := make([]string, 0, 3)
-	for _, candidate := range aliases {
-		matched := true
-		for _, term := range candidate.all {
-			term = strings.Map(func(r rune) rune {
-				if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
-					return -1
-				}
-				return r
-			}, strings.ToLower(term))
-			if !strings.Contains(compact, term) {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			queries = append(queries, candidate.hint)
-		}
-	}
-	queries = append(queries, query)
-	return queries
-}
 
 func typedConfigOptions() []core.ConfigOption {
 	var options []core.ConfigOption
@@ -378,6 +300,7 @@ func builtinMetadata(path string) builtinOptionMeta {
 		"webhook.enabled":                                      {description: "Expose the external HTTP endpoint that triggers Agent prompts or shell commands.", zh: "开放可触发 Agent 提示或 Shell 命令的外部 HTTP 端点。", defaultValue: "false"},
 		"webhook.port":                                         {description: "Set the external webhook listening port.", zh: "设置外部 Webhook 监听端口。", defaultValue: "9111"},
 		"webhook.path":                                         {description: "Set the external webhook URL path prefix.", zh: "设置外部 Webhook URL 路径前缀。", defaultValue: "/hook"},
+		"webhook.token":                                        {keywords: []string{"Webhook 接口需要认证"}},
 		"bridge.enabled":                                       {description: "Enable the WebSocket/REST bridge for external platform adapters.", zh: "启用供外部平台适配器使用的 WebSocket/REST Bridge。", defaultValue: "false"},
 		"bridge.port":                                          {description: "Set the external adapter bridge port.", zh: "设置外部适配器 Bridge 端口。", defaultValue: "9810"},
 		"bridge.path":                                          {description: "Set the external adapter bridge WebSocket path.", zh: "设置外部适配器 Bridge WebSocket 路径。", defaultValue: "/bridge/ws"},
@@ -410,7 +333,7 @@ func builtinMetadata(path string) builtinOptionMeta {
 		"relay.visibility":                                     {description: "Choose how much relay activity is echoed into the group.", zh: "选择群内展示多少 Relay 活动。", defaultValue: "full", values: []string{"full", "summary", "none"}},
 		"projects.name":                                        {description: "Give the project a unique name used by commands, storage, and relay routing.", zh: "设置供命令、存储和 Relay 路由使用的唯一项目名。", requirement: core.ConfigRequirementRequired},
 		"projects.mode":                                        {description: "Enable fixed-workspace or multi-workspace project routing.", zh: "选择固定工作区或多工作区项目路由。", defaultValue: "fixed", values: []string{"fixed", "multi-workspace"}},
-		"projects.base_dir":                                    {description: "Set the parent directory for dynamically created multi-workspaces.", zh: "设置动态创建多工作区的父目录。", requirement: core.ConfigRequirementConditional, requiredWhen: []string{"projects.mode = multi-workspace"}, conflictsWith: []string{"projects.agent.options.work_dir when projects.mode = multi-workspace"}},
+		"projects.base_dir":                                    {description: "Set the parent directory for dynamically created multi-workspaces.", zh: "设置动态创建多工作区的父目录。", requirement: core.ConfigRequirementConditional, requiredWhen: []string{"projects.mode = multi-workspace"}, conflictsWith: []string{"projects.agent.options.work_dir when projects.mode = multi-workspace"}, keywords: []string{"多工作区和 work_dir 冲突"}},
 		"projects.skip_git":                                    {description: "Allow multi-workspace directories that are not Git repositories.", zh: "允许多工作区目录不是 Git 仓库。", defaultValue: "false"},
 		"projects.workspace_init_allow_local_paths":            {description: "Allow /workspace init to bind local directories in addition to Git URLs.", zh: "允许 /workspace init 除 Git URL 外绑定本地目录。", defaultValue: "false"},
 		"projects.busy_message_mode":                           {description: "Override the process-wide busy-message policy for one project.", zh: "为单个项目覆盖进程级忙时消息策略。", defaultValue: "inherit", values: []string{"steer", "queue"}},
@@ -454,7 +377,7 @@ func builtinMetadata(path string) builtinOptionMeta {
 		"outgoing_rate_limit.platforms.<name>.max_per_second":  {description: "Override outgoing messages per second for one platform; unset inherits the global value.", zh: "为单个平台覆盖每秒出站消息数；省略时继承全局值。", defaultValue: "inherit", defaultSource: core.ConfigDefaultInherit, minimum: &zero, unit: "messages/second"},
 		"outgoing_rate_limit.platforms.<name>.burst":           {description: "Override the outgoing burst for one platform; unset inherits the global value.", zh: "为单个平台覆盖出站突发数量；省略时继承全局值。", defaultValue: "inherit", defaultSource: core.ConfigDefaultInherit, minimum: &zero},
 		"hooks.async":                                          {description: "Run the hook asynchronously instead of blocking message handling.", zh: "异步运行 Hook，避免阻塞消息处理。", defaultValue: "true"},
-		"hooks.event":                                          {description: "Choose the event that triggers this hook.", zh: "选择触发该 Hook 的事件。", requirement: core.ConfigRequirementRequired},
+		"hooks.event":                                          {description: "Choose the event that triggers this hook.", zh: "选择触发该 Hook 的事件。", requirement: core.ConfigRequirementRequired, keywords: []string{"启动后执行 hook"}},
 		"hooks.type":                                           {description: "Choose command or HTTP hook execution.", zh: "选择命令或 HTTP Hook 执行方式。", requirement: core.ConfigRequirementRequired, values: []string{"command", "http"}},
 		"hooks.command":                                        {description: "Set the shell command executed by a command hook.", zh: "设置 command Hook 执行的 Shell 命令。", requirement: core.ConfigRequirementConditional, requiredWhen: []string{"hooks.type = command"}, conflictsWith: []string{"hooks.url"}},
 		"hooks.url":                                            {description: "Set the URL called by an HTTP hook.", zh: "设置 HTTP Hook 调用的 URL。", requirement: core.ConfigRequirementConditional, requiredWhen: []string{"hooks.type = http"}, conflictsWith: []string{"hooks.command"}},

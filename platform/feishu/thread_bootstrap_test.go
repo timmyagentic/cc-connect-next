@@ -16,6 +16,31 @@ import (
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
+// markThreadSessionActive is a test-only fixture for directly exercising the
+// bootstrap state transition. Production admission uses
+// prepareThreadBootstrapDispatch, which also owns FIFO serialization.
+func (p *Platform) markThreadSessionActive(sessionKey string) bool {
+	if !p.threadIsolationEnabled() || !isThreadSessionKey(sessionKey) {
+		return false
+	}
+	p.activeThreadSessions.Store(sessionKey, time.Now())
+	p.threadBootstrapMu.Lock()
+	defer p.threadBootstrapMu.Unlock()
+	if p.threadBootstrapStates == nil {
+		p.threadBootstrapStates = make(map[string]*threadBootstrapEntry)
+	}
+	entry := p.threadBootstrapStates[sessionKey]
+	if entry == nil {
+		p.threadBootstrapStates[sessionKey] = &threadBootstrapEntry{state: threadBootstrapInFlight}
+		return true
+	}
+	if entry.state == threadBootstrapPending && entry.tail == nil {
+		entry.state = threadBootstrapInFlight
+		return true
+	}
+	return false
+}
+
 func TestMarkThreadSessionActiveReportsFirstActivation(t *testing.T) {
 	p := &Platform{threadMode: threadIsolationTopicsOnly}
 	const key = "feishu:oc_chat:root:om_root"
