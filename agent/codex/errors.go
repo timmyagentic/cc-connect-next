@@ -22,6 +22,10 @@ func classifyCodexError(err error) error {
 	return err
 }
 
+func isCodexClassifiedTerminalError(err error) bool {
+	return errors.Is(err, core.ErrUsageLimit) || errors.Is(err, core.ErrModelCapacity)
+}
+
 func isCodexModelCapacityMessage(message string) bool {
 	text := strings.ToLower(strings.TrimSpace(message))
 	if text == "" {

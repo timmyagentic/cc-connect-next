@@ -91,3 +91,22 @@ func TestCodexSession_TurnFailedUsageLimitIsClassified(t *testing.T) {
 		t.Fatalf("turn.failed error = %v, want usage-limit marker", event.Error)
 	}
 }
+
+func TestCodexSession_RawErrorEventModelCapacityIsEmitted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cs := &codexSession{ctx: ctx, events: make(chan core.Event, 1)}
+	cs.handleEvent(map[string]any{
+		"type":    "error",
+		"message": "Selected model is at capacity. Please try a different model.",
+	})
+
+	select {
+	case event := <-cs.events:
+		if !errors.Is(event.Error, core.ErrModelCapacity) {
+			t.Fatalf("raw error event = %v, want model-capacity marker", event.Error)
+		}
+	default:
+		t.Fatal("raw model-capacity error event was discarded")
+	}
+}

@@ -451,7 +451,7 @@ func (cs *codexSession) handleEvent(raw map[string]any) {
 			slog.Debug("codexSession: transient error", "message", msg)
 		} else {
 			slog.Warn("codexSession: error event", "message", msg)
-			if classified := classifyCodexError(fmt.Errorf("%s", msg)); errors.Is(classified, core.ErrUsageLimit) {
+			if classified := classifyCodexError(fmt.Errorf("%s", msg)); isCodexClassifiedTerminalError(classified) {
 				evt := core.Event{Type: core.EventError, Error: classified}
 				select {
 				case cs.events <- evt:
