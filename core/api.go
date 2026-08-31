@@ -133,6 +133,8 @@ func NewAPIServer(dataDir string) (*APIServer, error) {
 	}
 	s.mux.HandleFunc("/send", s.handleSend)
 	s.mux.HandleFunc("/restart/defer", s.handleDeferredRestart)
+	s.mux.HandleFunc("/feedback/preview", s.handleAgentFeedbackPreview)
+	s.mux.HandleFunc("/feedback/submit", s.handleAgentFeedbackSubmit)
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 	s.mux.HandleFunc("/capabilities", s.handleCapabilities)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
@@ -470,6 +472,106 @@ func (s *APIServer) handleDeferredRestart(w http.ResponseWriter, r *http.Request
 		SessionKey: restart.SessionKey,
 		Platform:   restart.Platform,
 	})
+}
+
+const agentFeedbackRequestLimit int64 = 256 << 10
+
+func decodeAgentFeedbackRequest(w http.ResponseWriter, r *http.Request, target any) bool {
+	decoder := json.NewDecoder(io.LimitReader(r.Body, agentFeedbackRequestLimit))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid JSON: trailing value", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+func agentFeedbackHTTPError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrAgentFeedbackSchemaMismatch):
+		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, ErrAgentFeedbackCredentialInvalid), errors.Is(err, ErrAgentFeedbackApprovalInvalid):
+		http.Error(w, err.Error(), http.StatusForbidden)
+	case errors.Is(err, ErrAgentFeedbackNoActiveTurn), errors.Is(err, ErrAgentFeedbackDisabled):
+		http.Error(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, ErrAgentFeedbackDescription):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	default:
+		http.Error(w, redactFeedbackText(err.Error()), http.StatusBadGateway)
+	}
+}
+
+func (s *APIServer) agentFeedbackEngines() []*Engine {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	engines := make([]*Engine, 0, len(s.engines))
+	for _, engine := range s.engines {
+		engines = append(engines, engine)
+	}
+	return engines
+}
+
+func (s *APIServer) handleAgentFeedbackPreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var request AgentFeedbackPreviewRequest
+	if !decodeAgentFeedbackRequest(w, r, &request) {
+		return
+	}
+	if request.Schema != AgentFeedbackAPISchema {
+		agentFeedbackHTTPError(w, ErrAgentFeedbackSchemaMismatch)
+		return
+	}
+	lastErr := error(ErrAgentFeedbackCredentialInvalid)
+	for _, engine := range s.agentFeedbackEngines() {
+		response, err := engine.PreviewAgentFeedback(request.Credential, request.Description)
+		if errors.Is(err, ErrAgentFeedbackCredentialInvalid) {
+			continue
+		}
+		if err != nil {
+			agentFeedbackHTTPError(w, err)
+			return
+		}
+		apiJSON(w, http.StatusOK, response)
+		return
+	}
+	agentFeedbackHTTPError(w, lastErr)
+}
+
+func (s *APIServer) handleAgentFeedbackSubmit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var request AgentFeedbackSubmitRequest
+	if !decodeAgentFeedbackRequest(w, r, &request) {
+		return
+	}
+	if request.Schema != AgentFeedbackAPISchema {
+		agentFeedbackHTTPError(w, ErrAgentFeedbackSchemaMismatch)
+		return
+	}
+	lastErr := error(ErrAgentFeedbackCredentialInvalid)
+	for _, engine := range s.agentFeedbackEngines() {
+		response, err := engine.SubmitAgentFeedback(r.Context(), request.Credential, request.ApprovalToken)
+		if errors.Is(err, ErrAgentFeedbackCredentialInvalid) {
+			continue
+		}
+		if err != nil {
+			agentFeedbackHTTPError(w, err)
+			return
+		}
+		apiJSON(w, http.StatusOK, response)
+		return
+	}
+	agentFeedbackHTTPError(w, lastErr)
 }
 
 func (s *APIServer) handleSessions(w http.ResponseWriter, r *http.Request) {

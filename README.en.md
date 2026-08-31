@@ -33,7 +33,7 @@ Run Claude Code, Codex, Cursor, or any of 14 coding agents on your own machine �
 - 🤖 **14 agents × 15 platforms** — one process hosts multiple projects, each binding a code directory to its own agent and platforms, with per-project permissions, providers, models, and display settings.
 - 🌍 **Production niceties** — `doctor` diagnostics, launchd/systemd/Windows daemon, web admin (beta), cron & webhooks, bot-to-bot relay, voice in/out (STT/TTS), multi-workspace routing, and full i18n in five languages (en, zh, zh-TW, ja, es).
 
-- **Reviewable one-command feedback.** `/feedback` first renders every field of the complete Foundation-redacted preview. Only a separate submit button or `confirm` sends that exact draft; cancel and missing approval make no request. The author-side Relay owns the repository and Issue rendering, so no GitHub account is needed.
+- **Reviewable feedback for chat and Agents.** `/feedback` and the Manifest-declared `cc-connect-next feedback preview` build the same complete Foundation-redacted Draft. A separate button, `confirm`, or one-time Agent approval token submits only that Draft; cancel, missing approval, identity/schema mismatch, and replay make no request. The Agent CLI derives trusted project/session/user state from a live HMAC turn credential and never needs Feishu `send_as_user`. The author-side Relay owns the repository and Issue rendering, so no GitHub account is needed.
 
 ## 🎬 What it looks like
 

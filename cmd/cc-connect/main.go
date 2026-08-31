@@ -240,7 +240,9 @@ func runtimePositionalArgError(args []string) error {
 
 func main() {
 	os.Args = append(os.Args[:1], normalizeLeadingConfigDoctorArgs(os.Args[1:])...)
-	checkUpdateAsync()
+	if shouldCheckUpdateAsync(os.Args[1:]) {
+		checkUpdateAsync()
+	}
 
 	// Handle subcommands before flag parsing
 	if len(os.Args) > 1 {
@@ -270,6 +272,9 @@ func main() {
 			return
 		case "send":
 			runSend(os.Args[2:])
+			return
+		case "feedback":
+			runFeedback(os.Args[2:])
 			return
 		case "cron":
 			runCron(os.Args[2:])
@@ -312,7 +317,7 @@ func main() {
 			// would silently do the wrong thing. Flags fall through to
 			// flag.Parse below unchanged.
 			if !strings.HasPrefix(os.Args[1], "-") {
-				fmt.Fprintf(os.Stderr, "unknown command %q\n\nSubcommands: config, config-example, capabilities, update, check-update, migrate, provider,\n  send, cron, timer, at, relay, sessions, agent-sid, daemon, feishu, lark-cli, weixin,\n  doctor, web\nRun 'cc-connect-next --help' for flags.\n", os.Args[1])
+				fmt.Fprintf(os.Stderr, "unknown command %q\n\nSubcommands: config, config-example, capabilities, update, check-update, migrate, provider,\n  send, feedback, cron, timer, at, relay, sessions, agent-sid, daemon, feishu, lark-cli, weixin,\n  doctor, web\nRun 'cc-connect-next --help' for flags.\n", os.Args[1])
 				os.Exit(2)
 			}
 		}
@@ -1549,6 +1554,13 @@ func main() {
 	slog.Info("bye")
 }
 
+// Feedback preview promises zero network I/O before approval, and submit must
+// make only the explicitly approved Relay request. Suppress the otherwise
+// global asynchronous release check for both feedback actions.
+func shouldCheckUpdateAsync(args []string) bool {
+	return len(args) == 0 || args[0] != "feedback"
+}
+
 // sessionStorePath builds a unique filename from project name + work_dir.
 // It checks for legacy session files (without the sessions/ subdirectory) in dataDir
 // for backward compatibility; if found, uses that path. Otherwise uses dataDir/sessions/.
@@ -1722,6 +1734,10 @@ Commands:
   send               Send a message to an active session via internal API
                      (-m <text> | --stdin, -p <project>, -s <session>)
 
+  feedback           Preview and submit a redacted feedback Draft from an active Agent turn
+    preview          Return the complete Draft and a one-time approval token
+    submit           Submit that exact Draft with --approval-token
+
   cron               Manage scheduled tasks
     add              Create a scheduled task (-c <expr> --prompt <text>)
     list             List scheduled tasks
@@ -1780,6 +1796,7 @@ Examples:
   cc-connect-next daemon install           Install as a system service
   cc-connect-next daemon logs -f           Follow daemon logs
   cc-connect-next send -m "hello"          Send a message to the active session
+  cc-connect-next feedback preview --description "missing capability"
   cc-connect-next cron list                List all scheduled tasks
   cc-connect-next feishu setup             Setup Feishu/Lark bot credentials
   cc-connect-next lark-cli setup           Bind the bot as the default bot profile

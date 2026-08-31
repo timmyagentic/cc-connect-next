@@ -157,6 +157,22 @@ confirm/cancel 命令。回合失败预览按会话节流，不支持的配置�
 Approved 并发送。取消、过期或未批准始终零请求。关闭通道可设置
 `[feedback] enabled = false`。
 
+Agent 也可以使用同一流程，无需伪造聊天消息，也不依赖飞书
+`send_as_user`：
+
+```text
+cc-connect-next feedback preview --description "描述问题"
+cc-connect-next feedback submit --approval-token "<preview 返回的 token>"
+```
+
+两个命令都输出 JSON。preview 返回 `status=approval_required`、完整 Draft、过期时间
+和 opaque token，且 Relay 请求数为零。submit 必须来自持有 HMAC 凭证的活动 Agent
+回合，token 只能由发起用户在同一会话内使用；成功回执包含 `status`、
+`reference_url` 和 `deduplicated`。CLI 不接受调用者指定 project、session、user、
+platform 或 endpoint。若用户尚未明确要求提交，Agent 必须先展示预览并等待；同一
+用户/会话的后续回合可在十分钟有效期内消费 token。缺失、过期、重放、跨用户/
+会话或 schema 不匹配都会在 Relay I/O 前失败关闭。
+
 ---
 
 ## 权限模式

@@ -330,16 +330,8 @@ func runAgentDeferredRestart(args []string, stdout, stderr io.Writer, clientFact
 		}
 	}
 
-	file, err := os.Open(noncePath)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "Agent-safe restart was not scheduled: turn nonce is unavailable. Use the chat /restart command instead.")
-		return true, 1
-	}
-	credentialBytes, readErr := io.ReadAll(io.LimitReader(file, 4<<10))
-	closeErr := file.Close()
-	nonce := strings.TrimSpace(string(credentialBytes))
-	credential, credentialErr := core.BuildAgentTurnCredential(sessionSecret, nonce)
-	if readErr != nil || closeErr != nil || credentialErr != nil || len(credentialBytes) >= 4<<10 {
+	credential, credentialErr := currentAgentTurnCredential()
+	if credentialErr != nil {
 		_, _ = fmt.Fprintln(stderr, "Agent-safe restart was not scheduled: turn credential is invalid. Use the chat /restart command instead.")
 		return true, 1
 	}

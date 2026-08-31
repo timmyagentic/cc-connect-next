@@ -1492,9 +1492,9 @@ func (e *Engine) isAdmin(userID string) bool {
 	return false
 }
 
-// deferredRestartStateForCredential resolves a cryptographic turn capability
-// without accepting a client-selected project or session route.
-func (e *Engine) deferredRestartStateForCredential(credential string) (*interactiveState, string) {
+// agentTurnStateForCredential resolves a cryptographic turn capability without
+// accepting a client-selected project, session, user, or platform route.
+func (e *Engine) agentTurnStateForCredential(credential string) (*interactiveState, string) {
 	if !validAgentTurnToken(credential) {
 		return nil, ""
 	}
@@ -1527,7 +1527,7 @@ func (e *Engine) deferredRestartStateForCredential(credential string) (*interact
 // identity and the user must pass the chat /restart admin_from gate.
 func (e *Engine) RequestDeferredRestart(credential string) (RestartRequest, error) {
 	credential = strings.TrimSpace(credential)
-	state, sessionKey := e.deferredRestartStateForCredential(credential)
+	state, sessionKey := e.agentTurnStateForCredential(credential)
 	if state == nil {
 		return RestartRequest{}, ErrDeferredRestartCredentialInvalid
 	}

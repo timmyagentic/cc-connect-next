@@ -18,7 +18,11 @@ CC Connect Next 继续负责命令、卡片、文本回退、本地化、最近�
    保存这份精确 Draft 十分钟。
 3. 只有携带 token 的独立按钮或无歧义的 `/feedback confirm` 才调用 `Approve(true)`；
    旧卡片、其他群成员、取消、过期、歧义和未批准始终零请求。
-4. Relay 在服务端固定 GitHub 仓库，负责 title/body、label、Token、限流和尽力去重。
+4. Manifest 声明的本地 Agent CLI 复用同一 builder 与 submit 函数。活动回合 HMAC
+   凭证解析可信 project/session/user；`feedback preview` 只返回 JSON-safe Draft
+   投影且零请求，`feedback submit` 只接受该预览绑定 session/user 的一次性 token。
+   CLI 不能指定路由、伪造入站消息或选择旧 schema 回退。
+5. Relay 在服务端固定 GitHub 仓库，负责 title/body、label、Token、限流和尽力去重。
 
 ## Update
 

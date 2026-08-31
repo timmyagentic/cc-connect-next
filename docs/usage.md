@@ -171,6 +171,25 @@ the exact pending Foundation Draft can become an opaque Approved value after a
 separate action; cancellation, expiry, and missing approval make zero network
 requests. Disable the channel with `[feedback] enabled = false`.
 
+An Agent can use the same flow without synthesizing a chat message or requiring
+Feishu `send_as_user`:
+
+```text
+cc-connect-next feedback preview --description "describe the problem"
+cc-connect-next feedback submit --approval-token "<token from preview>"
+```
+
+Both commands emit JSON. Preview returns `status=approval_required`, the
+complete Draft, expiry, and an opaque token while making zero Relay requests.
+Submit requires a live HMAC-authenticated Agent turn and accepts the token only
+for the initiating user and session; it returns `status`, `reference_url`,
+and `deduplicated`. The CLI never accepts project, session, user, platform, or
+endpoint routing from the caller. If the user has not already explicitly asked
+to submit, the Agent must show the preview and wait. A later turn for that same
+user/session can consume the token before its ten-minute expiry. Missing,
+expired, replayed, cross-user/session, or schema-mismatched approval fails
+closed before Relay I/O.
+
 ---
 
 ## Permission Modes

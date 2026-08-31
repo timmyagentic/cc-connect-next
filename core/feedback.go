@@ -43,6 +43,7 @@ type pendingFeedback struct {
 	At         time.Time
 	SessionKey string
 	UserID     string
+	AgentOnly  bool
 }
 
 type feedbackSubmitFunc func(context.Context, appfeatures.FeedbackDraft, bool) (appfeatures.FeedbackReceipt, error)
@@ -174,12 +175,17 @@ func (e *Engine) buildFeedbackDraft(sessionKey, description string, overrideGaps
 }
 
 func (e *Engine) rememberPendingFeedback(sessionKey, userID string, draft appfeatures.FeedbackDraft) (string, error) {
+	token, _, err := e.rememberPendingFeedbackForCaller(sessionKey, userID, false, draft)
+	return token, err
+}
+
+func (e *Engine) rememberPendingFeedbackForCaller(sessionKey, userID string, agentOnly bool, draft appfeatures.FeedbackDraft) (string, time.Time, error) {
 	if sessionKey == "" {
-		return "", fmt.Errorf("feedback session is required")
+		return "", time.Time{}, fmt.Errorf("feedback session is required")
 	}
 	token, err := newPendingActionToken()
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 	e.feedbackMu.Lock()
 	defer e.feedbackMu.Unlock()
@@ -191,8 +197,10 @@ func (e *Engine) rememberPendingFeedback(sessionKey, userID string, draft appfea
 	for len(e.feedbackPending) >= feedbackPendingMax {
 		e.evictOldestFeedbackLocked()
 	}
-	e.feedbackPending[token] = pendingFeedback{Draft: draft, At: now, SessionKey: sessionKey, UserID: userID}
-	return token, nil
+	e.feedbackPending[token] = pendingFeedback{
+		Draft: draft, At: now, SessionKey: sessionKey, UserID: userID, AgentOnly: agentOnly,
+	}
+	return token, now.Add(feedbackPendingTTL), nil
 }
 
 func (e *Engine) takePendingFeedback(sessionKey, userID, token string) (appfeatures.FeedbackDraft, bool) {
@@ -207,7 +215,7 @@ func (e *Engine) takePendingFeedback(sessionKey, userID, token string) (appfeatu
 	if !exists {
 		return appfeatures.FeedbackDraft{}, false
 	}
-	if pending.SessionKey != sessionKey || (pending.UserID != "" && pending.UserID != userID) {
+	if pending.AgentOnly || pending.SessionKey != sessionKey || (pending.UserID != "" && pending.UserID != userID) {
 		return appfeatures.FeedbackDraft{}, false
 	}
 	e.deletePendingFeedbackLocked(token)
@@ -221,7 +229,7 @@ func (e *Engine) clearPendingFeedback(sessionKey, userID, token string) {
 	if token == "" {
 		token = e.uniqueFeedbackTokenLocked(sessionKey, userID)
 	}
-	if pending, exists := e.feedbackPending[token]; exists && pending.SessionKey == sessionKey && (pending.UserID == "" || pending.UserID == userID) {
+	if pending, exists := e.feedbackPending[token]; exists && !pending.AgentOnly && pending.SessionKey == sessionKey && (pending.UserID == "" || pending.UserID == userID) {
 		e.deletePendingFeedbackLocked(token)
 	}
 }
@@ -229,7 +237,7 @@ func (e *Engine) clearPendingFeedback(sessionKey, userID, token string) {
 func (e *Engine) uniqueFeedbackTokenLocked(sessionKey, userID string) string {
 	match := ""
 	for token, pending := range e.feedbackPending {
-		if pending.SessionKey != sessionKey || (pending.UserID != "" && pending.UserID != userID) {
+		if pending.AgentOnly || pending.SessionKey != sessionKey || (pending.UserID != "" && pending.UserID != userID) {
 			continue
 		}
 		if match != "" {
@@ -272,24 +280,12 @@ func (e *Engine) submitPendingFeedback(platform Platform, message *Message, sess
 		return
 	}
 
-	e.feedbackMu.Lock()
-	endpoint := e.feedbackEndpoint
-	submit := e.feedbackSubmitFn
-	e.feedbackMu.Unlock()
-	if submit == nil {
-		relay := appfeatures.FeedbackRelay{Endpoint: endpoint}
-		submit = relay.Submit
-	}
-	ctx, cancel := context.WithTimeout(e.ctx, feedbackSubmitTimeout)
-	defer cancel()
-	receipt, err := submit(ctx, draft, true)
+	receipt, err := e.submitFeedbackDraft(e.ctx, draft)
 	if err != nil {
-		slog.Warn("feedback: submission failed", "error", err)
 		e.reply(platform, message.ReplyCtx, e.i18n.Tf(MsgFeedbackSubmitFailed, feedbackFallbackURL))
 		return
 	}
 
-	slog.Info("feedback: submitted", "reference_url", receipt.ReferenceURL, "deduplicated", receipt.Deduplicated)
 	e.reply(platform, message.ReplyCtx, e.i18n.Tf(MsgFeedbackSubmitted, receipt.ReferenceURL))
 }
 

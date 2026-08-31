@@ -23,6 +23,12 @@
 - Feedback approvals and Update confirmations now carry opaque one-time tokens
   bound to the exact displayed Draft/Plan, session, initiating user, and TTL;
   stale cards cannot approve a later replacement value.
+- The Agent Capability Manifest now declares a first-class, `local-agent`
+  feedback CLI. `feedback preview` returns the complete redacted Foundation
+  Draft with zero Relay I/O; `feedback submit` accepts only that one-time
+  token from a live HMAC-authenticated turn for the same session/user and
+  returns structured status, reference URL, and deduplication fields. Both
+  chat and CLI use the same Draft, approval, and Relay implementation.
 - The host-owned Relay entrypoint translates the exact legacy CC Connect
   schema-1 request into the new structured Foundation request, allowing an
   in-place Worker rollout without breaking existing installed clients.
