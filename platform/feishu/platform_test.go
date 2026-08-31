@@ -420,6 +420,9 @@ func TestInteractivePlatform_OnMessagePassesCardSenderToHandler(t *testing.T) {
 	if receivedMsg.Content != "/help" {
 		t.Fatalf("message content = %q, want /help", receivedMsg.Content)
 	}
+	if !receivedMsg.IsDirect {
+		t.Fatal("p2p message was not marked as a direct user conversation")
+	}
 	if _, ok := receivedPlat.(core.CardSender); !ok {
 		t.Fatalf("handler platform type = %T, want core.CardSender", receivedPlat)
 	}
@@ -1988,9 +1991,12 @@ func TestAllowChat_FiltersGroupMessages(t *testing.T) {
 			}
 
 			select {
-			case <-msgCh:
+			case msg := <-msgCh:
 				if !tt.wantPass {
 					t.Fatal("expected message to be blocked by allow_chat, but it was delivered")
+				}
+				if got, want := msg.IsDirect, tt.chatType == "p2p"; got != want {
+					t.Fatalf("IsDirect = %v, want %v for chat_type=%q", got, want, tt.chatType)
 				}
 			case <-time.After(2 * time.Second):
 				if tt.wantPass {

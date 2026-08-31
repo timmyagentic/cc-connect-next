@@ -1,6 +1,8 @@
 package core
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -18,9 +20,10 @@ import (
 // an old daemon would never learn that a newer version had shipped. The
 // UpdateNotifier closes that gap: it periodically compares CurrentVersion
 // against the newest stable GitHub release and, when a newer one appears,
-// sends one localized chat notice per project to that project's most recently
-// active session. Each discovered version is announced at most once per
-// project (persisted across restarts), so the reminder can never become spam.
+// sends one localized private notice to each project's explicit admin_from
+// users. Recent chats, groups, and topics are never notification targets. Each
+// recipient/version success is persisted across restarts so partial retries do
+// not repeat notices to administrators who already received them.
 
 const (
 	updateNoticeInitialDelay = 2 * time.Minute
@@ -29,13 +32,15 @@ const (
 )
 
 // UpdateNotifier periodically checks for a newer stable release and notifies
-// each registered project's most recently active session once per version.
+// each registered project's explicit administrators once per version.
 type UpdateNotifier struct {
-	mu       sync.Mutex
-	engines  map[string]*Engine
-	order    []string // registration order for deterministic iteration
-	dataDir  string
-	notified map[string]string // project name → last announced version tag
+	mu      sync.Mutex
+	engines map[string]*Engine
+	order   []string // registration order for deterministic iteration
+	dataDir string
+	// Project keys mark full delivery; recipient:<project>:<hash> keys remember
+	// partial successes without persisting platform user IDs.
+	notified map[string]string
 
 	initialDelay time.Duration
 	interval     time.Duration
@@ -143,10 +148,31 @@ func (n *UpdateNotifier) CheckOnce() {
 		if e == nil || already {
 			continue
 		}
-		if !e.NotifyUpdateAvailable(release) {
-			// No reachable session yet (fresh project, platform without
-			// proactive messaging, or send failure). Leave the project
-			// unmarked so the next cycle retries.
+		targets := e.updateNoticeTargets()
+		if len(targets) == 0 {
+			continue
+		}
+		action := e.i18n.Tf(MsgUpdateNoticeAvailableAction, release.TagName, CurrentVersion)
+		text := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
+		allDelivered := true
+		for _, target := range targets {
+			stateKey := updateNoticeRecipientStateKey(name, target.key)
+			n.mu.Lock()
+			targetDone := n.notified[stateKey] == release.TagName
+			n.mu.Unlock()
+			if targetDone {
+				continue
+			}
+			if err := e.sendUpdateNoticeTarget(target, action, text); err != nil {
+				allDelivered = false
+				continue
+			}
+			n.mu.Lock()
+			n.notified[stateKey] = release.TagName
+			n.mu.Unlock()
+			changed = true
+		}
+		if !allDelivered {
 			continue
 		}
 		n.mu.Lock()
@@ -157,6 +183,10 @@ func (n *UpdateNotifier) CheckOnce() {
 	if changed {
 		n.saveState()
 	}
+}
+
+func updateNoticeRecipientStateKey(project, targetKey string) string {
+	return "recipient:" + project + ":" + targetKey
 }
 
 func (n *UpdateNotifier) statePath() string {
@@ -200,9 +230,83 @@ func (n *UpdateNotifier) saveState() {
 	}
 }
 
-// NotifyUpdateAvailable sends a localized update notice to this engine's most
-// recently active session. Returns true only when a message was actually
-// delivered, so callers can retry later instead of losing the notice.
+func (e *Engine) explicitAdminUserIDs() []string {
+	e.userRolesMu.RLock()
+	raw := e.adminFrom
+	e.userRolesMu.RUnlock()
+	seen := make(map[string]struct{})
+	users := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		userID := strings.TrimSpace(part)
+		if userID == "*" {
+			return nil
+		}
+		if userID == "" {
+			continue
+		}
+		key := strings.ToLower(userID)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		users = append(users, userID)
+	}
+	sort.Slice(users, func(i, j int) bool {
+		return strings.ToLower(users[i]) < strings.ToLower(users[j])
+	})
+	return users
+}
+
+func (e *Engine) directUserNoticePlatform() (Platform, DirectUserSender, bool) {
+	var platform Platform
+	var sender DirectUserSender
+	for _, candidate := range e.platforms {
+		direct, ok := candidate.(DirectUserSender)
+		if !ok {
+			continue
+		}
+		if sender != nil {
+			return nil, nil, false
+		}
+		platform = candidate
+		sender = direct
+	}
+	return platform, sender, sender != nil
+}
+
+type updateNoticeTarget struct {
+	key      string
+	userID   string
+	platform Platform
+	sender   DirectUserSender
+}
+
+func (e *Engine) updateNoticeTargets() []updateNoticeTarget {
+	admins := e.explicitAdminUserIDs()
+	if len(admins) == 0 {
+		slog.Debug("update notice: no explicit admin_from private target", "project", e.name)
+		return nil
+	}
+	platform, sender, ok := e.directUserNoticePlatform()
+	if !ok {
+		slog.Debug("update notice: direct-user platform is missing or ambiguous", "project", e.name)
+		return nil
+	}
+	targets := make([]updateNoticeTarget, 0, len(admins))
+	for _, userID := range admins {
+		digest := sha256.Sum256([]byte(platform.Name() + "\x00" + strings.ToLower(userID)))
+		targets = append(targets, updateNoticeTarget{
+			key: hex.EncodeToString(digest[:]), userID: userID, platform: platform, sender: sender,
+		})
+	}
+	return targets
+}
+
+// NotifyUpdateAvailable sends one localized update notice to every explicit
+// admin_from user through exactly one platform that supports private direct
+// delivery. It never borrows a recent chat/session target. Returns true only
+// when every configured admin received the notice, so partial failures remain
+// retryable instead of permanently suppressing one administrator's reminder.
 //
 // The notice is actionable: platforms with cards or inline buttons get an
 // [review update] button, and the delivered session opens a natural-language
@@ -212,33 +316,45 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	if release == nil || release.TagName == "" {
 		return false
 	}
-	// Two copies, one per surface: a card/button message must not also tell
-	// the user to type a reply — the button is the call to action, and two
-	// competing instructions just make people hesitate. Only the text-only
-	// fallback spells out the natural-language route.
-	action := e.i18n.Tf(MsgUpdateNoticeAvailableAction, release.TagName, CurrentVersion)
-	text := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
-	key, ok := e.notifyMostRecentSessionFn("update notice", func(_ string, p Platform, replyCtx any) error {
-		return e.sendUpdateNotice(p, replyCtx, action, text)
-	})
-	if ok {
-		e.updateIntents.recordNotice(key)
+	targets := e.updateNoticeTargets()
+	if len(targets) == 0 {
+		return false
 	}
-	return ok
+	text := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
+	action := e.i18n.Tf(MsgUpdateNoticeAvailableAction, release.TagName, CurrentVersion)
+	delivered := 0
+	for _, target := range targets {
+		if err := e.sendUpdateNoticeTarget(target, action, text); err != nil {
+			slog.Debug("update notice: admin private send failed",
+				"project", e.name, "platform", target.platform.Name(), "error", err)
+			continue
+		}
+		delivered++
+	}
+	if delivered != len(targets) {
+		slog.Debug("update notice: partial admin delivery",
+			"project", e.name, "delivered", delivered, "expected", len(targets))
+		return false
+	}
+	slog.Info("update notice: delivered to explicit admins",
+		"project", e.name, "platform", targets[0].platform.Name(), "count", delivered)
+	return true
 }
 
-// sendUpdateNotice delivers the notice with [review update] / [what's new]
-// actions where the platform supports them, plain text elsewhere. Buttons
-// use the cmd:/ scheme so a tap passes the same gates as a typed command.
-// actionCopy accompanies the buttons (no typed-reply instruction);
-// textCopy is used whenever the message ends up without buttons, including
-// when a card or button send fails and delivery falls back to plain text.
-func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, actionCopy, textCopy string) error {
-	btnNow := e.i18n.T(MsgUpdateBtnNow)
-	btnLog := e.i18n.T(MsgUpdateBtnChangelog)
-	hint := e.i18n.T(MsgUpdateHintReplyUpdate)
-	if cs, ok := p.(CardSender); ok {
-		card := e.renderCardForPlatform(p, NewCard().
+func (e *Engine) sendUpdateNoticeTarget(target updateNoticeTarget, actionCopy, textCopy string) error {
+	if err := e.sendDirectUpdateNotice(target.platform, target.sender, target.userID, actionCopy, textCopy); err != nil {
+		return err
+	}
+	e.updateIntents.recordDirectNotice(target.platform.Name(), target.userID)
+	return nil
+}
+
+func (e *Engine) sendDirectUpdateNotice(platform Platform, sender DirectUserSender, userID, actionCopy, textCopy string) error {
+	if cards, ok := platform.(DirectUserCardSender); ok {
+		btnNow := e.i18n.T(MsgUpdateBtnNow)
+		btnLog := e.i18n.T(MsgUpdateBtnChangelog)
+		hint := e.i18n.T(MsgUpdateHintReplyUpdate)
+		card := e.renderCardForPlatform(platform, NewCard().
 			Markdown(actionCopy).
 			Buttons(
 				CardButton{Text: btnNow, Type: "primary", Value: "cmd:/upgrade"},
@@ -246,20 +362,11 @@ func (e *Engine) sendUpdateNotice(p Platform, replyCtx any, actionCopy, textCopy
 			).
 			Note(hint).
 			Build())
-		if err := cs.SendCard(e.ctx, replyCtx, card); err == nil {
+		if err := cards.SendDirectUserCard(e.ctx, userID, card); err == nil {
 			return nil
 		}
 	}
-	if bs, ok := p.(InlineButtonSender); ok {
-		buttons := [][]ButtonOption{{
-			{Text: btnNow, Data: "cmd:/upgrade"},
-			{Text: btnLog, Data: "cmd:/upgrade"},
-		}}
-		if err := bs.SendWithButtons(e.ctx, replyCtx, withUpdateHint(actionCopy, hint), buttons); err == nil {
-			return nil
-		}
-	}
-	return e.sendWithError(p, replyCtx, textCopy)
+	return sender.SendDirectUser(e.ctx, userID, textCopy)
 }
 
 // notifyMostRecentSessionFn invokes deliver for candidates ordered by recent

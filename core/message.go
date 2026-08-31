@@ -319,6 +319,7 @@ type Message struct {
 	// default into the current scope without deleting or overwriting either.
 	LegacyChannelKey string
 	ReplyCtx         any               // platform-specific context needed for replying
+	IsDirect         bool              // true only when the platform verified a private one-to-one user conversation
 	FromVoice        bool              // true if message originated from voice transcription
 	ModeOverride     string            // if set, temporarily override agent permission mode for this message
 	AnswerProfile    AnswerProfileName // optional one-shot answer profile for this message

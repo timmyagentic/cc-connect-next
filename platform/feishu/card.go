@@ -52,6 +52,18 @@ func (p *interactivePlatform) SendCard(ctx context.Context, rctx any, card *core
 	return p.createMessage(ctx, rc.chatID, larkim.MsgTypeInteractive, cardJSON, "send card")
 }
 
+// SendDirectUserCard sends an actionable card to one app-scoped open_id
+// without resolving or borrowing any recent chat/session target.
+func (p *interactivePlatform) SendDirectUserCard(ctx context.Context, userID string, card *core.Card) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || !strings.HasPrefix(userID, "ou_") {
+		return fmt.Errorf("%s: direct user ID must be an app-scoped open_id", p.tag())
+	}
+	cardJSON := renderCard(card, "")
+	_, err := p.createMessageToReceiveID(ctx, userID, larkim.CreateMessageV1ReceiveIDTypeOpenId, larkim.MsgTypeInteractive, cardJSON, "send direct user card")
+	return err
+}
+
 // RefreshCard updates a previously rendered card in-place using the Patch API.
 // It looks up the messageID stored from the most recent card action callback
 // for the given session key and patches that message with the new card content.

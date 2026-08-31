@@ -44,7 +44,7 @@ cc-connect-next daemon restart
 
 Prerelease updates remain explicit through `npm install -g cc-connect-next@beta`; `cc-connect-next update --pre` and `--beta` are intentionally rejected.
 
-**How you learn about new releases.** A running daemon checks for newer stable releases (shortly after startup, then daily) and sends each project's most recently active chat one localized notice per version — never repeated, even across restarts. From chat, `/upgrade` shows the details and `/upgrade confirm` performs the update. Set `update_notice = false` in `config.toml` to disable the reminder. Pull-based checks remain available anytime: `/upgrade` in chat or `cc-connect-next check-update` on the CLI.
+**How you learn about new releases.** A running daemon checks for newer stable releases (shortly after startup, then daily) and, when exactly one configured platform supports direct-user messaging, privately notifies each explicitly listed `admin_from` user once per version. Recent groups, topics, and ordinary sessions are never reminder targets; empty, wildcard, or ambiguous targets stay silent because they cannot identify a fixed private recipient safely. Per-recipient delivery state survives restarts, so a partial retry does not repeat notices to administrators who already received one. From chat, `/upgrade` shows the details and `/upgrade confirm` performs the update. Set `update_notice = false` in `config.toml` to disable the reminder. Pull-based checks remain available anytime: `/upgrade` in chat or `cc-connect-next check-update` on the CLI.
 
 ### Current source
 

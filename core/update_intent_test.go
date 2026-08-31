@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -69,6 +70,18 @@ func TestMatchUpdateIntent(t *testing.T) {
 // context, so proactive notices can target it.
 type updateIntentStubPlatform struct {
 	stubPlatformEngine
+}
+
+func (p *updateIntentStubPlatform) SendDirectUser(ctx context.Context, _ string, content string) error {
+	return p.Send(ctx, nil, content)
+}
+
+func (p *stubCardPlatform) SendDirectUser(ctx context.Context, _ string, content string) error {
+	return p.Send(ctx, nil, content)
+}
+
+func (p *stubCardPlatform) SendDirectUserCard(ctx context.Context, _ string, card *Card) error {
+	return p.SendCard(ctx, nil, card)
 }
 
 func (p *updateIntentStubPlatform) ReconstructReplyCtx(sessionKey string) (any, error) {
@@ -231,16 +244,17 @@ func TestUpdateIntent_RespectsPrivilegedGate(t *testing.T) {
 
 func TestNotifyUpdateAvailable_RecordsConsentWindow(t *testing.T) {
 	e, p := upgradeIntentHarness(t)
-	// Give the engine a session so notifyMostRecentSessionFn finds a target.
-	s := e.sessions.GetOrCreateActive("test:user1")
-	_ = s
 
 	ok := e.NotifyUpdateAvailable(&ReleaseInfo{TagName: "v9.9.9"})
 	if !ok {
 		t.Fatal("notice delivery failed")
 	}
-	if !e.updateIntents.noticeActive("test:user1") {
-		t.Fatal("delivered notice must open the consent window for that session")
+	directReply := &Message{Platform: "test", UserID: "user1", SessionKey: "test:dm:user1", IsDirect: true}
+	if !e.updateNoticeActiveForMessage(directReply) {
+		t.Fatal("delivered notice must open a consent window for that direct admin")
+	}
+	if e.updateIntents.noticeActive("test:user1") {
+		t.Fatal("direct notice must not bind consent to an unrelated/recent session")
 	}
 	sent := strings.Join(p.getSent(), "\n")
 	if !strings.Contains(sent, "v9.9.9") {
@@ -248,6 +262,24 @@ func TestNotifyUpdateAvailable_RecordsConsentWindow(t *testing.T) {
 	}
 	if strings.Contains(sent, "/upgrade") {
 		t.Fatalf("notice must not demand command syntax, got:\n%s", sent)
+	}
+}
+
+func TestNotifyUpdateAvailable_DirectReplyEntersUpgradePlan(t *testing.T) {
+	e, p := upgradeIntentHarness(t)
+	if !e.NotifyUpdateAvailable(&ReleaseInfo{TagName: "v9.9.9"}) {
+		t.Fatal("notice delivery failed")
+	}
+	p.clearSent()
+	msg := updateIntentMsg("更新")
+	msg.SessionKey = "test:dm:user1"
+	msg.IsDirect = true
+	if !e.maybeHandleUpdateIntent(p, msg, msg.Content) {
+		t.Fatal("direct reply did not enter the update Plan flow")
+	}
+	sent := strings.Join(p.getSent(), "\n")
+	if !strings.Contains(sent, "v9.9.9") || !strings.Contains(strings.ToLower(sent), "confirm") {
+		t.Fatalf("direct reply did not render the exact update Plan: %s", sent)
 	}
 }
 
@@ -329,6 +361,7 @@ func TestReleaseBodyForLanguageFallsBackToOriginal(t *testing.T) {
 func TestUpdateNotice_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
 	p := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangChinese)
+	e.SetAdminFrom("ou_admin")
 	oldVersion := CurrentVersion
 	CurrentVersion = "v1.0.0"
 	t.Cleanup(func() { CurrentVersion = oldVersion })
@@ -367,6 +400,7 @@ func TestUpdateNotice_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
 func TestUpdateNotice_TextOnlyCopyKeepsReplyInstruction(t *testing.T) {
 	p := &updateIntentStubPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangChinese)
+	e.SetAdminFrom("ou_admin")
 	oldVersion := CurrentVersion
 	CurrentVersion = "v1.0.0"
 	t.Cleanup(func() { CurrentVersion = oldVersion })
@@ -389,6 +423,7 @@ func TestUpdateNotice_CardFailureFallsBackToInstructiveCopy(t *testing.T) {
 		cardErr:            errCardSendFailed,
 	}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangChinese)
+	e.SetAdminFrom("ou_admin")
 	oldVersion := CurrentVersion
 	CurrentVersion = "v1.0.0"
 	t.Cleanup(func() { CurrentVersion = oldVersion })
