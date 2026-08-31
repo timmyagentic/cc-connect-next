@@ -1111,6 +1111,10 @@ manager immediately. When an Agent invokes the same command inside an active
 chat turn, cc-connect-next instead schedules its graceful restart after the
 current answer, terminal card, Agent writer, and already accepted queued
 messages finish. The active message user must be authorized by `admin_from`.
+The runtime rotates a nonce for each Agent turn and signs it with a private
+per-Agent session secret; the client sends only the derived HMAC capability
+and cannot choose a project, session, user, or platform.
+Exporting `CC_SESSION_KEY` in a normal terminal does not activate this path.
 If that active-turn endpoint is unavailable (including an older running
 daemon), the command fails without restarting; use the chat `/restart` command
 instead. `--force` is never accepted from an Agent turn.

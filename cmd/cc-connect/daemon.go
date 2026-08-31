@@ -309,14 +309,19 @@ func daemonRestart(args []string) {
 // path byte-for-byte. Inside a turn it fails closed: an unavailable/old runtime
 // never falls back to killing the process that owns the active Agent writer.
 func runAgentDeferredRestart(args []string, stdout, stderr io.Writer, clientFactory func(string) *http.Client) (handled bool, code int) {
-	sessionKey := strings.TrimSpace(os.Getenv("CC_SESSION_KEY"))
-	if sessionKey == "" {
+	marker := strings.TrimSpace(os.Getenv(core.AgentTurnMarkerEnv))
+	sessionSecret := strings.TrimSpace(os.Getenv(core.AgentSessionSecretEnv))
+	noncePath := strings.TrimSpace(os.Getenv(core.AgentTurnNonceFileEnv))
+	legacyAgentContext := strings.TrimSpace(os.Getenv("CC_PROJECT")) != "" &&
+		strings.TrimSpace(os.Getenv("CC_SESSION_KEY")) != "" &&
+		strings.TrimSpace(os.Getenv("CC_AGENT_TYPE")) != "" &&
+		strings.TrimSpace(os.Getenv("CC_PLATFORM_TYPES")) != ""
+	if marker != "1" || sessionSecret == "" || noncePath == "" {
+		if legacyAgentContext {
+			_, _ = fmt.Fprintln(stderr, "Agent-safe restart was not scheduled: the running daemon does not provide turn credentials. Use the chat /restart command instead.")
+			return true, 1
+		}
 		return false, 0
-	}
-	project := strings.TrimSpace(os.Getenv("CC_PROJECT"))
-	if project == "" {
-		_, _ = fmt.Fprintln(stderr, "Agent-safe restart was not scheduled: CC_PROJECT is missing. Use the chat /restart command instead.")
-		return true, 1
 	}
 	for _, arg := range args {
 		if arg == "--force" {
@@ -325,7 +330,21 @@ func runAgentDeferredRestart(args []string, stdout, stderr io.Writer, clientFact
 		}
 	}
 
-	payload, err := json.Marshal(core.DeferredRestartRequest{Project: project, SessionKey: sessionKey})
+	file, err := os.Open(noncePath)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "Agent-safe restart was not scheduled: turn nonce is unavailable. Use the chat /restart command instead.")
+		return true, 1
+	}
+	credentialBytes, readErr := io.ReadAll(io.LimitReader(file, 4<<10))
+	closeErr := file.Close()
+	nonce := strings.TrimSpace(string(credentialBytes))
+	credential, credentialErr := core.BuildAgentTurnCredential(sessionSecret, nonce)
+	if readErr != nil || closeErr != nil || credentialErr != nil || len(credentialBytes) >= 4<<10 {
+		_, _ = fmt.Fprintln(stderr, "Agent-safe restart was not scheduled: turn credential is invalid. Use the chat /restart command instead.")
+		return true, 1
+	}
+
+	payload, err := json.Marshal(core.DeferredRestartRequest{Credential: credential})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Agent-safe restart was not scheduled: %v. Use the chat /restart command instead.\n", err)
 		return true, 1

@@ -80,7 +80,7 @@ Manifest 会保留不支持的运行态能力条目，而不是静默删除。�
 内置命令权限直接遵循 Engine dispatch：
 
 - `/shell`、`/show`、`/dir`、`/diff`、`/web`、`/upgrade`、`/restart` 需要 `projects.admin_from`；
-- Agent 调用的 `cc-connect-next daemon restart` 同样需要管理员权限，且只在精确的活动回合内条件可用；客户端不提交 user 或 platform 身份；
+- Agent 调用的 `cc-connect-next daemon restart` 同样需要管理员权限，且只在持有由 Agent session 私有 secret 派生的精确 HMAC 回合凭证时条件可用；客户端不提交 project、session、user 或 platform 路由；
 - `/commands addexec`、`/cron addexec` 和 `/timer addexec` 仅对应 Shell 注册子操作需要管理员权限；
 - 所有带 `Exec` 正文的已注册自定义命令在实际调用时同样需要管理员；Prompt 自定义命令保持 member 权限；
 - 项目级 `disabled_commands` 会反映为 `unavailable`；用户角色级禁用和具体调用者身份仍由真实命令分发在调用时检查，因此 Manifest 将其保留为权限条件而不猜测身份；

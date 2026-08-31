@@ -143,6 +143,9 @@ func TestFilterEnvForSpawn_RunAsUser(t *testing.T) {
 		"HOME=/home/supervisor",
 		"SUPERVISOR_CREDENTIAL=nope",
 		"PGSSLROOTCERT=/etc/certs/root.crt",
+		AgentTurnMarkerEnv + "=1",
+		AgentSessionSecretEnv + "=" + strings.Repeat("a", 64),
+		AgentTurnNonceFileEnv + "=/state/run/turn-nonce",
 	}
 	opts := SpawnOptions{
 		RunAsUser:    "target",
@@ -154,8 +157,11 @@ func TestFilterEnvForSpawn_RunAsUser(t *testing.T) {
 	// sudo -i can rebuild it from the target user's login profile
 	// instead of inheriting the supervisor's PATH.
 	wantKept := map[string]bool{
-		"LANG=en_US.UTF-8":                 true,
-		"PGSSLROOTCERT=/etc/certs/root.crt": true,
+		"LANG=en_US.UTF-8":                                    true,
+		"PGSSLROOTCERT=/etc/certs/root.crt":                   true,
+		AgentTurnMarkerEnv + "=1":                             true,
+		AgentSessionSecretEnv + "=" + strings.Repeat("a", 64): true,
+		AgentTurnNonceFileEnv + "=/state/run/turn-nonce":      true,
 	}
 	for _, e := range got {
 		if !wantKept[e] {
@@ -201,8 +207,8 @@ func TestVerifyRunAsUserCheap_Success(t *testing.T) {
 	ResetVerifyCache()
 	runner := &stubSudoRunner{
 		script: map[string]stubResponse{
-			key("-n", "-iu", "target", "--", "/usr/bin/true"):                           {nil, nil},
-			key("-n", "-iu", "target", "--", "sudo", "-n", "/usr/bin/true"):             {[]byte("a password is required"), &exec.ExitError{}},
+			key("-n", "-iu", "target", "--", "/usr/bin/true"):               {nil, nil},
+			key("-n", "-iu", "target", "--", "sudo", "-n", "/usr/bin/true"): {[]byte("a password is required"), &exec.ExitError{}},
 		},
 	}
 	if err := VerifyRunAsUserCheap(context.Background(), runner, "target"); err != nil {
@@ -277,4 +283,3 @@ func TestVerifyRunAsUserCheap_CacheHit(t *testing.T) {
 		t.Fatalf("cached call made runner calls; want 2 total, got %d", len(runner.calls))
 	}
 }
-

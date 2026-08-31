@@ -63,12 +63,12 @@ type SendRequest struct {
 	AtAll      bool              `json:"at_all,omitempty"`
 }
 
-// DeferredRestartRequest is intentionally identity-free. The runtime resolves
-// user and platform from the active Engine turn so a local client cannot forge
-// admin_from authorization or redirect the post-restart notification.
+// DeferredRestartRequest is intentionally routing- and identity-free. The
+// opaque credential resolves one exact active Engine turn, so a local client
+// cannot select another project/session, forge admin_from authorization, or
+// redirect the post-restart notification.
 type DeferredRestartRequest struct {
-	Project    string `json:"project"`
-	SessionKey string `json:"session_key"`
+	Credential string `json:"credential"`
 }
 
 type DeferredRestartResponse struct {
@@ -430,30 +430,38 @@ func (s *APIServer) handleDeferredRestart(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	req.Project = strings.TrimSpace(req.Project)
-	req.SessionKey = strings.TrimSpace(req.SessionKey)
-	if req.Project == "" || req.SessionKey == "" {
-		http.Error(w, "project and session_key are required", http.StatusBadRequest)
+	req.Credential = strings.TrimSpace(req.Credential)
+	if req.Credential == "" {
+		http.Error(w, "credential is required", http.StatusBadRequest)
 		return
 	}
 
 	s.mu.RLock()
-	engine, ok := s.engines[req.Project]
-	s.mu.RUnlock()
-	if !ok {
-		http.Error(w, fmt.Sprintf("project %q not found", req.Project), http.StatusNotFound)
-		return
+	engines := make([]*Engine, 0, len(s.engines))
+	for _, engine := range s.engines {
+		engines = append(engines, engine)
 	}
+	s.mu.RUnlock()
 
-	restart, err := engine.RequestDeferredRestart(req.SessionKey)
-	if err != nil {
+	var restart RestartRequest
+	scheduleErr := ErrDeferredRestartCredentialInvalid
+	for _, engine := range engines {
+		var err error
+		restart, err = engine.RequestDeferredRestart(req.Credential)
+		if errors.Is(err, ErrDeferredRestartCredentialInvalid) {
+			continue
+		}
+		scheduleErr = err
+		break
+	}
+	if scheduleErr != nil {
 		switch {
-		case errors.Is(err, ErrDeferredRestartUnauthorized):
-			http.Error(w, err.Error(), http.StatusForbidden)
-		case errors.Is(err, ErrDeferredRestartNoActiveTurn), errors.Is(err, ErrDeferredRestartAlreadyPending):
-			http.Error(w, err.Error(), http.StatusConflict)
+		case errors.Is(scheduleErr, ErrDeferredRestartCredentialInvalid), errors.Is(scheduleErr, ErrDeferredRestartUnauthorized):
+			http.Error(w, scheduleErr.Error(), http.StatusForbidden)
+		case errors.Is(scheduleErr, ErrDeferredRestartNoActiveTurn), errors.Is(scheduleErr, ErrDeferredRestartAlreadyPending):
+			http.Error(w, scheduleErr.Error(), http.StatusConflict)
 		default:
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, scheduleErr.Error(), http.StatusInternalServerError)
 		}
 		return
 	}

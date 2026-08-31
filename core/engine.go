@@ -109,6 +109,9 @@ var (
 	// ErrDeferredRestartAlreadyPending means this turn already scheduled a
 	// restart. Repeated tool calls must not enqueue multiple lifecycle actions.
 	ErrDeferredRestartAlreadyPending = errors.New("restart is already pending for this Agent turn")
+	// ErrDeferredRestartCredentialInvalid means the caller did not prove that it
+	// belongs to one exact Agent turn in this process.
+	ErrDeferredRestartCredentialInvalid = errors.New("invalid Agent turn credential")
 )
 
 // RestartRequest carries info needed to send a post-restart notification.
@@ -604,6 +607,7 @@ type interactiveState struct {
 	replyCtx                 any
 	currentMessageID         string
 	currentUserID            string
+	currentSessionKey        string
 	lastRecallProbeMessageID string
 	lastRecallProbeAt        time.Time
 	recallProbeInFlight      bool
@@ -674,6 +678,9 @@ type interactiveState struct {
 	// terminal presentation, and every already-queued turn have finished.
 	deferredRestart        *RestartRequest
 	restartAdmissionFenced bool
+	restartTurnToken       string
+	restartSessionSecret   string
+	restartNoncePath       string
 	// presentationGeneration increments on every adopted handoff. Async
 	// operations snapshot it and re-check before mutating a card so late work
 	// from an old generation cannot overwrite a redirected card.
@@ -1485,22 +1492,44 @@ func (e *Engine) isAdmin(userID string) bool {
 	return false
 }
 
-// RequestDeferredRestart records a restart lifecycle action against the exact
-// active Agent turn. Caller-supplied identity is deliberately absent: user and
-// platform come from the Engine's trusted inbound message state, and the user
-// must pass the same admin_from gate as the chat /restart command.
-func (e *Engine) RequestDeferredRestart(sessionKey string) (RestartRequest, error) {
-	sessionKey = strings.TrimSpace(sessionKey)
-	if sessionKey == "" {
-		return RestartRequest{}, ErrDeferredRestartNoActiveTurn
+// deferredRestartStateForCredential resolves a cryptographic turn capability
+// without accepting a client-selected project or session route.
+func (e *Engine) deferredRestartStateForCredential(credential string) (*interactiveState, string) {
+	if !validAgentTurnToken(credential) {
+		return nil, ""
 	}
-
-	interactiveKey := e.interactiveKeyForSessionKey(sessionKey)
 	e.interactiveMu.Lock()
-	state := e.interactiveStates[interactiveKey]
+	states := make([]*interactiveState, 0, len(e.interactiveStates))
+	for _, state := range e.interactiveStates {
+		states = append(states, state)
+	}
 	e.interactiveMu.Unlock()
+	for _, state := range states {
+		if state == nil {
+			continue
+		}
+		state.steerMu.Lock()
+		state.mu.Lock()
+		matched := sameAgentTurnToken(credential, state.restartTurnToken)
+		sessionKey := state.currentSessionKey
+		state.mu.Unlock()
+		state.steerMu.Unlock()
+		if matched && sessionKey != "" {
+			return state, sessionKey
+		}
+	}
+	return nil, ""
+}
+
+// RequestDeferredRestart records a restart lifecycle action against the exact
+// active Agent turn proven by credential. User, platform, project, and session
+// all come from trusted Engine state; the local client supplies no routing or
+// identity and the user must pass the chat /restart admin_from gate.
+func (e *Engine) RequestDeferredRestart(credential string) (RestartRequest, error) {
+	credential = strings.TrimSpace(credential)
+	state, sessionKey := e.deferredRestartStateForCredential(credential)
 	if state == nil {
-		return RestartRequest{}, ErrDeferredRestartNoActiveTurn
+		return RestartRequest{}, ErrDeferredRestartCredentialInvalid
 	}
 
 	_, sessions := e.sessionContextForKey(sessionKey)
@@ -1513,6 +1542,9 @@ func (e *Engine) RequestDeferredRestart(sessionKey string) (RestartRequest, erro
 	defer state.steerMu.Unlock()
 	state.mu.Lock()
 	defer state.mu.Unlock()
+	if !sameAgentTurnToken(credential, state.restartTurnToken) || state.currentSessionKey != sessionKey {
+		return RestartRequest{}, ErrDeferredRestartCredentialInvalid
+	}
 	if !state.presentationOpen || state.stopped || state.agentSession == nil || !state.agentSession.Alive() || !session.Busy() {
 		return RestartRequest{}, ErrDeferredRestartNoActiveTurn
 	}
@@ -2478,6 +2510,7 @@ func (e *Engine) Stop() error {
 	e.interactiveMu.Unlock()
 
 	for key, state := range states {
+		clearAgentTurnCredential(state, true)
 		if state.agentSession != nil {
 			slog.Debug("engine.Stop: closing agent session", "session", key)
 			if err := state.agentSession.Close(); err != nil {
@@ -4183,9 +4216,9 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.platform = p
 	state.replyCtx = msg.ReplyCtx
 	state.currentMessageID = msg.MessageID
-	state.currentUserID = msg.UserID
 	state.currentTurnUserMessageTimeMs = msg.UserMessageTimeMs
 	state.mu.Unlock()
+	e.activateAgentTurnCredential(state, msg.UserID, msg.SessionKey)
 	state.setTurnRichCardCopy(msg.MessageID, turnRichCardCopy)
 	stopRecallMonitor := e.startMessageRecallMonitor(interactiveKey)
 	defer stopRecallMonitor()
@@ -4496,6 +4529,7 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 		)
 		e.stopUnsolicitedReader(state)
 		state.markStopped()
+		clearAgentTurnCredential(state, true)
 		// Close synchronously to prevent race condition where old agent
 		// continues outputting while new agent starts (issue #327).
 		e.closeAgentSessionWithTimeout(sessionKey, state.agentSession)
@@ -4514,6 +4548,8 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	}
 
 	// Inject per-session env vars so the agent subprocess can call `cc-connect-next cron add` etc.
+	var restartSessionSecret string
+	var restartNoncePath string
 	if inj, ok := agent.(SessionEnvInjector); ok {
 		envVars := []string{
 			"CC_PROJECT=" + e.name,
@@ -4523,6 +4559,26 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 		}
 		if e.dataDir != "" {
 			envVars = append(envVars, "CC_DATA_DIR="+e.dataDir)
+			envVars = append(envVars, AgentTurnMarkerEnv+"=1")
+			secret, secretErr := newAgentTurnToken()
+			path, pathErr := newAgentTurnNoncePath(e.dataDir)
+			if secretErr != nil || pathErr != nil {
+				if path != "" {
+					_ = os.Remove(path)
+				}
+				err := secretErr
+				if err == nil {
+					err = pathErr
+				}
+				slog.Warn("Agent turn credential setup failed", "project", e.name, "error", err)
+			} else {
+				restartSessionSecret = secret
+				restartNoncePath = path
+				envVars = append(envVars,
+					AgentSessionSecretEnv+"="+secret,
+					AgentTurnNonceFileEnv+"="+path,
+				)
+			}
 		}
 		if exePath, err := os.Executable(); err == nil {
 			binDir := filepath.Dir(exePath)
@@ -4549,6 +4605,9 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	// Check if context is already canceled (e.g. during shutdown/restart)
 	if e.ctx.Err() != nil {
 		slog.Debug("skipping session start: context canceled", "session_key", sessionKey)
+		if restartNoncePath != "" {
+			_ = os.Remove(restartNoncePath)
+		}
 		newState := &interactiveState{platform: p, replyCtx: replyCtx, agent: agent, eventsNeedResync: true}
 		adoptPendingFromPlaceholder(e.interactiveStates[sessionKey], newState)
 		state = newState
@@ -4609,6 +4668,9 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 		}
 		if err != nil {
 			slog.Error("failed to start interactive session", "error", err, "elapsed", startElapsed)
+			if restartNoncePath != "" {
+				_ = os.Remove(restartNoncePath)
+			}
 			e.hooks.Emit(HookEvent{
 				Event:      HookEventError,
 				SessionKey: sessionKey,
@@ -4653,11 +4715,13 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	}
 
 	newState := &interactiveState{
-		agentSession:     agentSession,
-		platform:         p,
-		replyCtx:         replyCtx,
-		agent:            agent,
-		eventsNeedResync: true,
+		agentSession:         agentSession,
+		platform:             p,
+		replyCtx:             replyCtx,
+		agent:                agent,
+		eventsNeedResync:     true,
+		restartSessionSecret: restartSessionSecret,
+		restartNoncePath:     restartNoncePath,
 	}
 	adoptPendingFromPlaceholder(e.interactiveStates[sessionKey], newState)
 	state = newState
@@ -4725,6 +4789,7 @@ func (e *Engine) cleanupInteractiveState(sessionKey string, expected ...*interac
 
 	// Notify senders of any queued messages that will never be processed.
 	if ok && state != nil {
+		clearAgentTurnCredential(state, true)
 		// Stop unsolicited reader before marking stopped to avoid goroutine leak.
 		e.stopUnsolicitedReader(state)
 
@@ -6833,6 +6898,7 @@ func (queue *turnQueue) handle() {
 		state.presentationOpen = true
 		state.mu.Unlock()
 		state.steerMu.Unlock()
+		e.activateAgentTurnCredential(state, queued.userID, queued.msgSessionKey)
 
 		// Stop the previous turn's typing indicator
 		if stopTyping != nil {
@@ -8410,6 +8476,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.activeAnswerProfile = queued.answerProfile
 		state.mu.Unlock()
 		state.steerMu.Unlock()
+		e.activateAgentTurnCredential(state, queued.userID, queued.msgSessionKey)
 
 		queuedRichCardCopy := e.i18n.RichCardCopyForText(queued.content)
 		e.i18n.DetectAndSet(queued.content)

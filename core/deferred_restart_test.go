@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -17,11 +18,17 @@ func prepareDeferredRestartTurn(t *testing.T, userID, sessionKey string) (*Engin
 	platform := &stubPlatformEngine{n: "feishu"}
 	engine := NewEngine("demo", &stubAgent{}, []Platform{platform}, "", LangEnglish)
 	engine.SetAdminFrom("admin-user")
+	token, err := newAgentTurnToken()
+	if err != nil {
+		t.Fatal(err)
+	}
 	state := &interactiveState{
-		agentSession:     &stubAgentSession{},
-		platform:         platform,
-		currentUserID:    userID,
-		presentationOpen: true,
+		agentSession:      &stubAgentSession{},
+		platform:          platform,
+		currentUserID:     userID,
+		currentSessionKey: sessionKey,
+		restartTurnToken:  token,
+		presentationOpen:  true,
 	}
 	engine.interactiveStates[sessionKey] = state
 	session := engine.sessions.GetOrCreateActive(sessionKey)
@@ -37,7 +44,7 @@ func TestRequestDeferredRestartUsesTrustedActiveTurnIdentity(t *testing.T) {
 	const sessionKey = "feishu:d:chat-1:admin-user:thread:omt-1"
 	engine, state := prepareDeferredRestartTurn(t, "admin-user", sessionKey)
 
-	req, err := engine.RequestDeferredRestart(sessionKey)
+	req, err := engine.RequestDeferredRestart(state.restartTurnToken)
 	if err != nil {
 		t.Fatalf("RequestDeferredRestart() error = %v", err)
 	}
@@ -50,7 +57,7 @@ func TestRequestDeferredRestartUsesTrustedActiveTurnIdentity(t *testing.T) {
 	if !fenced {
 		t.Fatal("restart scheduling did not freeze new message admission")
 	}
-	if _, err := engine.RequestDeferredRestart(sessionKey); !errors.Is(err, ErrDeferredRestartAlreadyPending) {
+	if _, err := engine.RequestDeferredRestart(state.restartTurnToken); !errors.Is(err, ErrDeferredRestartAlreadyPending) {
 		t.Fatalf("duplicate error = %v, want ErrDeferredRestartAlreadyPending", err)
 	}
 	select {
@@ -62,8 +69,8 @@ func TestRequestDeferredRestartUsesTrustedActiveTurnIdentity(t *testing.T) {
 
 func TestRequestDeferredRestartFailsClosed(t *testing.T) {
 	t.Run("non-admin", func(t *testing.T) {
-		engine, _ := prepareDeferredRestartTurn(t, "ordinary-user", "feishu:d:chat:user")
-		if _, err := engine.RequestDeferredRestart("feishu:d:chat:user"); !errors.Is(err, ErrDeferredRestartUnauthorized) {
+		engine, state := prepareDeferredRestartTurn(t, "ordinary-user", "feishu:d:chat:user")
+		if _, err := engine.RequestDeferredRestart(state.restartTurnToken); !errors.Is(err, ErrDeferredRestartUnauthorized) {
 			t.Fatalf("error = %v, want ErrDeferredRestartUnauthorized", err)
 		}
 	})
@@ -73,15 +80,15 @@ func TestRequestDeferredRestartFailsClosed(t *testing.T) {
 		state.mu.Lock()
 		state.presentationOpen = false
 		state.mu.Unlock()
-		if _, err := engine.RequestDeferredRestart("feishu:d:chat:admin"); !errors.Is(err, ErrDeferredRestartNoActiveTurn) {
+		if _, err := engine.RequestDeferredRestart(state.restartTurnToken); !errors.Is(err, ErrDeferredRestartNoActiveTurn) {
 			t.Fatalf("error = %v, want ErrDeferredRestartNoActiveTurn", err)
 		}
 	})
 
-	t.Run("wrong session", func(t *testing.T) {
+	t.Run("wrong credential", func(t *testing.T) {
 		engine, _ := prepareDeferredRestartTurn(t, "admin-user", "feishu:d:chat:admin")
-		if _, err := engine.RequestDeferredRestart("feishu:d:other:admin"); !errors.Is(err, ErrDeferredRestartNoActiveTurn) {
-			t.Fatalf("error = %v, want ErrDeferredRestartNoActiveTurn", err)
+		if _, err := engine.RequestDeferredRestart("other-turn-token"); !errors.Is(err, ErrDeferredRestartCredentialInvalid) {
+			t.Fatalf("error = %v, want ErrDeferredRestartCredentialInvalid", err)
 		}
 	})
 
@@ -90,7 +97,7 @@ func TestRequestDeferredRestartFailsClosed(t *testing.T) {
 		state.mu.Lock()
 		state.agentSession = nil
 		state.mu.Unlock()
-		if _, err := engine.RequestDeferredRestart("feishu:d:chat:admin"); !errors.Is(err, ErrDeferredRestartNoActiveTurn) {
+		if _, err := engine.RequestDeferredRestart(state.restartTurnToken); !errors.Is(err, ErrDeferredRestartNoActiveTurn) {
 			t.Fatalf("error = %v, want ErrDeferredRestartNoActiveTurn", err)
 		}
 	})
@@ -98,26 +105,114 @@ func TestRequestDeferredRestartFailsClosed(t *testing.T) {
 
 func TestRequestDeferredRestartUsesCommittedSteerIdentityBeforeAdoption(t *testing.T) {
 	const sessionKey = "feishu:d:chat:admin-user:thread:omt-steer-auth"
-	engine, _ := prepareDeferredRestartTurn(t, "admin-user", sessionKey)
+	engine, state := prepareDeferredRestartTurn(t, "admin-user", sessionKey)
 	if !engine.commitSteerPresentation(sessionKey, steerHandoff{
 		messageID: "steer-message", platform: &stubPlatformEngine{n: "feishu"},
 		replyCtx: "steer-reply", userID: "ordinary-user",
 	}) {
 		t.Fatal("steer handoff was not committed")
 	}
-	if _, err := engine.RequestDeferredRestart(sessionKey); !errors.Is(err, ErrDeferredRestartUnauthorized) {
+	state.mu.Lock()
+	credential := state.restartTurnToken
+	state.mu.Unlock()
+	if _, err := engine.RequestDeferredRestart(credential); !errors.Is(err, ErrDeferredRestartUnauthorized) {
 		t.Fatalf("error before handoff adoption = %v, want ErrDeferredRestartUnauthorized", err)
+	}
+}
+
+func TestAgentTurnCredentialRotatesPerTurnAndClears(t *testing.T) {
+	engine := NewEngine("demo", &stubAgent{}, nil, "", LangEnglish)
+	path, err := newAgentTurnNoncePath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := newAgentTurnToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &interactiveState{restartSessionSecret: secret, restartNoncePath: path}
+	engine.activateAgentTurnCredential(state, "admin-user", "feishu:d:chat:admin")
+	state.mu.Lock()
+	first := state.restartTurnToken
+	state.mu.Unlock()
+	if len(first) != 64 {
+		t.Fatalf("first credential length = %d", len(first))
+	}
+	firstNonceBytes, err := os.ReadFile(path)
+	firstNonce := strings.TrimSpace(string(firstNonceBytes))
+	if err != nil || agentTurnToken(secret, firstNonce) != first {
+		t.Fatalf("first nonce file = %q err=%v", firstNonceBytes, err)
+	}
+	otherSecret, err := newAgentTurnToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if borrowed, err := BuildAgentTurnCredential(otherSecret, firstNonce); err != nil || borrowed == first {
+		t.Fatalf("different Agent session secret reproduced turn credential: equal=%v err=%v", borrowed == first, err)
+	}
+
+	engine.activateAgentTurnCredential(state, "ordinary-user", "feishu:d:chat:ordinary")
+	state.mu.Lock()
+	second := state.restartTurnToken
+	userID := state.currentUserID
+	sessionKey := state.currentSessionKey
+	state.mu.Unlock()
+	if second == first || len(second) != 64 || userID != "ordinary-user" || sessionKey != "feishu:d:chat:ordinary" {
+		t.Fatalf("rotated state token_changed=%v user=%q session=%q", second != first, userID, sessionKey)
+	}
+	secondNonceBytes, err := os.ReadFile(path)
+	secondNonce := strings.TrimSpace(string(secondNonceBytes))
+	if err != nil || secondNonce == firstNonce || agentTurnToken(secret, secondNonce) != second {
+		t.Fatalf("second nonce file = %q err=%v", secondNonceBytes, err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("credential mode info=%v err=%v", info, err)
+	}
+
+	clearAgentTurnCredential(state, false)
+	if data, err := os.ReadFile(path); err != nil || strings.TrimSpace(string(data)) != "" {
+		t.Fatalf("cleared credential file = %q err=%v", data, err)
+	}
+	clearAgentTurnCredential(state, true)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("credential file still exists after cleanup: %v", err)
+	}
+}
+
+func TestInteractiveAgentReceivesDedicatedTurnCredentialMarker(t *testing.T) {
+	dataDir := t.TempDir()
+	platform := &stubPlatformEngine{n: "feishu"}
+	agent := &sessionEnvRecordingAgent{session: &stubAgentSession{}}
+	engine := NewEngine("demo", agent, []Platform{platform}, "", LangEnglish)
+	engine.SetDataDir(dataDir)
+	const sessionKey = "feishu:d:chat:admin"
+	session := engine.sessions.GetOrCreateActive(sessionKey)
+	state := engine.getOrCreateInteractiveStateWith(sessionKey, platform, "reply", session, engine.sessions, nil, sessionKey, "hello")
+	if got := agent.EnvValue(AgentTurnMarkerEnv); got != "1" {
+		t.Fatalf("%s = %q, want 1", AgentTurnMarkerEnv, got)
+	}
+	secret := agent.EnvValue(AgentSessionSecretEnv)
+	path := agent.EnvValue(AgentTurnNonceFileEnv)
+	if len(secret) != 64 || path == "" || state.restartSessionSecret != secret || state.restartNoncePath != path {
+		t.Fatalf("credential env/state secret_len=%d path=%q state_path=%q", len(secret), path, state.restartNoncePath)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("credential path info=%v err=%v", info, err)
+	}
+	engine.cleanupInteractiveState(sessionKey, state)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("credential path survived session cleanup: %v", err)
 	}
 }
 
 func TestHandleDeferredRestartSchedulesWithoutClientIdentity(t *testing.T) {
 	const sessionKey = "feishu:d:chat-1:admin-user:thread:omt-1"
-	engine, _ := prepareDeferredRestartTurn(t, "admin-user", sessionKey)
+	engine, state := prepareDeferredRestartTurn(t, "admin-user", sessionKey)
 	api := &APIServer{engines: map[string]*Engine{"demo": engine}}
 	// Unknown identity fields are deliberately ignored; authorization and the
 	// post-restart platform are taken from the active Engine state.
 	body, err := json.Marshal(map[string]string{
-		"project": "demo", "session_key": sessionKey,
+		"credential": state.restartTurnToken, "project": "wrong-project", "session_key": "feishu:d:other:ordinary-user",
 		"user_id": "ordinary-user", "platform": "telegram",
 	})
 	if err != nil {
@@ -166,7 +261,7 @@ func TestHandleDeferredRestartMapsAuthorizationAndLifecycleErrors(t *testing.T) 
 			state.mu.Unlock()
 			api := &APIServer{engines: map[string]*Engine{"demo": engine}}
 			body, _ := json.Marshal(map[string]string{
-				"project": "demo", "session_key": sessionKey,
+				"credential": state.restartTurnToken, "project": "demo", "session_key": sessionKey,
 				"user_id": "admin-user", "platform": "feishu",
 			})
 			req := httptest.NewRequest(http.MethodPost, "/restart/defer", bytes.NewReader(body))
@@ -176,6 +271,47 @@ func TestHandleDeferredRestartMapsAuthorizationAndLifecycleErrors(t *testing.T) 
 				t.Fatalf("status = %d, want %d: %s", rec.Code, tt.wantCode, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestHandleDeferredRestartRejectsExposedSessionWithoutCredential(t *testing.T) {
+	const sessionKey = "feishu:d:chat:admin"
+	engine, _ := prepareDeferredRestartTurn(t, "admin-user", sessionKey)
+	api := &APIServer{engines: map[string]*Engine{"demo": engine}}
+	body, _ := json.Marshal(map[string]string{
+		"credential": strings.Repeat("f", 64),
+		"project":    "demo", "session_key": sessionKey, "user_id": "admin-user",
+	})
+	rec := httptest.NewRecorder()
+	api.handleDeferredRestart(rec, httptest.NewRequest(http.MethodPost, "/restart/defer", bytes.NewReader(body)))
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), ErrDeferredRestartCredentialInvalid.Error()) {
+		t.Fatalf("status = %d, want 403: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleDeferredRestartCannotBorrowConcurrentAdminTurn(t *testing.T) {
+	adminEngine, adminState := prepareDeferredRestartTurn(t, "admin-user", "feishu:d:admin-chat:admin-user")
+	ordinaryEngine, ordinaryState := prepareDeferredRestartTurn(t, "ordinary-user", "feishu:d:ordinary-chat:ordinary-user")
+	api := &APIServer{engines: map[string]*Engine{
+		"admin-project":    adminEngine,
+		"ordinary-project": ordinaryEngine,
+	}}
+	body, _ := json.Marshal(map[string]string{
+		"credential": ordinaryState.restartTurnToken,
+		// These exposed routing values name the admin turn but are ignored.
+		"project": "admin-project", "session_key": adminState.currentSessionKey,
+		"user_id": "admin-user", "platform": "feishu",
+	})
+	rec := httptest.NewRecorder()
+	api.handleDeferredRestart(rec, httptest.NewRequest(http.MethodPost, "/restart/defer", bytes.NewReader(body)))
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), ErrDeferredRestartUnauthorized.Error()) {
+		t.Fatalf("status = %d, want ordinary turn authorization failure: %s", rec.Code, rec.Body.String())
+	}
+	adminState.mu.Lock()
+	adminPending := adminState.deferredRestart != nil
+	adminState.mu.Unlock()
+	if adminPending {
+		t.Fatal("ordinary turn credential scheduled restart against concurrent admin turn")
 	}
 }
 
@@ -260,6 +396,7 @@ func TestDeferredRestartWaitsForWriterCardAndQueuedTurns(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
+	credential := ""
 	for {
 		engine.interactiveMu.Lock()
 		state := engine.interactiveStates[sessionKey]
@@ -267,6 +404,9 @@ func TestDeferredRestartWaitsForWriterCardAndQueuedTurns(t *testing.T) {
 		if state != nil {
 			state.mu.Lock()
 			open := state.presentationOpen
+			if open {
+				credential = state.restartTurnToken
+			}
 			state.mu.Unlock()
 			if open {
 				break
@@ -286,7 +426,7 @@ func TestDeferredRestartWaitsForWriterCardAndQueuedTurns(t *testing.T) {
 		Content:    "queued follow-up",
 		ReplyCtx:   "reply-2",
 	})
-	if _, err := engine.RequestDeferredRestart(sessionKey); err != nil {
+	if _, err := engine.RequestDeferredRestart(credential); err != nil {
 		t.Fatalf("schedule deferred restart: %v", err)
 	}
 	select {
@@ -348,6 +488,8 @@ func TestDeferredRestartAuthorizationTracksAdoptedSteerUser(t *testing.T) {
 	defer h.session.Unlock()
 	h.state.mu.Lock()
 	h.state.currentUserID = "admin-user"
+	h.state.currentSessionKey = h.key
+	h.state.restartTurnToken = strings.Repeat("b", 64)
 	h.state.mu.Unlock()
 
 	msg := &Message{
@@ -366,7 +508,10 @@ func TestDeferredRestartAuthorizationTracksAdoptedSteerUser(t *testing.T) {
 		defer h.state.mu.Unlock()
 		return h.state.currentUserID == "ordinary-user"
 	})
-	if _, err := h.e.RequestDeferredRestart(h.key); !errors.Is(err, ErrDeferredRestartUnauthorized) {
+	h.state.mu.Lock()
+	credential := h.state.restartTurnToken
+	h.state.mu.Unlock()
+	if _, err := h.e.RequestDeferredRestart(credential); !errors.Is(err, ErrDeferredRestartUnauthorized) {
 		t.Fatalf("error after non-admin steer = %v, want ErrDeferredRestartUnauthorized", err)
 	}
 	h.finish(t, "steered turn done")
@@ -402,7 +547,13 @@ func TestDeferredRestartDispatchesAfterSafeErrorTerminal(t *testing.T) {
 		defer state.mu.Unlock()
 		return state.presentationOpen
 	})
-	if _, err := engine.RequestDeferredRestart(sessionKey); err != nil {
+	engine.interactiveMu.Lock()
+	state := engine.interactiveStates[sessionKey]
+	engine.interactiveMu.Unlock()
+	state.mu.Lock()
+	credential := state.restartTurnToken
+	state.mu.Unlock()
+	if _, err := engine.RequestDeferredRestart(credential); err != nil {
 		t.Fatalf("schedule deferred restart: %v", err)
 	}
 	close(session.releaseFirst)

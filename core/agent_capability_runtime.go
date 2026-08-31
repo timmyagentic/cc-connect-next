@@ -96,7 +96,7 @@ var agentToolDefinitions = []agentToolDefinition{
 	},
 	{
 		id: "daemon-restart", invocation: "cc-connect-next daemon restart",
-		description: "Schedule a graceful daemon restart after the current Agent turn and accepted queued messages finish.", zh: "在当前 Agent 回合及已接收排队消息完成后，安排 daemon 优雅重启。",
+		description: "Use a random turn-bound credential to schedule a graceful daemon restart after the current Agent turn and accepted queued messages finish.", zh: "使用随机回合凭证，在当前 Agent 回合及已接收排队消息完成后安排 daemon 优雅重启。",
 		permission: CapabilityPermissionAdmin, effects: []string{"process_control"}, probe: "deferred_restart",
 		fallback: CapabilityFallback{
 			Mode:          "chat-command",
@@ -122,7 +122,7 @@ func (e *Engine) agentToolCapabilities(snapshot capabilitySnapshot) []AgentToolC
 			if strings.TrimSpace(adminFrom) == "" {
 				availability = unavailable("Requires admin permission, but projects.admin_from is not configured.", "需要管理员权限，但 projects.admin_from 尚未配置。")
 			} else if availability.State != CapabilityUnavailable {
-				availability = conditional("Requires an exact active Agent turn and projects.admin_from authorization; caller identity is read from trusted Engine state at invocation time.", "需要精确的活动 Agent 回合及 projects.admin_from 授权；调用者身份在执行时从可信 Engine 状态读取。")
+				availability = conditional("Requires an exact active Agent turn credential and projects.admin_from authorization; routing and caller identity are read from trusted Engine state at invocation time.", "需要精确的活动 Agent 回合凭证及 projects.admin_from 授权；路由与调用者身份在执行时从可信 Engine 状态读取。")
 			}
 		}
 		fallback := definition.fallback

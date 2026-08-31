@@ -98,8 +98,15 @@ const RunAsChdirEnv = "CC_RUNAS_CHDIR"
 //     PATH. If the target user needs specific binaries on PATH, put
 //     them in the system PATH (e.g. /usr/local/bin symlinks) or in
 //     the target user's own shell profile.
-//   - anything secret
+//   - arbitrary secrets; the host-managed Agent session capability below is
+//     the sole explicit exception and is scoped to the target Agent process
 var DefaultEnvAllowlist = []string{
+	// Preserve only the dedicated Agent lifecycle contract. The per-session
+	// secret is intentionally scoped to the target Agent process; the nonce file
+	// is public and useless without that secret. Missing values fail closed.
+	AgentTurnMarkerEnv,
+	AgentSessionSecretEnv,
+	AgentTurnNonceFileEnv,
 	"LANG",
 	"LC_ALL",
 	"LC_CTYPE",

@@ -1008,7 +1008,11 @@ cc-connect-next daemon uninstall
 在普通终端中，`daemon restart` 仍会立即使用已安装的服务管理器。若 Agent
 在活动聊天回合内调用同一命令，cc-connect-next 会改为登记优雅重启：等待当前回答、
 终态卡片、Agent writer 以及已接收的排队消息全部完成后再重启。活动消息用户必须通过
-`admin_from` 授权。若活动回合端点不可用（包括运行中的 daemon 版本过旧），命令会在
+`admin_from` 授权。
+运行态会为每个 Agent 回合轮换 nonce，并用 Agent session 私有 secret 签出 HMAC
+凭证；客户端只提交派生凭证，不能选择 project、session、user 或 platform。普通终端
+即使导出了 `CC_SESSION_KEY` 也不会进入该路径。
+若活动回合端点不可用（包括运行中的 daemon 版本过旧），命令会在
 不重启的前提下失败，并提示改用聊天 `/restart`；Agent 回合内始终拒绝 `--force`。
 
 ---

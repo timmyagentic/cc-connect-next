@@ -41,8 +41,9 @@
 - Agent-invoked `cc-connect-next daemon restart` now schedules the existing
   graceful restart lifecycle through the local runtime instead of killing the
   daemon that owns the current turn. The Engine authenticates the active
-  message user with `admin_from`, waits for terminal card delivery, the Agent
-  writer, and accepted queued turns, then reuses the post-restart Ready
+  message user with `admin_from` through a random turn-bound credential, waits
+  for terminal card delivery, the Agent writer, and accepted queued turns,
+  then reuses the post-restart Ready
   notification; missing/old endpoints and authorization failures fail closed.
 - Local-reference rendering now preserves command-shaped `/name [arguments]`
   text byte-for-byte in ordinary output and inline code, including runtime
