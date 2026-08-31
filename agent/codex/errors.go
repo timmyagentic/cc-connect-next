@@ -16,7 +16,32 @@ func classifyCodexError(err error) error {
 	if isCodexUsageLimitMessage(err.Error()) {
 		return core.WrapUsageLimit(err)
 	}
+	if isCodexModelCapacityMessage(err.Error()) {
+		return core.WrapModelCapacity(err)
+	}
 	return err
+}
+
+func isCodexClassifiedTerminalError(err error) bool {
+	return errors.Is(err, core.ErrUsageLimit) || errors.Is(err, core.ErrModelCapacity)
+}
+
+func isCodexModelCapacityMessage(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	if text == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"selected model is at capacity",
+		"selected model is currently at capacity",
+		"the model is at capacity",
+		"the model is currently at capacity",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func isCodexUsageLimitMessage(message string) bool {

@@ -10,6 +10,11 @@ import (
 // can render a safe, user-facing quota message without exposing it.
 var ErrUsageLimit = errors.New("agent usage limit reached")
 
+// ErrModelCapacity marks a transient provider failure where the selected
+// model cannot accept more work. The underlying provider text stays available
+// for diagnostics, while presentation code renders only localized static copy.
+var ErrModelCapacity = errors.New("selected model is at capacity")
+
 // Steer failure sentinels. SteerableSession implementations wrap these so the
 // engine can pick a deterministic fallback without inspecting error text.
 //
@@ -56,4 +61,16 @@ func WrapUsageLimit(err error) error {
 		return err
 	}
 	return fmt.Errorf("%w: %v", ErrUsageLimit, err)
+}
+
+// WrapModelCapacity preserves the provider error for diagnostics and marks it
+// for safe, actionable user-facing rendering.
+func WrapModelCapacity(err error) error {
+	if err == nil {
+		return ErrModelCapacity
+	}
+	if errors.Is(err, ErrModelCapacity) {
+		return err
+	}
+	return fmt.Errorf("%w: %v", ErrModelCapacity, err)
 }

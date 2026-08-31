@@ -39,6 +39,16 @@ When `resolve_mentions = true`, streaming and safe-partial card bodies resolve `
 
 Remote markdown images are uploaded once and reused by URL. A failed fetch or Feishu upload enters a one-minute backoff instead of a permanent denylist; after that window the next card that references the URL retries it. This avoids per-frame retry storms while allowing transient timeouts, rate limits, and network failures to recover without restarting the process.
 
+Terminal failure cards follow an allowlist-only disclosure policy. Known
+provider-neutral markers such as usage exhaustion and the Codex
+"selected model is at capacity" condition render localized host-owned copy
+with a concrete next step. The original provider error is never copied into
+the card or its fallback message, even after generic redaction, because it may
+contain credentials, local paths, internal IDs, commands, or private upstream
+details. Unclassified failures retain the generic "Not completed" message;
+already-visible partial answer text may still be preserved above that safe
+reason.
+
 During shutdown, cc-connect-next first interrupts any final remote-image resolution for active turns, then uses the still-live platform connection to deliver each terminal Done/error card within the bounded shutdown window. Platform teardown happens only after those lifecycle updates finish or the deadline expires.
 
 ## Privacy boundary

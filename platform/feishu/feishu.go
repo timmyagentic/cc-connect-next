@@ -7579,13 +7579,20 @@ func buildRichCardJSONBytes(status core.CardStatus, phase string, steps []core.T
 		}
 	case core.CardStatusError:
 		headerTemplate = "red"
-		if phase == "usage_limit" && strings.TrimSpace(copy.UsageLimit) != "" {
+		switch {
+		case phase == "usage_limit" && strings.TrimSpace(copy.UsageLimit) != "":
 			headerTitle = "⚠️ " + copy.UsageLimit
 			summary = copy.UsageLimitSummary
 			if body == "" {
 				body = copy.UsageLimitBody
 			}
-		} else {
+		case phase == "model_capacity" && strings.TrimSpace(copy.ModelCapacity) != "":
+			headerTitle = "⚠️ " + copy.ModelCapacity
+			summary = copy.ModelCapacitySummary
+			if body == "" {
+				body = copy.ModelCapacityBody
+			}
+		default:
 			headerTitle = "⚠️ " + copy.Error
 			summary = copy.ErrorSummary
 			if body == "" {
