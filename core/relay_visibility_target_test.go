@@ -52,6 +52,16 @@ type relayVisibilitySenderStub struct {
 	sendErr    error
 }
 
+type restoredRelayVisibilityPlatform struct {
+	*replyTargetSnapshotPlatform
+	specialCalls int
+}
+
+func (p *restoredRelayVisibilityPlatform) SendRelayGroupVisibility(_ context.Context, _ string, _ string) error {
+	p.specialCalls++
+	return nil
+}
+
 func (p *relayVisibilitySenderStub) SendRelayGroupVisibility(_ context.Context, sessionKey, content string) error {
 	p.mu.Lock()
 	p.sessionKey = sessionKey
@@ -98,5 +108,37 @@ func TestSendToGroupPrefersPlatformVisibilitySender(t *testing.T) {
 	}
 	if got := platform.getSent(); len(got) != 1 || got[0] != "relay visible" {
 		t.Fatalf("visibility send = %#v", got)
+	}
+}
+
+func TestSendToGroupPrefersPersistedReplyTargetOverPlatformKeyReconstruction(t *testing.T) {
+	key := "snap:chat:thread:topic"
+	platform := &restoredRelayVisibilityPlatform{replyTargetSnapshotPlatform: &replyTargetSnapshotPlatform{
+		stubPlatformEngine: stubPlatformEngine{n: "snap"}, requireSnapshot: true,
+	}}
+	engine := NewEngine("source", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+	engine.rememberReplyTarget(platform, &Message{SessionKey: key, ReplyCtx: "live-target"})
+
+	NewRelayManager("").sendToGroup(context.Background(), engine, "snap", key, "relay visible")
+
+	if platform.specialCalls != 0 {
+		t.Fatalf("platform key reconstruction bypassed persisted target: calls=%d", platform.specialCalls)
+	}
+	if got := platform.getSent(); len(got) != 1 || got[0] != "relay visible" {
+		t.Fatalf("restored relay visibility = %#v", got)
+	}
+}
+
+func TestRelayResponseVisibilityUsesSourceEngineForPersistedPrivateTarget(t *testing.T) {
+	key := "snap:chat:thread:topic"
+	source := NewEngine("source", &stubAgent{}, nil, "", LangEnglish)
+	target := NewEngine("target", &stubAgent{}, nil, "", LangEnglish)
+	source.sessions.UpdateReplyTarget(key, PersistentReplyTarget{Platform: "snap", Data: []byte(`"target"`)})
+
+	if got := relayResponseVisibilityEngine(source, target, key); got != source {
+		t.Fatal("persisted private reply target did not keep response on source Engine")
+	}
+	if got := relayResponseVisibilityEngine(source, target, "snap:chat:user"); got != target {
+		t.Fatal("ordinary relay response stopped using target Engine")
 	}
 }

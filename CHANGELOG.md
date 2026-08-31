@@ -37,6 +37,12 @@
   custom commands and Skills. Unambiguous multi-segment absolute paths such as
   `/tmp/output.log` and `/Users/name/project/file.go:42` continue to use the
   configured path display and marker rules.
+- Feishu/Lark real P2P topics now use their stable `thread_id` as the Agent
+  session and workspace identity in both enabled isolation modes. The concrete
+  `message_id` needed for later replies is persisted separately through a
+  platform-owned snapshot, so different private topics cannot share steer,
+  history, `/new`, or cards and an `omt_` thread ID is never sent as an `om_`
+  Reply API target.
 
 ## v0.2.1 (2026-08-30)
 

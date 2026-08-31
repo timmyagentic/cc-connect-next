@@ -352,6 +352,7 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	_, preview := platform.(PreviewStarter)
 	_, mentions := platform.(AtMentionSender)
 	_, reconstruct := platform.(ReplyContextReconstructor)
+	_, replySnapshot := platform.(ReplyContextSnapshotter)
 	_, recall := platform.(MessageRecallDetector)
 	_, navigation := platform.(CardNavigable)
 	var reported map[string]CapabilityAvailability
@@ -376,6 +377,7 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		{"preview", "Start and update a streaming preview.", "启动并更新流式预览。", "final-only", "Deliver the final answer without a live preview.", "不显示实时预览，仅投递最终回答。", preview},
 		{"mentions", "Send native mention notifications.", "发送原生 @ 通知。", "visible-text", "Render mention text without guaranteed notification semantics.", "显示 @ 文本，但不保证通知语义。", mentions},
 		{"reply_context_reconstruction", "Reconstruct a proactive reply target from a session key.", "根据 session key 重建主动回复目标。", "reject", "Persistent proactive delivery is unavailable.", "持久主动投递不可用。", reconstruct},
+		{"reply_target_snapshot", "Persist and restore a concrete reply target independently from session identity.", "将具体回复目标与 session identity 分离并持久恢复。", "session-key", "Fall back to session-key reconstruction when the target shape permits it.", "目标结构允许时退化为 session-key 重建。", replySnapshot},
 		{"message_recall_detection", "Detect whether the triggering message was recalled.", "检测触发消息是否已撤回。", "best-effort", "Continue without recall detection.", "无法检测撤回时按尽力而为继续。", recall},
 		{"card_navigation", "Navigate interactive cards in place.", "原地导航交互卡片。", "new-card", "Send a replacement card or text response.", "发送替换卡片或文本回复。", navigation},
 	}
@@ -390,11 +392,17 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	}
 
 	proactiveAvailability := platformAvailability(reconstruct)
-	if validator, ok := platform.(PersistentProactiveTargetValidator); ok {
+	_, hasValidator := platform.(PersistentProactiveTargetValidator)
+	_, requiresSnapshot := platform.(PersistentReplyTargetRequirer)
+	if hasValidator || requiresSnapshot {
 		if snapshot.sessionKey == "" {
 			proactiveAvailability = conditional("A session key is required to validate persistent proactive delivery.", "需要 session key 才能验证持久主动投递。")
-		} else if err := validator.ValidatePersistentProactiveTarget(snapshot.sessionKey); err != nil {
-			proactiveAvailability = unavailable(strings.TrimSpace(redactFeedbackText(err.Error())), "当前会话目标不支持持久主动投递。")
+		} else if snapshot.platform == platform {
+			if err := e.ValidatePersistentProactiveTarget(snapshot.sessionKey); err != nil {
+				proactiveAvailability = unavailable(strings.TrimSpace(redactFeedbackText(err.Error())), "当前会话目标不支持持久主动投递。")
+			}
+		} else {
+			proactiveAvailability = conditional("Select an active session on this platform to validate persistent proactive delivery.", "请选择该平台的活动会话以验证持久主动投递。")
 		}
 	}
 	result.Capabilities = append(result.Capabilities, feature("persistent_proactive_delivery", "Persist a Cron/Timer target that remains deliverable after transport reconnection.", "持久化 Cron/Timer 目标，并在传输重连后仍可投递。", proactiveAvailability, CapabilityFallback{Mode: "reject", Description: "Job creation fails before persistence when the target cannot be reconstructed safely.", DescriptionZH: "目标无法安全重建时，在持久化前拒绝创建任务。"}))

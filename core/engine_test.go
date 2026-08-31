@@ -8404,6 +8404,29 @@ func TestHandleMessage_NewWithPromptRedispatchesResolvedAlias(t *testing.T) {
 	}
 }
 
+func TestHandleMessage_NewInP2PTopicLeavesSiblingTopicUntouched(t *testing.T) {
+	p := &stubPlatformEngine{n: "feishu"}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	keyA := "feishu:oc_p2p:thread:omt_a"
+	keyB := "feishu:oc_p2p:thread:omt_b"
+	oldA := e.sessions.GetOrCreateActive(keyA)
+	oldB := e.sessions.GetOrCreateActive(keyB)
+	oldB.AddHistory("user", "topic B context")
+
+	e.ReceiveMessage(p, &Message{
+		SessionKey: keyA, Platform: "feishu", MessageID: "om_a",
+		UserID: "ou_user", Content: "/new", ReplyCtx: "ctx-a",
+	})
+
+	if activeA := e.sessions.GetOrCreateActive(keyA); activeA.ID == oldA.ID {
+		t.Fatalf("/new kept topic A session %s active", oldA.ID)
+	}
+	activeB := e.sessions.GetOrCreateActive(keyB)
+	if activeB.ID != oldB.ID || len(activeB.GetHistory(0)) != 1 || activeB.GetHistory(0)[0].Content != "topic B context" {
+		t.Fatalf("/new in topic A mutated topic B: id=%s history=%+v", activeB.ID, activeB.GetHistory(0))
+	}
+}
+
 func TestCmdDiff_RejectsDashTarget(t *testing.T) {
 	p := &stubPlatformEngine{n: "test"}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)

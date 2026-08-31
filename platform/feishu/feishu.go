@@ -252,6 +252,7 @@ type replyContext struct {
 	messageID       string
 	chatID          string
 	sessionKey      string
+	threadID        string
 	bootstrapThread bool
 	bootstrapQueued bool
 	bootstrapWait   <-chan struct{}
@@ -1906,7 +1907,7 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	mentions := msg.Mentions
 	parentID := stringValue(msg.ParentId)
 
-	rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
+	rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, threadID: stringValue(msg.ThreadId)}
 	slog.Debug(p.tag()+": routed inbound message",
 		"message_id", messageID,
 		"session_key", sessionKey,
@@ -4632,6 +4633,11 @@ func topicRootMessageID(msg *larkim.EventMessage) string {
 }
 
 func (p *Platform) makeSessionKey(msg *larkim.EventMessage, chatID, userID string) string {
+	if p.threadIsolationEnabled() && msg != nil && stringValue(msg.ChatType) != "group" {
+		if threadID := stringValue(msg.ThreadId); threadID != "" {
+			return fmt.Sprintf("%s:%s:thread:%s", p.tag(), chatID, threadID)
+		}
+	}
 	if p.threadIsolationEnabled() && msg != nil && stringValue(msg.ChatType) == "group" {
 		var rootID string
 		switch p.threadMode {
@@ -4669,7 +4675,10 @@ func (p *Platform) shouldReplyInThread(rc replyContext) bool {
 	if rc.messageID == "" {
 		return false
 	}
-	return p.threadIsolationEnabled() && isThreadSessionKey(rc.sessionKey)
+	// A persisted thread session remains a routing boundary even if the current
+	// config later disables creation of new isolated sessions. Sending it to the
+	// chat root would leak proactive output into another conversation scope.
+	return isThreadSessionKey(rc.sessionKey)
 }
 
 // shouldUseThreadOrReplyAPI is true when we should call Im.Message.Reply (optionally with ReplyInThread).
@@ -4946,11 +4955,78 @@ func (p *Platform) ReconstructReplyCtx(sessionKey string) (any, error) {
 	}
 	rc := replyContext{chatID: parts[1], sessionKey: sessionKey}
 	if len(parts) == 3 {
-		if rootID, ok := parseThreadRootID(parts[2]); ok {
-			rc.messageID = rootID
+		if kind, targetID, ok := parseThreadTarget(parts[2]); ok {
+			if kind == "thread" {
+				return nil, fmt.Errorf("%s: thread session %q requires a persisted reply target", p.tag(), sessionKey)
+			}
+			rc.messageID = targetID
 		}
 	}
 	return rc, nil
+}
+
+type replyTargetSnapshot struct {
+	ChatID     string `json:"chat_id"`
+	MessageID  string `json:"message_id"`
+	SessionKey string `json:"session_key"`
+	ThreadID   string `json:"thread_id"`
+}
+
+func (p *Platform) SnapshotReplyCtx(value any) (json.RawMessage, error) {
+	rc, ok := value.(replyContext)
+	if !ok {
+		return nil, fmt.Errorf("%s: invalid reply context type %T", p.tag(), value)
+	}
+	parts := strings.SplitN(rc.sessionKey, ":", 3)
+	if len(parts) != 3 || parts[0] != p.platformName || parts[1] != rc.chatID {
+		return nil, core.ErrNotSupported
+	}
+	kind, threadID, ok := parseThreadTarget(parts[2])
+	if !ok || kind != "thread" {
+		return nil, core.ErrNotSupported
+	}
+	if rc.messageID == "" || strings.HasPrefix(rc.messageID, "omt_") {
+		return nil, fmt.Errorf("%s: thread reply target has invalid message ID", p.tag())
+	}
+	if rc.threadID != "" && rc.threadID != threadID {
+		return nil, fmt.Errorf("%s: reply context thread ID does not match session key", p.tag())
+	}
+	return json.Marshal(replyTargetSnapshot{
+		ChatID: rc.chatID, MessageID: rc.messageID, SessionKey: rc.sessionKey, ThreadID: threadID,
+	})
+}
+
+func (p *Platform) RestoreReplyCtx(data json.RawMessage) (any, error) {
+	var snapshot replyTargetSnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return nil, fmt.Errorf("%s: decode reply target: %w", p.tag(), err)
+	}
+	parts := strings.SplitN(snapshot.SessionKey, ":", 3)
+	if len(parts) != 3 || parts[0] != p.platformName || parts[1] != snapshot.ChatID {
+		return nil, fmt.Errorf("%s: persisted reply target does not match platform/chat", p.tag())
+	}
+	kind, threadID, ok := parseThreadTarget(parts[2])
+	if !ok || kind != "thread" || threadID != snapshot.ThreadID {
+		return nil, fmt.Errorf("%s: persisted reply target has inconsistent thread identity", p.tag())
+	}
+	if snapshot.MessageID == "" || strings.HasPrefix(snapshot.MessageID, "omt_") {
+		return nil, fmt.Errorf("%s: persisted reply target has invalid message ID", p.tag())
+	}
+	return replyContext{
+		messageID:  snapshot.MessageID,
+		chatID:     snapshot.ChatID,
+		sessionKey: snapshot.SessionKey,
+		threadID:   snapshot.ThreadID,
+	}, nil
+}
+
+func (p *Platform) RequiresPersistentReplyTarget(sessionKey string) bool {
+	parts := strings.SplitN(sessionKey, ":", 3)
+	if len(parts) != 3 || parts[0] != p.platformName {
+		return false
+	}
+	kind, _, ok := parseThreadTarget(parts[2])
+	return ok && kind == "thread"
 }
 
 // RelayGroupVisibilityKey keeps relay visibility echoes in the Feishu/Lark
@@ -4987,17 +5063,20 @@ func (p *Platform) SendRelayGroupVisibility(ctx context.Context, sessionKey, con
 	return p.sendNewMessageToChat(ctx, rc, msgType, body)
 }
 
-func parseThreadRootID(sessionTail string) (string, bool) {
-	for _, prefix := range []string{"root:", "thread:"} {
+func parseThreadTarget(sessionTail string) (kind, id string, ok bool) {
+	for _, candidate := range []string{"root", "thread"} {
+		prefix := candidate + ":"
 		if strings.HasPrefix(sessionTail, prefix) {
-			rootID := strings.TrimPrefix(sessionTail, prefix)
-			if rootID != "" {
-				return rootID, true
-			}
-			return "", false
+			id = strings.TrimPrefix(sessionTail, prefix)
+			return candidate, id, id != ""
 		}
 	}
-	return "", false
+	return "", "", false
+}
+
+func parseThreadRootID(sessionTail string) (string, bool) {
+	_, id, ok := parseThreadTarget(sessionTail)
+	return id, ok
 }
 
 func isThreadSessionKey(sessionKey string) bool {

@@ -110,6 +110,32 @@ func TestMakeSessionKey_ThreadIsolationSeparatesGroupRoots(t *testing.T) {
 	}
 }
 
+func TestMakeSessionKey_P2PTopicsUseStableThreadIdentity(t *testing.T) {
+	chatType := "p2p"
+	chatID := "oc_p2p"
+	userID := "ou_user"
+	messageA, messageAReply, messageB := "om_a", "om_a_reply", "om_b"
+	threadA, threadB := "omt_a", "omt_b"
+
+	for _, mode := range []threadIsolationMode{threadIsolationTopicsOnly, threadIsolationTopicPerMessage} {
+		p := &Platform{platformName: "feishu", threadMode: mode}
+		keyA := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, MessageId: &messageA, ThreadId: &threadA}, chatID, userID)
+		keyAReply := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, MessageId: &messageAReply, ThreadId: &threadA}, chatID, userID)
+		keyB := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, MessageId: &messageB, ThreadId: &threadB}, chatID, userID)
+		plain := p.makeSessionKey(&larkim.EventMessage{ChatType: &chatType, MessageId: &messageB}, chatID, userID)
+
+		if keyA != "feishu:oc_p2p:thread:omt_a" || keyAReply != keyA {
+			t.Fatalf("mode %s topic A keys = %q / %q, want stable thread identity", mode, keyA, keyAReply)
+		}
+		if keyB != "feishu:oc_p2p:thread:omt_b" || keyB == keyA {
+			t.Fatalf("mode %s topic B key = %q, want independent thread identity", mode, keyB)
+		}
+		if plain != "feishu:oc_p2p:ou_user" {
+			t.Fatalf("mode %s plain P2P key = %q, want legacy user session", mode, plain)
+		}
+	}
+}
+
 func TestMakeSessionKey_ThreadIsolationOnlyAppliesToRealTopics(t *testing.T) {
 	chatType := "group"
 	messageID := "om_message"
@@ -968,6 +994,60 @@ func TestLark_GroupReplyAllWithThreadIsolationKeepsPlainGroupSessionWithoutMenti
 	}
 }
 
+func TestLark_P2PTopicDispatchUsesThreadSessionAndWorkspaceScope(t *testing.T) {
+	p, err := newPlatform("lark", lark.LarkBaseUrl, map[string]any{
+		"app_id": "cli_xxx", "app_secret": "secret", "enable_feishu_card": true,
+		"thread_isolation": "topics_only",
+	})
+	if err != nil {
+		t.Fatalf("newPlatform(lark) error = %v", err)
+	}
+	ip := p.(*interactivePlatform)
+
+	messageID := "om_p2p_reply"
+	threadID := "omt_p2p_topic"
+	chatID := "oc_p2p"
+	openID := "ou_user"
+	msgType := "text"
+	chatType := "p2p"
+	senderType := "user"
+	content := `{"text":"hello from p2p topic"}`
+	createText := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	ip.userNameCache.Store(openID, "User")
+	ip.chatNameCache.Store(chatID, "P2P")
+
+	msgCh := make(chan *core.Message, 1)
+	ip.handler = func(_ core.Platform, msg *core.Message) { msgCh <- msg }
+
+	if err := ip.onMessage(context.Background(), &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Sender: &larkim.EventSender{SenderId: &larkim.UserId{OpenId: &openID}, SenderType: &senderType},
+			Message: &larkim.EventMessage{
+				MessageId: &messageID, ThreadId: &threadID, ChatId: &chatID,
+				ChatType: &chatType, MessageType: &msgType, Content: &content, CreateTime: &createText,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("onMessage() error = %v", err)
+	}
+
+	select {
+	case received := <-msgCh:
+		if received.SessionKey != "lark:oc_p2p:thread:omt_p2p_topic" {
+			t.Fatalf("SessionKey = %q", received.SessionKey)
+		}
+		if received.ChannelKey != "oc_p2p:topic:omt_p2p_topic" || received.LegacyChannelKey != "oc_p2p" {
+			t.Fatalf("workspace keys = %q / %q", received.ChannelKey, received.LegacyChannelKey)
+		}
+		rc := received.ReplyCtx.(replyContext)
+		if rc.messageID != messageID || rc.threadID != threadID || !ip.shouldReplyInThread(rc) {
+			t.Fatalf("reply context = %+v, want concrete message target inside thread", rc)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected P2P topic message dispatch")
+	}
+}
+
 func TestBuildReplyMessageReqBody_SetsReplyInThreadFlag(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -982,10 +1062,16 @@ func TestBuildReplyMessageReqBody_SetsReplyInThreadFlag(t *testing.T) {
 			wantThreading: true,
 		},
 		{
-			name:          "thread isolation does not affect p2p session",
+			name:          "real p2p topic remains threaded",
 			platform:      &Platform{threadMode: threadIsolationTopicsOnly},
-			replyCtx:      replyContext{messageID: "om_reply", sessionKey: "feishu:oc_chat:ou_user"},
-			wantThreading: false,
+			replyCtx:      replyContext{messageID: "om_reply", sessionKey: "feishu:oc_chat:thread:omt_topic"},
+			wantThreading: true,
+		},
+		{
+			name:          "persisted p2p topic remains threaded after config disables isolation",
+			platform:      &Platform{threadMode: threadIsolationOff},
+			replyCtx:      replyContext{messageID: "om_reply", sessionKey: "feishu:oc_chat:thread:omt_topic", threadID: "omt_topic"},
+			wantThreading: true,
 		},
 		{
 			name:          "plain reply remains non-threaded",
@@ -1078,10 +1164,43 @@ func TestLark_ReconstructReplyCtx(t *testing.T) {
 	if rc.messageID != "om_root456" {
 		t.Fatalf("thread messageID = %q, want om_root456", rc.messageID)
 	}
+	if _, err := base.ReconstructReplyCtx("lark:oc_chat123:thread:omt_topic456"); err == nil || !strings.Contains(err.Error(), "persisted reply target") {
+		t.Fatalf("ReconstructReplyCtx(P2P thread) error = %v, want fail-closed snapshot requirement", err)
+	}
 
 	_, err = base.ReconstructReplyCtx("feishu:oc_chat:ou_user")
 	if err == nil {
 		t.Fatal("expected error for feishu-prefixed key on lark platform")
+	}
+}
+
+func TestP2PThreadReplyTargetSnapshotRestoresConcreteMessageID(t *testing.T) {
+	p := &Platform{platformName: "feishu", threadMode: threadIsolationTopicsOnly}
+	original := replyContext{
+		messageID: "om_reply", chatID: "oc_p2p",
+		sessionKey: "feishu:oc_p2p:thread:omt_topic", threadID: "omt_topic",
+	}
+
+	snapshot, err := p.SnapshotReplyCtx(original)
+	if err != nil {
+		t.Fatalf("SnapshotReplyCtx() error = %v", err)
+	}
+	restoredAny, err := p.RestoreReplyCtx(snapshot)
+	if err != nil {
+		t.Fatalf("RestoreReplyCtx() error = %v", err)
+	}
+	restored := restoredAny.(replyContext)
+	if restored.messageID != "om_reply" || restored.threadID != "omt_topic" || restored.sessionKey != original.sessionKey {
+		t.Fatalf("restored reply context = %+v", restored)
+	}
+	if !p.shouldReplyInThread(restored) {
+		t.Fatal("restored P2P topic target must use ReplyInThread")
+	}
+
+	bad := original
+	bad.messageID = bad.threadID
+	if _, err := p.SnapshotReplyCtx(bad); err == nil {
+		t.Fatal("SnapshotReplyCtx accepted omt_ as message_id")
 	}
 }
 

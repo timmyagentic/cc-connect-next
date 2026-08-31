@@ -298,10 +298,12 @@ func (s *Session) GetHistory(n int) []HistoryEntry {
 	return out
 }
 
-// UserMeta stores human-readable display info for a session key.
+// UserMeta stores display metadata and an optional minimal delivery target for
+// a session key.
 type UserMeta struct {
-	UserName string `json:"user_name,omitempty"`
-	ChatName string `json:"chat_name,omitempty"`
+	UserName    string                 `json:"user_name,omitempty"`
+	ChatName    string                 `json:"chat_name,omitempty"`
+	ReplyTarget *PersistentReplyTarget `json:"reply_target,omitempty"`
 }
 
 // snapshotVersion tracks the schema version so we can detect data saved by
@@ -531,6 +533,41 @@ func (sm *SessionManager) UpdateUserMeta(sessionKey, userName, chatName string) 
 	}
 }
 
+// UpdateReplyTarget persists an immutable copy of a platform-owned reply
+// target. It is saved immediately because lifecycle commands may restart the
+// process before the current Agent turn writes any further session state.
+func (sm *SessionManager) UpdateReplyTarget(sessionKey string, target PersistentReplyTarget) {
+	if strings.TrimSpace(sessionKey) == "" || strings.TrimSpace(target.Platform) == "" || len(target.Data) == 0 {
+		return
+	}
+	copyTarget := target
+	copyTarget.Data = append(json.RawMessage(nil), target.Data...)
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	meta := sm.userMeta[sessionKey]
+	if meta == nil {
+		meta = &UserMeta{}
+		sm.userMeta[sessionKey] = meta
+	}
+	meta.ReplyTarget = &copyTarget
+	sm.saveLocked()
+}
+
+// GetReplyTarget returns a deep copy so callers cannot mutate persisted state
+// without holding the SessionManager lock.
+func (sm *SessionManager) GetReplyTarget(sessionKey string) *PersistentReplyTarget {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	meta := sm.userMeta[sessionKey]
+	if meta == nil || meta.ReplyTarget == nil {
+		return nil
+	}
+	target := *meta.ReplyTarget
+	target.Data = append(json.RawMessage(nil), meta.ReplyTarget.Data...)
+	return &target
+}
+
 // GetUserMeta returns a copy of the stored metadata for a session key, or nil.
 func (sm *SessionManager) GetUserMeta(sessionKey string) *UserMeta {
 	sm.mu.RLock()
@@ -540,6 +577,11 @@ func (sm *SessionManager) GetUserMeta(sessionKey string) *UserMeta {
 		return nil
 	}
 	cp := *m
+	if m.ReplyTarget != nil {
+		target := *m.ReplyTarget
+		target.Data = append(json.RawMessage(nil), m.ReplyTarget.Data...)
+		cp.ReplyTarget = &target
+	}
 	return &cp
 }
 

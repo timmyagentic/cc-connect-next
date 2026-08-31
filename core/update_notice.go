@@ -309,11 +309,7 @@ func (e *Engine) notifyMostRecentSessionFn(logTag string, deliver func(string, P
 		if target == nil {
 			continue
 		}
-		rc, ok := target.(ReplyContextReconstructor)
-		if !ok {
-			continue
-		}
-		replyCtx, err := rc.ReconstructReplyCtx(c.key)
+		replyCtx, err := e.reconstructReplyContext(target, c.key)
 		if err != nil {
 			slog.Debug(logTag+": reconstruct reply context failed",
 				"session_key", c.key, "error", err)
