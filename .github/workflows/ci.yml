@@ -151,12 +151,7 @@ jobs:
 
       - name: Verify extracted Feedback Relay delivery
         working-directory: feedback-relay
-        run: |
-          sh verify.sh
-          cd ..
-          node --test internal/appfeatures/feedback_contract.test.mjs
-          node --test internal/appfeatures/feedback_relay_compat.test.mjs
-          node --check feedback-relay/src/compat.js
+        run: sh verify-host.sh
 
       - name: Verify exact Foundation source and host lock
         run: ./scripts/verify-agent-app-features.sh

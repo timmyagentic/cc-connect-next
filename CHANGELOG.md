@@ -26,6 +26,12 @@
 - The host-owned Relay entrypoint translates the exact legacy CC Connect
   schema-1 request into the new structured Foundation request, allowing an
   in-place Worker rollout without breaking existing installed clients.
+- The production Relay now authenticates as a repository-selected GitHub App:
+  after schema validation and Cloudflare rate limiting it signs a short-lived
+  RS256 JWT, requests a repository-scoped installation token, and delegates to
+  the unchanged Foundation adapter. Feedback issues and deduplication comments
+  are therefore attributed to the App bot instead of the maintainer's personal
+  account, and the former PAT is no longer required.
 - Windows standalone updates now remove a retained `.old` file before the next
   transaction only after the current executable passes an exact, non-mutating
   version probe; an unverified current binary keeps the recovery backup intact.
