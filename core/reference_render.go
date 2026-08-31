@@ -157,7 +157,7 @@ func transformTextOutsideFence(text string, cfg ReferenceRenderCfg, workspaceDir
 			out.WriteString(part.text)
 			continue
 		}
-		ref, ok := parseLocalReference(match[1], workspaceDir)
+		ref, ok := parseRenderableLocalReference(match[1], workspaceDir)
 		if !ok {
 			out.WriteString(part.text)
 			continue
@@ -171,6 +171,7 @@ func transformTextOutsideFence(text string, cfg ReferenceRenderCfg, workspaceDir
 
 func transformNonCodeText(text string, cfg ReferenceRenderCfg, workspaceDir string) (string, []placeholderReplacement) {
 	replacements := make([]placeholderReplacement, 0)
+	text = replaceProtectedSlashCommandLines(text, &replacements)
 	text = replaceProtectedWebMarkdownLinks(text, &replacements)
 	text = replaceProtectedLinks(text, reBareURL, &replacements)
 	text = replaceMarkdownLinks(text, &replacements, workspaceDir)
@@ -178,6 +179,25 @@ func transformNonCodeText(text string, cfg ReferenceRenderCfg, workspaceDir stri
 	text = replaceLocalReferenceCandidates(text, reRelativeRef, &replacements, workspaceDir)
 	text = replaceLocalReferenceCandidates(text, reBasenameFileRef, &replacements, workspaceDir)
 	return text, replacements
+}
+
+func replaceProtectedSlashCommandLines(text string, replacements *[]placeholderReplacement) string {
+	lines := strings.SplitAfter(text, "\n")
+	var out strings.Builder
+	for _, line := range lines {
+		body := strings.TrimSuffix(line, "\n")
+		if looksLikeSlashCommand(strings.TrimLeft(body, " \t")) {
+			placeholder := makeReferencePlaceholder(len(*replacements))
+			*replacements = append(*replacements, placeholderReplacement{placeholder: placeholder, keepText: body})
+			out.WriteString(placeholder)
+		} else {
+			out.WriteString(body)
+		}
+		if strings.HasSuffix(line, "\n") {
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
 }
 
 func replaceProtectedLinks(text string, re *regexp.Regexp, replacements *[]placeholderReplacement) string {
@@ -271,7 +291,7 @@ func replaceLocalReferenceCandidates(text string, re *regexp.Regexp, replacement
 			last = m[1]
 			continue
 		}
-		ref, ok := parseLocalReference(token, workspaceDir)
+		ref, ok := parseRenderableLocalReference(token, workspaceDir)
 		if !ok {
 			out.WriteString(token)
 			last = m[1]

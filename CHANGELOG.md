@@ -30,6 +30,14 @@
   transaction only after the current executable passes an exact, non-mutating
   version probe; an unverified current binary keeps the recovery backup intact.
 
+### Correctness fixes
+
+- Local-reference rendering now preserves command-shaped `/name [arguments]`
+  text byte-for-byte in ordinary output and inline code, including runtime
+  custom commands and Skills. Unambiguous multi-segment absolute paths such as
+  `/tmp/output.log` and `/Users/name/project/file.go:42` continue to use the
+  configured path display and marker rules.
+
 ## v0.2.1 (2026-08-30)
 
 Stable release focused on Agent-native capability discovery, an executable

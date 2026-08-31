@@ -3394,7 +3394,7 @@ func TestProcessInteractiveEvents_RichCardRendersWorkspaceReferences(t *testing.
 	}
 	e.interactiveStates[sessionKey] = state
 
-	raw := "/root/code/demo-repo/src/services/user_profile_service.ts:42"
+	raw := "Run `/feedback report details` and inspect /root/code/demo-repo/src/services/user_profile_service.ts:42"
 	agentSession.events <- Event{Type: EventResult, Content: raw, Done: true}
 	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-rich-reference", time.Now(), nil, nil, state.replyCtx)
 
@@ -3406,6 +3406,9 @@ func TestProcessInteractiveEvents_RichCardRendersWorkspaceReferences(t *testing.
 	want := "📄 `demo-repo/src/services/user_profile_service.ts:42`"
 	if !strings.Contains(final, want) {
 		t.Fatalf("rich card did not apply workspace reference rendering: %q", final)
+	}
+	if !strings.Contains(final, "`/feedback report details`") {
+		t.Fatalf("rich card did not preserve slash command bytes: %q", final)
 	}
 	if strings.Contains(final, raw) {
 		t.Fatalf("rich card retained the raw absolute path: %q", final)

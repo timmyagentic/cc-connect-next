@@ -235,3 +235,53 @@ func TestTransformLocalReferences_UnknownNoExtPathKeepsNoMarker(t *testing.T) {
 		t.Fatalf("TransformLocalReferences() = %q, want %q", got, want)
 	}
 }
+
+func TestTransformLocalReferences_PreservesSlashCommandsAndStillRendersAbsolutePaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("TransformLocalReferences path handling assumes Unix separators")
+	}
+	cfg := ReferenceRenderCfg{
+		NormalizeAgents: []string{"codex"},
+		RenderPlatforms: []string{"feishu"},
+		DisplayPath:     "basename",
+		MarkerStyle:     "emoji",
+		EnclosureStyle:  "code",
+	}
+	input := strings.Join([]string{
+		"/feedback update notices should use admin_from",
+		"/show /tmp/output.log",
+		"Run `/new investigate the failure` and then `/upgrade`.",
+		"Custom /deploy+prod now; Skill `/release_notes summarize`.",
+		"Inspect /Users/name/project/file.go:42 and /tmp/output.log next.",
+	}, "\n")
+
+	got := TransformLocalReferences(input, cfg, "codex", "feishu", "/Users/name/project")
+
+	for _, command := range []string{
+		"/feedback update notices should use admin_from",
+		"/show /tmp/output.log",
+		"`/new investigate the failure`",
+		"`/upgrade`",
+		"/deploy+prod now",
+		"`/release_notes summarize`",
+	} {
+		if !strings.Contains(got, command) {
+			t.Errorf("TransformLocalReferences() lost slash command %q: %q", command, got)
+		}
+	}
+	for _, renderedPath := range []string{"📄 `file.go:42`", "📄 `output.log`"} {
+		if !strings.Contains(got, renderedPath) {
+			t.Errorf("TransformLocalReferences() did not render real path %q: %q", renderedPath, got)
+		}
+	}
+}
+
+func TestParseUserLocalReference_StillAcceptsSingleSegmentAbsolutePath(t *testing.T) {
+	ref, err := parseUserLocalReference("/tmp", "/")
+	if err != nil {
+		t.Fatalf("parseUserLocalReference(/tmp) error = %v", err)
+	}
+	if ref.pathOriginal != "/tmp" {
+		t.Fatalf("parseUserLocalReference(/tmp) path = %q", ref.pathOriginal)
+	}
+}
