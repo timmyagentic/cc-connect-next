@@ -249,8 +249,9 @@ func TestTransformLocalReferences_PreservesSlashCommandsAndStillRendersAbsoluteP
 	}
 	input := strings.Join([]string{
 		"/feedback update notices should use admin_from",
+		"/show /tmp/output.log",
 		"Run `/new investigate the failure` and then `/upgrade`.",
-		"Custom /deploy-prod now; Skill `/release_notes summarize`.",
+		"Custom /deploy+prod now; Skill `/release_notes summarize`.",
 		"Inspect /Users/name/project/file.go:42 and /tmp/output.log next.",
 	}, "\n")
 
@@ -258,9 +259,10 @@ func TestTransformLocalReferences_PreservesSlashCommandsAndStillRendersAbsoluteP
 
 	for _, command := range []string{
 		"/feedback update notices should use admin_from",
+		"/show /tmp/output.log",
 		"`/new investigate the failure`",
 		"`/upgrade`",
-		"/deploy-prod now",
+		"/deploy+prod now",
 		"`/release_notes summarize`",
 	} {
 		if !strings.Contains(got, command) {

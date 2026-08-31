@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"unicode"
 )
 
 type referenceKind string
@@ -160,12 +159,6 @@ func looksLikeSlashCommand(raw string) bool {
 	}
 	token := fields[0]
 	if len(token) < 2 || token[0] != '/' || strings.HasPrefix(token, "//") || strings.Contains(token[1:], "/") {
-		return false
-	}
-	for _, r := range token[1:] {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("_-.:@", r) {
-			continue
-		}
 		return false
 	}
 	return true
