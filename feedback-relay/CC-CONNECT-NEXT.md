@@ -24,14 +24,12 @@ testable. Foundation files remain byte-identical; the host adds
 Local verification runs from this directory:
 
 ```bash
-npm ci --ignore-scripts
-npm test
-npm run check
-npm run typecheck
-npm run types:check
-npm run validate:worker
-npm audit --audit-level=high
+sh verify-host.sh
 ```
+
+`verify-host.sh` composes the byte-identical Foundation gate with the CC legacy
+compatibility, GitHub App authentication, and real workerd signing tests. The
+Makefile and both tag-only CI/Release workflows call this same entrypoint.
 
 GitHub downloads App keys as PKCS#1. Convert the downloaded key to unencrypted
 PKCS#8 before setting the Worker secret, then delete the temporary local key

@@ -69,6 +69,7 @@
         "feedback-relay/test/runtime.spec.js",
         "feedback-relay/tsconfig.json",
         "feedback-relay/verify.sh",
+        "feedback-relay/verify-host.sh",
         "feedback-relay/vitest.config.js",
         "feedback-relay/vitest.host.config.js",
         "feedback-relay/worker-configuration.d.ts",

@@ -138,12 +138,7 @@ test-release-local:
 	go test ./platform/feishu -run 'TestUserIDFromEventFallsBackToUserID|TestResolveUserNameSkipsInvalidLookupID|TestNew_CanDisableInteractiveCards'
 
 test-feature-foundation:
-	sh feedback-relay/verify.sh
-	node --test internal/appfeatures/feedback_contract.test.mjs
-	node --test internal/appfeatures/feedback_relay_compat.test.mjs
-	node --check feedback-relay/src/compat.js
-	node --check feedback-relay/src/github-app.js
-	cd feedback-relay && npm exec -- vitest run --config vitest.host.config.js
+	sh feedback-relay/verify-host.sh
 	./scripts/verify-agent-app-features.sh
 
 # Legacy: runs unit tests only
