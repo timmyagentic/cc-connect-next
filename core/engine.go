@@ -99,6 +99,21 @@ var CurrentVersion string
 // ErrAttachmentSendDisabled indicates that side-channel image/file delivery is disabled by config.
 var ErrAttachmentSendDisabled = errors.New("attachment send is disabled by config")
 
+var (
+	// ErrDeferredRestartNoActiveTurn means a local caller tried to schedule a
+	// restart without an in-flight Agent turn for the exact session key.
+	ErrDeferredRestartNoActiveTurn = errors.New("no active Agent turn for deferred restart")
+	// ErrDeferredRestartUnauthorized means the trusted user attached to the
+	// active turn is not authorized by projects.admin_from.
+	ErrDeferredRestartUnauthorized = errors.New("active Agent turn is not authorized to restart")
+	// ErrDeferredRestartAlreadyPending means this turn already scheduled a
+	// restart. Repeated tool calls must not enqueue multiple lifecycle actions.
+	ErrDeferredRestartAlreadyPending = errors.New("restart is already pending for this Agent turn")
+	// ErrDeferredRestartCredentialInvalid means the caller did not prove that it
+	// belongs to one exact Agent turn in this process.
+	ErrDeferredRestartCredentialInvalid = errors.New("invalid Agent turn credential")
+)
+
 // RestartRequest carries info needed to send a post-restart notification.
 type RestartRequest struct {
 	SessionKey string `json:"session_key"`
@@ -591,6 +606,8 @@ type interactiveState struct {
 	platform                 Platform
 	replyCtx                 any
 	currentMessageID         string
+	currentUserID            string
+	currentSessionKey        string
 	lastRecallProbeMessageID string
 	lastRecallProbeAt        time.Time
 	recallProbeInFlight      bool
@@ -656,6 +673,14 @@ type interactiveState struct {
 	pendingHandoffs  []steerHandoff
 	handoffSignal    chan struct{} // buffered(1); poked when a handoff is appended
 	presentationOpen bool
+	// deferredRestart is set by the local runtime API while an authorized Agent
+	// turn is active. The event loop consumes it only after the Agent writer,
+	// terminal presentation, and every already-queued turn have finished.
+	deferredRestart        *RestartRequest
+	restartAdmissionFenced bool
+	restartTurnToken       string
+	restartSessionSecret   string
+	restartNoncePath       string
 	// presentationGeneration increments on every adopted handoff. Async
 	// operations snapshot it and re-check before mutating a card so late work
 	// from an old generation cannot overwrite a redirected card.
@@ -673,6 +698,7 @@ type steerHandoff struct {
 	hasRichCardCopy   bool
 	content           string
 	fromVoice         bool
+	userID            string
 	userMessageTimeMs int64
 }
 
@@ -1464,6 +1490,138 @@ func (e *Engine) isAdmin(userID string) bool {
 		}
 	}
 	return false
+}
+
+// deferredRestartStateForCredential resolves a cryptographic turn capability
+// without accepting a client-selected project or session route.
+func (e *Engine) deferredRestartStateForCredential(credential string) (*interactiveState, string) {
+	if !validAgentTurnToken(credential) {
+		return nil, ""
+	}
+	e.interactiveMu.Lock()
+	states := make([]*interactiveState, 0, len(e.interactiveStates))
+	for _, state := range e.interactiveStates {
+		states = append(states, state)
+	}
+	e.interactiveMu.Unlock()
+	for _, state := range states {
+		if state == nil {
+			continue
+		}
+		state.steerMu.Lock()
+		state.mu.Lock()
+		matched := sameAgentTurnToken(credential, state.restartTurnToken)
+		sessionKey := state.currentSessionKey
+		state.mu.Unlock()
+		state.steerMu.Unlock()
+		if matched && sessionKey != "" {
+			return state, sessionKey
+		}
+	}
+	return nil, ""
+}
+
+// RequestDeferredRestart records a restart lifecycle action against the exact
+// active Agent turn proven by credential. User, platform, project, and session
+// all come from trusted Engine state; the local client supplies no routing or
+// identity and the user must pass the chat /restart admin_from gate.
+func (e *Engine) RequestDeferredRestart(credential string) (RestartRequest, error) {
+	credential = strings.TrimSpace(credential)
+	state, sessionKey := e.deferredRestartStateForCredential(credential)
+	if state == nil {
+		return RestartRequest{}, ErrDeferredRestartCredentialInvalid
+	}
+
+	_, sessions := e.sessionContextForKey(sessionKey)
+	if sessions == nil {
+		return RestartRequest{}, ErrDeferredRestartNoActiveTurn
+	}
+	session := sessions.GetOrCreateActive(sessionKey)
+
+	state.steerMu.Lock()
+	defer state.steerMu.Unlock()
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !sameAgentTurnToken(credential, state.restartTurnToken) || state.currentSessionKey != sessionKey {
+		return RestartRequest{}, ErrDeferredRestartCredentialInvalid
+	}
+	if !state.presentationOpen || state.stopped || state.agentSession == nil || !state.agentSession.Alive() || !session.Busy() {
+		return RestartRequest{}, ErrDeferredRestartNoActiveTurn
+	}
+	if !e.isAdmin(state.currentUserID) {
+		return RestartRequest{}, ErrDeferredRestartUnauthorized
+	}
+	if state.deferredRestart != nil {
+		return RestartRequest{}, ErrDeferredRestartAlreadyPending
+	}
+	if state.restartAdmissionFenced {
+		return RestartRequest{}, ErrDeferredRestartNoActiveTurn
+	}
+	if state.platform == nil || strings.TrimSpace(state.platform.Name()) == "" {
+		return RestartRequest{}, ErrDeferredRestartNoActiveTurn
+	}
+
+	req := RestartRequest{SessionKey: sessionKey, Platform: state.platform.Name()}
+	state.deferredRestart = &req
+	// Freeze the accepted-message set at the scheduling boundary. Messages
+	// already in pendingMessages still drain, while later messages cannot starve
+	// the restart or begin a turn in the unlock-to-RestartCh handoff window.
+	state.restartAdmissionFenced = true
+	return req, nil
+}
+
+func takeDeferredRestart(state *interactiveState) *RestartRequest {
+	if state == nil {
+		return nil
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	req := state.deferredRestart
+	if req != nil {
+		state.restartAdmissionFenced = true
+	}
+	state.deferredRestart = nil
+	return req
+}
+
+func (e *Engine) restartAdmissionFenced(interactiveKey string) bool {
+	e.interactiveMu.Lock()
+	state := e.interactiveStates[interactiveKey]
+	e.interactiveMu.Unlock()
+	if state == nil {
+		return false
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return state.restartAdmissionFenced
+}
+
+func dispatchDeferredRestartAfterDrain(state *interactiveState, session *Session, unlocked *bool) bool {
+	restart := takeDeferredRestart(state)
+	if restart == nil {
+		return false
+	}
+	if !*unlocked {
+		session.Unlock()
+		*unlocked = true
+	}
+	queueDeferredRestart(restart)
+	return true
+}
+
+func queueDeferredRestart(req *RestartRequest) {
+	if req == nil {
+		return
+	}
+	select {
+	case RestartCh <- *req:
+		slog.Info("deferred Agent restart queued", "platform", req.Platform, "session", req.SessionKey)
+	default:
+		// A process-wide restart is already queued. Coalescing is sufficient: the
+		// first request will restart this same process, and blocking here could
+		// strand a completed Agent goroutine during shutdown.
+		slog.Info("deferred Agent restart coalesced with existing restart", "platform", req.Platform, "session", req.SessionKey)
+	}
 }
 
 // SetBannedWords replaces the banned words list.
@@ -2352,6 +2510,7 @@ func (e *Engine) Stop() error {
 	e.interactiveMu.Unlock()
 
 	for key, state := range states {
+		clearAgentTurnCredential(state, true)
 		if state.agentSession != nil {
 			slog.Debug("engine.Stop: closing agent session", "session", key)
 			if err := state.agentSession.Close(); err != nil {
@@ -3128,6 +3287,11 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	}
 
 sessionLocked:
+	if e.restartAdmissionFenced(interactiveKey) {
+		session.UnlockWithoutUpdate()
+		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRestarting, msg.Content))
+		return
+	}
 	if rotated := e.maybeAutoResetSessionOnIdle(p, msg, sessions, interactiveKey, session); rotated != nil {
 		session = rotated
 	}
@@ -3240,6 +3404,11 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	defer state.steerMu.Unlock()
 	state.mu.Lock()
 	as := state.agentSession
+	if state.restartAdmissionFenced {
+		state.mu.Unlock()
+		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRestarting, msg.Content))
+		return true
+	}
 	if as == nil || !as.Alive() {
 		state.mu.Unlock()
 		return false
@@ -3289,6 +3458,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 			hasRichCardCopy:   true,
 			content:           msg.Content,
 			fromVoice:         msg.FromVoice,
+			userID:            msg.UserID,
 			userMessageTimeMs: msg.UserMessageTimeMs,
 		})
 		switch {
@@ -3417,6 +3587,10 @@ func (e *Engine) commitSteerPresentation(interactiveKey string, h steerHandoff) 
 		return false
 	}
 	state.pendingHandoffs = append(state.pendingHandoffs, h)
+	// Authorization-sensitive Agent actions must observe the newest steer as
+	// soon as the backend acceptance is committed, not only after the event loop
+	// gets around to adopting its presentation card.
+	state.currentUserID = h.userID
 	ch := state.handoffSignalChLocked()
 	state.mu.Unlock()
 	select {
@@ -3443,6 +3617,10 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 	state.mu.Lock()
 	e.interactiveMu.Unlock()
 	defer state.mu.Unlock()
+	if state.restartAdmissionFenced {
+		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRestarting, msg.Content))
+		return true
+	}
 
 	// Allow queueing when agentSession is nil (session is starting up,
 	// issue #565). Only reject if the session was established and died.
@@ -3554,6 +3732,9 @@ func (e *Engine) drainOrphanedQueue(session *Session, sessions *SessionManager, 
 	e.stopUnsolicitedReader(state)
 
 	unlocked = e.drainPendingMessages(state, session, sessions, interactiveKey)
+	if dispatchDeferredRestartAfterDrain(state, session, &unlocked) {
+		return
+	}
 
 	// Restart unsolicited reader if the session is still alive and clean.
 	state.mu.Lock()
@@ -4037,6 +4218,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.currentMessageID = msg.MessageID
 	state.currentTurnUserMessageTimeMs = msg.UserMessageTimeMs
 	state.mu.Unlock()
+	e.activateAgentTurnCredential(state, msg.UserID, msg.SessionKey)
 	state.setTurnRichCardCopy(msg.MessageID, turnRichCardCopy)
 	stopRecallMonitor := e.startMessageRecallMonitor(interactiveKey)
 	defer stopRecallMonitor()
@@ -4139,6 +4321,16 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// the message to queueMessageForBusySession). Drain any such orphans.
 	if e.drainPendingMessages(state, session, sessions, interactiveKey) {
 		unlocked = true
+	}
+
+	// An Agent-invoked daemon restart is a lifecycle action, not an ordinary
+	// subprocess command. Dispatch it only after the foreground event loop has
+	// finalized the visible answer, Send() has returned (releasing the backend
+	// writer), and every message accepted into the FIFO has completed. If a
+	// queued turn failed before drainPendingMessages could unlock, release the
+	// session here before asking main to shut the Engine down.
+	if dispatchDeferredRestartAfterDrain(state, session, &unlocked) {
+		return
 	}
 
 	// Start unsolicited reader if the session is still alive and the last
@@ -4337,6 +4529,7 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 		)
 		e.stopUnsolicitedReader(state)
 		state.markStopped()
+		clearAgentTurnCredential(state, true)
 		// Close synchronously to prevent race condition where old agent
 		// continues outputting while new agent starts (issue #327).
 		e.closeAgentSessionWithTimeout(sessionKey, state.agentSession)
@@ -4355,6 +4548,8 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	}
 
 	// Inject per-session env vars so the agent subprocess can call `cc-connect-next cron add` etc.
+	var restartSessionSecret string
+	var restartNoncePath string
 	if inj, ok := agent.(SessionEnvInjector); ok {
 		envVars := []string{
 			"CC_PROJECT=" + e.name,
@@ -4364,6 +4559,26 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 		}
 		if e.dataDir != "" {
 			envVars = append(envVars, "CC_DATA_DIR="+e.dataDir)
+			envVars = append(envVars, AgentTurnMarkerEnv+"=1")
+			secret, secretErr := newAgentTurnToken()
+			path, pathErr := newAgentTurnNoncePath(e.dataDir)
+			if secretErr != nil || pathErr != nil {
+				if path != "" {
+					_ = os.Remove(path)
+				}
+				err := secretErr
+				if err == nil {
+					err = pathErr
+				}
+				slog.Warn("Agent turn credential setup failed", "project", e.name, "error", err)
+			} else {
+				restartSessionSecret = secret
+				restartNoncePath = path
+				envVars = append(envVars,
+					AgentSessionSecretEnv+"="+secret,
+					AgentTurnNonceFileEnv+"="+path,
+				)
+			}
 		}
 		if exePath, err := os.Executable(); err == nil {
 			binDir := filepath.Dir(exePath)
@@ -4390,6 +4605,9 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	// Check if context is already canceled (e.g. during shutdown/restart)
 	if e.ctx.Err() != nil {
 		slog.Debug("skipping session start: context canceled", "session_key", sessionKey)
+		if restartNoncePath != "" {
+			_ = os.Remove(restartNoncePath)
+		}
 		newState := &interactiveState{platform: p, replyCtx: replyCtx, agent: agent, eventsNeedResync: true}
 		adoptPendingFromPlaceholder(e.interactiveStates[sessionKey], newState)
 		state = newState
@@ -4450,6 +4668,9 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 		}
 		if err != nil {
 			slog.Error("failed to start interactive session", "error", err, "elapsed", startElapsed)
+			if restartNoncePath != "" {
+				_ = os.Remove(restartNoncePath)
+			}
 			e.hooks.Emit(HookEvent{
 				Event:      HookEventError,
 				SessionKey: sessionKey,
@@ -4494,11 +4715,13 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	}
 
 	newState := &interactiveState{
-		agentSession:     agentSession,
-		platform:         p,
-		replyCtx:         replyCtx,
-		agent:            agent,
-		eventsNeedResync: true,
+		agentSession:         agentSession,
+		platform:             p,
+		replyCtx:             replyCtx,
+		agent:                agent,
+		eventsNeedResync:     true,
+		restartSessionSecret: restartSessionSecret,
+		restartNoncePath:     restartNoncePath,
 	}
 	adoptPendingFromPlaceholder(e.interactiveStates[sessionKey], newState)
 	state = newState
@@ -4566,6 +4789,7 @@ func (e *Engine) cleanupInteractiveState(sessionKey string, expected ...*interac
 
 	// Notify senders of any queued messages that will never be processed.
 	if ok && state != nil {
+		clearAgentTurnCredential(state, true)
 		// Stop unsolicited reader before marking stopped to avoid goroutine leak.
 		e.stopUnsolicitedReader(state)
 
@@ -5661,6 +5885,7 @@ func (t *turnProcessor) run() {
 			state.replyCtx = h.replyCtx
 			state.currentMessageID = h.messageID
 			state.fromVoice = h.fromVoice
+			state.currentUserID = h.userID
 			state.currentTurnUserMessageTimeMs = h.userMessageTimeMs
 			// Fence: async work that captured an older generation must not
 			// mutate a card that has been frozen by this handoff.
@@ -6666,12 +6891,14 @@ func (queue *turnQueue) handle() {
 		state.replyCtx = queued.replyCtx
 		state.currentMessageID = queued.messageID
 		state.fromVoice = queued.fromVoice
+		state.currentUserID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		// Re-open the steer adoption window for the queued turn.
 		state.presentationOpen = true
 		state.mu.Unlock()
 		state.steerMu.Unlock()
+		e.activateAgentTurnCredential(state, queued.userID, queued.msgSessionKey)
 
 		// Stop the previous turn's typing indicator
 		if stopTyping != nil {
@@ -8192,12 +8419,24 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.mu.Lock()
 		if state.stopped {
 			state.pendingMessages = nil
+			if state.deferredRestart != nil {
+				state.restartAdmissionFenced = true
+				state.mu.Unlock()
+				state.steerMu.Unlock()
+				return false
+			}
 			session.Unlock()
 			state.mu.Unlock()
 			state.steerMu.Unlock()
 			return true
 		}
 		if len(state.pendingMessages) == 0 {
+			if state.deferredRestart != nil {
+				state.restartAdmissionFenced = true
+				state.mu.Unlock()
+				state.steerMu.Unlock()
+				return false
+			}
 			session.Unlock()
 			state.mu.Unlock()
 			state.steerMu.Unlock()
@@ -8215,6 +8454,12 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 			)
 		}
 		if len(state.pendingMessages) == 0 {
+			if state.deferredRestart != nil {
+				state.restartAdmissionFenced = true
+				state.mu.Unlock()
+				state.steerMu.Unlock()
+				return false
+			}
 			session.Unlock()
 			state.mu.Unlock()
 			state.steerMu.Unlock()
@@ -8226,10 +8471,12 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.replyCtx = queued.replyCtx
 		state.currentMessageID = queued.messageID
 		state.fromVoice = queued.fromVoice
+		state.currentUserID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		state.mu.Unlock()
 		state.steerMu.Unlock()
+		e.activateAgentTurnCredential(state, queued.userID, queued.msgSessionKey)
 
 		queuedRichCardCopy := e.i18n.RichCardCopyForText(queued.content)
 		e.i18n.DetectAndSet(queued.content)
@@ -8246,6 +8493,11 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		if as == nil || !as.Alive() {
 			e.send(queued.platform, queued.replyCtx, fmt.Sprintf(e.i18n.TForText(MsgError, queued.content), "agent session ended"))
 			e.notifyDroppedQueuedMessages(state, fmt.Errorf("agent session ended"))
+			state.mu.Lock()
+			if state.deferredRestart != nil {
+				state.restartAdmissionFenced = true
+			}
+			state.mu.Unlock()
 			return false
 		}
 
@@ -8305,6 +8557,15 @@ func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
 	// concurrent `codex exec resume` racing the running turn (issue #27), so
 	// steer-aware sessions never fall back to Send.
 	if steerable, ok := state.agentSession.(SteerableSession); ok {
+		state.steerMu.Lock()
+		defer state.steerMu.Unlock()
+		state.mu.Lock()
+		restartFenced := state.restartAdmissionFenced
+		state.mu.Unlock()
+		if restartFenced {
+			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRestarting, msg.Content))
+			return
+		}
 		// Rich-card mode: the successor card replying to the /ps message is
 		// itself the acknowledgement, replacing the plain "P.S. delivered"
 		// text so the sender gets exactly one feedback surface (issue #27).
@@ -8323,6 +8584,7 @@ func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
 				richCardCopy:      cardCopy,
 				hasRichCardCopy:   true,
 				content:           text,
+				userID:            msg.UserID,
 				userMessageTimeMs: msg.UserMessageTimeMs,
 			})
 			switch {
@@ -8362,8 +8624,37 @@ func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
 		return
 	}
 	// Legacy path: persistent-process agents treat a mid-turn Send as
-	// supplemental stdin input to the current turn.
-	if err := state.agentSession.Send(text, nil, nil); err != nil {
+	// supplemental stdin input to the current turn. Identity is fail-closed
+	// while Send is in flight: if Send blocks while the Agent already acts on
+	// the supplement, a privileged local API call cannot inherit the previous
+	// user's authorization. A newer native steer wins instead of being
+	// overwritten when this Send returns.
+	state.steerMu.Lock()
+	state.mu.Lock()
+	if state.restartAdmissionFenced {
+		state.mu.Unlock()
+		state.steerMu.Unlock()
+		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRestarting, msg.Content))
+		return
+	}
+	previousUserID := state.currentUserID
+	state.currentUserID = ""
+	state.mu.Unlock()
+	state.steerMu.Unlock()
+
+	err := state.agentSession.Send(text, nil, nil)
+	state.steerMu.Lock()
+	state.mu.Lock()
+	if state.currentUserID == "" {
+		if err == nil {
+			state.currentUserID = msg.UserID
+		} else {
+			state.currentUserID = previousUserID
+		}
+	}
+	state.mu.Unlock()
+	state.steerMu.Unlock()
+	if err != nil {
 		slog.Error("ps: send failed", "error", err)
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgPsSendFailed))
 		return
@@ -12029,6 +12320,7 @@ func (e *Engine) drainQueuedMessagesAfterCompress(state *interactiveState, sessi
 	if e.drainPendingMessages(state, session, sessions, sessionKey) {
 		*unlocked = true
 	}
+	dispatchDeferredRestartAfterDrain(state, session, unlocked)
 }
 
 func (e *Engine) cmdAllow(p Platform, msg *Message, args []string) {

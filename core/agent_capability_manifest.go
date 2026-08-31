@@ -609,6 +609,11 @@ func (e *Engine) commandCapabilityAvailability(id, probe string, snapshot capabi
 			return conditional("Available only while that session has a turn in flight; native steer or the documented legacy Send path is selected at invocation.", "仅在该会话有进行中回合时可用；调用时选择原生 steer 或已记录的旧 Send 路径。")
 		}
 		return conditional("Requires a live session with a turn in flight.", "需要存在进行中回合的活动会话。")
+	case "deferred_restart":
+		if snapshot.session != nil && snapshot.session.Alive() {
+			return conditional("Requires that this exact session still has an Agent turn in flight when invoked.", "调用时要求该精确会话仍有进行中的 Agent 回合。")
+		}
+		return conditional("Requires a session-bound Agent turn; external terminals keep the ordinary supervisor restart behavior.", "需要绑定会话的 Agent 回合；外部终端保持普通 supervisor 重启行为。")
 	default:
 		return available(fmt.Sprintf("Built-in command %s is compiled into this runtime.", id), fmt.Sprintf("内置命令 %s 已编译进当前运行态。", id))
 	}

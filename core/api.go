@@ -63,6 +63,20 @@ type SendRequest struct {
 	AtAll      bool              `json:"at_all,omitempty"`
 }
 
+// DeferredRestartRequest is intentionally routing- and identity-free. The
+// opaque credential resolves one exact active Engine turn, so a local client
+// cannot select another project/session, forge admin_from authorization, or
+// redirect the post-restart notification.
+type DeferredRestartRequest struct {
+	Credential string `json:"credential"`
+}
+
+type DeferredRestartResponse struct {
+	Status     string `json:"status"`
+	SessionKey string `json:"session_key"`
+	Platform   string `json:"platform"`
+}
+
 type RuntimePlatformState string
 
 const (
@@ -118,6 +132,7 @@ func NewAPIServer(dataDir string) (*APIServer, error) {
 		maxAttachmentBytes: DefaultMaxAttachmentSize,
 	}
 	s.mux.HandleFunc("/send", s.handleSend)
+	s.mux.HandleFunc("/restart/defer", s.handleDeferredRestart)
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 	s.mux.HandleFunc("/capabilities", s.handleCapabilities)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
@@ -403,6 +418,58 @@ func (s *APIServer) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apiJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *APIServer) handleDeferredRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var req DeferredRestartRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.Credential = strings.TrimSpace(req.Credential)
+	if req.Credential == "" {
+		http.Error(w, "credential is required", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.RLock()
+	engines := make([]*Engine, 0, len(s.engines))
+	for _, engine := range s.engines {
+		engines = append(engines, engine)
+	}
+	s.mu.RUnlock()
+
+	var restart RestartRequest
+	scheduleErr := ErrDeferredRestartCredentialInvalid
+	for _, engine := range engines {
+		var err error
+		restart, err = engine.RequestDeferredRestart(req.Credential)
+		if errors.Is(err, ErrDeferredRestartCredentialInvalid) {
+			continue
+		}
+		scheduleErr = err
+		break
+	}
+	if scheduleErr != nil {
+		switch {
+		case errors.Is(scheduleErr, ErrDeferredRestartCredentialInvalid), errors.Is(scheduleErr, ErrDeferredRestartUnauthorized):
+			http.Error(w, scheduleErr.Error(), http.StatusForbidden)
+		case errors.Is(scheduleErr, ErrDeferredRestartNoActiveTurn), errors.Is(scheduleErr, ErrDeferredRestartAlreadyPending):
+			http.Error(w, scheduleErr.Error(), http.StatusConflict)
+		default:
+			http.Error(w, scheduleErr.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	apiJSON(w, http.StatusAccepted, DeferredRestartResponse{
+		Status:     "scheduled",
+		SessionKey: restart.SessionKey,
+		Platform:   restart.Platform,
+	})
 }
 
 func (s *APIServer) handleSessions(w http.ResponseWriter, r *http.Request) {

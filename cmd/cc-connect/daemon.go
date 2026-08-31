@@ -2,9 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +15,7 @@ import (
 	"time"
 
 	"github.com/timmyagentic/cc-connect-next/config"
+	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/timmyagentic/cc-connect-next/daemon"
 )
 
@@ -266,6 +270,13 @@ func daemonStop() {
 }
 
 func daemonRestart(args []string) {
+	if handled, code := runAgentDeferredRestart(args, os.Stdout, os.Stderr, newLocalAPIClient); handled {
+		if code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
+
 	force := false
 	for _, a := range args {
 		if a == "--force" {
@@ -291,6 +302,88 @@ func daemonRestart(args []string) {
 		os.Exit(1)
 	}
 	fmt.Println("cc-connect-next daemon restarted.")
+}
+
+// runAgentDeferredRestart intercepts daemon restart only inside an Agent turn.
+// Returning handled=false preserves the existing external-terminal supervisor
+// path byte-for-byte. Inside a turn it fails closed: an unavailable/old runtime
+// never falls back to killing the process that owns the active Agent writer.
+func runAgentDeferredRestart(args []string, stdout, stderr io.Writer, clientFactory func(string) *http.Client) (handled bool, code int) {
+	marker := strings.TrimSpace(os.Getenv(core.AgentTurnMarkerEnv))
+	sessionSecret := strings.TrimSpace(os.Getenv(core.AgentSessionSecretEnv))
+	noncePath := strings.TrimSpace(os.Getenv(core.AgentTurnNonceFileEnv))
+	legacyAgentContext := strings.TrimSpace(os.Getenv("CC_PROJECT")) != "" &&
+		strings.TrimSpace(os.Getenv("CC_SESSION_KEY")) != "" &&
+		strings.TrimSpace(os.Getenv("CC_AGENT_TYPE")) != "" &&
+		strings.TrimSpace(os.Getenv("CC_PLATFORM_TYPES")) != ""
+	if marker != "1" || sessionSecret == "" || noncePath == "" {
+		if legacyAgentContext {
+			_, _ = fmt.Fprintln(stderr, "Agent-safe restart was not scheduled: the running daemon does not provide turn credentials. Use the chat /restart command instead.")
+			return true, 1
+		}
+		return false, 0
+	}
+	for _, arg := range args {
+		if arg == "--force" {
+			_, _ = fmt.Fprintln(stderr, "Agent-safe restart does not allow --force. Use the chat /restart command instead.")
+			return true, 2
+		}
+	}
+
+	file, err := os.Open(noncePath)
+	if err != nil {
+		_, _ = fmt.Fprintln(stderr, "Agent-safe restart was not scheduled: turn nonce is unavailable. Use the chat /restart command instead.")
+		return true, 1
+	}
+	credentialBytes, readErr := io.ReadAll(io.LimitReader(file, 4<<10))
+	closeErr := file.Close()
+	nonce := strings.TrimSpace(string(credentialBytes))
+	credential, credentialErr := core.BuildAgentTurnCredential(sessionSecret, nonce)
+	if readErr != nil || closeErr != nil || credentialErr != nil || len(credentialBytes) >= 4<<10 {
+		_, _ = fmt.Fprintln(stderr, "Agent-safe restart was not scheduled: turn credential is invalid. Use the chat /restart command instead.")
+		return true, 1
+	}
+
+	payload, err := json.Marshal(core.DeferredRestartRequest{Credential: credential})
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "Agent-safe restart was not scheduled: %v. Use the chat /restart command instead.\n", err)
+		return true, 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix/restart/defer", bytes.NewReader(payload))
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "Agent-safe restart was not scheduled: %v. Use the chat /restart command instead.\n", err)
+		return true, 1
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := clientFactory(resolveSocketPath(""))
+	defer client.CloseIdleConnections()
+	resp, err := client.Do(req)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "Agent-safe restart was not scheduled: %v. Use the chat /restart command instead.\n", err)
+		return true, 1
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		detail := strings.TrimSpace(string(body))
+		if detail == "" {
+			detail = http.StatusText(resp.StatusCode)
+		}
+		_, _ = fmt.Fprintf(stderr, "Agent-safe restart was not scheduled: runtime returned HTTP %d: %s. Use the chat /restart command instead.\n", resp.StatusCode, detail)
+		return true, 1
+	}
+	var scheduled core.DeferredRestartResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&scheduled); err != nil || scheduled.Status != "scheduled" {
+		if err == nil {
+			err = fmt.Errorf("unexpected runtime status %q", scheduled.Status)
+		}
+		_, _ = fmt.Fprintf(stderr, "Agent-safe restart was not scheduled: %v. Use the chat /restart command instead.\n", err)
+		return true, 1
+	}
+	_, _ = fmt.Fprintln(stdout, "cc-connect-next daemon restart scheduled after the current Agent turn and queued messages complete.")
+	return true, 0
 }
 
 func requireInstalled(mgr daemon.Manager) {

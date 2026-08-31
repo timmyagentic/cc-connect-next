@@ -53,7 +53,7 @@ Top-level sections:
 | Field | Contents |
 |-------|----------|
 | `configuration` | Active-project configuration contract; never current values |
-| `tools` | Agent-facing local CLI tools such as send, Cron, Timer, and Relay |
+| `tools` | Agent-facing local CLI tools such as send, Cron, Timer, Relay, and deferred daemon restart |
 | `commands` | Built-in and project custom chat commands |
 | `skills` | Skills actually discovered from the active Agent's Skill directories |
 | `runtime` | Active Agent, Agent-session, and Platform interface capabilities |
@@ -79,7 +79,7 @@ Unsupported runtime features remain visible with a reason and fallback. For exam
 
 ## Permission and side-effect contract
 
-Built-in command permissions follow the real Engine dispatch path. Static privileged commands require `projects.admin_from`; dynamic Shell registration through `/commands addexec`, `/cron addexec`, and `/timer addexec` is admin-only. Every registered custom command with an `Exec` body is also admin-only at invocation, while Prompt-backed custom commands remain member operations. Project-level `disabled_commands` is reflected immediately; user-role policy and the concrete caller identity remain invocation-time checks, so the Manifest keeps them conditional instead of guessing identity from a platform session-key format.
+Built-in command permissions follow the real Engine dispatch path. Static privileged commands require `projects.admin_from`; dynamic Shell registration through `/commands addexec`, `/cron addexec`, and `/timer addexec` is admin-only. The Agent-facing `cc-connect-next daemon restart` tool is also admin-only and conditionally available only with the exact HMAC turn credential derived from a private per-Agent session secret; its client supplies no project, session, user, or platform routing. Every registered custom command with an `Exec` body is also admin-only at invocation, while Prompt-backed custom commands remain member operations. Project-level `disabled_commands` is reflected immediately; user-role policy and the concrete caller identity remain invocation-time checks, so the Manifest keeps them conditional instead of guessing identity from a platform session-key format.
 
 Agent command files may publish only an explicit frontmatter `description`. Their Markdown Prompt body—including its first line—is never reused as Manifest or menu metadata.
 
