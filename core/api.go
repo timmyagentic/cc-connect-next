@@ -63,6 +63,20 @@ type SendRequest struct {
 	AtAll      bool              `json:"at_all,omitempty"`
 }
 
+// DeferredRestartRequest is intentionally identity-free. The runtime resolves
+// user and platform from the active Engine turn so a local client cannot forge
+// admin_from authorization or redirect the post-restart notification.
+type DeferredRestartRequest struct {
+	Project    string `json:"project"`
+	SessionKey string `json:"session_key"`
+}
+
+type DeferredRestartResponse struct {
+	Status     string `json:"status"`
+	SessionKey string `json:"session_key"`
+	Platform   string `json:"platform"`
+}
+
 type RuntimePlatformState string
 
 const (
@@ -118,6 +132,7 @@ func NewAPIServer(dataDir string) (*APIServer, error) {
 		maxAttachmentBytes: DefaultMaxAttachmentSize,
 	}
 	s.mux.HandleFunc("/send", s.handleSend)
+	s.mux.HandleFunc("/restart/defer", s.handleDeferredRestart)
 	s.mux.HandleFunc("/healthz", s.handleHealth)
 	s.mux.HandleFunc("/capabilities", s.handleCapabilities)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
@@ -403,6 +418,50 @@ func (s *APIServer) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apiJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *APIServer) handleDeferredRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	var req DeferredRestartRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.Project = strings.TrimSpace(req.Project)
+	req.SessionKey = strings.TrimSpace(req.SessionKey)
+	if req.Project == "" || req.SessionKey == "" {
+		http.Error(w, "project and session_key are required", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.RLock()
+	engine, ok := s.engines[req.Project]
+	s.mu.RUnlock()
+	if !ok {
+		http.Error(w, fmt.Sprintf("project %q not found", req.Project), http.StatusNotFound)
+		return
+	}
+
+	restart, err := engine.RequestDeferredRestart(req.SessionKey)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrDeferredRestartUnauthorized):
+			http.Error(w, err.Error(), http.StatusForbidden)
+		case errors.Is(err, ErrDeferredRestartNoActiveTurn), errors.Is(err, ErrDeferredRestartAlreadyPending):
+			http.Error(w, err.Error(), http.StatusConflict)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	apiJSON(w, http.StatusAccepted, DeferredRestartResponse{
+		Status:     "scheduled",
+		SessionKey: restart.SessionKey,
+		Platform:   restart.Platform,
+	})
 }
 
 func (s *APIServer) handleSessions(w http.ResponseWriter, r *http.Request) {

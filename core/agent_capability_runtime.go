@@ -11,6 +11,7 @@ type agentToolDefinition struct {
 	description string
 	zh          string
 	parameters  []CapabilityParameter
+	permission  CapabilityPermissionLevel
 	readOnly    bool
 	effects     []string
 	fallback    CapabilityFallback
@@ -93,14 +94,36 @@ var agentToolDefinitions = []agentToolDefinition{
 		description: "Run side-effect-free configuration, dependency, Agent CLI, and platform preflight checks.", zh: "执行无副作用的配置、依赖、Agent CLI 与平台预检。", readOnly: true,
 		parameters: []CapabilityParameter{capabilityParam("project", "string", false, "Optional project filter.", "可选项目过滤。")},
 	},
+	{
+		id: "daemon-restart", invocation: "cc-connect-next daemon restart",
+		description: "Schedule a graceful daemon restart after the current Agent turn and accepted queued messages finish.", zh: "在当前 Agent 回合及已接收排队消息完成后，安排 daemon 优雅重启。",
+		permission: CapabilityPermissionAdmin, effects: []string{"process_control"}, probe: "deferred_restart",
+		fallback: CapabilityFallback{
+			Mode:          "chat-command",
+			Description:   "The Agent path fails closed when the active-turn runtime endpoint or authorization is unavailable; use the chat /restart command instead. It never falls back to an immediate supervisor restart.",
+			DescriptionZH: "活动回合运行态端点或授权不可用时，Agent 路径会变更前失败；请改用聊天 /restart。绝不会退化成立即调用 supervisor 重启。",
+		},
+	},
 }
 
 func (e *Engine) agentToolCapabilities(snapshot capabilitySnapshot) []AgentToolCapability {
 	result := make([]AgentToolCapability, 0, len(agentToolDefinitions))
 	for _, definition := range agentToolDefinitions {
-		availability := available("This read-only tool is compiled into the current build.", "该只读工具已编译进当前构建。")
+		availability := available("This Agent tool is compiled into the current build.", "该 Agent 工具已编译进当前构建。")
 		if definition.probe != "" {
 			availability = e.commandCapabilityAvailability(definition.id, definition.probe, snapshot)
+		}
+		permission := definition.permission
+		if permission == "" {
+			permission = CapabilityPermissionLocalAgent
+		}
+		if permission == CapabilityPermissionAdmin {
+			_, adminFrom := e.capabilityProjectPolicy()
+			if strings.TrimSpace(adminFrom) == "" {
+				availability = unavailable("Requires admin permission, but projects.admin_from is not configured.", "需要管理员权限，但 projects.admin_from 尚未配置。")
+			} else if availability.State != CapabilityUnavailable {
+				availability = conditional("Requires an exact active Agent turn and projects.admin_from authorization; caller identity is read from trusted Engine state at invocation time.", "需要精确的活动 Agent 回合及 projects.admin_from 授权；调用者身份在执行时从可信 Engine 状态读取。")
+			}
 		}
 		fallback := definition.fallback
 		if fallback.Mode == "" {
@@ -108,7 +131,7 @@ func (e *Engine) agentToolCapabilities(snapshot capabilitySnapshot) []AgentToolC
 		}
 		result = append(result, AgentToolCapability{
 			ID: definition.id, Invocation: definition.invocation, Description: definition.description, DescriptionZH: definition.zh,
-			Parameters: append([]CapabilityParameter(nil), definition.parameters...), Permission: CapabilityPermissionLocalAgent,
+			Parameters: append([]CapabilityParameter(nil), definition.parameters...), Permission: permission,
 			ReadOnly: definition.readOnly, SideEffects: expandSideEffects(definition.effects), Fallback: fallback, Availability: availability,
 		})
 	}

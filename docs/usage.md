@@ -1106,6 +1106,15 @@ cc-connect-next daemon logs [-f]
 cc-connect-next daemon uninstall
 ```
 
+From a normal terminal, `daemon restart` keeps using the installed service
+manager immediately. When an Agent invokes the same command inside an active
+chat turn, cc-connect-next instead schedules its graceful restart after the
+current answer, terminal card, Agent writer, and already accepted queued
+messages finish. The active message user must be authorized by `admin_from`.
+If that active-turn endpoint is unavailable (including an older running
+daemon), the command fails without restarting; use the chat `/restart` command
+instead. `--force` is never accepted from an Agent turn.
+
 ---
 
 ## Multi-Workspace Mode

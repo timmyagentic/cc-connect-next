@@ -153,6 +153,10 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 	if shell.Permission != CapabilityPermissionAdmin || shell.Availability.State != CapabilityUnavailable || !hasManifestEffect(shell.SideEffects, "shell_execution") {
 		t.Fatalf("shell contract = %#v", shell)
 	}
+	daemonRestart := findManifestTool(t, manifest.Tools, "daemon-restart")
+	if daemonRestart.Permission != CapabilityPermissionAdmin || daemonRestart.Availability.State != CapabilityUnavailable || !hasManifestEffect(daemonRestart.SideEffects, "process_control") || daemonRestart.Fallback.Mode != "chat-command" {
+		t.Fatalf("daemon restart tool contract = %#v", daemonRestart)
+	}
 	timer := findManifestCommand(t, manifest.Commands, "timer")
 	if timer.Permission != CapabilityPermissionConditional || !slices.Contains(timer.PrivilegedWhen, "addexec") {
 		t.Fatalf("timer permission contract = %#v", timer)
@@ -169,6 +173,10 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 	deployWithAdminConfigured := findManifestCommand(t, e.QueryAgentCapabilityManifest("", "", false).Commands, "deploy")
 	if deployWithAdminConfigured.Permission != CapabilityPermissionAdmin || deployWithAdminConfigured.Availability.State != CapabilityConditional {
 		t.Fatalf("custom exec with admin_from configured = %#v", deployWithAdminConfigured)
+	}
+	daemonRestartWithAdminConfigured := findManifestTool(t, e.QueryAgentCapabilityManifest("", "", false).Tools, "daemon-restart")
+	if daemonRestartWithAdminConfigured.Permission != CapabilityPermissionAdmin || daemonRestartWithAdminConfigured.Availability.State != CapabilityConditional {
+		t.Fatalf("daemon restart tool with admin_from = %#v", daemonRestartWithAdminConfigured)
 	}
 	if len(manifest.Skills) != 1 || manifest.Skills[0].Name != "release-check" || manifest.Skills[0].Description != "Verify a release safely" {
 		t.Fatalf("skills = %#v", manifest.Skills)
@@ -344,6 +352,17 @@ func findManifestCommand(t *testing.T, commands []AgentCommandCapability, id str
 	}
 	t.Fatalf("command %q not found", id)
 	return AgentCommandCapability{}
+}
+
+func findManifestTool(t *testing.T, tools []AgentToolCapability, id string) AgentToolCapability {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.ID == id {
+			return tool
+		}
+	}
+	t.Fatalf("tool %q not found", id)
+	return AgentToolCapability{}
 }
 
 func hasManifestEffect(effects []CapabilitySideEffect, kind string) bool {
