@@ -4079,7 +4079,7 @@ Use a separate Agent session for each platform thread or topic.
 
 ### `projects.platforms.options.thread_isolation` — `feishu, lark`
 
-Choose Feishu/Lark topic isolation scope. off keeps legacy per-user/channel sessions. topics_only isolates only real topics whose events carry thread_id; ordinary group messages stay in the main chat. topic_per_message gives every top-level group message its own topic/session. Real topics get an independent Agent session and workspace binding in both enabled modes. Omitting the key maps to off; legacy true maps to topic_per_message and false maps to off. New Starter and recommended profiles write topics_only.
+Choose Feishu/Lark topic isolation scope. off keeps legacy per-user/channel sessions. topics_only isolates every real topic whose event carries thread_id, including P2P topics; ordinary group messages stay in the main chat and ordinary non-topic private messages keep their existing session. topic_per_message additionally gives every top-level group message its own topic/session. Real topics get an independent Agent session and workspace binding in both enabled modes. Omitting the key maps to off; legacy true maps to topic_per_message and false maps to off. New Starter and recommended profiles write topics_only.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`

@@ -26,14 +26,14 @@ type WebhookServer struct {
 
 // WebhookRequest is the JSON body for POST /hook.
 type WebhookRequest struct {
-	Event      string `json:"event,omitempty"`       // event name for logging (e.g. "git:commit")
-	Project    string `json:"project,omitempty"`      // target project; optional if single project
-	SessionKey string `json:"session_key"`            // target session key (required)
-	Prompt     string `json:"prompt,omitempty"`       // agent prompt (mutually exclusive with exec)
-	Exec       string `json:"exec,omitempty"`         // shell command (mutually exclusive with prompt)
-	WorkDir    string `json:"work_dir,omitempty"`     // working dir for exec
-	Silent     bool   `json:"silent,omitempty"`       // suppress notification
-	Payload    any    `json:"payload,omitempty"`      // arbitrary extra data; appended to prompt context
+	Event      string `json:"event,omitempty"`    // event name for logging (e.g. "git:commit")
+	Project    string `json:"project,omitempty"`  // target project; optional if single project
+	SessionKey string `json:"session_key"`        // target session key (required)
+	Prompt     string `json:"prompt,omitempty"`   // agent prompt (mutually exclusive with exec)
+	Exec       string `json:"exec,omitempty"`     // shell command (mutually exclusive with prompt)
+	WorkDir    string `json:"work_dir,omitempty"` // working dir for exec
+	Silent     bool   `json:"silent,omitempty"`   // suppress notification
+	Payload    any    `json:"payload,omitempty"`  // arbitrary extra data; appended to prompt context
 }
 
 func NewWebhookServer(port int, token, path string) *WebhookServer {
@@ -216,13 +216,7 @@ func (ws *WebhookServer) executePrompt(engine *Engine, sessionKey, prompt string
 		return
 	}
 
-	rc, ok := targetPlatform.(ReplyContextReconstructor)
-	if !ok {
-		slog.Error("webhook: platform does not support proactive messaging", "event", event, "platform", platformName)
-		return
-	}
-
-	replyCtx, err := rc.ReconstructReplyCtx(sessionKey)
+	replyCtx, err := engine.reconstructReplyContext(targetPlatform, sessionKey)
 	if err != nil {
 		slog.Error("webhook: reconstruct reply context failed", "event", event, "error", err)
 		return
@@ -275,13 +269,7 @@ func (ws *WebhookServer) executeShell(engine *Engine, req WebhookRequest, event 
 		return
 	}
 
-	rc, ok := targetPlatform.(ReplyContextReconstructor)
-	if !ok {
-		slog.Error("webhook: platform does not support proactive messaging", "event", event, "platform", platformName)
-		return
-	}
-
-	replyCtx, err := rc.ReconstructReplyCtx(sessionKey)
+	replyCtx, err := engine.reconstructReplyContext(targetPlatform, sessionKey)
 	if err != nil {
 		slog.Error("webhook: reconstruct reply context failed", "event", event, "error", err)
 		return

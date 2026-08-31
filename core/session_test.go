@@ -1,12 +1,36 @@
 package core
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestSessionManager_PersistentReplyTargetRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	key := "feishu:oc_p2p:thread:omt_topic"
+	sm := NewSessionManager(path)
+	sm.UpdateReplyTarget(key, PersistentReplyTarget{
+		Platform: "feishu",
+		Data:     json.RawMessage(`{"message_id":"om_reply"}`),
+	})
+
+	reloaded := NewSessionManager(path)
+	target := reloaded.GetReplyTarget(key)
+	var payload map[string]string
+	if target == nil || target.Platform != "feishu" || json.Unmarshal(target.Data, &payload) != nil || payload["message_id"] != "om_reply" {
+		t.Fatalf("reloaded reply target = %#v", target)
+	}
+	target.Data[0] = 'x'
+	got := reloaded.GetReplyTarget(key)
+	payload = nil
+	if json.Unmarshal(got.Data, &payload) != nil || payload["message_id"] != "om_reply" {
+		t.Fatalf("GetReplyTarget returned mutable persisted bytes: %s", got.Data)
+	}
+}
 
 func TestSessionManager_GetOrCreateActive(t *testing.T) {
 	sm := NewSessionManager("")

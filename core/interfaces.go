@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -28,6 +29,29 @@ var ErrPersistentProactiveDeliveryUnsupported = errors.New("persistent proactive
 // to send messages to users without an incoming message.
 type ReplyContextReconstructor interface {
 	ReconstructReplyCtx(sessionKey string) (any, error)
+}
+
+// PersistentReplyTarget is the platform-owned, minimal routing state needed to
+// restore a reply context after the live inbound event has gone away. Data must
+// never contain message content, credentials, or other prompt payloads.
+type PersistentReplyTarget struct {
+	Platform string          `json:"platform"`
+	Data     json.RawMessage `json:"data"`
+}
+
+// ReplyContextSnapshotter lets a platform decouple stable session identity
+// from the concrete message target required for later delivery. The Engine
+// persists the opaque snapshot and gives it back only to the same platform.
+type ReplyContextSnapshotter interface {
+	SnapshotReplyCtx(replyCtx any) (json.RawMessage, error)
+	RestoreReplyCtx(snapshot json.RawMessage) (any, error)
+}
+
+// PersistentReplyTargetRequirer identifies session-key shapes that cannot be
+// reconstructed safely without a previously persisted reply-context snapshot.
+// Other session shapes retain the legacy ReplyContextReconstructor contract.
+type PersistentReplyTargetRequirer interface {
+	RequiresPersistentReplyTarget(sessionKey string) bool
 }
 
 // PersistentProactiveTargetValidator is an optional platform capability used

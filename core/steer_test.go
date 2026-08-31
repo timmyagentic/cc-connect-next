@@ -287,6 +287,30 @@ func TestTrySteerBusyMessage_DeliveredIntoActiveTurn(t *testing.T) {
 	}
 }
 
+func TestTrySteerBusyMessage_P2PTopicsDoNotCrossActiveTurn(t *testing.T) {
+	p := &stubPlatformEngine{n: "feishu"}
+	sessA := newSteerableSession("topic-a")
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	e.SetBusyMessageMode(BusyMessageModeSteer)
+
+	keyA := "feishu:oc_p2p:thread:omt_a"
+	keyB := "feishu:oc_p2p:thread:omt_b"
+	unlock := installBusySteerableState(t, e, p, keyA, sessA)
+	defer unlock()
+
+	sessionB := e.sessions.GetOrCreateActive(keyB)
+	msgB := &Message{SessionKey: keyB, MessageID: "om_b", Content: "topic B input", ReplyCtx: "ctx-b"}
+	if e.trySteerBusyMessage(p, msgB, keyB, sessionB, e.sessions) {
+		t.Fatal("topic B was treated as the active turn in topic A")
+	}
+	if calls := sessA.getSteerCalls(); len(calls) != 0 {
+		t.Fatalf("topic B crossed into topic A steer calls: %v", calls)
+	}
+	if handoffs := pendingHandoffsFor(e, keyA); len(handoffs) != 0 {
+		t.Fatalf("topic B created a card handoff in topic A: %+v", handoffs)
+	}
+}
+
 func TestTrySteerBusyMessageTouchesLastUserActivity(t *testing.T) {
 	p := &stubPlatformEngine{n: "test"}
 	sess := newSteerableSession("steer-activity")

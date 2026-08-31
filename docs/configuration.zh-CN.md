@@ -4079,7 +4079,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.thread_isolation` — `feishu, lark`
 
-选择飞书/Lark 话题隔离范围。off 沿用旧版按用户/频道会话；topics_only 只隔离事件携带 thread_id 的真实话题，普通群消息留在群主会话；topic_per_message 让每条群主会话消息都拥有独立话题/session。两种启用模式都会给真实话题独立 Agent 会话和工作区绑定。省略该键映射 off；旧 true 映射 topic_per_message，旧 false 映射 off；新 Starter 和推荐 Profile 写入 topics_only。
+选择飞书/Lark 话题隔离范围。off 沿用旧版按用户/频道会话；topics_only 隔离事件携带 thread_id 的所有真实话题（包括 P2P 私聊话题），普通群消息留在群主会话，普通无话题私聊保持原会话；topic_per_message 还会让每条群主会话消息拥有独立话题/session。两种启用模式都会给真实话题独立 Agent 会话和工作区绑定。省略该键映射 off；旧 true 映射 topic_per_message，旧 false 映射 off；新 Starter 和推荐 Profile 写入 topics_only。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`

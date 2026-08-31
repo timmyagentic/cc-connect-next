@@ -283,11 +283,7 @@ func (rm *RelayManager) sendToGroup(ctx context.Context, e *Engine, platform, se
 			}
 			return
 		}
-		rc, ok := p.(ReplyContextReconstructor)
-		if !ok {
-			continue
-		}
-		rctx, err := rc.ReconstructReplyCtx(sessionKey)
+		rctx, err := e.reconstructReplyContext(p, sessionKey)
 		if err != nil {
 			slog.Debug("relay: failed to reconstruct reply ctx", "error", err)
 			continue

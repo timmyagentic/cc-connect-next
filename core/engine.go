@@ -315,11 +315,7 @@ func (e *Engine) dispatchRestartNotify(req *RestartRequest) error {
 	if p == nil {
 		return fmt.Errorf("platform %q not ready", req.Platform)
 	}
-	rc, ok := p.(ReplyContextReconstructor)
-	if !ok {
-		return fmt.Errorf("platform %q does not support ReconstructReplyCtx", req.Platform)
-	}
-	rctx, err := rc.ReconstructReplyCtx(req.SessionKey)
+	rctx, err := e.reconstructReplyContext(p, req.SessionKey)
 	if err != nil {
 		return fmt.Errorf("reconstruct reply ctx: %w", err)
 	}
@@ -1646,7 +1642,16 @@ func (e *Engine) ValidatePersistentProactiveTarget(sessionKey string) error {
 		return nil
 	}
 	if validator, ok := platform.(PersistentProactiveTargetValidator); ok {
-		return validator.ValidatePersistentProactiveTarget(resolvedSessionKey)
+		if err := validator.ValidatePersistentProactiveTarget(resolvedSessionKey); err != nil {
+			return err
+		}
+	}
+	if requirer, ok := platform.(PersistentReplyTargetRequirer); ok && requirer.RequiresPersistentReplyTarget(resolvedSessionKey) {
+		if e.sessions.GetReplyTarget(resolvedSessionKey) == nil {
+			return fmt.Errorf("%w: session %q has no persisted reply target", ErrPersistentProactiveDeliveryUnsupported, resolvedSessionKey)
+		}
+		_, err = e.reconstructReplyContext(platform, resolvedSessionKey)
+		return err
 	}
 	return nil
 }
@@ -1698,6 +1703,49 @@ func (e *Engine) resolvePlatformSessionTarget(sessionKey string) (Platform, stri
 		return nil, platformName, resolvedSessionKey, fmt.Errorf("platform %q not found for session %q", platformName, sessionKey)
 	}
 	return targetPlatform, platformName, resolvedSessionKey, nil
+}
+
+func (e *Engine) rememberReplyTarget(platform Platform, msg *Message) {
+	if platform == nil || msg == nil || strings.TrimSpace(msg.SessionKey) == "" || msg.ReplyCtx == nil {
+		return
+	}
+	snapshotter, ok := platform.(ReplyContextSnapshotter)
+	if !ok {
+		return
+	}
+	data, err := snapshotter.SnapshotReplyCtx(msg.ReplyCtx)
+	if err != nil {
+		if !errors.Is(err, ErrNotSupported) {
+			slog.Warn("reply target snapshot failed", "platform", platform.Name(), "session", msg.SessionKey, "error", err)
+		}
+		return
+	}
+	e.sessions.UpdateReplyTarget(msg.SessionKey, PersistentReplyTarget{Platform: platform.Name(), Data: data})
+}
+
+func (e *Engine) reconstructReplyContext(platform Platform, sessionKey string) (any, error) {
+	if platform == nil {
+		return nil, fmt.Errorf("reply target platform is nil")
+	}
+	if target := e.sessions.GetReplyTarget(sessionKey); target != nil {
+		if target.Platform != platform.Name() {
+			return nil, fmt.Errorf("persisted reply target platform %q does not match %q", target.Platform, platform.Name())
+		}
+		snapshotter, ok := platform.(ReplyContextSnapshotter)
+		if !ok {
+			return nil, fmt.Errorf("platform %q cannot restore its persisted reply target", platform.Name())
+		}
+		replyCtx, err := snapshotter.RestoreReplyCtx(target.Data)
+		if err != nil {
+			return nil, fmt.Errorf("restore persisted reply target: %w", err)
+		}
+		return replyCtx, nil
+	}
+	reconstructor, ok := platform.(ReplyContextReconstructor)
+	if !ok {
+		return nil, fmt.Errorf("platform %q does not support proactive messaging", platform.Name())
+	}
+	return reconstructor.ReconstructReplyCtx(sessionKey)
 }
 
 type scheduledJobSpec struct {
@@ -1799,11 +1847,6 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 		return err
 	}
 
-	rc, ok := targetPlatform.(ReplyContextReconstructor)
-	if !ok {
-		return fmt.Errorf("platform %q does not support proactive messaging (%s)", platformName, spec.kind)
-	}
-
 	runSessionKey := sessionKey
 	var replyCtx any
 	var replyErr error
@@ -1825,7 +1868,7 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 		}
 	}
 	if replyCtx == nil {
-		replyCtx, replyErr = rc.ReconstructReplyCtx(runSessionKey)
+		replyCtx, replyErr = e.reconstructReplyContext(targetPlatform, runSessionKey)
 		if replyErr != nil {
 			return fmt.Errorf("reconstruct reply context: %w", replyErr)
 		}
@@ -2184,12 +2227,7 @@ func (e *Engine) ExecuteHeartbeat(sessionKey, prompt string, silent bool) error 
 	}
 	sessionKey = resolvedSessionKey
 
-	rc, ok := targetPlatform.(ReplyContextReconstructor)
-	if !ok {
-		return fmt.Errorf("platform %q does not support proactive messaging (heartbeat)", platformName)
-	}
-
-	replyCtx, err := rc.ReconstructReplyCtx(sessionKey)
+	replyCtx, err := e.reconstructReplyContext(targetPlatform, sessionKey)
 	if err != nil {
 		return fmt.Errorf("reconstruct reply context: %w", err)
 	}
@@ -2905,6 +2943,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 	if e.rejectBannedContent(p, msg, content) {
 		return
 	}
+	e.rememberReplyTarget(p, msg)
 
 	// Multi-workspace resolution
 	var wsAgent Agent
@@ -12746,11 +12785,7 @@ func (e *Engine) resolveSessionTarget(sessionKey string, attachments bool) (send
 	if p == nil && resolvedSessionKey != "" {
 		targetPlatform, _, strippedKey, resolveErr := e.resolvePlatformSessionTarget(resolvedSessionKey)
 		if resolveErr == nil {
-			rc, ok := targetPlatform.(ReplyContextReconstructor)
-			if !ok {
-				return sendTarget{}, fmt.Errorf("platform %q does not support proactive messaging", targetPlatform.Name())
-			}
-			reconstructed, err := rc.ReconstructReplyCtx(strippedKey)
+			reconstructed, err := e.reconstructReplyContext(targetPlatform, strippedKey)
 			if err != nil {
 				return sendTarget{}, fmt.Errorf("reconstruct reply context: %w", err)
 			}
@@ -14105,12 +14140,7 @@ func (e *Engine) pushDeleteModeResultCard(sessionKey string) {
 	}
 
 	// Fallback: send a new card message.
-	rc, ok := targetPlatform.(ReplyContextReconstructor)
-	if !ok {
-		slog.Warn("delete mode: platform does not support proactive messaging", "platform", platformName)
-		return
-	}
-	rctx, err := rc.ReconstructReplyCtx(sessionKey)
+	rctx, err := e.reconstructReplyContext(targetPlatform, sessionKey)
 	if err != nil {
 		slog.Error("delete mode: reconstruct reply ctx failed", "error", err)
 		return
@@ -14166,12 +14196,7 @@ func (e *Engine) pushModelSwitchResultCard(sessionKey string, card *Card) {
 		}
 	}
 
-	rc, ok := targetPlatform.(ReplyContextReconstructor)
-	if !ok {
-		slog.Warn("model switch: platform does not support proactive messaging", "platform", platformName)
-		return
-	}
-	rctx, err := rc.ReconstructReplyCtx(sessionKey)
+	rctx, err := e.reconstructReplyContext(targetPlatform, sessionKey)
 	if err != nil {
 		slog.Error("model switch: reconstruct reply ctx failed", "error", err)
 		return
