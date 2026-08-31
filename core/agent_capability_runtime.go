@@ -95,6 +95,21 @@ var agentToolDefinitions = []agentToolDefinition{
 		parameters: []CapabilityParameter{capabilityParam("project", "string", false, "Optional project filter.", "可选项目过滤。")},
 	},
 	{
+		id: "feedback", invocation: "cc-connect-next feedback <preview|submit> [options]",
+		description: "Preview one complete redacted Foundation Draft, then submit that exact Draft once only when the current user explicitly authorized it.", zh: "先预览一份完整脱敏的 Foundation Draft；仅当当前用户明确授权后，才能一次性提交该精确 Draft。",
+		permission: CapabilityPermissionLocalAgent, effects: []string{"external_service", "network"}, probe: "agent_feedback",
+		parameters: []CapabilityParameter{
+			capabilityParam("action", "string", true, "Feedback operation; preview never performs network I/O.", "反馈操作；preview 绝不发出网络请求。", "preview", "submit"),
+			capabilityParam("description", "string", false, "Problem or missing capability for preview.", "用于生成预览的问题或缺失能力。"),
+			capabilityParam("approval-token", "opaque-token", false, "One-time token returned by preview and accepted only for the initiating user/session from a live Agent turn.", "preview 返回的一次性 token，仅可由发起用户在同一会话的活动 Agent 回合中使用。"),
+		},
+		fallback: CapabilityFallback{
+			Mode:          "chat-command",
+			Description:   "The Agent path fails closed without a live turn credential or exact approval token; use /feedback in chat for a user-visible preview and confirmation.",
+			DescriptionZH: "缺少活动回合凭证或精确 approval token 时 Agent 路径会失败关闭；可改用聊天内 /feedback 展示并确认。",
+		},
+	},
+	{
 		id: "daemon-restart", invocation: "cc-connect-next daemon restart",
 		description: "Use a random turn-bound credential to schedule a graceful daemon restart after the current Agent turn and accepted queued messages finish.", zh: "使用随机回合凭证，在当前 Agent 回合及已接收排队消息完成后安排 daemon 优雅重启。",
 		permission: CapabilityPermissionAdmin, effects: []string{"process_control"}, probe: "deferred_restart",

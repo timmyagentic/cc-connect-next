@@ -20,7 +20,13 @@ bounds, opaque approval value, and no-redirect HTTP client.
 3. A separate token-bearing button or unambiguous `/feedback confirm` calls
    `Approve(true)` and sends the same Draft. Stale cards, another group user,
    cancel, expiry, ambiguity, and missing approval make no request.
-4. The Relay owns GitHub repository selection, title/body rendering, label,
+4. The Manifest-declared local-Agent CLI uses the same builder and submit
+   function. A live HMAC turn credential resolves trusted project/session/user
+   state; `feedback preview` exposes a JSON-safe projection with no request,
+   and `feedback submit` accepts only its one-time session/user-bound token.
+   The CLI cannot supply routing, forge an inbound message, or select a schema
+   fallback.
+5. The Relay owns GitHub repository selection, title/body rendering, label,
    token, rate limiting, and best-effort deduplication.
 
 ## Updates

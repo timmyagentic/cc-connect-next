@@ -157,6 +157,13 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 	if daemonRestart.Permission != CapabilityPermissionAdmin || daemonRestart.Availability.State != CapabilityUnavailable || !hasManifestEffect(daemonRestart.SideEffects, "process_control") || daemonRestart.Fallback.Mode != "chat-command" {
 		t.Fatalf("daemon restart tool contract = %#v", daemonRestart)
 	}
+	feedbackTool := findManifestTool(t, manifest.Tools, "feedback")
+	if feedbackTool.Permission != CapabilityPermissionLocalAgent || feedbackTool.ReadOnly ||
+		!hasManifestEffect(feedbackTool.SideEffects, "external_service") ||
+		!hasManifestEffect(feedbackTool.SideEffects, "network") ||
+		feedbackTool.Fallback.Mode != "chat-command" {
+		t.Fatalf("Agent feedback tool contract = %#v", feedbackTool)
+	}
 	timer := findManifestCommand(t, manifest.Commands, "timer")
 	if timer.Permission != CapabilityPermissionConditional || !slices.Contains(timer.PrivilegedWhen, "addexec") {
 		t.Fatalf("timer permission contract = %#v", timer)
@@ -177,6 +184,11 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 	daemonRestartWithAdminConfigured := findManifestTool(t, e.QueryAgentCapabilityManifest("", "", false).Tools, "daemon-restart")
 	if daemonRestartWithAdminConfigured.Permission != CapabilityPermissionAdmin || daemonRestartWithAdminConfigured.Availability.State != CapabilityConditional {
 		t.Fatalf("daemon restart tool with admin_from = %#v", daemonRestartWithAdminConfigured)
+	}
+	e.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
+	feedbackEnabled := findManifestTool(t, e.QueryAgentCapabilityManifest("", "", false).Tools, "feedback")
+	if feedbackEnabled.Permission != CapabilityPermissionLocalAgent || feedbackEnabled.Availability.State != CapabilityConditional {
+		t.Fatalf("Agent feedback tool with feedback enabled = %#v", feedbackEnabled)
 	}
 	if len(manifest.Skills) != 1 || manifest.Skills[0].Name != "release-check" || manifest.Skills[0].Description != "Verify a release safely" {
 		t.Fatalf("skills = %#v", manifest.Skills)

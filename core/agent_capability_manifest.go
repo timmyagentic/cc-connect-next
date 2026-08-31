@@ -579,6 +579,11 @@ func (e *Engine) commandCapabilityAvailability(id, probe string, snapshot capabi
 			return available("The feedback channel is enabled; submission still requires confirmation.", "反馈通道已启用；提交仍需确认。")
 		}
 		return unavailable("The feedback channel is disabled by configuration.", "反馈通道已被配置禁用。")
+	case "agent_feedback":
+		if !e.feedbackActive() {
+			return unavailable("The feedback channel is disabled or has no valid Relay endpoint.", "反馈通道已禁用或没有有效的 Relay 端点。")
+		}
+		return conditional("Requires an exact active Agent turn credential and a separate one-time approval token bound to the trusted project, session, user, and immutable Draft.", "需要精确的活动 Agent 回合凭证，以及绑定可信项目、会话、用户和不可变 Draft 的独立一次性 approval token。")
 	case "relay":
 		if e.relayManager != nil {
 			return available("The cross-project relay manager is configured.", "已配置跨项目 Relay 管理器。")
