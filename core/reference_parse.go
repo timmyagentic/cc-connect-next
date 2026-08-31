@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 type referenceKind string
@@ -133,6 +134,41 @@ func parseLocalReference(raw, workspaceDir string) (*localReference, bool) {
 	}
 	ref.kind = inferReferenceKind(ref)
 	return ref, true
+}
+
+func parseRenderableLocalReference(raw, workspaceDir string) (*localReference, bool) {
+	if looksLikeSlashCommand(raw) {
+		return nil, false
+	}
+	return parseLocalReference(raw, workspaceDir)
+}
+
+// looksLikeSlashCommand protects command-shaped text from the local-reference
+// renderer. A single "/word" is inherently ambiguous with an absolute path
+// such as "/root"; preserving its bytes is the safe choice because changing a
+// command is destructive, while leaving a one-segment path unstyled is only a
+// presentation downgrade. Multi-segment paths such as /tmp/output.log and
+// /Users/name/file.go remain unambiguous and continue through path rendering.
+//
+// This deliberately uses syntax rather than the built-in command registry so
+// runtime custom commands, Skills, aliases, and platform command suffixes are
+// protected by the same parser used for ordinary text and inline code.
+func looksLikeSlashCommand(raw string) bool {
+	fields := strings.Fields(strings.TrimSpace(raw))
+	if len(fields) == 0 {
+		return false
+	}
+	token := fields[0]
+	if len(token) < 2 || token[0] != '/' || strings.HasPrefix(token, "//") || strings.Contains(token[1:], "/") {
+		return false
+	}
+	for _, r := range token[1:] {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("_-.:@", r) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func inferReferenceKind(ref *localReference) referenceKind {

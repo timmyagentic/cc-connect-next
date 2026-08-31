@@ -157,7 +157,7 @@ func transformTextOutsideFence(text string, cfg ReferenceRenderCfg, workspaceDir
 			out.WriteString(part.text)
 			continue
 		}
-		ref, ok := parseLocalReference(match[1], workspaceDir)
+		ref, ok := parseRenderableLocalReference(match[1], workspaceDir)
 		if !ok {
 			out.WriteString(part.text)
 			continue
@@ -271,7 +271,7 @@ func replaceLocalReferenceCandidates(text string, re *regexp.Regexp, replacement
 			last = m[1]
 			continue
 		}
-		ref, ok := parseLocalReference(token, workspaceDir)
+		ref, ok := parseRenderableLocalReference(token, workspaceDir)
 		if !ok {
 			out.WriteString(token)
 			last = m[1]
