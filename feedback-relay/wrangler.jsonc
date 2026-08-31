@@ -6,7 +6,12 @@
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "GITHUB_REPO": "timmyagentic/cc-connect-next",
-    "GITHUB_LABEL": "user-feedback"
+    "GITHUB_LABEL": "user-feedback",
+    "GITHUB_APP_ID": "4781408",
+    "GITHUB_APP_INSTALLATION_ID": "157971931"
+  },
+  "secrets": {
+    "required": ["GITHUB_APP_PRIVATE_KEY"]
   },
   "ratelimits": [
     {

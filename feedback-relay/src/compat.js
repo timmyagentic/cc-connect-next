@@ -1,6 +1,7 @@
-import { fetchHandler } from "./relay.js";
+import {GitHubAppAuthError, installationAccessToken} from "./github-app.js";
+import {fetchHandler, _test as relayTest} from "./relay.js";
 
-/** @typedef {Env & {GITHUB_TOKEN: string}} RelayEnv */
+/** @typedef {Env & {GITHUB_APP_PRIVATE_KEY: string}} RelayEnv */
 
 const MAX_REQUEST_BYTES = 96 * 1024;
 const MAX_DESCRIPTION_BYTES = 4_000;
@@ -135,11 +136,65 @@ function rebuiltRequest(request, body) {
   });
 }
 
+/** @param {RelayEnv} env @returns {string | null} */
+function configurationError(env) {
+  const repositoryParts = typeof env.GITHUB_REPO === "string" ? env.GITHUB_REPO.split("/") : [];
+  if (
+    typeof env.GITHUB_APP_ID !== "string" ||
+    !/^[1-9][0-9]{0,19}$/.test(env.GITHUB_APP_ID.trim()) ||
+    typeof env.GITHUB_APP_INSTALLATION_ID !== "string" ||
+    !/^[1-9][0-9]{0,19}$/.test(env.GITHUB_APP_INSTALLATION_ID.trim()) ||
+    typeof env.GITHUB_APP_PRIVATE_KEY !== "string" ||
+    !env.GITHUB_APP_PRIVATE_KEY.trim().startsWith("-----BEGIN PRIVATE KEY-----") ||
+    typeof env.GITHUB_REPO !== "string" ||
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(env.GITHUB_REPO) ||
+    repositoryParts.some((part) => part === "." || part === "..") ||
+    (env.GITHUB_LABEL !== undefined &&
+      (typeof env.GITHUB_LABEL !== "string" ||
+        !/^[A-Za-z0-9][A-Za-z0-9 ._:-]{0,49}$/.test(env.GITHUB_LABEL))) ||
+    !env.RATE_LIMITER ||
+    typeof env.RATE_LIMITER.limit !== "function"
+  ) {
+    return "relay is not configured";
+  }
+  return null;
+}
+
+/** @param {Request} request @returns {string} */
+function clientRateLimitKey(request) {
+  const connectingIP = request.headers.get("cf-connecting-ip")?.trim().slice(0, 128);
+  return connectingIP ? `ip:${connectingIP}` : "unknown";
+}
+
+/** @param {RelayEnv} env @param {string} token @param {string} acceptedKey */
+function authorizedRelayEnv(env, token, acceptedKey) {
+  const rateLimiter = {
+    /** @param {{key: string}} input */
+    async limit({key}) {
+      return {success: key === acceptedKey};
+    },
+  };
+  return {
+    ...env,
+    GITHUB_TOKEN: token,
+    RATE_LIMITER: rateLimiter,
+  };
+}
+
+/** @param {Request} request @param {RelayEnv} env @returns {Promise<Response>} */
+function rejectWithoutAuthentication(request, env) {
+  return fetchHandler(request, {...env, GITHUB_TOKEN: "invalid-request-placeholder"});
+}
+
 /** @param {Request} request @param {RelayEnv} env @returns {Promise<Response>} */
 async function compatibilityHandler(request, env) {
   const url = new URL(request.url);
   if (request.method !== "POST" || url.pathname !== "/v1/feedback" || url.search !== "") {
-    return fetchHandler(request, env);
+    return rejectWithoutAuthentication(request, env);
+  }
+  const contentType = request.headers.get("content-type") || "";
+  if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
+    return rejectWithoutAuthentication(request, env);
   }
   let bytes;
   try {
@@ -155,11 +210,46 @@ async function compatibilityHandler(request, env) {
   try {
     decoded = JSON.parse(raw);
   } catch {
-    return fetchHandler(rebuiltRequest(request, raw), env);
+    return rejectWithoutAuthentication(rebuiltRequest(request, raw), env);
   }
   const translated = translateLegacy(decoded);
-  const body = JSON.stringify(translated ?? decoded);
-  return fetchHandler(rebuiltRequest(request, body), env);
+  const submission = translated ?? decoded;
+  const body = JSON.stringify(submission);
+  const delegatedRequest = rebuiltRequest(request, body);
+  if (relayTest.validateSubmission(submission)) {
+    return rejectWithoutAuthentication(delegatedRequest, env);
+  }
+  if (configurationError(env)) {
+    return json(500, {error: "relay is not configured"});
+  }
+
+  const rateLimitKey = clientRateLimitKey(request);
+  let rateLimit;
+  try {
+    rateLimit = await env.RATE_LIMITER.limit({key: rateLimitKey});
+  } catch {
+    console.error(JSON.stringify({
+      message: "feedback rate limit failed",
+      error: "rate limiter unavailable",
+    }));
+    return json(500, {error: "internal relay error"});
+  }
+  if (!rateLimit.success) {
+    return json(429, {error: "rate limited"});
+  }
+
+  let token;
+  try {
+    token = await installationAccessToken(env, env.GITHUB_REPO);
+  } catch (error) {
+    console.error(JSON.stringify({
+      message: "GitHub App authentication failed",
+      code: error instanceof GitHubAppAuthError ? error.code : "unexpected authentication failure",
+      status: error instanceof GitHubAppAuthError ? error.status : undefined,
+    }));
+    return json(502, {error: "github app authentication failed"});
+  }
+  return fetchHandler(delegatedRequest, authorizedRelayEnv(env, token, rateLimitKey));
 }
 
 const worker = {fetch: compatibilityHandler};

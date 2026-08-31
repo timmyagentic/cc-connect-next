@@ -2,12 +2,20 @@
 
 This directory is copied from `awesome-agent-app-features v0.1.1`
 (`2e30c73ee6c3192f057ef24fa5bb4f77b8346c81`) and remains independently
-testable. `wrangler.jsonc` and its generated `worker-configuration.d.ts` are
-the only Foundation files intentionally owned by this host.
+testable. Foundation files remain byte-identical; the host adds
+`CC-CONNECT-NEXT.md`, `src/compat.js`, `src/github-app.js`,
+`test/host-auth.runtime.spec.js`, and `vitest.host.config.js`, and owns
+`wrangler.jsonc` plus its generated `worker-configuration.d.ts`.
 
 - Worker name: `cc-connect-feedback` (preserves the existing deployment name).
 - GitHub destination: server-side `timmyagentic/cc-connect-next`.
-- Secret: `GITHUB_TOKEN`, set only with Wrangler secret management.
+- GitHub identity: the repository-selected `cc-connect-feedback` GitHub App,
+  with only Issues read/write and implicit Metadata read.
+- Non-secret vars: `GITHUB_APP_ID` and `GITHUB_APP_INSTALLATION_ID`.
+- Secret: `GITHUB_APP_PRIVATE_KEY`, stored only with Wrangler secret
+  management. The Relay dynamically exchanges a short-lived RS256 JWT for a
+  repository-scoped installation token after request validation and rate
+  limiting; no personal access token is used.
 - Rate Limiting namespace: `1001` is a local/dry-run placeholder. An operator
   must replace it with a unique positive integer in the target Cloudflare
   account before a separately authorized deployment.
@@ -25,8 +33,20 @@ npm run validate:worker
 npm audit --audit-level=high
 ```
 
-This integration does not deploy the Worker, set secrets, or prove the current
-public endpoint has been cut over to the new structured contract.
+GitHub downloads App keys as PKCS#1. Convert the downloaded key to unencrypted
+PKCS#8 before setting the Worker secret, then delete the temporary local key
+files after the secret has been read back through a real App-authenticated
+request:
+
+```bash
+openssl pkcs8 -topk8 -nocrypt -in github-app-private-key.pem -out github-app-private-key.pkcs8.pem
+npm exec -- wrangler secret put GITHUB_APP_PRIVATE_KEY < github-app-private-key.pkcs8.pem
+```
+
+Repository changes do not deploy the Worker automatically. A production
+cutover must deploy the reviewed exact head, verify a real feedback issue is
+authored by the App bot, and only then remove the obsolete `GITHUB_TOKEN`
+secret.
 
 ## Existing-client migration
 
