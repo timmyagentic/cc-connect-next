@@ -1217,8 +1217,8 @@ func main() {
 	}
 
 	// Start the daemon-side update notice (on by default): reminds each
-	// project's most recently active chat once per newly published stable
-	// release. Disable with update_notice = false.
+	// project's explicit admin_from users by private message once per newly
+	// published stable release. Disable with update_notice = false.
 	var updateNotifier *core.UpdateNotifier
 	if cfg.UpdateNotice == nil || *cfg.UpdateNotice {
 		updateNotifier = core.NewUpdateNotifier(cfg.DataDir)

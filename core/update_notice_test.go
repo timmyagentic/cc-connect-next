@@ -1,20 +1,229 @@
 package core
 
 // Tests for the daemon-side update notice: a user running an old version gets
-// exactly one localized chat reminder per newly published stable release,
-// delivered to the project's most recently active session.
+// exactly one localized private reminder per newly published stable release,
+// delivered to the project's explicit admin_from users.
 
 import (
+	"context"
+	"errors"
+	"os"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
-func newUpdateNoticeTestEngine(t *testing.T, platformName string) (*Engine, *restartNotifyStub) {
+type updateNoticeDirectCall struct {
+	userID  string
+	content string
+}
+
+type updateNoticeDirectStub struct {
+	restartNotifyStub
+	directMu    sync.Mutex
+	directCalls []updateNoticeDirectCall
+	failUsers   map[string]error
+}
+
+func newUpdateNoticeDirectStub(name string) *updateNoticeDirectStub {
+	return &updateNoticeDirectStub{restartNotifyStub: restartNotifyStub{name: name}}
+}
+
+func (p *updateNoticeDirectStub) SendDirectUser(_ context.Context, userID, content string) error {
+	p.directMu.Lock()
+	defer p.directMu.Unlock()
+	p.directCalls = append(p.directCalls, updateNoticeDirectCall{userID: userID, content: content})
+	return p.failUsers[userID]
+}
+
+func (p *updateNoticeDirectStub) directSnapshot() []updateNoticeDirectCall {
+	p.directMu.Lock()
+	defer p.directMu.Unlock()
+	return append([]updateNoticeDirectCall(nil), p.directCalls...)
+}
+
+func (p *updateNoticeDirectStub) sentTexts() []string {
+	calls := p.directSnapshot()
+	texts := make([]string, 0, len(calls))
+	for _, call := range calls {
+		texts = append(texts, call.content)
+	}
+	return texts
+}
+
+func (p *updateNoticeDirectStub) clearDirect() {
+	p.directMu.Lock()
+	p.directCalls = nil
+	p.directMu.Unlock()
+}
+
+func TestUpdateNotice_SendsOnlyToExplicitAdminPrivateUsers(t *testing.T) {
+	withCurrentVersion(t, "v0.1.0")
+	platform := newUpdateNoticeDirectStub("feishu")
+	e := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+	e.SetAdminFrom("ou_admin_b, ou_admin_a, OU_ADMIN_A")
+	// Recent group/topic activity must never influence the target.
+	touchSession(e, "feishu:oc_recent_group:ou_member:root:om_topic")
+	touchSession(e, "feishu:oc_recent_group:ou_admin_a")
+
+	if !e.NotifyUpdateAvailable(&ReleaseInfo{TagName: "v0.1.2"}) {
+		t.Fatal("expected every explicit admin direct notice to succeed")
+	}
+	calls := platform.directSnapshot()
+	gotUsers := make([]string, 0, len(calls))
+	for _, call := range calls {
+		gotUsers = append(gotUsers, call.userID)
+		if !strings.Contains(call.content, "v0.1.2") || !strings.Contains(call.content, "v0.1.0") {
+			t.Fatalf("direct notice content = %q", call.content)
+		}
+	}
+	if !slices.Equal(gotUsers, []string{"ou_admin_a", "ou_admin_b"}) {
+		t.Fatalf("direct notice users = %v", gotUsers)
+	}
+	if regular := platform.restartNotifyStub.sentTexts(); len(regular) != 0 {
+		t.Fatalf("update notice leaked to recent session: %v", regular)
+	}
+}
+
+func TestUpdateNotice_EmptyOrWildcardAdminNeverFallsBackToRecentSession(t *testing.T) {
+	for _, adminFrom := range []string{"", "*", " , * , ", "ou_admin,*"} {
+		t.Run(strings.ReplaceAll(adminFrom, " ", "_"), func(t *testing.T) {
+			platform := newUpdateNoticeDirectStub("feishu")
+			e := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+			e.SetAdminFrom(adminFrom)
+			touchSession(e, "feishu:oc_recent_group:ou_member")
+			if e.NotifyUpdateAvailable(&ReleaseInfo{TagName: "v0.1.2"}) {
+				t.Fatal("non-enumerable admin_from must not report delivery")
+			}
+			if len(platform.directSnapshot()) != 0 || len(platform.sentTexts()) != 0 {
+				t.Fatalf("admin_from %q produced a notice", adminFrom)
+			}
+		})
+	}
+}
+
+func TestUpdateNotice_MultipleDirectPlatformsAreAmbiguous(t *testing.T) {
+	p1 := newUpdateNoticeDirectStub("feishu-a")
+	p2 := newUpdateNoticeDirectStub("feishu-b")
+	e := NewEngine("test", &stubAgent{}, []Platform{p1, p2}, "", LangEnglish)
+	e.SetAdminFrom("ou_admin")
+	if e.NotifyUpdateAvailable(&ReleaseInfo{TagName: "v0.1.2"}) {
+		t.Fatal("ambiguous direct-user platform selection must fail closed")
+	}
+	if len(p1.directSnapshot()) != 0 || len(p2.directSnapshot()) != 0 {
+		t.Fatal("ambiguous platforms must not receive any notice")
+	}
+}
+
+func TestUpdateNotice_UnsupportedDirectPlatformNeverFallsBackToRecentSession(t *testing.T) {
+	platform := &restartNotifyStub{name: "legacy"}
+	e := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+	e.SetAdminFrom("ou_admin")
+	touchSession(e, "legacy:recent-group:ou_admin")
+	if e.NotifyUpdateAvailable(&ReleaseInfo{TagName: "v0.1.2"}) {
+		t.Fatal("platform without DirectUserSender must not report delivery")
+	}
+	if sent := platform.sentTexts(); len(sent) != 0 {
+		t.Fatalf("unsupported direct platform fell back to recent session: %v", sent)
+	}
+}
+
+func TestUpdateNotice_PartialAdminFailureRetriesBeforeMarkingVersion(t *testing.T) {
+	withCurrentVersion(t, "v0.1.0")
+	platform := newUpdateNoticeDirectStub("feishu")
+	platform.failUsers = map[string]error{"ou_admin_b": errors.New("temporary failure")}
+	e := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+	e.SetAdminFrom("ou_admin_a,ou_admin_b")
+	n, _ := newTestNotifier(t, &ReleaseInfo{TagName: "v0.1.2"})
+	n.RegisterEngine("demo", e)
+
+	n.CheckOnce()
+	if got := len(platform.directSnapshot()); got != 2 {
+		t.Fatalf("first attempt calls = %d, want 2", got)
+	}
+	platform.directMu.Lock()
+	delete(platform.failUsers, "ou_admin_b")
+	platform.directMu.Unlock()
+	platform.clearDirect()
+	n.CheckOnce()
+	if calls := platform.directSnapshot(); len(calls) != 1 || calls[0].userID != "ou_admin_b" {
+		t.Fatalf("partial failure should retry only the missing admin; second calls = %+v", calls)
+	}
+	platform.clearDirect()
+	n.CheckOnce()
+	if got := len(platform.directSnapshot()); got != 0 {
+		t.Fatalf("fully delivered version should not repeat; calls = %d", got)
+	}
+}
+
+func TestUpdateNotice_PartialRecipientStatePersistsAcrossNotifierRestart(t *testing.T) {
+	withCurrentVersion(t, "v0.1.0")
+	dataDir := t.TempDir()
+	release := &ReleaseInfo{TagName: "v0.1.2"}
+
+	firstPlatform := newUpdateNoticeDirectStub("feishu")
+	firstPlatform.failUsers = map[string]error{"ou_admin_b": errors.New("temporary failure")}
+	firstEngine := NewEngine("test", &stubAgent{}, []Platform{firstPlatform}, "", LangEnglish)
+	firstEngine.SetAdminFrom("ou_admin_a,ou_admin_b")
+	firstNotifier := NewUpdateNotifier(dataDir)
+	firstNotifier.checkFn = func(string) (*ReleaseInfo, error) { return release, nil }
+	firstNotifier.RegisterEngine("demo", firstEngine)
+	firstNotifier.CheckOnce()
+	stateBytes, err := os.ReadFile(firstNotifier.statePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stateBytes), "ou_admin") {
+		t.Fatalf("persisted recipient state leaked admin IDs: %s", stateBytes)
+	}
+
+	secondPlatform := newUpdateNoticeDirectStub("feishu")
+	secondEngine := NewEngine("test", &stubAgent{}, []Platform{secondPlatform}, "", LangEnglish)
+	secondEngine.SetAdminFrom("ou_admin_a,ou_admin_b")
+	secondNotifier := NewUpdateNotifier(dataDir)
+	secondNotifier.checkFn = func(string) (*ReleaseInfo, error) { return release, nil }
+	secondNotifier.RegisterEngine("demo", secondEngine)
+	secondNotifier.CheckOnce()
+	if calls := secondPlatform.directSnapshot(); len(calls) != 1 || calls[0].userID != "ou_admin_b" {
+		t.Fatalf("restarted notifier repeated a successful admin or missed the failed one: %+v", calls)
+	}
+}
+
+func TestUpdateNotice_DirectConsentWindowDoesNotApplyInGroup(t *testing.T) {
+	e := NewEngine("test", &stubAgent{}, nil, "", LangEnglish)
+	e.updateIntents.recordDirectNotice("feishu", "ou_admin")
+	direct := &Message{Platform: "feishu", UserID: "ou_admin", SessionKey: "feishu:oc_dm:ou_admin", IsDirect: true}
+	group := &Message{Platform: "feishu", UserID: "ou_admin", SessionKey: "feishu:oc_group:ou_admin"}
+	if !e.updateNoticeActiveForMessage(direct) {
+		t.Fatal("direct admin reply did not inherit notice consent window")
+	}
+	if e.updateNoticeActiveForMessage(group) {
+		t.Fatal("group message inherited private update notice consent window")
+	}
+}
+
+func TestAgentCapabilityManifestReportsDirectUserNoticeCapabilities(t *testing.T) {
+	platform := newUpdateNoticeDirectStub("feishu")
+	e := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+	e.OnPlatformReady(platform)
+	manifest := e.QueryAgentCapabilityManifest("", "", false)
+	adapter := findRuntimeAdapter(t, manifest.Runtime, "platform", "feishu")
+	if got := findRuntimeFeature(t, adapter.Capabilities, "direct_user_messages").Availability.State; got != CapabilityAvailable {
+		t.Fatalf("direct_user_messages = %s, want available", got)
+	}
+	card := findRuntimeFeature(t, adapter.Capabilities, "direct_user_cards")
+	if card.Availability.State != CapabilityUnavailable || card.Fallback.Mode != "direct-text" {
+		t.Fatalf("direct_user_cards = %#v", card)
+	}
+}
+
+func newUpdateNoticeTestEngine(t *testing.T, platformName string) (*Engine, *updateNoticeDirectStub) {
 	t.Helper()
-	plat := &restartNotifyStub{name: platformName}
+	plat := newUpdateNoticeDirectStub(platformName)
 	e := NewEngine("test", &stubAgent{}, []Platform{plat}, "", LangEnglish)
+	e.SetAdminFrom("ou_admin")
 	return e, plat
 }
 
@@ -119,47 +328,25 @@ func TestUpdateNotice_StatePersistsAcrossRestarts(t *testing.T) {
 	}
 }
 
-func TestUpdateNotice_RetriesWhenNoSessionReachable(t *testing.T) {
+func TestUpdateNotice_RetriesWhenDirectDeliveryFails(t *testing.T) {
 	withCurrentVersion(t, "v0.1.0")
 	e, plat := newUpdateNoticeTestEngine(t, "feishu")
-	// No sessions at all: delivery impossible.
+	plat.failUsers = map[string]error{"ou_admin": errors.New("temporarily unavailable")}
 
 	n, _ := newTestNotifier(t, &ReleaseInfo{TagName: "v0.1.2"})
 	n.RegisterEngine("demo", e)
 	n.CheckOnce()
-	if got := plat.sentTexts(); len(got) != 0 {
-		t.Fatalf("no session should mean no send, got %v", got)
+	if got := len(plat.directSnapshot()); got != 1 {
+		t.Fatalf("failed direct attempt count = %d, want 1", got)
 	}
 
-	// A session appears later: the next cycle must deliver (the project was
-	// never marked as notified).
-	touchSession(e, "feishu:oc_chat:ou_user")
+	plat.directMu.Lock()
+	delete(plat.failUsers, "ou_admin")
+	plat.directMu.Unlock()
+	plat.clearDirect()
 	n.CheckOnce()
 	if got := plat.sentTexts(); len(got) != 1 {
-		t.Fatalf("notice must be retried once a session exists, got %v", got)
-	}
-}
-
-func TestUpdateNotice_PicksMostRecentlyActiveSession(t *testing.T) {
-	withCurrentVersion(t, "v0.1.0")
-	plat := &restartNotifyStub{name: "feishu", reconstructRCT: ""}
-	e := NewEngine("test", &stubAgent{}, []Platform{plat}, "", LangEnglish)
-
-	old := e.sessions.GetOrCreateActive("feishu:oc_old:ou_user")
-	old.TouchUserActivity()
-	time.Sleep(5 * time.Millisecond)
-	fresh := e.sessions.GetOrCreateActive("feishu:oc_new:ou_user")
-	fresh.TouchUserActivity()
-
-	if !e.NotifyUpdateAvailable(&ReleaseInfo{TagName: "v0.1.2"}) {
-		t.Fatal("expected delivery to succeed")
-	}
-	// restartNotifyStub's ReconstructReplyCtx returns "rctx-<sessionKey>", and
-	// its Send records only content — assert via reconstruct behavior instead:
-	// the most recent session must be chosen, which we can observe through the
-	// reply context the stub produced for the send.
-	if got := plat.sentTexts(); len(got) != 1 {
-		t.Fatalf("expected one notice, got %v", got)
+		t.Fatalf("notice must be retried after direct send recovers, got %v", got)
 	}
 }
 

@@ -253,6 +253,7 @@ type replyContext struct {
 	chatID          string
 	sessionKey      string
 	threadID        string
+	directUserID    string
 	bootstrapThread bool
 	bootstrapQueued bool
 	bootstrapWait   <-chan struct{}
@@ -665,6 +666,9 @@ func (p *Platform) SendDirectUser(ctx context.Context, userID, content string) e
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return fmt.Errorf("%s: direct user ID is empty", p.tag())
+	}
+	if !strings.HasPrefix(userID, "ou_") {
+		return fmt.Errorf("%s: direct user ID must be an app-scoped open_id", p.tag())
 	}
 	msgType, body := buildReplyContentWithResolvedMention(content, false)
 	_, err := p.createMessageToReceiveID(ctx, userID, larkim.CreateMessageV1ReceiveIDTypeOpenId, msgType, body, "send direct user")
@@ -1908,6 +1912,9 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	parentID := stringValue(msg.ParentId)
 
 	rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, threadID: stringValue(msg.ThreadId)}
+	if chatType == "p2p" && stringValue(msg.ThreadId) == "" {
+		rctx.directUserID = userID
+	}
 	slog.Debug(p.tag()+": routed inbound message",
 		"message_id", messageID,
 		"session_key", sessionKey,
@@ -2000,6 +2007,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		if msg.ExtraContent == "" {
 			msg.ExtraContent = quoted.text
 		}
+		msg.IsDirect = rctx.directUserID != "" && msg.UserID == rctx.directUserID
 		if len(quoted.images) > 0 {
 			images := make([]core.ImageAttachment, 0, len(quoted.images)+len(msg.Images))
 			images = append(images, quoted.images...)

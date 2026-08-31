@@ -116,6 +116,19 @@ func (s *updateIntentState) recordNotice(sessionKey string) {
 	s.noticeAt[sessionKey] = time.Now()
 }
 
+func directUpdateNoticeKey(platform, userID string) string {
+	platform = strings.TrimSpace(platform)
+	userID = strings.TrimSpace(userID)
+	if platform == "" || userID == "" {
+		return ""
+	}
+	return "direct-user:" + platform + ":" + userID
+}
+
+func (s *updateIntentState) recordDirectNotice(platform, userID string) {
+	s.recordNotice(directUpdateNoticeKey(platform, userID))
+}
+
 func (s *updateIntentState) recordAsk(sessionKey string) {
 	if sessionKey == "" {
 		return
@@ -142,6 +155,16 @@ func (s *updateIntentState) askActive(sessionKey string) bool {
 	return ok && time.Since(t) < updateAskConsentTTL
 }
 
+func (e *Engine) updateNoticeActiveForMessage(msg *Message) bool {
+	if msg == nil {
+		return false
+	}
+	if e.updateIntents.noticeActive(msg.SessionKey) {
+		return true
+	}
+	return msg.IsDirect && e.updateIntents.noticeActive(directUpdateNoticeKey(msg.Platform, msg.UserID))
+}
+
 // maybeHandleUpdateIntent routes natural-language update requests into the
 // /upgrade pipeline. Returns true when the message was consumed.
 func (e *Engine) maybeHandleUpdateIntent(p Platform, msg *Message, content string) bool {
@@ -163,7 +186,7 @@ func (e *Engine) maybeHandleUpdateIntent(p Platform, msg *Message, content strin
 		}
 		return e.handleCommand(p, msg, "/upgrade")
 	case updateIntentBare:
-		if !e.updateIntents.noticeActive(msg.SessionKey) && !e.updateIntents.askActive(msg.SessionKey) {
+		if !e.updateNoticeActiveForMessage(msg) && !e.updateIntents.askActive(msg.SessionKey) {
 			return false // ambiguous outside an update conversation → agent
 		}
 		if e.updateIntents.askActive(msg.SessionKey) {

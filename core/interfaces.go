@@ -16,6 +16,20 @@ type Platform interface {
 	Stop() error
 }
 
+// DirectUserSender is an optional proactive-messaging capability for sending
+// a private message to one platform-scoped user ID without borrowing any
+// recent chat, group, topic, or session target.
+type DirectUserSender interface {
+	SendDirectUser(ctx context.Context, userID, content string) error
+}
+
+// DirectUserCardSender optionally preserves interactive-card actions on a
+// private user target. Engines always fall back to DirectUserSender text when
+// the card path is unavailable or fails.
+type DirectUserCardSender interface {
+	SendDirectUserCard(ctx context.Context, userID string, card *Card) error
+}
+
 // ErrNotSupported indicates a platform doesn't support a particular operation.
 var ErrNotSupported = errors.New("operation not supported by this platform")
 

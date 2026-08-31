@@ -5621,7 +5621,7 @@ Set the provider-specific voice ID used by tts.
 
 ### `update_notice`
 
-Notify the most recently active chat once per stable release; the user reviews an exact immutable Plan before confirmation.
+With one unambiguous direct-user platform, privately notify each explicit admin_from user once per stable release; empty/wildcard/ambiguous targets stay silent, recent groups/topics are never targets, and the user reviews an exact immutable Plan before confirmation.
 
 - Source: `toml`
 - Placement: `config.toml root`

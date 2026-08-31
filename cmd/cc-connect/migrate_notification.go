@@ -22,10 +22,6 @@ type migrationNotifyTarget struct {
 	Message     string
 }
 
-type migrationDirectUserSender interface {
-	SendDirectUser(context.Context, string, string) error
-}
-
 func resolveMigrationNotifyTarget(configPath string, hints migrationNotifyHints) (*migrationNotifyTarget, string, error) {
 	cfg, err := ccconfig.Load(configPath)
 	if err != nil {
@@ -107,7 +103,7 @@ func sendMigrationComplete(ctx context.Context, target *migrationNotifyTarget, d
 	if err != nil {
 		return err
 	}
-	sender, ok := platform.(migrationDirectUserSender)
+	sender, ok := platform.(core.DirectUserSender)
 	if !ok {
 		return fmt.Errorf("platform %q does not support private user messages", target.Platform.Type)
 	}

@@ -376,6 +376,8 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	_, mentions := platform.(AtMentionSender)
 	_, reconstruct := platform.(ReplyContextReconstructor)
 	_, replySnapshot := platform.(ReplyContextSnapshotter)
+	_, directUser := platform.(DirectUserSender)
+	_, directUserCard := platform.(DirectUserCardSender)
 	_, recall := platform.(MessageRecallDetector)
 	_, navigation := platform.(CardNavigable)
 	var reported map[string]CapabilityAvailability
@@ -401,6 +403,8 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		{"mentions", "Send native mention notifications.", "发送原生 @ 通知。", "visible-text", "Render mention text without guaranteed notification semantics.", "显示 @ 文本，但不保证通知语义。", mentions},
 		{"reply_context_reconstruction", "Reconstruct a proactive reply target from a session key.", "根据 session key 重建主动回复目标。", "reject", "Persistent proactive delivery is unavailable.", "持久主动投递不可用。", reconstruct},
 		{"reply_target_snapshot", "Persist and restore a concrete reply target independently from session identity.", "将具体回复目标与 session identity 分离并持久恢复。", "session-key", "Fall back to session-key reconstruction when the target shape permits it.", "目标结构允许时退化为 session-key 重建。", replySnapshot},
+		{"direct_user_messages", "Send proactive private messages to an explicit platform user ID without borrowing a recent chat/session.", "按明确的平台 user ID 主动私聊，不借用最近 chat/session。", "reject", "Reject when no explicit direct-user target exists; never fall back to a recent group or topic.", "没有明确私聊目标时拒绝；绝不回退最近群聊或话题。", directUser},
+		{"direct_user_cards", "Send actionable structured cards to an explicit private user target.", "向明确的私聊用户目标发送可操作结构化卡片。", "direct-text", "Fall back to a private text message for the same explicit user.", "退化为发送给同一明确用户的私聊文本。", directUserCard},
 		{"message_recall_detection", "Detect whether the triggering message was recalled.", "检测触发消息是否已撤回。", "best-effort", "Continue without recall detection.", "无法检测撤回时按尽力而为继续。", recall},
 		{"card_navigation", "Navigate interactive cards in place.", "原地导航交互卡片。", "new-card", "Send a replacement card or text response.", "发送替换卡片或文本回复。", navigation},
 	}

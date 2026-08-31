@@ -5621,7 +5621,7 @@ Agent 流式输出期间持续更新一条预览消息。
 
 ### `update_notice`
 
-每个稳定版向最近活跃会话提醒一次；用户确认前先查看精确 immutable Plan。
+仅当存在唯一明确的私聊平台时，每个稳定版私聊提醒明确列出的 admin_from 用户一次；空值/通配符/歧义目标保持静默，绝不投递最近群聊/话题，用户确认前先查看精确 immutable Plan。
 
 - 来源：`toml`
 - 配置位置：`config.toml root`
