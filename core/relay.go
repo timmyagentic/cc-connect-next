@@ -261,7 +261,8 @@ func (rm *RelayManager) Send(ctx context.Context, req RelayRequest) (*RelayRespo
 	// Post the response to the group chat for visibility.
 	if targetEngine != nil && visibility != RelayVisibilityNone {
 		label := relayVisibilityResponseLabel(visibility, toName, response)
-		rm.sendToGroup(ctx, targetEngine, platform, groupSessionKey, label)
+		visibilityEngine := relayResponseVisibilityEngine(sourceEngine, targetEngine, groupSessionKey)
+		rm.sendToGroup(ctx, visibilityEngine, platform, groupSessionKey, label)
 	}
 
 	return &RelayResponse{Response: response}, nil
@@ -272,6 +273,16 @@ func (rm *RelayManager) sendToGroup(ctx context.Context, e *Engine, platform, se
 	for _, p := range e.platforms {
 		if p.Name() != platform {
 			continue
+		}
+		if rctx, err := e.reconstructReplyContext(p, sessionKey); err == nil {
+			if err := p.Send(ctx, rctx, content); err != nil {
+				slog.Warn("relay: failed to send restored group visibility message",
+					"platform", platform,
+					"session_key", sessionKey,
+					"error", err,
+				)
+			}
+			return
 		}
 		if sender, ok := p.(RelayGroupVisibilitySender); ok {
 			if err := sender.SendRelayGroupVisibility(ctx, sessionKey, content); err != nil {
@@ -293,6 +304,16 @@ func (rm *RelayManager) sendToGroup(ctx context.Context, e *Engine, platform, se
 		}
 		return
 	}
+}
+
+func relayResponseVisibilityEngine(sourceEngine, targetEngine *Engine, sessionKey string) *Engine {
+	// A P2P topic's concrete reply message is intentionally not encoded in its
+	// stable session key. Keep both visibility echoes on the source bot, whose
+	// Engine owns the persisted reply target for that private topic.
+	if sourceEngine != nil && sourceEngine.sessions.GetReplyTarget(sessionKey) != nil {
+		return sourceEngine
+	}
+	return targetEngine
 }
 
 func truncateRelay(s string, maxLen int) string {

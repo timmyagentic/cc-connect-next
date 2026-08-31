@@ -1068,6 +1068,12 @@ func TestBuildReplyMessageReqBody_SetsReplyInThreadFlag(t *testing.T) {
 			wantThreading: true,
 		},
 		{
+			name:          "persisted p2p topic remains threaded after config disables isolation",
+			platform:      &Platform{threadMode: threadIsolationOff},
+			replyCtx:      replyContext{messageID: "om_reply", sessionKey: "feishu:oc_chat:thread:omt_topic", threadID: "omt_topic"},
+			wantThreading: true,
+		},
+		{
 			name:          "plain reply remains non-threaded",
 			platform:      &Platform{},
 			replyCtx:      replyContext{messageID: "om_reply"},

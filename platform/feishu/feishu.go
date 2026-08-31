@@ -4675,7 +4675,10 @@ func (p *Platform) shouldReplyInThread(rc replyContext) bool {
 	if rc.messageID == "" {
 		return false
 	}
-	return p.threadIsolationEnabled() && isThreadSessionKey(rc.sessionKey)
+	// A persisted thread session remains a routing boundary even if the current
+	// config later disables creation of new isolated sessions. Sending it to the
+	// chat root would leak proactive output into another conversation scope.
+	return isThreadSessionKey(rc.sessionKey)
 }
 
 // shouldUseThreadOrReplyAPI is true when we should call Im.Message.Reply (optionally with ReplyInThread).
