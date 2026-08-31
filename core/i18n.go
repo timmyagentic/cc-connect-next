@@ -372,33 +372,36 @@ const (
 	MsgReasoningUsage             MsgKey = "reasoning_usage"
 	MsgReasoningSelectPlaceholder MsgKey = "reasoning_select_placeholder"
 
-	MsgModeUsage                 MsgKey = "mode_usage"
-	MsgLangSelectPlaceholder     MsgKey = "lang_select_placeholder"
-	MsgModelSelectPlaceholder    MsgKey = "model_select_placeholder"
-	MsgModeSelectPlaceholder     MsgKey = "mode_select_placeholder"
-	MsgProviderSelectPlaceholder MsgKey = "provider_select_placeholder"
-	MsgProviderClearOption       MsgKey = "provider_clear_option"
-	MsgCardBack                  MsgKey = "card_back"
-	MsgCardPrev                  MsgKey = "card_prev"
-	MsgCardNext                  MsgKey = "card_next"
-	MsgCardTitleStatus           MsgKey = "card_title_status"
-	MsgCardTitleLanguage         MsgKey = "card_title_language"
-	MsgRichCardThinking          MsgKey = "rich_card_thinking"
-	MsgRichCardCallingTools      MsgKey = "rich_card_calling_tools"
-	MsgRichCardAnswering         MsgKey = "rich_card_answering"
-	MsgRichCardDone              MsgKey = "rich_card_done"
-	MsgRichCardError             MsgKey = "rich_card_error"
-	MsgRichCardCompletedBody     MsgKey = "rich_card_completed_body"
-	MsgRichCardErrorBody         MsgKey = "rich_card_error_body"
-	MsgRichCardPrivacyNotice     MsgKey = "rich_card_privacy_notice"
-	MsgRichCardProgressFormat    MsgKey = "rich_card_progress_format"
-	MsgRichCardThinkingSummary   MsgKey = "rich_card_thinking_summary"
-	MsgRichCardToolSummary       MsgKey = "rich_card_tool_summary"
-	MsgRichCardAnswerSummary     MsgKey = "rich_card_answer_summary"
-	MsgRichCardErrorSummary      MsgKey = "rich_card_error_summary"
-	MsgRichCardUsageLimit        MsgKey = "rich_card_usage_limit"
-	MsgRichCardUsageLimitBody    MsgKey = "rich_card_usage_limit_body"
-	MsgRichCardUsageLimitSummary MsgKey = "rich_card_usage_limit_summary"
+	MsgModeUsage                    MsgKey = "mode_usage"
+	MsgLangSelectPlaceholder        MsgKey = "lang_select_placeholder"
+	MsgModelSelectPlaceholder       MsgKey = "model_select_placeholder"
+	MsgModeSelectPlaceholder        MsgKey = "mode_select_placeholder"
+	MsgProviderSelectPlaceholder    MsgKey = "provider_select_placeholder"
+	MsgProviderClearOption          MsgKey = "provider_clear_option"
+	MsgCardBack                     MsgKey = "card_back"
+	MsgCardPrev                     MsgKey = "card_prev"
+	MsgCardNext                     MsgKey = "card_next"
+	MsgCardTitleStatus              MsgKey = "card_title_status"
+	MsgCardTitleLanguage            MsgKey = "card_title_language"
+	MsgRichCardThinking             MsgKey = "rich_card_thinking"
+	MsgRichCardCallingTools         MsgKey = "rich_card_calling_tools"
+	MsgRichCardAnswering            MsgKey = "rich_card_answering"
+	MsgRichCardDone                 MsgKey = "rich_card_done"
+	MsgRichCardError                MsgKey = "rich_card_error"
+	MsgRichCardCompletedBody        MsgKey = "rich_card_completed_body"
+	MsgRichCardErrorBody            MsgKey = "rich_card_error_body"
+	MsgRichCardPrivacyNotice        MsgKey = "rich_card_privacy_notice"
+	MsgRichCardProgressFormat       MsgKey = "rich_card_progress_format"
+	MsgRichCardThinkingSummary      MsgKey = "rich_card_thinking_summary"
+	MsgRichCardToolSummary          MsgKey = "rich_card_tool_summary"
+	MsgRichCardAnswerSummary        MsgKey = "rich_card_answer_summary"
+	MsgRichCardErrorSummary         MsgKey = "rich_card_error_summary"
+	MsgRichCardUsageLimit           MsgKey = "rich_card_usage_limit"
+	MsgRichCardUsageLimitBody       MsgKey = "rich_card_usage_limit_body"
+	MsgRichCardUsageLimitSummary    MsgKey = "rich_card_usage_limit_summary"
+	MsgRichCardModelCapacity        MsgKey = "rich_card_model_capacity"
+	MsgRichCardModelCapacityBody    MsgKey = "rich_card_model_capacity_body"
+	MsgRichCardModelCapacitySummary MsgKey = "rich_card_model_capacity_summary"
 	// Steer / presentation handoff (issue #27)
 	MsgRichCardSteering          MsgKey = "rich_card_steering"
 	MsgRichCardRedirected        MsgKey = "rich_card_redirected"
@@ -2757,6 +2760,21 @@ var messages = map[MsgKey]map[Language]string{
 		LangEnglish: "Token usage limit reached", LangChinese: "Token 使用额度已用完", LangTraditionalChinese: "Token 使用額度已用完",
 		LangJapanese: "トークン利用上限に達しました", LangSpanish: "Límite de uso de tokens alcanzado",
 	},
+	MsgRichCardModelCapacity: {
+		LangEnglish: "Model at capacity", LangChinese: "模型容量已满", LangTraditionalChinese: "模型容量已滿",
+		LangJapanese: "モデルの容量が上限に達しています", LangSpanish: "Modelo sin capacidad disponible",
+	},
+	MsgRichCardModelCapacityBody: {
+		LangEnglish:            "The selected model is currently at capacity, so this request could not be processed.\n\nPlease try again later or switch to another available model.",
+		LangChinese:            "所选模型当前容量已满，暂时无法处理本次请求。\n\n请稍后重试，或切换到其他可用模型。",
+		LangTraditionalChinese: "所選模型目前容量已滿，暫時無法處理本次請求。\n\n請稍後再試，或切換到其他可用模型。",
+		LangJapanese:           "選択したモデルは現在容量の上限に達しているため、このリクエストを処理できませんでした。\n\nしばらくしてから再試行するか、別の利用可能なモデルに切り替えてください。",
+		LangSpanish:            "El modelo seleccionado no tiene capacidad disponible en este momento, por lo que no se pudo procesar la solicitud.\n\nInténtalo de nuevo más tarde o cambia a otro modelo disponible.",
+	},
+	MsgRichCardModelCapacitySummary: {
+		LangEnglish: "Selected model is at capacity", LangChinese: "所选模型当前容量已满", LangTraditionalChinese: "所選模型目前容量已滿",
+		LangJapanese: "選択したモデルは現在容量の上限に達しています", LangSpanish: "El modelo seleccionado no tiene capacidad disponible",
+	},
 	MsgRichCardSteering: {
 		LangEnglish: "Adding this message to the current task...", LangChinese: "正在将此消息并入当前任务…", LangTraditionalChinese: "正在將此訊息併入目前任務…",
 		LangJapanese: "このメッセージを現在のタスクに追加しています…", LangSpanish: "Añadiendo este mensaje a la tarea en curso...",
@@ -4693,27 +4711,30 @@ func (i *I18n) languageForText(text string) Language {
 func richCardCopyForLanguage(lang Language) RichCardCopy {
 	t := func(key MsgKey) string { return translateMessage(key, lang) }
 	return RichCardCopy{
-		Thinking:            t(MsgRichCardThinking),
-		CallingTools:        t(MsgRichCardCallingTools),
-		Answering:           t(MsgRichCardAnswering),
-		Done:                t(MsgRichCardDone),
-		Error:               t(MsgRichCardError),
-		CompletedBody:       t(MsgRichCardCompletedBody),
-		ErrorBody:           t(MsgRichCardErrorBody),
-		PrivacyNotice:       t(MsgRichCardPrivacyNotice),
-		ProgressFormat:      t(MsgRichCardProgressFormat),
-		ThinkingSummary:     t(MsgRichCardThinkingSummary),
-		ToolSummary:         t(MsgRichCardToolSummary),
-		AnswerSummary:       t(MsgRichCardAnswerSummary),
-		ErrorSummary:        t(MsgRichCardErrorSummary),
-		UsageLimit:          t(MsgRichCardUsageLimit),
-		UsageLimitBody:      t(MsgRichCardUsageLimitBody),
-		UsageLimitSummary:   t(MsgRichCardUsageLimitSummary),
-		Steering:            t(MsgRichCardSteering),
-		Redirected:          t(MsgRichCardRedirected),
-		RedirectedBody:      t(MsgRichCardRedirectedBody),
-		RedirectedSummary:   t(MsgRichCardRedirectedSummary),
-		ReplyFooterDuration: replyFooterDurationCopyForLanguage(lang),
+		Thinking:             t(MsgRichCardThinking),
+		CallingTools:         t(MsgRichCardCallingTools),
+		Answering:            t(MsgRichCardAnswering),
+		Done:                 t(MsgRichCardDone),
+		Error:                t(MsgRichCardError),
+		CompletedBody:        t(MsgRichCardCompletedBody),
+		ErrorBody:            t(MsgRichCardErrorBody),
+		PrivacyNotice:        t(MsgRichCardPrivacyNotice),
+		ProgressFormat:       t(MsgRichCardProgressFormat),
+		ThinkingSummary:      t(MsgRichCardThinkingSummary),
+		ToolSummary:          t(MsgRichCardToolSummary),
+		AnswerSummary:        t(MsgRichCardAnswerSummary),
+		ErrorSummary:         t(MsgRichCardErrorSummary),
+		UsageLimit:           t(MsgRichCardUsageLimit),
+		UsageLimitBody:       t(MsgRichCardUsageLimitBody),
+		UsageLimitSummary:    t(MsgRichCardUsageLimitSummary),
+		ModelCapacity:        t(MsgRichCardModelCapacity),
+		ModelCapacityBody:    t(MsgRichCardModelCapacityBody),
+		ModelCapacitySummary: t(MsgRichCardModelCapacitySummary),
+		Steering:             t(MsgRichCardSteering),
+		Redirected:           t(MsgRichCardRedirected),
+		RedirectedBody:       t(MsgRichCardRedirectedBody),
+		RedirectedSummary:    t(MsgRichCardRedirectedSummary),
+		ReplyFooterDuration:  replyFooterDurationCopyForLanguage(lang),
 	}
 }
 

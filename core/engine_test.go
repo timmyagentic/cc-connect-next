@@ -2434,6 +2434,58 @@ func TestProcessInteractiveEvents_RichCardUsageLimitUsesDedicatedCopy(t *testing
 	}
 }
 
+func TestProcessInteractiveEvents_RichCardModelCapacityUsesDedicatedCopy(t *testing.T) {
+	p := &stubRichCardSilentPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: "rich"})
+	sessionKey := "feishu:user-rich-model-capacity"
+	session := e.sessions.GetOrCreateActive(sessionKey)
+	agentSession := newControllableSession("s-rich-model-capacity")
+	state := &interactiveState{agentSession: agentSession, platform: p, replyCtx: "ctx-rich-model-capacity"}
+	e.interactiveStates[sessionKey] = state
+
+	privateError := "Selected model is at capacity. token=private /Users/example/project"
+	agentSession.events <- Event{Type: EventError, Error: WrapModelCapacity(errors.New(privateError))}
+	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-rich-model-capacity", time.Now(), nil, nil, state.replyCtx)
+
+	starts, streams, updates, deletes := p.snapshot()
+	if len(starts) != 1 || len(updates) == 0 || deletes != 0 {
+		t.Fatalf("capacity card lifecycle = starts %d, streams %d, updates %d, deletes %d", len(starts), len(streams), len(updates), deletes)
+	}
+	rendered := strings.Join(append(append(starts, streams...), updates...), "\n")
+	for _, want := range []string{"selected model is currently at capacity", "try again later", "switch to another available model"} {
+		if !strings.Contains(strings.ToLower(rendered), want) {
+			t.Fatalf("capacity card missing %q: %q", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, privateError) || strings.Contains(rendered, "token=private") || strings.Contains(rendered, "/Users/example") || strings.Contains(rendered, NewI18n(LangEnglish).T(MsgRichCardErrorBody)) {
+		t.Fatalf("capacity card leaked raw details or used generic copy: %q", rendered)
+	}
+}
+
+func TestProcessInteractiveEvents_ModelCapacityPlainFallbackIsActionableAndSafe(t *testing.T) {
+	p := &stubPlatformEngine{n: "plain"}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	sessionKey := "plain:user-model-capacity"
+	session := e.sessions.GetOrCreateActive(sessionKey)
+	agentSession := newControllableSession("s-plain-model-capacity")
+	state := &interactiveState{agentSession: agentSession, platform: p, replyCtx: "ctx-plain-model-capacity"}
+	e.interactiveStates[sessionKey] = state
+	privateError := "Selected model is at capacity. Authorization: Bearer private /Users/example/project"
+	agentSession.events <- Event{Type: EventError, Error: WrapModelCapacity(errors.New(privateError))}
+	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-plain-model-capacity", time.Now(), nil, nil, state.replyCtx)
+
+	sent := strings.Join(p.getSent(), "\n")
+	if !strings.Contains(strings.ToLower(sent), "selected model is currently at capacity") || !strings.Contains(strings.ToLower(sent), "switch to another available model") {
+		t.Fatalf("plain capacity fallback is not actionable: %q", sent)
+	}
+	for _, forbidden := range []string{privateError, "Bearer private", "/Users/example"} {
+		if strings.Contains(sent, forbidden) {
+			t.Fatalf("plain capacity fallback leaked %q: %q", forbidden, sent)
+		}
+	}
+}
+
 func TestProcessInteractiveEvents_RichCardPreservesReplyContextTransforms(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -2921,6 +2973,33 @@ func TestNotifyDroppedQueuedMessagesUsesEachMessageLocale(t *testing.T) {
 				t.Fatalf("dropped queue was not drained: %+v", state.pendingMessages)
 			}
 		})
+	}
+}
+
+func TestNotifyDroppedQueuedMessagesModelCapacityUsesEachMessageLocale(t *testing.T) {
+	zhPlatform := &stubRichCardSilentPlatform{stubPlatformEngine: stubPlatformEngine{n: "zh"}}
+	enPlatform := &stubRichCardSilentPlatform{stubPlatformEngine: stubPlatformEngine{n: "en"}}
+	e := NewEngine("test", &stubAgent{}, []Platform{zhPlatform, enPlatform}, "", LangAuto)
+	e.SetDisplayConfig(DisplayCfg{CardMode: "rich"})
+	state := &interactiveState{pendingMessages: []queuedMessage{
+		{platform: zhPlatform, replyCtx: "ctx-zh", content: "请帮我处理"},
+		{platform: enPlatform, replyCtx: "ctx-en", content: "please handle this"},
+	}}
+	privateError := "Selected model is at capacity at /Users/private token=secret"
+	e.notifyDroppedQueuedMessages(state, WrapModelCapacity(errors.New(privateError)))
+
+	zh := strings.Join(zhPlatform.getSent(), "\n")
+	en := strings.Join(enPlatform.getSent(), "\n")
+	if !strings.Contains(zh, "所选模型当前容量已满") || !strings.Contains(zh, "切换到其他可用模型") {
+		t.Fatalf("Chinese queued capacity notice = %q", zh)
+	}
+	if !strings.Contains(en, "selected model is currently at capacity") || !strings.Contains(en, "switch to another available model") {
+		t.Fatalf("English queued capacity notice = %q", en)
+	}
+	for _, rendered := range []string{zh, en} {
+		if strings.Contains(rendered, privateError) || strings.Contains(rendered, "/Users/private") || strings.Contains(rendered, "token=secret") {
+			t.Fatalf("queued capacity notice leaked private error: %q", rendered)
+		}
 	}
 }
 
@@ -3614,6 +3693,31 @@ func TestProcessInteractiveEvents_RichCardErrorFallbackPreservesSafePartial(t *t
 	_, _, _, deletes := base.snapshot()
 	if deletes != 1 {
 		t.Fatalf("stale-card deletes = %d, want 1", deletes)
+	}
+}
+
+func TestProcessInteractiveEvents_RichCardCapacityFallbackPreservesPartialAndStaticReason(t *testing.T) {
+	base := &stubRichCardSilentPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+	p := &stubRichCardUpdateFailurePlatform{stubRichCardSilentPlatform: base}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: "rich"})
+	sessionKey := "feishu:user-rich-capacity-fallback"
+	session := e.sessions.GetOrCreateActive(sessionKey)
+	agentSession := newControllableSession("s-rich-capacity-fallback")
+	state := &interactiveState{agentSession: agentSession, platform: p, replyCtx: "ctx-rich-capacity-fallback"}
+	e.interactiveStates[sessionKey] = state
+	safePartial := "Safe partial answer."
+	privateError := "Selected model is at capacity at /Users/private token=secret"
+	agentSession.events <- Event{Type: EventText, Content: safePartial}
+	agentSession.events <- Event{Type: EventError, Error: WrapModelCapacity(errors.New(privateError))}
+	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-rich-capacity-fallback", time.Now(), nil, nil, state.replyCtx)
+
+	sent := strings.Join(base.getSent(), "\n")
+	if !strings.Contains(sent, safePartial) || !strings.Contains(strings.ToLower(sent), "selected model is currently at capacity") {
+		t.Fatalf("capacity fallback missing partial or static reason: %q", sent)
+	}
+	if strings.Contains(sent, privateError) || strings.Contains(sent, "/Users/private") || strings.Contains(sent, "token=secret") {
+		t.Fatalf("capacity fallback leaked private details: %q", sent)
 	}
 }
 

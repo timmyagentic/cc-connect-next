@@ -38,6 +38,10 @@
 
 ### Correctness fixes
 
+- Feishu/Lark terminal cards now recognize the narrowly allowlisted Codex
+  "selected model is at capacity" failure and show localized, actionable
+  retry-or-switch-model guidance. The provider text is never rendered;
+  unknown errors keep the generic safe fallback and existing usage-limit copy.
 - Agent-invoked `cc-connect-next daemon restart` now schedules the existing
   graceful restart lifecycle through the local runtime instead of killing the
   daemon that owns the current turn. The Engine authenticates the active

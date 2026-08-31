@@ -5192,25 +5192,36 @@ var agentErrorHandlers = []agentErrorHandler{
 	{"Session not found", MsgSessionNotFound},
 }
 
-const richCardUsageLimitPhase = "usage_limit"
+const (
+	richCardGenericErrorPhase  = "error"
+	richCardUsageLimitPhase    = "usage_limit"
+	richCardModelCapacityPhase = "model_capacity"
+)
 
 func richCardFailurePhase(err error) string {
 	if errors.Is(err, ErrUsageLimit) {
 		return richCardUsageLimitPhase
 	}
-	return "error"
+	if errors.Is(err, ErrModelCapacity) {
+		return richCardModelCapacityPhase
+	}
+	return richCardGenericErrorPhase
 }
 
 func richCardFailureCopy(copy RichCardCopy, phase string) (summary, body string) {
-	if phase == richCardUsageLimitPhase && strings.TrimSpace(copy.UsageLimitBody) != "" {
+	switch phase {
+	case richCardUsageLimitPhase:
 		return copy.UsageLimitSummary, copy.UsageLimitBody
+	case richCardModelCapacityPhase:
+		return copy.ModelCapacitySummary, copy.ModelCapacityBody
+	default:
+		return copy.ErrorSummary, copy.ErrorBody
 	}
-	return copy.ErrorSummary, copy.ErrorBody
 }
 
 func richCardFailureBody(copy RichCardCopy, phase, partial string) string {
 	partial = strings.TrimSpace(partial)
-	if phase != richCardUsageLimitPhase {
+	if phase == richCardGenericErrorPhase {
 		return partial
 	}
 	_, message := richCardFailureCopy(copy, phase)
@@ -5722,7 +5733,7 @@ func (t *turnProcessor) run() {
 			partial = safeBody[0]
 		}
 		content := richCardFailureBody(turnRichCardCopy, phase, partial)
-		if phase != richCardUsageLimitPhase {
+		if phase == richCardGenericErrorPhase {
 			content = strings.TrimSpace(turnRichCardCopy.ErrorBody)
 			if content == "" {
 				content = e.i18n.T(MsgRichCardErrorBody)
@@ -5732,9 +5743,8 @@ func (t *turnProcessor) run() {
 			}
 		}
 		if content == "" {
-			if phase == richCardUsageLimitPhase {
-				content = e.i18n.T(MsgRichCardUsageLimitBody)
-			} else {
+			_, content = richCardFailureCopy(e.i18n.RichCardCopy(), phase)
+			if content == "" {
 				content = e.i18n.T(MsgRichCardErrorBody)
 			}
 		}
@@ -6064,10 +6074,10 @@ func (t *turnProcessor) run() {
 			if !markRichCardFailedWithPhase(p, cardMessageID, phase, safePartial) {
 				if usesRichCard(p) {
 					sendRichFailure(p, replyCtx, cardMessageID, phase, safePartial)
-				} else if phase == richCardUsageLimitPhase {
+				} else if phase != richCardGenericErrorPhase {
 					message := richCardFailureBody(turnRichCardCopy, phase, "")
 					if message == "" {
-						message = e.i18n.T(MsgRichCardUsageLimitBody)
+						_, message = richCardFailureCopy(e.i18n.RichCardCopy(), phase)
 					}
 					e.send(p, replyCtx, message)
 				} else {
@@ -7368,10 +7378,10 @@ func (failure *turnFailure) handle() {
 				sendRichFailure(p, replyCtx, cardMessageID, phase, safePartial)
 			} else {
 				userMsg := fmt.Sprintf(e.i18n.T(MsgError), errMsg)
-				if phase == richCardUsageLimitPhase {
+				if phase != richCardGenericErrorPhase {
 					userMsg = richCardFailureBody(turnRichCardCopy, phase, "")
 					if userMsg == "" {
-						userMsg = e.i18n.T(MsgRichCardUsageLimitBody)
+						_, userMsg = richCardFailureCopy(e.i18n.RichCardCopy(), phase)
 					}
 				}
 				for _, h := range agentErrorHandlers {
@@ -8392,15 +8402,17 @@ func (e *Engine) notifyDroppedQueuedMessages(state *interactiveState, reason err
 	display, _ := e.displayRuntimeSnapshot()
 	for _, q := range remaining {
 		message := fmt.Sprintf(e.i18n.TForText(MsgError, q.content), reason)
-		if errors.Is(reason, ErrUsageLimit) {
-			message = e.i18n.RichCardCopyForText(q.content).UsageLimitBody
+		copy := e.i18n.RichCardCopyForText(q.content)
+		phase := richCardFailurePhase(reason)
+		if phase != richCardGenericErrorPhase {
+			_, message = richCardFailureCopy(copy, phase)
 			if message == "" {
-				message = e.i18n.T(MsgRichCardUsageLimitBody)
+				_, message = richCardFailureCopy(e.i18n.RichCardCopy(), phase)
 			}
 		}
 		if display.CardMode == "rich" {
 			if _, ok := q.platform.(RichCardSupporter); ok {
-				if !errors.Is(reason, ErrUsageLimit) {
+				if phase == richCardGenericErrorPhase {
 					message = e.i18n.TForText(MsgRichCardErrorBody, q.content)
 				}
 			}

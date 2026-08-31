@@ -1457,6 +1457,15 @@ func TestBuildRichCard_CompletedAndErrorStatesAreClean(t *testing.T) {
 	if strings.Contains(usageLimit, "本次处理未能完成") {
 		t.Fatalf("usage-limit card should not use generic failure copy: %q", usageLimit)
 	}
+	capacity := buildRichCard(core.CardStatusError, "model_capacity", steps, "", false, "model · effort:max · ⏱ 12.3s")
+	for _, want := range []string{"⚠️ 模型容量已满", "所选模型当前容量已满", "请稍后重试，或切换到其他可用模型"} {
+		if !strings.Contains(capacity, want) {
+			t.Fatalf("model-capacity card should contain %q, got %q", want, capacity)
+		}
+	}
+	if strings.Contains(capacity, "本次处理未能完成") {
+		t.Fatalf("model-capacity card should not use generic failure copy: %q", capacity)
+	}
 	// The reply footer (model · effort · elapsed) is rendered on terminal cards since
 	// the rich-footer change; only reasoning/tool details stay private.
 	for _, cardJSON := range []string{done, failed} {
@@ -1481,12 +1490,13 @@ func TestBuildRichCard_LocalizesLifecycleForEverySupportedLanguage(t *testing.T)
 		privacy  string
 		done     string
 		error    string
+		capacity string
 	}{
-		{"english", core.LangEnglish, "Thinking…", "Calling tools…", "Reasoning 1 · Tools 1", "details are private", "✅ Done", "⚠️ Not completed"},
-		{"simplified chinese", core.LangChinese, "正在思考…", "正在调用工具…", "推理 1 次 · 工具 1 次", "详情不会展示", "✅ 已完成", "⚠️ 未完成"},
-		{"traditional chinese", core.LangTraditionalChinese, "正在思考…", "正在呼叫工具…", "推理 1 次 · 工具 1 次", "詳情不會顯示", "✅ 已完成", "⚠️ 未完成"},
-		{"japanese", core.LangJapanese, "考えています…", "ツールを呼び出しています…", "推論 1 回 · ツール 1 回", "詳細は非公開", "✅ 完了", "⚠️ 未完了"},
-		{"spanish", core.LangSpanish, "Pensando…", "Usando herramientas…", "razonamientos 1 · herramientas 1", "detalles del razonamiento", "✅ Completado", "⚠️ No completado"},
+		{"english", core.LangEnglish, "Thinking…", "Calling tools…", "Reasoning 1 · Tools 1", "details are private", "✅ Done", "⚠️ Not completed", "⚠️ Model at capacity"},
+		{"simplified chinese", core.LangChinese, "正在思考…", "正在调用工具…", "推理 1 次 · 工具 1 次", "详情不会展示", "✅ 已完成", "⚠️ 未完成", "⚠️ 模型容量已满"},
+		{"traditional chinese", core.LangTraditionalChinese, "正在思考…", "正在呼叫工具…", "推理 1 次 · 工具 1 次", "詳情不會顯示", "✅ 已完成", "⚠️ 未完成", "⚠️ 模型容量已滿"},
+		{"japanese", core.LangJapanese, "考えています…", "ツールを呼び出しています…", "推論 1 回 · ツール 1 回", "詳細は非公開", "✅ 完了", "⚠️ 未完了", "⚠️ モデルの容量が上限に達しています"},
+		{"spanish", core.LangSpanish, "Pensando…", "Usando herramientas…", "razonamientos 1 · herramientas 1", "detalles del razonamiento", "✅ Completado", "⚠️ No completado", "⚠️ Modelo sin capacidad disponible"},
 	}
 	steps := []core.ToolStep{{Kind: core.ToolStepKindThinking}, {Kind: core.ToolStepKindTool}}
 	for _, tt := range tests {
@@ -1496,6 +1506,7 @@ func TestBuildRichCard_LocalizesLifecycleForEverySupportedLanguage(t *testing.T)
 			tool := buildRichCardWithCopy(core.CardStatusWorking, "tool", steps, "", true, "", copy)
 			done := buildRichCardWithCopy(core.CardStatusDone, "done", steps, "result", false, "", copy)
 			failed := buildRichCardWithCopy(core.CardStatusError, "error", steps, "", false, "", copy)
+			capacity := buildRichCardWithCopy(core.CardStatusError, "model_capacity", steps, "", false, "", copy)
 			for label, assertion := range map[string]struct {
 				card string
 				want string
@@ -1506,6 +1517,7 @@ func TestBuildRichCard_LocalizesLifecycleForEverySupportedLanguage(t *testing.T)
 				"privacy":  {tool, tt.privacy},
 				"done":     {done, tt.done},
 				"error":    {failed, tt.error},
+				"capacity": {capacity, tt.capacity},
 			} {
 				if !strings.Contains(assertion.card, assertion.want) {
 					t.Fatalf("%s card missing %q: %s", label, assertion.want, assertion.card)

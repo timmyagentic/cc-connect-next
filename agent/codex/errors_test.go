@@ -43,6 +43,34 @@ func TestClassifyCodexErrorMarksUsageLimit(t *testing.T) {
 	}
 }
 
+func TestIsCodexModelCapacityMessage(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		want    bool
+	}{
+		{name: "reported wording", message: "Selected model is at capacity. Please try a different model.", want: true},
+		{name: "currently at capacity", message: "The selected model is currently at capacity", want: true},
+		{name: "storage capacity", message: "workspace storage capacity is full", want: false},
+		{name: "generic capacity", message: "capacity unavailable", want: false},
+		{name: "sensitive unknown", message: "model token at /Users/private is invalid", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isCodexModelCapacityMessage(tt.message); got != tt.want {
+				t.Fatalf("isCodexModelCapacityMessage(%q) = %v, want %v", tt.message, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyCodexErrorMarksModelCapacity(t *testing.T) {
+	err := classifyCodexError(errors.New("Selected model is at capacity. Please try a different model."))
+	if !errors.Is(err, core.ErrModelCapacity) {
+		t.Fatalf("classified error = %v, want errors.Is(..., core.ErrModelCapacity)", err)
+	}
+}
+
 func TestCodexSession_TurnFailedUsageLimitIsClassified(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

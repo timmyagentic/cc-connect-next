@@ -103,22 +103,25 @@ type ReplyFooterDurationCopy struct {
 // Keeping this copy in core ensures platform renderers never hardcode one
 // language or need to infer locale from a phase token.
 type RichCardCopy struct {
-	Thinking          string
-	CallingTools      string
-	Answering         string
-	Done              string
-	Error             string
-	CompletedBody     string
-	ErrorBody         string
-	PrivacyNotice     string
-	ProgressFormat    string
-	ThinkingSummary   string
-	ToolSummary       string
-	AnswerSummary     string
-	ErrorSummary      string
-	UsageLimit        string
-	UsageLimitBody    string
-	UsageLimitSummary string
+	Thinking             string
+	CallingTools         string
+	Answering            string
+	Done                 string
+	Error                string
+	CompletedBody        string
+	ErrorBody            string
+	PrivacyNotice        string
+	ProgressFormat       string
+	ThinkingSummary      string
+	ToolSummary          string
+	AnswerSummary        string
+	ErrorSummary         string
+	UsageLimit           string
+	UsageLimitBody       string
+	UsageLimitSummary    string
+	ModelCapacity        string
+	ModelCapacityBody    string
+	ModelCapacitySummary string
 	// Steer / presentation handoff copy (issue #27).
 	Steering            string // pending phase title while a steer is awaiting acceptance
 	Redirected          string // header title of a card frozen by a successful steer

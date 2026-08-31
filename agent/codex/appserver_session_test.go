@@ -37,6 +37,18 @@ func TestAppServerSession_TurnCompletedUsageLimitIsClassified(t *testing.T) {
 	}
 }
 
+func TestAppServerSession_TurnCompletedModelCapacityIsClassified(t *testing.T) {
+	s := &appServerSession{events: make(chan core.Event, 1)}
+	s.threadID.Store("thread-1")
+	s.currentTurn = "turn-1"
+	s.handleNotification("turn/completed", json.RawMessage(`{"threadId":"thread-1","turn":{"id":"turn-1","status":"failed","error":{"message":"Selected model is at capacity. Please try a different model."}}}`))
+
+	event := <-s.events
+	if !errors.Is(event.Error, core.ErrModelCapacity) {
+		t.Fatalf("turn/completed error = %v, want model-capacity marker", event.Error)
+	}
+}
+
 func TestAppServerSession_ApplyThreadRuntimeState(t *testing.T) {
 	s := &appServerSession{}
 	effort := "xhigh"
