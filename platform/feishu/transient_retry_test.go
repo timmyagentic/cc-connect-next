@@ -16,6 +16,7 @@ import (
 	"time"
 
 	lark "github.com/larksuite/oapi-sdk-go/v3"
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 // ─── isTransientError unit tests ───────────────────────────────────────────
@@ -415,6 +416,65 @@ func TestPatchMessageRetriesOnTransientError(t *testing.T) {
 	}
 	if got := patchCalls.Load(); got < 2 {
 		t.Fatalf("patchCalls = %d, want >= 2", got)
+	}
+}
+
+func TestUpdateCardUsesExactCallbackMessageAndLinkFreeResult(t *testing.T) {
+	const appID = "cli_feedback_result"
+	const appSecret = "secret"
+
+	var patchCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch {
+		case request.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+			writeJSON(t, writer, map[string]any{
+				"code": 0, "msg": "success", "expire": 7200, "tenant_access_token": "valid-token",
+			})
+		case strings.Contains(request.URL.Path, "/messages/om_feedback_result") && request.Method == http.MethodPatch:
+			patchCalls.Add(1)
+			var body struct {
+				Content string `json:"content"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatalf("decode patch body: %v", err)
+			}
+			if !strings.Contains(body.Content, "提交成功") || strings.Contains(body.Content, "http") || strings.Contains(body.Content, "issues/") {
+				t.Fatalf("patched feedback result = %q", body.Content)
+			}
+			writeJSON(t, writer, map[string]any{"code": 0, "msg": "success"})
+		default:
+			t.Fatalf("unexpected path %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	base := &Platform{
+		platformName: "feishu",
+		domain:       server.URL,
+		appID:        appID,
+		appSecret:    appSecret,
+		client: lark.NewClient(appID, appSecret,
+			lark.WithOpenBaseUrl(server.URL),
+			lark.WithHttpClient(server.Client()),
+		),
+		replayClient: lark.NewClient(appID, appSecret,
+			lark.WithEnableTokenCache(false),
+			lark.WithOpenBaseUrl(server.URL),
+			lark.WithHttpClient(server.Client()),
+		),
+	}
+	interactive := &interactivePlatform{Platform: base}
+	err := interactive.UpdateCard(context.Background(), replyContext{
+		messageID:  "om_feedback_result",
+		chatID:     "oc_chat",
+		sessionKey: "feishu:oc_chat:ou_user",
+	}, core.NewCard().Title("提交成功", "green").Build())
+	if err != nil {
+		t.Fatalf("UpdateCard() error = %v", err)
+	}
+	if patchCalls.Load() != 1 {
+		t.Fatalf("patch calls = %d, want 1", patchCalls.Load())
 	}
 }
 

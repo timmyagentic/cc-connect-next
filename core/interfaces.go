@@ -424,6 +424,14 @@ type CardSender interface {
 	ReplyCard(ctx context.Context, replyCtx any, card *Card) error
 }
 
+// CardActionUpdater updates the exact card identified by an incoming card
+// action's reply context. Unlike CardRefresher, it does not rely on a mutable
+// session-to-message cache, so a concurrent card action cannot redirect the
+// final result to a different card.
+type CardActionUpdater interface {
+	UpdateCard(ctx context.Context, replyCtx any, card *Card) error
+}
+
 // CardNavigationHandler is called by platforms to render a card for in-place
 // card updates (e.g. Feishu card.action.trigger callback). The action string
 // uses prefixes like "nav:/model" or "act:/model 3".

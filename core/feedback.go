@@ -25,7 +25,6 @@ import (
 const (
 	DefaultFeedbackEndpoint = "https://cc-connect-feedback.qianbi3956001.workers.dev/v1/feedback"
 
-	feedbackFallbackURL       = "https://github.com/timmyagentic/cc-connect-next/issues/new"
 	feedbackSubmitTimeout     = 15 * time.Second
 	feedbackPendingTTL        = 10 * time.Minute
 	feedbackPendingMax        = 64
@@ -93,6 +92,10 @@ func (e *Engine) feedbackActive() bool {
 // user to learn command syntax.
 func (e *Engine) cmdFeedback(platform Platform, message *Message, raw string) {
 	if !e.feedbackActive() {
+		if message.IsCardAction {
+			e.deliverFeedbackSubmitResult(platform, message, false)
+			return
+		}
 		e.reply(platform, message.ReplyCtx, e.i18n.T(MsgFeedbackDisabled))
 		return
 	}
@@ -276,17 +279,40 @@ func (e *Engine) evictOldestFeedbackLocked() {
 func (e *Engine) submitPendingFeedback(platform Platform, message *Message, sessionKey, userID, token string) {
 	draft, exists := e.takePendingFeedback(sessionKey, userID, token)
 	if !exists {
+		if message.IsCardAction {
+			e.deliverFeedbackSubmitResult(platform, message, false)
+			return
+		}
 		e.reply(platform, message.ReplyCtx, e.i18n.T(MsgFeedbackPendingMissing))
 		return
 	}
 
-	receipt, err := e.submitFeedbackDraft(e.ctx, draft)
-	if err != nil {
-		e.reply(platform, message.ReplyCtx, e.i18n.Tf(MsgFeedbackSubmitFailed, feedbackFallbackURL))
+	_, err := e.submitFeedbackDraft(e.ctx, draft)
+	e.deliverFeedbackSubmitResult(platform, message, err == nil)
+}
+
+func (e *Engine) deliverFeedbackSubmitResult(platform Platform, message *Message, succeeded bool) {
+	messageKey := MsgFeedbackSubmitted
+	color := "green"
+	if !succeeded {
+		messageKey = MsgFeedbackSubmitFailed
+		color = "red"
+	}
+	status := e.i18n.T(messageKey)
+	if !message.IsCardAction {
+		e.reply(platform, message.ReplyCtx, status)
 		return
 	}
 
-	e.reply(platform, message.ReplyCtx, e.i18n.Tf(MsgFeedbackSubmitted, receipt.ReferenceURL))
+	updater, ok := platform.(CardActionUpdater)
+	if !ok {
+		slog.Warn("feedback: platform cannot update clicked card", "platform", platform.Name(), "succeeded", succeeded)
+		return
+	}
+	card := e.renderCardForPlatform(platform, NewCard().Title(status, color).Build())
+	if err := updater.UpdateCard(e.ctx, message.ReplyCtx, card); err != nil {
+		slog.Warn("feedback: result card update failed", "platform", platform.Name(), "succeeded", succeeded, "error", err)
+	}
 }
 
 func (e *Engine) feedbackPreview(report appfeatures.FeedbackReport) string {

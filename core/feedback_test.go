@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -74,8 +75,74 @@ func TestCmdFeedback_PreviewsBeforeExplicitApproval(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("a separate confirm action must submit the exact pending preview")
 	}
-	if sent := platform.sentTexts(); !strings.Contains(sent[len(sent)-1], "issues/99") {
-		t.Fatalf("success reply missing reference URL: %v", sent)
+	if sent := platform.sentTexts(); len(sent) == 0 || sent[len(sent)-1] != "Submission succeeded" {
+		t.Fatalf("success reply = %v, want status without reference URL", sent)
+	}
+}
+
+type feedbackResultCardPlatform struct {
+	stubCardPlatform
+	updatedCards []*Card
+}
+
+func (platform *feedbackResultCardPlatform) UpdateCard(_ context.Context, _ any, card *Card) error {
+	platform.mu.Lock()
+	defer platform.mu.Unlock()
+	platform.updatedCards = append(platform.updatedCards, card)
+	return nil
+}
+
+func TestFeedbackCardActionSubmitUpdatesOnlyOriginalCard(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		submitErr     error
+		disableBefore bool
+		wantTitle     string
+	}{
+		{name: "success", wantTitle: "提交成功"},
+		{name: "failure", submitErr: errors.New("relay unavailable"), wantTitle: "提交失败"},
+		{name: "disabled", disableBefore: true, wantTitle: "提交失败"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			platform := &feedbackResultCardPlatform{stubCardPlatform: stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}}
+			engine := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangChinese)
+			engine.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
+			engine.feedbackSubmitFn = func(_ context.Context, _ appfeatures.FeedbackDraft, approved bool) (appfeatures.FeedbackReceipt, error) {
+				if !approved {
+					t.Fatal("card action submitted without approval")
+				}
+				return appfeatures.FeedbackReceipt{ReferenceURL: "https://github.com/timmyagentic/cc-connect-next/issues/99"}, test.submitErr
+			}
+
+			draft, err := engine.buildFeedbackDraft("feishu:oc_chat:ou_user", "card result", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			token, err := engine.rememberPendingFeedback("feishu:oc_chat:ou_user", "ou_user", draft)
+			if err != nil {
+				t.Fatal(err)
+			}
+			message := feedbackTestMsg()
+			message.ReplyCtx = "original-card"
+			message.IsCardAction = true
+			if test.disableBefore {
+				engine.SetFeedbackConfig(false, "https://relay.example/v1/feedback")
+			}
+			engine.cmdFeedback(platform, message, "confirm "+token)
+
+			platform.mu.Lock()
+			updated := append([]*Card(nil), platform.updatedCards...)
+			platform.mu.Unlock()
+			if len(updated) != 1 || updated[0].Header == nil || updated[0].Header.Title != test.wantTitle {
+				t.Fatalf("updated cards = %#v, want one %q result", updated, test.wantTitle)
+			}
+			if rendered := updated[0].RenderText(); strings.Contains(rendered, "http") || strings.Contains(rendered, "issues/") {
+				t.Fatalf("result card leaked reference URL: %s", rendered)
+			}
+			if sent := platform.getSent(); len(sent) != 0 {
+				t.Fatalf("card action sent an extra message: %v", sent)
+			}
+		})
 	}
 }
 
