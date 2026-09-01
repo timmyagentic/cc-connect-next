@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v0.3.0-beta.1 (2026-09-01)
+
+Beta preview of the Foundation-backed Feedback/Update lifecycle, first-class
+local-Agent feedback submission, safe in-turn daemon restart, precise Feishu
+P2P topic routing, administrator-only update reminders, and safer failure/
+reference rendering.
+
+See `changelogs/v0.3.0-beta.1.md` for bilingual release notes, Beta channel
+behavior, and upgrade boundaries.
+
 ### Awesome Agent App Features contract v1 integration
 
 - Feedback now builds the complete structured, redacted Foundation draft and
