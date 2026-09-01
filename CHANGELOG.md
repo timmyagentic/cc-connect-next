@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v0.3.0-beta.2 (2026-09-01)
+
+Second v0.3.0 Beta focused on configuration compatibility and explicit
+Feedback-card completion state.
+
+See `changelogs/v0.3.0-beta.2.md` for bilingual release notes, Beta channel
+behavior, and compatibility boundaries.
+
+- Dynamic Agent and Platform option tables such as
+  `projects.agent.options.env` no longer report their consumed nested keys as
+  unsupported configuration. Adapter-owned top-level option validation and
+  migration fail-closed behavior remain unchanged.
 - Feedback confirmation buttons now replace the clicked card with a localized
   submission-success or submission-failure result. Chat feedback no longer
   exposes the Relay's Issue URL or sends a separate result message.
