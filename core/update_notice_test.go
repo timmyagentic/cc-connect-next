@@ -1,8 +1,8 @@
 package core
 
 // Tests for the daemon-side update notice: a user running an old version gets
-// exactly one localized private reminder per newly published stable release,
-// delivered to the project's explicit admin_from users.
+// a localized private reminder delivered to every explicit admin_from user;
+// the project/version completes only after one full pass succeeds.
 
 import (
 	"context"
@@ -130,7 +130,7 @@ func TestUpdateNotice_UnsupportedDirectPlatformNeverFallsBackToRecentSession(t *
 	}
 }
 
-func TestUpdateNotice_PartialAdminFailureRetriesBeforeMarkingVersion(t *testing.T) {
+func TestUpdateNotice_PartialAdminFailureRetriesAllBeforeMarkingVersion(t *testing.T) {
 	withCurrentVersion(t, "v0.1.0")
 	platform := newUpdateNoticeDirectStub("feishu")
 	platform.failUsers = map[string]error{"ou_admin_b": errors.New("temporary failure")}
@@ -148,8 +148,9 @@ func TestUpdateNotice_PartialAdminFailureRetriesBeforeMarkingVersion(t *testing.
 	platform.directMu.Unlock()
 	platform.clearDirect()
 	n.CheckOnce()
-	if calls := platform.directSnapshot(); len(calls) != 1 || calls[0].userID != "ou_admin_b" {
-		t.Fatalf("partial failure should retry only the missing admin; second calls = %+v", calls)
+	if calls := platform.directSnapshot(); len(calls) != 2 ||
+		calls[0].userID != "ou_admin_a" || calls[1].userID != "ou_admin_b" {
+		t.Fatalf("partial failure should retry every explicit admin; second calls = %+v", calls)
 	}
 	platform.clearDirect()
 	n.CheckOnce()
@@ -158,7 +159,7 @@ func TestUpdateNotice_PartialAdminFailureRetriesBeforeMarkingVersion(t *testing.
 	}
 }
 
-func TestUpdateNotice_PartialRecipientStatePersistsAcrossNotifierRestart(t *testing.T) {
+func TestUpdateNotice_PartialFailureRetriesAllAcrossNotifierRestart(t *testing.T) {
 	withCurrentVersion(t, "v0.1.0")
 	dataDir := t.TempDir()
 	release := &ReleaseInfo{TagName: "v0.1.2"}
@@ -172,11 +173,11 @@ func TestUpdateNotice_PartialRecipientStatePersistsAcrossNotifierRestart(t *test
 	firstNotifier.RegisterEngine("demo", firstEngine)
 	firstNotifier.CheckOnce()
 	stateBytes, err := os.ReadFile(firstNotifier.statePath())
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(stateBytes), "ou_admin") {
-		t.Fatalf("persisted recipient state leaked admin IDs: %s", stateBytes)
+	if strings.Contains(string(stateBytes), "recipient:") || strings.Contains(string(stateBytes), "ou_admin") {
+		t.Fatalf("partial failure persisted recipient-specific state: %s", stateBytes)
 	}
 
 	secondPlatform := newUpdateNoticeDirectStub("feishu")
@@ -186,8 +187,9 @@ func TestUpdateNotice_PartialRecipientStatePersistsAcrossNotifierRestart(t *test
 	secondNotifier.checkFn = func(string) (*ReleaseInfo, error) { return release, nil }
 	secondNotifier.RegisterEngine("demo", secondEngine)
 	secondNotifier.CheckOnce()
-	if calls := secondPlatform.directSnapshot(); len(calls) != 1 || calls[0].userID != "ou_admin_b" {
-		t.Fatalf("restarted notifier repeated a successful admin or missed the failed one: %+v", calls)
+	if calls := secondPlatform.directSnapshot(); len(calls) != 2 ||
+		calls[0].userID != "ou_admin_a" || calls[1].userID != "ou_admin_b" {
+		t.Fatalf("restarted notifier should retry every explicit admin after partial failure: %+v", calls)
 	}
 }
 

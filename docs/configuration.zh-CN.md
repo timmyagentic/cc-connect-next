@@ -62,7 +62,7 @@
 
 ### 反馈与更新 (`feedback-updates`)
 
-控制匿名反馈能力和稳定版一次性升级提醒。
+控制匿名反馈能力和稳定版升级提醒投递。
 
 相关配置： `feedback.enabled`, `feedback.endpoint`, `update_notice`
 
@@ -5621,7 +5621,7 @@ Agent 流式输出期间持续更新一条预览消息。
 
 ### `update_notice`
 
-仅当存在唯一明确的私聊平台时，每个稳定版私聊提醒明确列出的 admin_from 用户一次；空值/通配符/歧义目标保持静默，绝不投递最近群聊/话题，用户确认前先查看精确 immutable Plan。
+仅当存在唯一明确的私聊平台时，每轮私聊提醒全部明确列出的 admin_from 用户，直到某一轮全部成功；部分失败会在下一轮重试完整名单。空值/通配符/歧义目标保持静默，绝不投递最近群聊/话题，用户确认前先查看精确 immutable Plan。
 
 - 来源：`toml`
 - 配置位置：`config.toml root`

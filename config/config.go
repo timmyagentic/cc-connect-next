@@ -111,8 +111,8 @@ type Config struct {
 	Cron               CronConfig              `toml:"cron"`
 	Queue              QueueConfig             `toml:"queue"`
 	// UpdateNotice controls the daemon-side update reminder: when a newer
-	// stable release is published, each project's explicit admin_from users
-	// receive one localized private notice per version. nil/true = enabled
+	// stable release is published, each pass privately notifies every explicit
+	// admin_from user until one pass succeeds for all of them. nil/true = enabled
 	// (default); false = disabled.
 	UpdateNotice *bool `toml:"update_notice"`
 	// Feedback controls the in-app problem-reporting channel: /feedback plus

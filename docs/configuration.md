@@ -62,7 +62,7 @@ Related configuration: `webhook.enabled`, `bridge.enabled`, `management.enabled`
 
 ### Feedback and updates (`feedback-updates`)
 
-Control anonymous feedback availability and one-time stable-version notifications.
+Control anonymous feedback availability and stable-version reminder delivery.
 
 Related configuration: `feedback.enabled`, `feedback.endpoint`, `update_notice`
 
@@ -5621,7 +5621,7 @@ Set the provider-specific voice ID used by tts.
 
 ### `update_notice`
 
-With one unambiguous direct-user platform, privately notify each explicit admin_from user once per stable release; empty/wildcard/ambiguous targets stay silent, recent groups/topics are never targets, and the user reviews an exact immutable Plan before confirmation.
+With one unambiguous direct-user platform, each pass privately notifies all explicit admin_from users until one pass succeeds for everyone; a partial failure retries the full list next time. Empty/wildcard/ambiguous targets stay silent, recent groups/topics are never targets, and the user reviews an exact immutable Plan before confirmation.
 
 - Source: `toml`
 - Placement: `config.toml root`
