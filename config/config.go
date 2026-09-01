@@ -748,12 +748,15 @@ func load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	// Record keys the struct did not consume: they are either typos or
-	// capabilities this build lacks, and both deserve a visible prompt
-	// instead of silent no-op behavior. Keys inside map[string]any tables
-	// (agent/platform options, env) are consumed by the maps and thus never
-	// appear here.
+	// Record typed keys the struct did not consume: they are either typos or
+	// capabilities this build lacks, and both deserve a visible prompt instead
+	// of silent no-op behavior. Dynamic Agent/Platform option children are
+	// preserved in map[string]any even though the TOML metadata reports their
+	// leaves as undecoded; their top-level option is validated by the adapter.
 	for _, key := range md.Undecoded() {
+		if isDynamicPluginOptionChild(key) {
+			continue
+		}
 		cfg.UnknownConfigKeys = append(cfg.UnknownConfigKeys, key.String())
 	}
 	resolveEnvInConfig(cfg)
@@ -770,6 +773,20 @@ func load(path string) (*Config, error) {
 	}
 	cfg.ResolveProviderRefs()
 	return cfg, nil
+}
+
+// isDynamicPluginOptionChild identifies leaves below a free-form Agent or
+// Platform option. BurntSushi/toml preserves these values in map[string]any
+// but reports the nested leaves as undecoded because `any` has no concrete Go
+// shape. Normal startup validates the top-level option name and value through
+// the selected adapter's schema; treating its children as typed config gaps
+// would only create false unsupported-config warnings.
+func isDynamicPluginOptionChild(key toml.Key) bool {
+	parts := []string(key)
+	return len(parts) >= 5 &&
+		parts[0] == "projects" &&
+		(parts[1] == "agent" || parts[1] == "platforms") &&
+		parts[2] == "options"
 }
 
 // LoadPermissive loads the config file and performs all validation except the

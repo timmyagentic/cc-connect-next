@@ -646,6 +646,53 @@ func TestAnnotateUnknownPluginConfigKeys_ReportsDynamicMapTypos(t *testing.T) {
 	}
 }
 
+func TestAnnotateUnknownPluginConfigKeys_LoadedDynamicTablesReportOnlyUnknownOptions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+[[projects]]
+name = "demo"
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "` + dir + `"
+totally_made_up = true
+
+[projects.agent.options.env]
+GITLAB_TOKEN = "fixture"
+
+[[projects.platforms]]
+type = "feishu"
+
+[projects.platforms.options]
+app_id = "fixture"
+app_secret = "fixture"
+resolve_mentions = true
+card_theme_color = "blue"
+
+[projects.platforms.options.mention_map]
+reviewer = "ou_fixture"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadPermissive(path)
+	if err != nil {
+		t.Fatalf("LoadPermissive: %v", err)
+	}
+
+	annotateUnknownPluginConfigKeys(cfg)
+	want := []string{
+		"projects[0].agent.options.totally_made_up",
+		"projects[0].platforms[0].options.card_theme_color",
+	}
+	if !slices.Equal(cfg.UnknownConfigKeys, want) {
+		t.Fatalf("UnknownConfigKeys = %v, want only real top-level option gaps %v", cfg.UnknownConfigKeys, want)
+	}
+}
+
 func TestGeneratedConfigCapabilityDocsAreCurrent(t *testing.T) {
 	docs := generatedConfigCapabilityDocs()
 	for name, want := range docs {
