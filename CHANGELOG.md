@@ -46,8 +46,9 @@
 
 - Stable update reminders now go only to private conversations for explicit,
   deduplicated `admin_from` users through one unambiguous direct-user platform;
-  recent groups/topics are never fallback targets. Per-recipient hashed state
-  keeps partial retries from repeating successful deliveries.
+  recent groups/topics are never fallback targets. Delivery state stays
+  project-scoped: a pass marks the version complete only when every explicit
+  administrator succeeds, while a partial failure retries the full list.
 - Feishu/Lark terminal cards now recognize the narrowly allowlisted Codex
   "selected model is at capacity" failure and show localized, actionable
   retry-or-switch-model guidance. The provider text is never rendered;

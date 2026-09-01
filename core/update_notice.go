@@ -1,8 +1,6 @@
 package core
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -21,9 +19,9 @@ import (
 // UpdateNotifier closes that gap: it periodically compares CurrentVersion
 // against the newest stable GitHub release and, when a newer one appears,
 // sends one localized private notice to each project's explicit admin_from
-// users. Recent chats, groups, and topics are never notification targets. Each
-// recipient/version success is persisted across restarts so partial retries do
-// not repeat notices to administrators who already received them.
+// users. Recent chats, groups, and topics are never notification targets. A
+// project/version is complete only when one pass reaches every administrator;
+// after a partial failure the next pass deliberately retries the full list.
 
 const (
 	updateNoticeInitialDelay = 2 * time.Minute
@@ -31,15 +29,13 @@ const (
 	updateNoticeStateFile    = "update_notice.json"
 )
 
-// UpdateNotifier periodically checks for a newer stable release and notifies
-// each registered project's explicit administrators once per version.
+// UpdateNotifier periodically checks for a newer stable release and retries
+// each project's full explicit-administrator list until one pass succeeds.
 type UpdateNotifier struct {
-	mu      sync.Mutex
-	engines map[string]*Engine
-	order   []string // registration order for deterministic iteration
-	dataDir string
-	// Project keys mark full delivery; recipient:<project>:<hash> keys remember
-	// partial successes without persisting platform user IDs.
+	mu       sync.Mutex
+	engines  map[string]*Engine
+	order    []string // registration order for deterministic iteration
+	dataDir  string
 	notified map[string]string
 
 	initialDelay time.Duration
@@ -148,31 +144,7 @@ func (n *UpdateNotifier) CheckOnce() {
 		if e == nil || already {
 			continue
 		}
-		targets := e.updateNoticeTargets()
-		if len(targets) == 0 {
-			continue
-		}
-		action := e.i18n.Tf(MsgUpdateNoticeAvailableAction, release.TagName, CurrentVersion)
-		text := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
-		allDelivered := true
-		for _, target := range targets {
-			stateKey := updateNoticeRecipientStateKey(name, target.key)
-			n.mu.Lock()
-			targetDone := n.notified[stateKey] == release.TagName
-			n.mu.Unlock()
-			if targetDone {
-				continue
-			}
-			if err := e.sendUpdateNoticeTarget(target, action, text); err != nil {
-				allDelivered = false
-				continue
-			}
-			n.mu.Lock()
-			n.notified[stateKey] = release.TagName
-			n.mu.Unlock()
-			changed = true
-		}
-		if !allDelivered {
+		if !e.NotifyUpdateAvailable(release) {
 			continue
 		}
 		n.mu.Lock()
@@ -183,10 +155,6 @@ func (n *UpdateNotifier) CheckOnce() {
 	if changed {
 		n.saveState()
 	}
-}
-
-func updateNoticeRecipientStateKey(project, targetKey string) string {
-	return "recipient:" + project + ":" + targetKey
 }
 
 func (n *UpdateNotifier) statePath() string {
@@ -275,7 +243,6 @@ func (e *Engine) directUserNoticePlatform() (Platform, DirectUserSender, bool) {
 }
 
 type updateNoticeTarget struct {
-	key      string
 	userID   string
 	platform Platform
 	sender   DirectUserSender
@@ -294,9 +261,8 @@ func (e *Engine) updateNoticeTargets() []updateNoticeTarget {
 	}
 	targets := make([]updateNoticeTarget, 0, len(admins))
 	for _, userID := range admins {
-		digest := sha256.Sum256([]byte(platform.Name() + "\x00" + strings.ToLower(userID)))
 		targets = append(targets, updateNoticeTarget{
-			key: hex.EncodeToString(digest[:]), userID: userID, platform: platform, sender: sender,
+			userID: userID, platform: platform, sender: sender,
 		})
 	}
 	return targets
@@ -305,8 +271,9 @@ func (e *Engine) updateNoticeTargets() []updateNoticeTarget {
 // NotifyUpdateAvailable sends one localized update notice to every explicit
 // admin_from user through exactly one platform that supports private direct
 // delivery. It never borrows a recent chat/session target. Returns true only
-// when every configured admin received the notice, so partial failures remain
-// retryable instead of permanently suppressing one administrator's reminder.
+// when every configured admin received the notice. A partial failure leaves
+// the project/version unfinished, so the next notifier pass retries every
+// explicit administrator rather than maintaining per-recipient state.
 //
 // The notice is actionable: platforms with cards or inline buttons get an
 // [review update] button, and the delivered session opens a natural-language
@@ -333,7 +300,8 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	}
 	if delivered != len(targets) {
 		slog.Debug("update notice: partial admin delivery",
-			"project", e.name, "delivered", delivered, "expected", len(targets))
+			"project", e.name, "delivered", delivered, "expected", len(targets),
+			"retry", "all explicit admins")
 		return false
 	}
 	slog.Info("update notice: delivered to explicit admins",
