@@ -469,6 +469,7 @@ var _ core.RelayGroupVisibilityTarget = (*Platform)(nil)
 var _ core.RelayGroupVisibilitySender = (*Platform)(nil)
 var _ core.AsyncRecoverablePlatform = (*Platform)(nil)
 var _ core.AsyncRecoverablePlatform = (*interactivePlatform)(nil)
+var _ core.CardActionUpdater = (*interactivePlatform)(nil)
 
 const botIdentityRetryInterval = 5 * time.Minute
 
@@ -1307,13 +1308,14 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 		slog.Info(p.tag()+": card action dispatched as command", "cmd", cmdText, "user", userID)
 
 		go p.dispatchCoreMessage(&core.Message{
-			SessionKey: sessionKey,
-			Platform:   p.platformName,
-			UserID:     userID,
-			UserName:   p.resolveUserName(userID),
-			ChatName:   p.resolveChatName(chatID),
-			Content:    cmdText,
-			ReplyCtx:   rctx,
+			SessionKey:   sessionKey,
+			Platform:     p.platformName,
+			UserID:       userID,
+			UserName:     p.resolveUserName(userID),
+			ChatName:     p.resolveChatName(chatID),
+			Content:      cmdText,
+			ReplyCtx:     rctx,
+			IsCardAction: true,
 		})
 
 		if ac, ok := event.Event.Action.Value["after_click"].(map[string]any); ok {

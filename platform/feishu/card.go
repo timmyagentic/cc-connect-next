@@ -64,6 +64,18 @@ func (p *interactivePlatform) SendDirectUserCard(ctx context.Context, userID str
 	return err
 }
 
+// UpdateCard replaces the exact interactive card that produced a callback.
+func (p *interactivePlatform) UpdateCard(ctx context.Context, rctx any, card *core.Card) error {
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return fmt.Errorf("%s: invalid card action reply context type %T", p.tag(), rctx)
+	}
+	if rc.messageID == "" {
+		return fmt.Errorf("%s: card action messageID is empty", p.tag())
+	}
+	return p.patchCard(ctx, rc.messageID, rc.sessionKey, card)
+}
+
 // RefreshCard updates a previously rendered card in-place using the Patch API.
 // It looks up the messageID stored from the most recent card action callback
 // for the given session key and patches that message with the new card content.
@@ -76,9 +88,13 @@ func (p *interactivePlatform) RefreshCard(ctx context.Context, sessionKey string
 		return fmt.Errorf("%s: no tracked card messageID for session %q", p.tag(), sessionKey)
 	}
 
+	return p.patchCard(ctx, msgID, sessionKey, card)
+}
+
+func (p *interactivePlatform) patchCard(ctx context.Context, messageID, sessionKey string, card *core.Card) error {
 	cardJSON := renderCard(card, sessionKey)
 	req := larkim.NewPatchMessageReqBuilder().
-		MessageId(msgID).
+		MessageId(messageID).
 		Body(larkim.NewPatchMessageReqBodyBuilder().
 			Content(cardJSON).
 			Build()).

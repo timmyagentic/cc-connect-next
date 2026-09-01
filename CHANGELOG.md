@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Feedback confirmation buttons now replace the clicked card with a localized
+  submission-success or submission-failure result. Chat feedback no longer
+  exposes the Relay's Issue URL or sends a separate result message.
+
 ## v0.3.0-beta.1 (2026-09-01)
 
 Beta preview of the Foundation-backed Feedback/Update lifecycle, first-class

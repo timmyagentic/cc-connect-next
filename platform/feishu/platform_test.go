@@ -2575,6 +2575,13 @@ func TestCmdAction_WithoutAfterClick_DispatchesAndReturnsNil(t *testing.T) {
 		if msg.Content != "/verify F9F-162" {
 			t.Fatalf("dispatched content = %q, want /verify F9F-162", msg.Content)
 		}
+		if !msg.IsCardAction {
+			t.Fatal("card command was not marked as a card action")
+		}
+		rctx, ok := msg.ReplyCtx.(replyContext)
+		if !ok || rctx.messageID != "om_msg1" {
+			t.Fatalf("card action reply context = %#v, want original message", msg.ReplyCtx)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected command to be dispatched")
 	}

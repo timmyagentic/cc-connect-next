@@ -2241,8 +2241,8 @@ func TestCUJ_J1_FeedbackPreviewCancelAndExactApproval(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("approved draft was not submitted")
 	}
-	if !env.sentContains("issues/7") {
-		t.Fatalf("user did not receive the relay reference: %v", env.plat.getSent())
+	if !env.sentContains("Submission succeeded") || env.sentContains("issues/7") {
+		t.Fatalf("user did not receive a link-free success status: %v", env.plat.getSent())
 	}
 }
 
