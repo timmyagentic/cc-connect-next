@@ -25,6 +25,7 @@ name = "demo"
 
 [projects.agent]
 type = "codex"
+sparkle = true
 
 [projects.agent.options]
 work_dir = "` + dir + `"
@@ -44,7 +45,7 @@ token = "t"
 		t.Fatalf("LoadPermissive: %v", err)
 	}
 
-	for _, want := range []string{"log.sparkle", "feedbak.enabled"} {
+	for _, want := range []string{"log.sparkle", "feedbak.enabled", "projects.agent.sparkle"} {
 		if !slices.Contains(cfg.UnknownConfigKeys, want) {
 			t.Errorf("UnknownConfigKeys missing %q, got %v", want, cfg.UnknownConfigKeys)
 		}
@@ -55,6 +56,58 @@ token = "t"
 		if k == "projects.agent.options.totally_made_up_option" {
 			t.Errorf("agent option keys must not be reported as unknown: %v", cfg.UnknownConfigKeys)
 		}
+	}
+}
+
+// Regression: [projects.agent.options.env] is a supported dynamic table. The
+// TOML decoder must not turn its arbitrary environment-variable names into
+// unsupported configuration gaps merely because Options uses map[string]any.
+func TestLoad_ProjectAgentEnvKeysAreNotUnknown(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+[[projects]]
+name = "demo"
+
+[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "` + dir + `"
+
+[projects.agent.options.env]
+CI_SERVER_HOST = "https://gitlab.example"
+GITLAB_HOST = "https://gitlab.example"
+GITLAB_PRIVATE_TOKEN = "fixture"
+GITLAB_TOKEN = "fixture"
+GLAB_TOKEN = "fixture"
+PRIVATE_TOKEN = "fixture"
+
+[[projects.platforms]]
+type = "telegram"
+
+[projects.platforms.options]
+token = "fixture"
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadPermissive(path)
+	if err != nil {
+		t.Fatalf("LoadPermissive: %v", err)
+	}
+
+	env, ok := cfg.Projects[0].Agent.Options["env"].(map[string]any)
+	if !ok {
+		t.Fatalf("agent env type = %T, want map[string]any", cfg.Projects[0].Agent.Options["env"])
+	}
+	for _, key := range []string{"CI_SERVER_HOST", "GITLAB_HOST", "GITLAB_PRIVATE_TOKEN", "GITLAB_TOKEN", "GLAB_TOKEN", "PRIVATE_TOKEN"} {
+		if value, ok := env[key].(string); !ok || value == "" {
+			t.Errorf("env[%q] = %#v, want non-empty string", key, env[key])
+		}
+	}
+	if len(cfg.UnknownConfigKeys) != 0 {
+		t.Fatalf("supported env children reported unknown: %v", cfg.UnknownConfigKeys)
 	}
 }
 
