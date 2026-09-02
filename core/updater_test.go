@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
 type stubCoreUpdateService struct {
@@ -91,6 +93,39 @@ func TestUpdateCardConfirmationBindsDisplayedPlan(t *testing.T) {
 	engine.handleCommand(platform, message, strings.TrimPrefix(firstAction, "cmd:"))
 	if service.applyCalls != 1 || service.appliedPlan.token != "first-plan" {
 		t.Fatalf("old update card applied replacement Plan: calls=%d plan=%#v", service.applyCalls, service.appliedPlan)
+	}
+}
+
+func TestCmdUpgradeBetaLabelsChannelAndPrereleaseWithoutCallingItStable(t *testing.T) {
+	platform := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+	engine := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+	engine.SetAdminFrom("ou_admin")
+	engine.SetUpdateChannel(string(updatechannel.Beta))
+	engine.SetUpdateService(&stubCoreUpdateService{plan: PreparedUpdate{
+		Release: ReleaseInfo{
+			TagName: "v0.3.0-beta.2", Body: "beta notes", Prerelease: true, Channel: string(updatechannel.Beta),
+		},
+		ArchiveAsset: "beta.tar.gz", Available: true, token: "beta-plan",
+	}})
+	previousVersion := CurrentVersion
+	CurrentVersion = "v0.3.0-beta.1"
+	t.Cleanup(func() { CurrentVersion = previousVersion })
+	engine.cmdUpgrade(platform, &Message{SessionKey: "feishu:group", Platform: "feishu", UserID: "ou_admin"}, []string{"beta"})
+
+	platform.mu.Lock()
+	if len(platform.repliedCards) != 1 {
+		platform.mu.Unlock()
+		t.Fatalf("replied cards = %d", len(platform.repliedCards))
+	}
+	rendered := platform.repliedCards[0].RenderText()
+	platform.mu.Unlock()
+	for _, want := range []string{"Channel: `beta`", "Release type: `prerelease`", "v0.3.0-beta.2"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("beta plan missing %q: %s", want, rendered)
+		}
+	}
+	if strings.Contains(strings.ToLower(rendered), "stable release") {
+		t.Fatalf("beta plan was mislabeled stable: %s", rendered)
 	}
 }
 

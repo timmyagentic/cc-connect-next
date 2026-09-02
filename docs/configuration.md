@@ -62,9 +62,9 @@ Related configuration: `webhook.enabled`, `bridge.enabled`, `management.enabled`
 
 ### Feedback and updates (`feedback-updates`)
 
-Control anonymous feedback availability and stable-version reminder delivery.
+Control anonymous feedback availability, release-channel selection, and update reminder delivery.
 
-Related configuration: `feedback.enabled`, `feedback.endpoint`, `update_notice`
+Related configuration: `feedback.enabled`, `feedback.endpoint`, `update_channel`, `update_notice`
 
 ### Projects and workspaces (`multi-project`)
 
@@ -5618,6 +5618,21 @@ Set the provider-specific voice ID used by tts.
 - Default source: `runtime`
 - Takes effect: `restart`
 - Example: `voice_id = "value"`
+
+### `update_channel`
+
+Choose the release line used by daemon notices and chat update plans. Stable is the compatibility default; beta is an explicit prerelease opt-in and never changes npm/GitHub Latest.
+
+- Source: `toml`
+- Placement: `config.toml root`
+- Scope: `global`
+- Type: `string`
+- Requirement: `optional`
+- Default: `stable`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Allowed values: `stable`, `beta`
+- Example: `update_channel = "beta"`
 
 ### `update_notice`
 

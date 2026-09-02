@@ -29,11 +29,11 @@
 - 🎛️ **并入正在执行的回合（steer）** —— 忙时消息默认直接并入**正在运行**的任务（Codex 原生 `turn/steer`），进度卡片同步交接到最新消息；不支持该能力的 agent 透明回退到 FIFO 队列，`busy_message_mode = "queue"` 可恢复始终排队。`/ps` 在任何模式下都是显式 steer。
 - 🚚 **可审计的一键迁移** —— `cc-connect-next migrate` 清点官方安装、对每个源文件计算哈希、staging 构建校验后原子启用，附带时间戳备份和完整 SHA-256 manifest；宁可安全失败也绝不启用不完整的目标。
 - 🪶 **同一个机器人，开箱即用的官方 lark-cli** —— 新装与迁移可直接安装官方 `lark-cli`，复用 Next 已验证的飞书机器人，创建或复用隔离 profile，并把它设为默认 bot profile；旧 profile、用户 OAuth 与密钥边界完整保留。
-- 🔔 **自我维护的安装** —— `cc-connect-next update` 只走稳定通道；独立二进制使用 Foundation 的 immutable Plan、同 Release checksum、双版本探针、锁、备份与回滚，npm/Windows 保留显式宿主 adapter。daemon 对每个新稳定版只提醒一次；点击【查看并更新】或回复「更新」先展示精确 Release/产物，再确认安装，不会批准 A 却安装 B。
+- 🔔 **自我维护的安装** —— `cc-connect-next update [stable|beta]` 显式选择通道，`stable` 保持默认；独立二进制使用 immutable Plan、同 Release checksum、双版本探针、锁、备份与回滚。daemon 按 `update_channel` 对每个新版本只提醒一次；点击【查看并更新】或回复「更新」先展示精确通道、Release 类型与产物，再确认安装，不会批准 A 却安装 B。
 - 🤖 **14 种 Agent × 15 个平台** —— 单进程承载多个项目，每个项目把一个代码目录绑定到独立的 Agent 与平台，各自拥有权限、provider、模型与展示配置。
 - 🌍 **生产级配套** —— `doctor` 诊断、launchd/systemd/Windows daemon、Web 管理台（Beta）、定时任务与 webhook、机器人间 relay、语音输入/输出（STT/TTS）、多工作区路由，五语言 i18n（en、zh、zh-TW、ja、es）。
 
-- **聊天与 Agent 都可审阅的反馈。** 遇到 bug 或缺失能力时，`/feedback` 与 Manifest 声明的 `cc-connect-next feedback preview` 生成同一份 Foundation 完整脱敏 Draft；只有独立按钮、`confirm` 或 Agent 一次性 approval token 才能提交该 Draft。Agent CLI 通过活动回合 HMAC 解析可信 project/session/user，不依赖飞书 `send_as_user`；取消、未批准、身份/schema 不匹配和重放始终零请求。作者侧 Relay 固定目标仓库并渲染 Issue，无需 GitHub 账号。
+- **聊天与 Agent 都可审阅的反馈。** 遇到 bug 或缺失能力时，`/feedback` 与 Manifest 声明的 `cc-connect-next feedback preview` 生成同一份 Foundation 完整脱敏 Draft，并只加入最近相邻、字段化、有界且脱敏的用户/Agent 诊断上下文；只有独立按钮、`confirm` 或 Agent 一次性 approval token 才能提交该 Draft。Agent CLI 通过活动回合 HMAC 解析可信 project/session/user，不依赖飞书 `send_as_user`；取消、未批准、身份/schema 不匹配和重放始终零请求。作者侧 Relay 固定目标仓库并渲染 Issue，无需 GitHub 账号。
 
 ## 🎬 实际效果
 
@@ -192,7 +192,7 @@ cc-connect-next 从 CC Connect v1.4.1 分叉，通过逐项审计而非整体合
 | 飞书回答 | 消息流 / legacy 卡片 | 单卡片 Card 2.0 生命周期 + 打字机流式 |
 | 聊天中的推理/工具明细 | 会渲染 | 只有匿名计数，两层强制丢弃 |
 | 忙时消息 | 仅 FIFO 排队；`/ps` 裸发送 | 默认原生 steer + 卡片交接，可配置排队 |
-| 更新 | 手动 | 稳定通道更新器 + daemon 每版本一次的主动提醒 |
+| 更新 | 手动 | Stable/Beta 显式通道 + daemon 每版本一次的主动提醒 |
 | 迁移路径 | — | 带 manifest 与回滚的可审计一键迁移 |
 | 运行时身份 | `cc-connect` · `~/.cc-connect` | 全部独立，可并存 |
 

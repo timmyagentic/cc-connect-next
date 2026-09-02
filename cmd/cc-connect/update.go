@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/timmyagentic/cc-connect-next/internal/appfeatures"
+	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
 var cachedLatestVersion struct {
@@ -63,24 +65,60 @@ func getUpdateHintIfAvailable() string {
 
 func runUpdate() {
 	if len(os.Args) == 3 && (os.Args[2] == "--help" || os.Args[2] == "-h") {
-		fmt.Println("Usage: cc-connect-next update\n\nUpdates to the latest stable release. The installation method is detected automatically.")
+		fmt.Println("Usage: cc-connect-next update [stable|beta]\n       cc-connect-next update --channel <stable|beta>\n\nStable is the default. Beta is an explicit prerelease opt-in. The installation method is detected automatically.")
 		return
 	}
-	if err := runStableUpdate(os.Args[2:]); err != nil {
+	options, err := parseUpdateOptions(os.Args[2:])
+	if err == nil {
+		err = runChannelUpdate(options)
+	}
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func runStableUpdate(args []string) error {
-	if err := validateStableUpdateArgs(args); err != nil {
-		return err
+type updateOptions struct {
+	Channel updatechannel.Channel
+}
+
+func parseUpdateOptions(args []string) (updateOptions, error) {
+	options := updateOptions{Channel: updatechannel.Stable}
+	if len(args) == 0 {
+		return options, nil
 	}
+	if len(args) == 1 {
+		switch args[0] {
+		case "--beta", "--pre":
+			options.Channel = updatechannel.Beta
+			return options, nil
+		case "--stable":
+			return options, nil
+		}
+		if channel, ok := updatechannel.Parse(args[0]); ok && strings.TrimSpace(args[0]) != "" {
+			options.Channel = channel
+			return options, nil
+		}
+	}
+	if len(args) == 2 && args[0] == "--channel" {
+		channel, ok := updatechannel.Parse(args[1])
+		if !ok || strings.TrimSpace(args[1]) == "" {
+			return updateOptions{}, fmt.Errorf("update channel must be stable or beta")
+		}
+		options.Channel = channel
+		return options, nil
+	}
+	return updateOptions{}, fmt.Errorf("unknown update option(s) %q; choose stable or beta", strings.Join(args, " "))
+}
+
+func runChannelUpdate(options updateOptions) error {
+	channel := options.Channel.Effective()
 	fmt.Printf("cc-connect-next %s\n", version)
-	fmt.Println("Checking for stable updates...")
+	fmt.Printf("Checking the %s update channel...\n", channel)
 
 	service, err := appfeatures.NewUpdateService(appfeatures.UpdateConfig{
 		CurrentVersion: version,
+		Channel:        channel,
 		Progress:       printUpdateProgress,
 	})
 	if err != nil {
@@ -88,16 +126,16 @@ func runStableUpdate(args []string) error {
 	}
 	plan, err := service.Prepare(context.Background())
 	if err != nil {
-		return fmt.Errorf("prepare stable update: %w", err)
+		return fmt.Errorf("prepare %s update: %w", channel, err)
 	}
 	latest := plan.Release().Tag
 	if !plan.Available() {
-		fmt.Printf("Already up to date (%s >= %s).\n", version, latest)
+		fmt.Printf("Already up to date on the %s channel (%s >= %s).\n", channel, version, latest)
 		return nil
 	}
 
 	installation := service.Installation()
-	fmt.Printf("New stable version available: %s → %s\n", version, latest)
+	fmt.Printf("New %s available on the %s channel: %s → %s\n", channel.ReleaseType(plan.Release().Prerelease), channel, version, latest)
 	switch installation.Kind {
 	case appfeatures.InstallNPM:
 		fmt.Printf("Detected npm installation at %s.\n", installation.PackageDir)
@@ -123,18 +161,6 @@ func runStableUpdate(args []string) error {
 	return nil
 }
 
-func validateStableUpdateArgs(args []string) error {
-	if len(args) == 0 {
-		return nil
-	}
-	for _, argument := range args {
-		if argument == "--pre" || argument == "--beta" {
-			return fmt.Errorf("cc-connect-next update installs stable releases only; use npm install -g cc-connect-next@beta to opt into prereleases")
-		}
-	}
-	return fmt.Errorf("unknown update option %q; cc-connect-next update accepts no options and installs the latest stable release", args[0])
-}
-
 func printUpdateProgress(event appfeatures.UpdateEvent) {
 	switch event.Stage {
 	case appfeatures.StageDownloadingChecksums:
@@ -152,14 +178,20 @@ func printUpdateProgress(event appfeatures.UpdateEvent) {
 	}
 }
 
-func checkUpdate() {
+func checkUpdate(args []string) {
 	if version == "dev" || version == "" {
+		return
+	}
+	options, err := parseUpdateOptions(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Check update failed: %v\n", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	release, err := appfeatures.CheckForUpdate(ctx, version, nil)
+	release, err := appfeatures.CheckForUpdateChannel(ctx, version, options.Channel, nil)
 	if err == nil && release != nil {
-		fmt.Fprintf(os.Stderr, "Stable update available: %s → %s (run: cc-connect-next update)\n", version, release.Tag)
+		channel := options.Channel.Effective()
+		fmt.Fprintf(os.Stderr, "%s update available on the %s channel: %s → %s (run: cc-connect-next update %s)\n", channel.ReleaseType(release.Prerelease), channel, version, release.Tag, channel)
 	}
 }

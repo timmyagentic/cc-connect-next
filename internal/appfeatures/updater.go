@@ -1,7 +1,9 @@
 package appfeatures
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -18,7 +20,7 @@ import (
 	"sync/atomic"
 
 	featureupdater "github.com/timmyagentic/awesome-agent-app-features/updater"
-	featuregithub "github.com/timmyagentic/awesome-agent-app-features/updater/github"
+	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
 const releaseRepository = "timmyagentic/cc-connect-next"
@@ -56,6 +58,7 @@ type CommandRunner func(context.Context, string, ...string) error
 
 type UpdateConfig struct {
 	CurrentVersion string
+	Channel        updatechannel.Channel
 	ExecutablePath string
 	Source         featureupdater.Source
 	Verifier       featureupdater.VersionVerifier
@@ -124,6 +127,7 @@ func NewUpdateService(config UpdateConfig) (*UpdateService, error) {
 
 func newUpdateService(config UpdateConfig, platformOS, platformArch string) (*UpdateService, error) {
 	config.CurrentVersion = strings.TrimSpace(config.CurrentVersion)
+	config.Channel = config.Channel.Effective()
 	if config.CurrentVersion == "" {
 		return nil, fmt.Errorf("current version is required")
 	}
@@ -133,7 +137,7 @@ func newUpdateService(config UpdateConfig, platformOS, platformArch string) (*Up
 	}
 	source := config.Source
 	if source == nil {
-		source = featuregithub.Source{Repository: releaseRepository, UserAgent: ProductName + "-updater/1"}
+		source = newGitHubUpdateSource()
 	}
 	verifier := config.Verifier
 	if verifier == nil {
@@ -152,7 +156,7 @@ func newUpdateService(config UpdateConfig, platformOS, platformArch string) (*Up
 		platformOS:   platformOS,
 		platformArch: platformArch,
 	}
-	if installation.Kind == InstallStandalone && (platformOS == "darwin" || platformOS == "linux") {
+	if config.Channel == updatechannel.Stable && installation.Kind == InstallStandalone && (platformOS == "darwin" || platformOS == "linux") {
 		standalone, err := featureupdater.New(featureupdater.Config{
 			Product:           ProductName,
 			CurrentVersion:    config.CurrentVersion,
@@ -170,6 +174,13 @@ func newUpdateService(config UpdateConfig, platformOS, platformArch string) (*Up
 		service.standalone = standalone
 	}
 	return service, nil
+}
+
+func (service *UpdateService) Channel() updatechannel.Channel {
+	if service == nil {
+		return updatechannel.Stable
+	}
+	return service.config.Channel.Effective()
 }
 
 func (service *UpdateService) Installation() Installation {
@@ -200,14 +211,14 @@ func (service *UpdateService) Prepare(ctx context.Context) (UpdatePlan, error) {
 		state.asset = plan.ArchiveAsset()
 	} else {
 		service.emit(featureupdater.Event{Stage: featureupdater.StageChecking})
-		release, err := service.source.LatestStable(ctx)
+		release, err := latestUpdateRelease(ctx, service.source, service.config.Channel)
 		if err != nil {
-			return UpdatePlan{}, fmt.Errorf("resolve latest stable release: %w", err)
+			return UpdatePlan{}, fmt.Errorf("resolve latest %s release: %w", service.config.Channel, err)
 		}
-		if err := featureupdater.ValidateStableRelease(release); err != nil {
+		if err := validateUpdateReleaseForChannel(release, service.config.Channel); err != nil {
 			return UpdatePlan{}, err
 		}
-		available, err := featureupdater.IsNewerStable(release.Tag, service.config.CurrentVersion)
+		available, err := isNewerUpdateRelease(release.Tag, service.config.CurrentVersion, service.config.Channel)
 		if err != nil {
 			return UpdatePlan{}, err
 		}
@@ -264,6 +275,19 @@ func (service *UpdateService) Apply(ctx context.Context, plan UpdatePlan) (resul
 		return result, featureupdater.ErrUpdateInProgress
 	}
 	defer targetLock.Unlock()
+	var hostLock hostUpdateLock
+	if service.standalone == nil && service.installation.Kind == InstallStandalone {
+		lock, lockErr := tryHostUpdateLock(service.installation.ExecutablePath + ".update.lock")
+		if lockErr != nil {
+			return result, lockErr
+		}
+		hostLock = lock
+		defer func() {
+			if releaseErr := hostLock.release(); resultErr == nil && releaseErr != nil {
+				resultErr = releaseErr
+			}
+		}()
+	}
 	state, err := service.validatePlan(plan)
 	if err != nil {
 		return result, err
@@ -329,8 +353,8 @@ func (service *UpdateService) applyNPM(ctx context.Context, tag string) error {
 	if installation.Kind != InstallNPM || installation.PackageDir == "" || installation.NPMPrefix == "" {
 		return fmt.Errorf("invalid npm installation metadata")
 	}
-	stableVersion := strings.TrimPrefix(tag, "v")
-	packageSpec := ProductName + "@" + stableVersion
+	targetVersion := strings.TrimPrefix(tag, "v")
+	packageSpec := ProductName + "@" + targetVersion
 	service.emit(featureupdater.Event{Stage: featureupdater.StageInstalling, TargetVersion: tag, Asset: packageSpec})
 	if err := service.runner(ctx, npmExecutableName(), "install", "--global", "--prefix", installation.NPMPrefix, packageSpec); err != nil {
 		return fmt.Errorf("npm install %s: %w", packageSpec, err)
@@ -340,8 +364,8 @@ func (service *UpdateService) applyNPM(ctx context.Context, tag string) error {
 	if err != nil {
 		return fmt.Errorf("verify updated npm package: %w", err)
 	}
-	if metadata.Name != ProductName || strings.TrimPrefix(metadata.Version, "v") != stableVersion {
-		return fmt.Errorf("npm package metadata did not update to %s", stableVersion)
+	if metadata.Name != ProductName || strings.TrimPrefix(metadata.Version, "v") != targetVersion {
+		return fmt.Errorf("npm package metadata did not update to %s", targetVersion)
 	}
 	if err := service.verifier.Verify(ctx, installation.ExecutablePath, tag); err != nil {
 		return fmt.Errorf("verify updated npm binary: %w", err)
@@ -356,20 +380,18 @@ const (
 	maxHostBinaryBytes       = 128 * 1024 * 1024
 )
 
-// applyHostStandalone is the explicit host adapter for standalone platforms
-// outside the Foundation's darwin/linux replacement guarantee (currently
-// Windows). Release selection and checksum pinning still come from Prepare.
+// applyHostStandalone is the channel-aware host adapter. Stable Darwin/Linux
+// continues to use the Foundation implementation; this path supplies the same
+// exact-plan/checksum/probe/backup/rollback boundaries for explicit Beta and
+// for Windows, where Foundation v0.1.1 has no replacement adapter.
 func (service *UpdateService) applyHostStandalone(ctx context.Context, state *updatePlanState) (string, error) {
-	if service.platformOS != "windows" {
-		return "", fmt.Errorf("standalone host adapter is unavailable on %s", service.platformOS)
-	}
 	target := service.installation.ExecutablePath
 	info, err := os.Lstat(target)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return "", fmt.Errorf("current executable is missing or unsafe")
 	}
 	backup := target + ".old"
-	if err := service.removeVerifiedStaleWindowsBackup(ctx, target, backup); err != nil {
+	if err := service.removeVerifiedStaleBackup(ctx, target, backup); err != nil {
 		return backup, err
 	}
 
@@ -384,7 +406,7 @@ func (service *UpdateService) applyHostStandalone(ctx context.Context, state *up
 	}
 	service.emit(featureupdater.Event{Stage: featureupdater.StageChecksumVerified, TargetVersion: state.release.Tag, Asset: state.asset.Name, Bytes: archiveBytes})
 
-	staged, err := extractExactZipBinary(archivePath, state.binaryName, filepath.Dir(target), maxHostBinaryBytes)
+	staged, err := extractExactReleaseBinary(archivePath, state.asset.Name, state.binaryName, filepath.Dir(target), maxHostBinaryBytes)
 	if err != nil {
 		return "", err
 	}
@@ -439,7 +461,7 @@ func (service *UpdateService) applyHostStandalone(ctx context.Context, state *up
 	return "", nil
 }
 
-func (service *UpdateService) removeVerifiedStaleWindowsBackup(ctx context.Context, target, backup string) error {
+func (service *UpdateService) removeVerifiedStaleBackup(ctx context.Context, target, backup string) error {
 	info, err := os.Lstat(backup)
 	if os.IsNotExist(err) {
 		return nil
@@ -502,6 +524,11 @@ func (service *UpdateService) downloadFile(ctx context.Context, asset featureupd
 	path := file.Name()
 	writer := &boundedUpdateWriter{destination: file, remaining: maximum}
 	if err := service.source.Download(ctx, asset, writer); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", writer.written, err
+	}
+	if err := file.Sync(); err != nil {
 		_ = file.Close()
 		_ = os.Remove(path)
 		return "", writer.written, err
@@ -638,11 +665,86 @@ func extractExactZipBinary(archivePath, binaryName, directory string, maximum in
 		_ = os.Remove(path)
 		return "", err
 	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
 	if err := file.Close(); err != nil {
 		_ = os.Remove(path)
 		return "", err
 	}
 	return path, nil
+}
+
+func extractExactReleaseBinary(archivePath, archiveName, binaryName, directory string, maximum int64) (string, error) {
+	switch {
+	case strings.HasSuffix(archiveName, ".zip"):
+		return extractExactZipBinary(archivePath, binaryName, directory, maximum)
+	case strings.HasSuffix(archiveName, ".tar.gz"):
+		return extractExactTarGzBinary(archivePath, binaryName, directory, maximum)
+	default:
+		return "", fmt.Errorf("unsupported release archive %s", archiveName)
+	}
+}
+
+func extractExactTarGzBinary(archivePath, binaryName, directory string, maximum int64) (string, error) {
+	archive, err := os.Open(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = archive.Close() }()
+	gzipReader, err := gzip.NewReader(archive)
+	if err != nil {
+		return "", fmt.Errorf("open gzip stream: %w", err)
+	}
+	defer func() { _ = gzipReader.Close() }()
+	reader := tar.NewReader(gzipReader)
+	var staged string
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			_ = os.Remove(staged)
+			return "", fmt.Errorf("read tar archive: %w", err)
+		}
+		if header.Name != binaryName {
+			continue
+		}
+		if staged != "" {
+			_ = os.Remove(staged)
+			return "", fmt.Errorf("archive contains duplicate binary %s", binaryName)
+		}
+		if header.Typeflag != tar.TypeReg || header.Size < 0 || header.Size > maximum {
+			return "", fmt.Errorf("archive binary is not a bounded regular file")
+		}
+		file, err := os.CreateTemp(directory, ".cc-connect-next-staged-*")
+		if err != nil {
+			return "", err
+		}
+		staged = file.Name()
+		writer := &boundedUpdateWriter{destination: file, remaining: maximum}
+		if _, err := io.Copy(writer, reader); err != nil {
+			_ = file.Close()
+			_ = os.Remove(staged)
+			return "", err
+		}
+		if err := file.Sync(); err != nil {
+			_ = file.Close()
+			_ = os.Remove(staged)
+			return "", err
+		}
+		if err := file.Close(); err != nil {
+			_ = os.Remove(staged)
+			return "", err
+		}
+	}
+	if staged == "" {
+		return "", fmt.Errorf("archive does not contain exact binary %s", binaryName)
+	}
+	return staged, nil
 }
 
 func (service *UpdateService) emit(event featureupdater.Event) {
@@ -661,17 +763,25 @@ func (service *UpdateService) emit(event featureupdater.Event) {
 // CheckForUpdate performs discovery only. Interactive installation must still
 // call UpdateService.Prepare and render that exact Plan before approval.
 func CheckForUpdate(ctx context.Context, currentVersion string, source featureupdater.Source) (*UpdateRelease, error) {
+	return CheckForUpdateChannel(ctx, currentVersion, updatechannel.Stable, source)
+}
+
+func CheckForUpdateChannel(ctx context.Context, currentVersion string, channel updatechannel.Channel, source featureupdater.Source) (*UpdateRelease, error) {
+	channel = channel.Effective()
 	if source == nil {
-		source = featuregithub.Source{Repository: releaseRepository, UserAgent: ProductName + "-updater/1"}
+		source = newGitHubUpdateSource()
 	}
-	release, err := source.LatestStable(ctx)
+	release, err := latestUpdateRelease(ctx, source, channel)
+	if errors.Is(err, errNoPrerelease) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	if err := featureupdater.ValidateStableRelease(release); err != nil {
+	if err := validateUpdateReleaseForChannel(release, channel); err != nil {
 		return nil, err
 	}
-	newer, err := featureupdater.IsNewerStable(release.Tag, currentVersion)
+	newer, err := isNewerUpdateRelease(release.Tag, currentVersion, channel)
 	if err != nil {
 		return nil, err
 	}

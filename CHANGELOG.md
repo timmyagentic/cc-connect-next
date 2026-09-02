@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Added an explicit process-wide `update_channel = "stable" | "beta"`
+  contract plus matching CLI/chat selectors. Stable remains the default;
+  every discovery, notice, immutable Plan, and result identifies its channel
+  and release type, while Beta uses the same checksum, staged/installed
+  version, locking, backup, and rollback boundaries.
+- Feedback previews now include only the immediately adjacent recent user and
+  assistant diagnostic context, with strict field/size bounds and the existing
+  credential, identifier, and path redaction. The complete enriched Draft still
+  requires a separate confirmation, and the final card remains link-free.
+
 ## v0.3.0-beta.2 (2026-09-01)
 
 Second v0.3.0 Beta focused on configuration compatibility and explicit

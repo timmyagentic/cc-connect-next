@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	featurefeedback "github.com/timmyagentic/awesome-agent-app-features/feedback"
 	featurehttp "github.com/timmyagentic/awesome-agent-app-features/feedback/httpclient"
@@ -26,15 +27,18 @@ type FeedbackReport = featurefeedback.Report
 type FeedbackReceipt = featurehttp.Receipt
 
 // FeedbackContext is the complete allowlist of host state that may enter a
-// feedback draft. It intentionally has no transcript, arbitrary environment,
-// card payload, tool event, or credential-bearing configuration map.
+// feedback draft. It permits only two explicitly bounded adjacent-message
+// fields, never an arbitrary transcript, environment, card payload, tool event,
+// or credential-bearing configuration map.
 type FeedbackContext struct {
-	Description    string
-	RecentError    string
-	RecentErrorAt  time.Time
-	CapabilityGaps []string
-	Version        string
-	Agent          string
+	Description               string
+	PreviousUserMessage       string
+	PreviousAssistantResponse string
+	RecentError               string
+	RecentErrorAt             time.Time
+	CapabilityGaps            []string
+	Version                   string
+	Agent                     string
 }
 
 // BuildFeedbackDraft maps CC Connect Next state into the provider-neutral v1
@@ -46,7 +50,7 @@ func BuildFeedbackDraft(input FeedbackContext) (FeedbackDraft, error) {
 		recentError = &featurefeedback.RecentError{Text: input.RecentError, At: input.RecentErrorAt}
 	}
 	return (featurefeedback.Builder{AdditionalRedact: redactCCConnectFeedback}).Build(featurefeedback.Input{
-		Description:    input.Description,
+		Description:    composeFeedbackDescription(input),
 		RecentError:    recentError,
 		CapabilityGaps: input.CapabilityGaps,
 		Environment: featurefeedback.Environment{
@@ -57,6 +61,59 @@ func BuildFeedbackDraft(input FeedbackContext) (FeedbackDraft, error) {
 			Agent:   input.Agent,
 		},
 	})
+}
+
+func composeFeedbackDescription(input FeedbackContext) string {
+	description := strings.TrimSpace(input.Description)
+	// Redact before the host-specific truncation. Truncating a credential first
+	// could cut away the syntax a redactor needs and expose a partial secret.
+	previousUser := strings.TrimSpace(redactFeedbackContextText(input.PreviousUserMessage))
+	previousAssistant := strings.TrimSpace(redactFeedbackContextText(input.PreviousAssistantResponse))
+	if previousUser == "" && previousAssistant == "" {
+		return description
+	}
+	const header = "Related diagnostic context (recent and subject to redaction)"
+	remaining := featurefeedback.MaxDescriptionBytes - len(description) - len(header) - 4
+	if remaining < 256 {
+		return description
+	}
+	contextSections := make([]string, 0, 2)
+	if previousUser != "" {
+		section := "Previous user message:\n" + truncateFeedbackUTF8(previousUser, min(800, remaining/3))
+		contextSections = append(contextSections, section)
+		remaining -= len(section) + 2
+	}
+	const assistantLabel = "Previous assistant response:\n"
+	if previousAssistant != "" && remaining > len(assistantLabel)+128 {
+		contextSections = append(contextSections, assistantLabel+truncateFeedbackUTF8(previousAssistant, remaining-len(assistantLabel)))
+	}
+	if len(contextSections) == 0 {
+		return description
+	}
+	context := header + "\n\n" + strings.Join(contextSections, "\n\n")
+	if description == "" {
+		return context
+	}
+	return description + "\n\n" + context
+}
+
+func redactFeedbackContextText(value string) string {
+	return featurefeedback.Redact(redactCCConnectFeedback(featurefeedback.Redact(value)))
+}
+
+func truncateFeedbackUTF8(value string, maximum int) string {
+	if maximum <= 0 || len(value) <= maximum {
+		return value
+	}
+	suffix := "\n[truncated]"
+	if maximum <= len(suffix) {
+		return ""
+	}
+	value = value[:maximum-len(suffix)]
+	for !utf8.ValidString(value) && value != "" {
+		value = value[:len(value)-1]
+	}
+	return value + suffix
 }
 
 func redactCCConnectFeedback(text string) string {

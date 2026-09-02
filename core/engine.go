@@ -23,6 +23,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
 const maxPlatformMessageLen = 4000
@@ -434,10 +436,11 @@ type Engine struct {
 	// recency so natural-language consent ("更新", "confirm") can be
 	// honored without hijacking unrelated messages.
 	updateIntents updateIntentState
-	// updateService prepares one immutable Foundation-backed Plan and applies
-	// that same Plan only after the host receives explicit approval.
+	// updateServices prepare one immutable, channel-bound Plan and apply that
+	// same Plan only after the host receives explicit approval.
 	updateServiceMu sync.Mutex
-	updateService   UpdateService
+	updateChannel   updatechannel.Channel
+	updateServices  map[updatechannel.Channel]UpdateService
 	updatePlans     map[string]pendingUpdatePlan
 
 	hooks              *HookManager
@@ -15516,6 +15519,7 @@ func (e *Engine) renderVersionCard() *Card {
 func (e *Engine) renderUpgradeCard() *Card {
 	title := e.i18n.T(MsgCardTitleUpgrade)
 	cur := CurrentVersion
+	channel := e.updateChannel.Effective()
 	if cur == "" || cur == "dev" {
 		return e.simpleCard(title, "grey", e.i18n.T(MsgUpgradeDevBuild))
 	}
@@ -15525,9 +15529,8 @@ func (e *Engine) renderUpgradeCard() *Card {
 		err     error
 	}
 	ch := make(chan result, 1)
-	useGitee := e.i18n.IsZhLike()
 	go func() {
-		r, err := CheckForUpdate(cur, useGitee)
+		r, err := CheckForUpdateInChannel(cur, channel)
 		ch <- result{r, err}
 	}()
 
@@ -15537,13 +15540,14 @@ func (e *Engine) renderUpgradeCard() *Card {
 		if res.err != nil {
 			content = e.i18n.Tf(MsgError, res.err)
 		} else if res.release == nil {
-			content = fmt.Sprintf(e.i18n.T(MsgUpgradeUpToDate), cur)
+			content = e.i18n.Tf(MsgUpgradeUpToDateChannel, channel, cur)
 		} else {
 			body := localizedReleaseBodyPreview(res.release.Body, e.i18n.CurrentLang())
-			content = fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, res.release.TagName, body)
+			summary := e.i18n.Tf(MsgUpgradeChannelSummary, channel, channel.ReleaseType(res.release.Prerelease))
+			content = fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, res.release.TagName, summary+"\n\n"+body)
 		}
 	case <-time.After(8 * time.Second):
-		content = "⏱ " + e.i18n.T(MsgUpgradeChecking) + e.i18n.T(MsgUpgradeTimeoutSuffix)
+		content = "⏱ " + e.i18n.Tf(MsgUpgradeCheckingChannel, channel) + e.i18n.T(MsgUpgradeTimeoutSuffix)
 	}
 
 	return NewCard().
@@ -16966,9 +16970,20 @@ func (e *Engine) cmdDoctor(p Platform, msg *Message) {
 }
 
 func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
+	channel := e.updateChannel.Effective()
+	if len(args) > 0 {
+		if selected, ok := updatechannel.Parse(args[0]); ok && strings.TrimSpace(args[0]) != "" {
+			channel = selected
+			args = args[1:]
+		}
+	}
 	subCmd := ""
 	if len(args) > 0 {
 		subCmd = matchSubCommand(args[0], []string{"confirm", "check"})
+		if subCmd == "" {
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradeChannelUsage))
+			return
+		}
 	}
 
 	if subCmd == "confirm" {
@@ -16981,7 +16996,7 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 	}
 
 	// Default: check for updates
-	e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradeChecking))
+	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradeCheckingChannel, channel))
 
 	cur := CurrentVersion
 	if cur == "" || cur == "dev" {
@@ -16989,7 +17004,7 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 		return
 	}
 
-	service, err := e.currentUpdateService()
+	service, err := e.currentUpdateService(channel)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
@@ -17002,12 +17017,12 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 		return
 	}
 	if !plan.Available {
-		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeUpToDate), cur))
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradeUpToDateChannel, channel, cur))
 		return
 	}
 
 	body := localizedReleaseBodyPreview(plan.Release.Body, e.i18n.CurrentLang())
-	details := e.i18n.Tf(MsgUpgradePlanDetails, plan.ArchiveAsset, body)
+	details := e.i18n.Tf(MsgUpgradePlanDetails, channel, channel.ReleaseType(plan.Release.Prerelease), plan.ArchiveAsset, body)
 
 	// Store the exact immutable plan before opening the consent window. Confirm
 	// never re-resolves latest or swaps the reviewed release/assets/checksum.
@@ -17035,7 +17050,7 @@ func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message, token string) {
 		return
 	}
 
-	service, err := e.currentUpdateService()
+	service, err := e.currentUpdateService(updatechannel.Channel(plan.Release.Channel))
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
@@ -17052,7 +17067,7 @@ func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message, token string) {
 	}
 	e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
 	if !result.Updated {
-		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeUpToDate), cur))
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradeUpToDateChannel, updatechannel.Channel(plan.Release.Channel).Effective(), cur))
 		return
 	}
 

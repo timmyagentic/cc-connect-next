@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/timmyagentic/cc-connect-next/internal/appfeatures"
+	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
 // ReleaseInfo is the host projection used by notices and localized cards.
@@ -17,6 +18,7 @@ type ReleaseInfo struct {
 	Body       string `json:"body"`
 	HTMLURL    string `json:"html_url"`
 	Prerelease bool   `json:"prerelease"`
+	Channel    string `json:"channel"`
 	CreatedAt  string `json:"created_at"`
 }
 
@@ -46,11 +48,14 @@ type UpdateService interface {
 
 type foundationUpdateService struct {
 	service *appfeatures.UpdateService
+	channel updatechannel.Channel
 }
 
-func newFoundationUpdateService() (*foundationUpdateService, error) {
+func newFoundationUpdateService(channel updatechannel.Channel) (*foundationUpdateService, error) {
+	channel = channel.Effective()
 	service, err := appfeatures.NewUpdateService(appfeatures.UpdateConfig{
 		CurrentVersion: CurrentVersion,
+		Channel:        channel,
 		Progress: func(event appfeatures.UpdateEvent) {
 			slog.Info("updater: progress",
 				"stage", event.Stage,
@@ -64,7 +69,7 @@ func newFoundationUpdateService() (*foundationUpdateService, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &foundationUpdateService{service: service}, nil
+	return &foundationUpdateService{service: service, channel: channel}, nil
 }
 
 func (service *foundationUpdateService) Prepare(ctx context.Context) (PreparedUpdate, error) {
@@ -74,7 +79,7 @@ func (service *foundationUpdateService) Prepare(ctx context.Context) (PreparedUp
 	}
 	release := plan.Release()
 	return PreparedUpdate{
-		Release:      releaseInfo(release),
+		Release:      releaseInfo(release, service.channel),
 		ArchiveAsset: plan.ArchiveAsset().Name,
 		Available:    plan.Available(),
 		token:        plan,
@@ -88,40 +93,51 @@ func (service *foundationUpdateService) Apply(ctx context.Context, prepared Prep
 	}
 	result, err := service.service.Apply(ctx, plan)
 	return UpdateResult{
-		Release:          releaseInfo(result.Release),
+		Release:          releaseInfo(result.Release, service.channel),
 		Updated:          result.Updated,
 		ArchiveAsset:     result.ArchiveAsset,
 		BackupRetainedAt: result.BackupRetainedAt,
 	}, err
 }
 
-func releaseInfo(release appfeatures.UpdateRelease) ReleaseInfo {
+func releaseInfo(release appfeatures.UpdateRelease, channel updatechannel.Channel) ReleaseInfo {
 	return ReleaseInfo{
 		TagName:    release.Tag,
 		Name:       release.Tag,
 		Body:       release.Notes,
 		HTMLURL:    release.URL,
 		Prerelease: release.Prerelease,
+		Channel:    string(channel.Effective()),
 	}
 }
 
-// CheckForUpdate performs read-only stable discovery for notices. Interactive
-// flows still call UpdateService.Prepare before showing an approval prompt.
+// CheckForUpdate preserves the historical Stable discovery API. Channel-aware
+// callers use CheckForUpdateInChannel; interactive flows still call Prepare
+// before showing an approval prompt.
 func CheckForUpdate(currentVersion string, _ bool) (*ReleaseInfo, error) {
+	return CheckForUpdateInChannel(currentVersion, updatechannel.Stable)
+}
+
+func CheckForUpdateInChannel(currentVersion string, channel updatechannel.Channel) (*ReleaseInfo, error) {
+	channel = channel.Effective()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	release, err := appfeatures.CheckForUpdate(ctx, currentVersion, nil)
+	release, err := appfeatures.CheckForUpdateChannel(ctx, currentVersion, channel, nil)
 	if err != nil || release == nil {
 		return nil, err
 	}
-	value := releaseInfo(*release)
+	value := releaseInfo(*release, channel)
 	return &value, nil
 }
 
 // SelfUpdate remains for callers that already represent an authorized,
 // non-interactive action. Interactive chat uses Prepare/Apply directly.
-func SelfUpdate(tag string, _ bool) error {
-	service, err := newFoundationUpdateService()
+func SelfUpdate(tag string, prerelease bool) error {
+	channel := updatechannel.Stable
+	if prerelease {
+		channel = updatechannel.Beta
+	}
+	service, err := newFoundationUpdateService(channel)
 	if err != nil {
 		return err
 	}
@@ -139,21 +155,35 @@ func SelfUpdate(tag string, _ bool) error {
 func (e *Engine) SetUpdateService(service UpdateService) {
 	e.updateServiceMu.Lock()
 	defer e.updateServiceMu.Unlock()
-	e.updateService = service
+	if e.updateServices == nil {
+		e.updateServices = make(map[updatechannel.Channel]UpdateService)
+	}
+	e.updateServices[e.updateChannel.Effective()] = service
 	e.updatePlans = nil
 }
 
-func (e *Engine) currentUpdateService() (UpdateService, error) {
+func (e *Engine) SetUpdateChannel(channel string) {
 	e.updateServiceMu.Lock()
 	defer e.updateServiceMu.Unlock()
-	if e.updateService != nil {
-		return e.updateService, nil
+	e.updateChannel = updatechannel.Channel(channel).Effective()
+	e.updatePlans = nil
+}
+
+func (e *Engine) currentUpdateService(channel updatechannel.Channel) (UpdateService, error) {
+	e.updateServiceMu.Lock()
+	defer e.updateServiceMu.Unlock()
+	channel = channel.Effective()
+	if e.updateServices == nil {
+		e.updateServices = make(map[updatechannel.Channel]UpdateService)
 	}
-	service, err := newFoundationUpdateService()
+	if service := e.updateServices[channel]; service != nil {
+		return service, nil
+	}
+	service, err := newFoundationUpdateService(channel)
 	if err != nil {
 		return nil, err
 	}
-	e.updateService = service
+	e.updateServices[channel] = service
 	return service, nil
 }
 

@@ -54,17 +54,31 @@ func TestGetUpdateHintIfAvailableSkipsDev(t *testing.T) {
 	}
 }
 
-func TestValidateStableUpdateArgsRejectsPrereleaseAndUnknownFlags(t *testing.T) {
-	if err := validateStableUpdateArgs(nil); err != nil {
-		t.Fatalf("no args: %v", err)
-	}
-	for _, argument := range []string{"--pre", "--beta"} {
-		err := validateStableUpdateArgs([]string{argument})
-		if err == nil || !strings.Contains(err.Error(), "stable") {
-			t.Fatalf("%s error = %v", argument, err)
+func TestParseUpdateOptionsRejectsUnknownAndAmbiguousValues(t *testing.T) {
+	for _, args := range [][]string{{"--force"}, {"--channel"}, {"--channel", "nightly"}, {"stable", "beta"}} {
+		if _, err := parseUpdateOptions(args); err == nil {
+			t.Fatalf("parseUpdateOptions(%v) accepted invalid input", args)
 		}
 	}
-	if err := validateStableUpdateArgs([]string{"--force"}); err == nil || !strings.Contains(err.Error(), "unknown") {
-		t.Fatalf("unknown flag error = %v", err)
+}
+
+func TestParseUpdateOptionsSupportsExplicitStableAndBetaChannels(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{want: "stable"},
+		{args: []string{"stable"}, want: "stable"},
+		{args: []string{"beta"}, want: "beta"},
+		{args: []string{"--channel", "beta"}, want: "beta"},
+		{args: []string{"--beta"}, want: "beta"},
+	} {
+		got, err := parseUpdateOptions(test.args)
+		if err != nil || string(got.Channel) != test.want {
+			t.Fatalf("parseUpdateOptions(%v) = %#v, %v; want %s", test.args, got, err, test.want)
+		}
+	}
+	if _, err := parseUpdateOptions([]string{"--channel", "nightly"}); err == nil {
+		t.Fatal("unknown update channel was accepted")
 	}
 }

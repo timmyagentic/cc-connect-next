@@ -30,6 +30,7 @@ const (
 	feedbackPendingMax        = 64
 	feedbackErrorHintCooldown = 10 * time.Minute
 	feedbackErrorAttachWindow = 30 * time.Minute
+	feedbackContextWindow     = 15 * time.Minute
 )
 
 type feedbackError struct {
@@ -164,17 +165,75 @@ func (e *Engine) buildFeedbackDraft(sessionKey, description string, overrideGaps
 		recent = nil
 	}
 
+	previousUser, previousAssistant := e.feedbackRelatedContext(sessionKey)
 	input := appfeatures.FeedbackContext{
-		Description:    description,
-		CapabilityGaps: gaps,
-		Version:        CurrentVersion,
-		Agent:          e.agent.Name(),
+		Description:               description,
+		PreviousUserMessage:       previousUser,
+		PreviousAssistantResponse: previousAssistant,
+		CapabilityGaps:            gaps,
+		Version:                   CurrentVersion,
+		Agent:                     e.agent.Name(),
 	}
 	if recent != nil {
 		input.RecentError = recent.Text
 		input.RecentErrorAt = recent.At
 	}
 	return appfeatures.BuildFeedbackDraft(input)
+}
+
+func (e *Engine) feedbackRelatedContext(sessionKey string) (previousUser, previousAssistant string) {
+	if strings.TrimSpace(sessionKey) == "" {
+		return "", ""
+	}
+	_, sessions := e.sessionContextForKey(sessionKey)
+	if sessions == nil {
+		return "", ""
+	}
+	activeID := sessions.ActiveSessionID(sessionKey)
+	if activeID == "" {
+		return "", ""
+	}
+	session := sessions.FindByID(activeID)
+	if session == nil {
+		return "", ""
+	}
+	entries := session.GetHistory(8)
+	now := time.Now()
+	latestIndex := -1
+	for index := len(entries) - 1; index >= 0; index-- {
+		entry := entries[index]
+		if !entry.Timestamp.IsZero() && now.Sub(entry.Timestamp) > feedbackContextWindow {
+			continue
+		}
+		content := strings.TrimSpace(entry.Content)
+		if content == "" || strings.HasPrefix(strings.ToLower(content), "/feedback") {
+			continue
+		}
+		if entry.Role == "assistant" || entry.Role == "user" {
+			latestIndex = index
+			break
+		}
+	}
+	if latestIndex < 0 {
+		return "", ""
+	}
+	latest := entries[latestIndex]
+	if latest.Role == "user" {
+		return strings.TrimSpace(latest.Content), ""
+	}
+	previousAssistant = strings.TrimSpace(latest.Content)
+	for index := latestIndex - 1; index >= 0; index-- {
+		entry := entries[index]
+		if !entry.Timestamp.IsZero() && now.Sub(entry.Timestamp) > feedbackContextWindow {
+			continue
+		}
+		content := strings.TrimSpace(entry.Content)
+		if entry.Role == "user" && content != "" && !strings.HasPrefix(strings.ToLower(content), "/feedback") {
+			previousUser = content
+			break
+		}
+	}
+	return previousUser, previousAssistant
 }
 
 func (e *Engine) rememberPendingFeedback(sessionKey, userID string, draft appfeatures.FeedbackDraft) (string, error) {

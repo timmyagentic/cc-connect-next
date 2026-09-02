@@ -265,7 +265,7 @@ func main() {
 			}
 			return
 		case "check-update":
-			checkUpdate()
+			checkUpdate(os.Args[2:])
 			return
 		case "provider":
 			runProviderCommand(os.Args[2:])
@@ -823,6 +823,7 @@ func main() {
 
 		// Wire busy-message policy (queue | steer), project override first
 		engine.SetBusyMessageMode(cfg.ResolveBusyMessageMode(&proj))
+		engine.SetUpdateChannel(cfg.ResolveUpdateChannel())
 
 		// Wire auto-compress settings
 		if proj.AutoCompress.Enabled != nil && *proj.AutoCompress.Enabled {
@@ -1223,10 +1224,11 @@ func main() {
 
 	// Start the daemon-side update notice (on by default): reminds each
 	// project's explicit admin_from users by private message once per newly
-	// published stable release. Disable with update_notice = false.
+	// published release on the explicitly configured channel. Stable remains
+	// the compatibility default. Disable with update_notice = false.
 	var updateNotifier *core.UpdateNotifier
 	if cfg.UpdateNotice == nil || *cfg.UpdateNotice {
-		updateNotifier = core.NewUpdateNotifier(cfg.DataDir)
+		updateNotifier = core.NewUpdateNotifier(cfg.DataDir, cfg.ResolveUpdateChannel())
 		for i, e := range engines {
 			updateNotifier.RegisterEngine(cfg.Projects[i].Name, e)
 		}
@@ -1785,7 +1787,7 @@ Commands:
                      (--config <path>, --project <name>)
     user-isolation   Audit run_as_user projects and emit an isolation report
 
-  update             Update the current npm or standalone install to latest stable
+  update             Update the current install on the stable or beta channel
   migrate            Copy official CC Connect config/state into ~/.cc-connect-next
   check-update       Check if a newer version is available
   config-example     (deprecated: use 'config example' instead)
@@ -1802,7 +1804,7 @@ Examples:
   cc-connect-next lark-cli setup           Bind the bot as the default bot profile
   cc-connect-next doctor                   Diagnose the configured setup
   cc-connect-next weixin setup             Setup Weixin (ilink) with QR or --token
-  cc-connect-next update                   Update to the latest stable version
+  cc-connect-next update [stable|beta]     Update on an explicit release channel
   cc-connect-next migrate --dry-run        Preview migration from official CC Connect
   cc-connect-next config format            Format the config file
   cc-connect-next capabilities --search "switch model"

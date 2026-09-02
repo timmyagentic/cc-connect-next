@@ -514,7 +514,11 @@ const (
 	MsgMigrationComplete MsgKey = "migration_complete"
 
 	MsgUpgradeChecking        MsgKey = "upgrade_checking"
+	MsgUpgradeCheckingChannel MsgKey = "upgrade_checking_channel"
 	MsgUpgradeUpToDate        MsgKey = "upgrade_up_to_date"
+	MsgUpgradeUpToDateChannel MsgKey = "upgrade_up_to_date_channel"
+	MsgUpgradeChannelUsage    MsgKey = "upgrade_channel_usage"
+	MsgUpgradeChannelSummary  MsgKey = "upgrade_channel_summary"
 	MsgUpgradeAvailable       MsgKey = "upgrade_available"
 	MsgUpgradeAvailableAction MsgKey = "upgrade_available_action"
 	MsgUpgradePlanDetails     MsgKey = "upgrade_plan_details"
@@ -3251,12 +3255,40 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese:           "🔍 アップデートを確認中...",
 		LangSpanish:            "🔍 Buscando actualizaciones...",
 	},
+	MsgUpgradeCheckingChannel: {
+		LangEnglish:            "🔍 Checking the %s update channel...",
+		LangChinese:            "🔍 正在检查 %s 更新通道...",
+		LangTraditionalChinese: "🔍 正在檢查 %s 更新通道...",
+		LangJapanese:           "🔍 %s 更新チャンネルを確認中...",
+		LangSpanish:            "🔍 Buscando actualizaciones en el canal %s...",
+	},
 	MsgUpgradeUpToDate: {
 		LangEnglish:            "✅ Already up to date (%s)",
 		LangChinese:            "✅ 已是最新版本 (%s)",
 		LangTraditionalChinese: "✅ 已是最新版本 (%s)",
 		LangJapanese:           "✅ 最新バージョンです (%s)",
 		LangSpanish:            "✅ Ya está actualizado (%s)",
+	},
+	MsgUpgradeUpToDateChannel: {
+		LangEnglish:            "✅ Already up to date on the %s channel (%s)",
+		LangChinese:            "✅ %s 通道已是最新版本 (%s)",
+		LangTraditionalChinese: "✅ %s 通道已是最新版本 (%s)",
+		LangJapanese:           "✅ %s チャンネルは最新です (%s)",
+		LangSpanish:            "✅ Ya está actualizado en el canal %s (%s)",
+	},
+	MsgUpgradeChannelUsage: {
+		LangEnglish:            "Choose `stable` or `beta`: `/upgrade [stable|beta]`.",
+		LangChinese:            "请选择 `stable` 或 `beta`：`/upgrade [stable|beta]`。",
+		LangTraditionalChinese: "請選擇 `stable` 或 `beta`：`/upgrade [stable|beta]`。",
+		LangJapanese:           "`stable` または `beta` を選択してください：`/upgrade [stable|beta]`。",
+		LangSpanish:            "Elige `stable` o `beta`: `/upgrade [stable|beta]`.",
+	},
+	MsgUpgradeChannelSummary: {
+		LangEnglish:            "Channel: `%s`\nRelease type: `%s`",
+		LangChinese:            "更新通道：`%s`\nRelease 类型：`%s`",
+		LangTraditionalChinese: "更新通道：`%s`\nRelease 類型：`%s`",
+		LangJapanese:           "更新チャンネル: `%s`\nリリース種別: `%s`",
+		LangSpanish:            "Canal: `%s`\nTipo de versión: `%s`",
 	},
 	MsgUpgradeAvailable: {
 		LangEnglish: "🆕 New version available!\n\n\n" +
@@ -3308,11 +3340,11 @@ var messages = map[MsgKey]map[Language]string{
 			"%s",
 	},
 	MsgUpgradePlanDetails: {
-		LangEnglish:            "Selected artifact: `%s`\n\n%s",
-		LangChinese:            "已选定产物：`%s`\n\n%s",
-		LangTraditionalChinese: "已選定產物：`%s`\n\n%s",
-		LangJapanese:           "選択された成果物: `%s`\n\n%s",
-		LangSpanish:            "Artefacto seleccionado: `%s`\n\n%s",
+		LangEnglish:            "Channel: `%s`\nRelease type: `%s`\nSelected artifact: `%s`\n\n%s",
+		LangChinese:            "更新通道：`%s`\nRelease 类型：`%s`\n已选定产物：`%s`\n\n%s",
+		LangTraditionalChinese: "更新通道：`%s`\nRelease 類型：`%s`\n已選定產物：`%s`\n\n%s",
+		LangJapanese:           "更新チャンネル: `%s`\nリリース種別: `%s`\n選択された成果物: `%s`\n\n%s",
+		LangSpanish:            "Canal: `%s`\nTipo de versión: `%s`\nArtefacto seleccionado: `%s`\n\n%s",
 	},
 	MsgUpgradePlanMissing: {
 		LangEnglish:            "The reviewed update plan is missing or expired. Run `/upgrade` again to review the current exact release before installing.",
@@ -3696,18 +3728,18 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "↪️ Tu añadido fue aceptado justo cuando la tarea terminó; consulta la respuesta anterior.",
 	},
 	MsgUpdateNoticeAvailable: {
-		LangEnglish:            "📦 cc-connect-next %s has been released (you are on %s). Reply “update” to review the exact release plan before installing.",
-		LangChinese:            "📦 cc-connect-next %s 已发布（当前版本 %s）。回复「更新」可先查看精确 Release 计划，再确认安装。",
-		LangTraditionalChinese: "📦 cc-connect-next %s 已發布（目前版本 %s）。回覆「更新」可先查看精確 Release 計畫，再確認安裝。",
-		LangJapanese:           "📦 cc-connect-next %s がリリースされました（現在のバージョン %s）。「update」と返信すると、正確なリリースプランを確認してからインストールできます。",
-		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s). Responde “update” para revisar el plan exacto antes de instalar.",
+		LangEnglish:            "📦 cc-connect-next %s is available on the %s channel (you are on %s). Reply “update” to review the exact release plan before installing.",
+		LangChinese:            "📦 cc-connect-next %s 已在 %s 通道发布（当前版本 %s）。回复「更新」可先查看精确 Release 计划，再确认安装。",
+		LangTraditionalChinese: "📦 cc-connect-next %s 已在 %s 通道發布（目前版本 %s）。回覆「更新」可先查看精確 Release 計畫，再確認安裝。",
+		LangJapanese:           "📦 cc-connect-next %s が %s チャンネルで利用できます（現在のバージョン %s）。「update」と返信すると、正確なリリースプランを確認してからインストールできます。",
+		LangSpanish:            "📦 cc-connect-next %s está disponible en el canal %s (versión actual %s). Responde “update” para revisar el plan exacto antes de instalar.",
 	},
 	MsgUpdateNoticeAvailableAction: {
-		LangEnglish:            "📦 cc-connect-next %s has been released (you are on %s).",
-		LangChinese:            "📦 cc-connect-next %s 已发布（当前版本 %s）。",
-		LangTraditionalChinese: "📦 cc-connect-next %s 已發布（目前版本 %s）。",
-		LangJapanese:           "📦 cc-connect-next %s がリリースされました（現在のバージョン %s）。",
-		LangSpanish:            "📦 cc-connect-next %s ya está disponible (versión actual %s).",
+		LangEnglish:            "📦 cc-connect-next %s is available on the %s channel (you are on %s).",
+		LangChinese:            "📦 cc-connect-next %s 已在 %s 通道发布（当前版本 %s）。",
+		LangTraditionalChinese: "📦 cc-connect-next %s 已在 %s 通道發布（目前版本 %s）。",
+		LangJapanese:           "📦 cc-connect-next %s が %s チャンネルで利用できます（現在のバージョン %s）。",
+		LangSpanish:            "📦 cc-connect-next %s está disponible en el canal %s (versión actual %s).",
 	},
 	MsgUpdateBtnNow: {
 		LangEnglish:            "Review update",
