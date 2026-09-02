@@ -18,9 +18,10 @@ import (
 )
 
 // Feedback remains a host-owned product flow over the reusable Foundation:
-// CC Connect Next chooses context, renders every structured field, owns cards,
-// localization and fallback, and only submits the exact pending Draft after a
-// separate explicit user action.
+// CC Connect Next chooses and redacts the structured context, owns cards,
+// localization and fallback, and treats an explicit chat command or card action
+// as approval to submit immediately. Proactive offers remain zero-network until
+// the user acts. The local-Agent CLI keeps its separate preview/token contract.
 
 const (
 	DefaultFeedbackEndpoint = "https://cc-connect-feedback.qianbi3956001.workers.dev/v1/feedback"
@@ -57,7 +58,7 @@ func (e *Engine) SetFeedbackConfig(enabled bool, endpoint string) {
 }
 
 // SetFeedbackCapabilityGaps records config keys this build does not consume;
-// they seed proactive previews and a bare /feedback draft.
+// they seed proactive offers and a bare /feedback draft.
 func (e *Engine) SetFeedbackCapabilityGaps(keys []string) {
 	cleaned := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -83,14 +84,10 @@ func (e *Engine) feedbackActive() bool {
 	return e.feedbackEnabled && e.feedbackEndpoint != ""
 }
 
-// cmdFeedback is deliberately two-step:
-//
-//	/feedback <description>  -> render and retain the complete redacted draft
-//	/feedback confirm        -> approve and submit that exact draft
-//	/feedback cancel         -> discard it
-//
-// Card buttons provide the same confirm/cancel actions without requiring the
-// user to learn command syntax.
+// cmdFeedback treats the inbound command or card action as the explicit user
+// approval. Ordinary /feedback invocations build and submit immediately. The
+// internal submit-token form is used only by proactive zero-network offers so
+// the user's later click submits the exact prepared Draft in one action.
 func (e *Engine) cmdFeedback(platform Platform, message *Message, raw string) {
 	if !e.feedbackActive() {
 		if message.IsCardAction {
@@ -102,18 +99,13 @@ func (e *Engine) cmdFeedback(platform Platform, message *Message, raw string) {
 	}
 	key := feedbackSessionKey(platform, message)
 	argument := strings.TrimSpace(raw)
-	control, token, controlled := feedbackControl(argument)
-	switch control {
-	case "confirm", "submit":
+	if token, handled := feedbackOfferToken(argument); handled {
 		e.submitPendingFeedback(platform, message, key, message.UserID, token)
 		return
-	case "cancel", "dismiss":
-		e.clearPendingFeedback(key, message.UserID, token)
-		e.reply(platform, message.ReplyCtx, e.i18n.T(MsgFeedbackDismissed))
-		return
 	}
-	if controlled {
-		argument = ""
+	if isLegacyFeedbackControl(argument) {
+		e.reply(platform, message.ReplyCtx, e.i18n.T(MsgFeedbackUsage))
+		return
 	}
 
 	draft, err := e.buildFeedbackDraft(key, argument, nil)
@@ -121,31 +113,35 @@ func (e *Engine) cmdFeedback(platform Platform, message *Message, raw string) {
 		e.reply(platform, message.ReplyCtx, e.i18n.T(MsgFeedbackUsage))
 		return
 	}
-	token, err = e.rememberPendingFeedback(key, message.UserID, draft)
-	if err != nil {
-		e.reply(platform, message.ReplyCtx, e.i18n.Tf(MsgError, err))
-		return
-	}
-	if err := e.deliverFeedbackPreview(platform, message.ReplyCtx, draft.Report(), token, false); err != nil {
-		e.clearPendingFeedback(key, message.UserID, token)
-		slog.Warn("feedback: preview delivery failed", "platform", platform.Name(), "error", err)
-	}
+	_, err = e.submitFeedbackDraft(e.ctx, draft)
+	e.deliverFeedbackSubmitResult(platform, message, err == nil)
 }
 
-func feedbackControl(argument string) (control, token string, ok bool) {
+func feedbackOfferToken(argument string) (token string, handled bool) {
+	fields := strings.Fields(argument)
+	if len(fields) == 0 || !strings.EqualFold(fields[0], "submit-token") {
+		return "", false
+	}
+	if len(fields) != 2 {
+		return "", true
+	}
+	return fields[1], true
+}
+
+func isLegacyFeedbackControl(argument string) bool {
 	fields := strings.Fields(argument)
 	if len(fields) == 0 || len(fields) > 2 {
-		return "", "", false
+		return false
 	}
-	control = strings.ToLower(fields[0])
-	switch control {
-	case "confirm", "submit", "cancel", "dismiss", "error", "config":
-		if len(fields) == 2 {
-			token = fields[1]
+	switch strings.ToLower(fields[0]) {
+	case "confirm", "submit", "cancel", "dismiss":
+		if len(fields) == 1 {
+			return true
 		}
-		return control, token, true
+		decoded, err := hex.DecodeString(fields[1])
+		return err == nil && len(decoded) == 16
 	default:
-		return "", "", false
+		return false
 	}
 }
 
@@ -271,7 +267,7 @@ func (e *Engine) takePendingFeedback(sessionKey, userID, token string) (appfeatu
 	now := time.Now()
 	e.prunePendingFeedbackLocked(now)
 	if token == "" {
-		token = e.uniqueFeedbackTokenLocked(sessionKey, userID)
+		return appfeatures.FeedbackDraft{}, false
 	}
 	pending, exists := e.feedbackPending[token]
 	if !exists {
@@ -288,26 +284,9 @@ func (e *Engine) clearPendingFeedback(sessionKey, userID, token string) {
 	e.feedbackMu.Lock()
 	defer e.feedbackMu.Unlock()
 	e.prunePendingFeedbackLocked(time.Now())
-	if token == "" {
-		token = e.uniqueFeedbackTokenLocked(sessionKey, userID)
-	}
 	if pending, exists := e.feedbackPending[token]; exists && !pending.AgentOnly && pending.SessionKey == sessionKey && (pending.UserID == "" || pending.UserID == userID) {
 		e.deletePendingFeedbackLocked(token)
 	}
-}
-
-func (e *Engine) uniqueFeedbackTokenLocked(sessionKey, userID string) string {
-	match := ""
-	for token, pending := range e.feedbackPending {
-		if pending.AgentOnly || pending.SessionKey != sessionKey || (pending.UserID != "" && pending.UserID != userID) {
-			continue
-		}
-		if match != "" {
-			return ""
-		}
-		match = token
-	}
-	return match
 }
 
 func (e *Engine) deletePendingFeedbackLocked(token string) {
@@ -374,48 +353,19 @@ func (e *Engine) deliverFeedbackSubmitResult(platform Platform, message *Message
 	}
 }
 
-func (e *Engine) feedbackPreview(report appfeatures.FeedbackReport) string {
-	empty := e.i18n.T(MsgFeedbackPreviewEmpty)
-	description := strings.TrimSpace(report.Description)
-	if description == "" {
-		description = empty
-	}
-	recentError := empty
-	if report.RecentError != nil {
-		recentError = fmt.Sprintf("%s\n%s", report.RecentError.At.UTC().Format(time.RFC3339), report.RecentError.Text)
-	}
-	gaps := empty
-	if len(report.CapabilityGaps) > 0 {
-		gaps = "- `" + strings.Join(report.CapabilityGaps, "`\n- `") + "`"
-	}
-	return e.i18n.Tf(
-		MsgFeedbackPreview,
-		description,
-		recentError,
-		gaps,
-		report.Environment.Product,
-		report.Environment.Version,
-		report.Environment.OS,
-		report.Environment.Arch,
-		report.Environment.Agent,
-	)
-}
-
-func (e *Engine) feedbackPreviewCard(report appfeatures.FeedbackReport, token string) *Card {
+func (e *Engine) feedbackOfferCard(token string) *Card {
 	return NewCard().
 		Title(e.i18n.T(MsgFeedbackAskTitle), "orange").
-		Markdown(e.feedbackPreview(report)).
+		Markdown(e.i18n.T(MsgFeedbackHint)).
 		Buttons(
-			PrimaryBtn(e.i18n.T(MsgFeedbackBtnSubmit), "cmd:/feedback confirm "+token),
-			DefaultBtn(e.i18n.T(MsgFeedbackBtnDismiss), "cmd:/feedback cancel "+token),
+			PrimaryBtn(e.i18n.T(MsgFeedbackBtnSubmit), "cmd:/feedback submit-token "+token),
 		).
 		Build()
 }
 
-func (e *Engine) deliverFeedbackPreview(platform Platform, replyCtx any, report appfeatures.FeedbackReport, token string, proactive bool) error {
-	preview := e.feedbackPreview(report)
+func (e *Engine) deliverFeedbackOffer(platform Platform, replyCtx any, token string, proactive bool) error {
 	if sender, ok := platform.(CardSender); ok {
-		card := e.renderCardForPlatform(platform, e.feedbackPreviewCard(report, token))
+		card := e.renderCardForPlatform(platform, e.feedbackOfferCard(token))
 		ctx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
 		defer cancel()
 		var err error
@@ -430,15 +380,13 @@ func (e *Engine) deliverFeedbackPreview(platform Platform, replyCtx any, report 
 	}
 	if sender, ok := platform.(InlineButtonSender); ok {
 		buttons := [][]ButtonOption{{
-			{Text: e.i18n.T(MsgFeedbackBtnSubmit), Data: "cmd:/feedback confirm " + token},
-			{Text: e.i18n.T(MsgFeedbackBtnDismiss), Data: "cmd:/feedback cancel " + token},
+			{Text: e.i18n.T(MsgFeedbackBtnSubmit), Data: "cmd:/feedback submit-token " + token},
 		}}
-		if err := sender.SendWithButtons(e.ctx, replyCtx, preview, buttons); err == nil {
+		if err := sender.SendWithButtons(e.ctx, replyCtx, e.i18n.T(MsgFeedbackHint), buttons); err == nil {
 			return nil
 		}
 	}
-	confirmation := strings.Replace(e.i18n.T(MsgFeedbackPreviewConfirm), "/feedback confirm", "/feedback confirm "+token, 1)
-	text := preview + "\n\n" + confirmation
+	text := e.i18n.T(MsgFeedbackHint) + "\n\n" + e.i18n.Tf(MsgFeedbackOfferSubmit, token)
 	if proactive {
 		return e.sendWithError(platform, replyCtx, text)
 	}
@@ -483,9 +431,9 @@ func (e *Engine) maybeSendFeedbackErrorHint(platform Platform, replyCtx any, ses
 	if err != nil {
 		return
 	}
-	if err := e.deliverFeedbackPreview(platform, replyCtx, draft.Report(), token, true); err != nil {
+	if err := e.deliverFeedbackOffer(platform, replyCtx, token, true); err != nil {
 		e.clearPendingFeedback(sessionKey, "", token)
-		slog.Debug("feedback: proactive preview failed", "session_key", sessionKey, "error", err)
+		slog.Debug("feedback: proactive offer failed", "session_key", sessionKey, "error", err)
 	}
 }
 
@@ -502,7 +450,7 @@ func (e *Engine) NotifyCapabilityGap(keys []string) bool {
 		if err != nil {
 			return err
 		}
-		if err := e.deliverFeedbackPreview(platform, replyCtx, draft.Report(), token, true); err != nil {
+		if err := e.deliverFeedbackOffer(platform, replyCtx, token, true); err != nil {
 			e.clearPendingFeedback(sessionKey, "", token)
 			return err
 		}

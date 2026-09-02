@@ -603,14 +603,10 @@ const (
 	MsgFeedbackSubmitFailed   MsgKey = "feedback_submit_failed"
 	MsgFeedbackDisabled       MsgKey = "feedback_disabled"
 	MsgFeedbackHint           MsgKey = "feedback_hint"
+	MsgFeedbackOfferSubmit    MsgKey = "feedback_offer_submit"
 	MsgFeedbackAskTitle       MsgKey = "feedback_ask_title"
 	MsgFeedbackBtnSubmit      MsgKey = "feedback_btn_submit"
-	MsgFeedbackBtnDismiss     MsgKey = "feedback_btn_dismiss"
-	MsgFeedbackPreview        MsgKey = "feedback_preview"
-	MsgFeedbackPreviewEmpty   MsgKey = "feedback_preview_empty"
-	MsgFeedbackPreviewConfirm MsgKey = "feedback_preview_confirm"
 	MsgFeedbackPendingMissing MsgKey = "feedback_pending_missing"
-	MsgFeedbackDismissed      MsgKey = "feedback_dismissed"
 
 	MsgWhoamiTitle     MsgKey = "whoami_title"
 	MsgWhoamiCardTitle MsgKey = "whoami_card_title"
@@ -3770,46 +3766,18 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Novedades",
 	},
 	MsgFeedbackUsage: {
-		LangEnglish:            "\U0001F4EE Build a complete redacted preview for any problem or wish:\n`/feedback <describe it>`\nReview every field, then explicitly submit or dismiss it. Recent errors and unsupported config keys are attached automatically; no GitHub account is needed.",
-		LangChinese:            "\U0001F4EE 为使用中的问题或想要的能力生成完整脱敏预览：\n`/feedback <描述>`\n检查全部字段后再明确提交或取消。最近的错误和不支持的配置项会自动附上，无需 GitHub 账号。",
-		LangTraditionalChinese: "\U0001F4EE 為使用中的問題或想要的能力產生完整去敏預覽：\n`/feedback <描述>`\n檢查全部欄位後再明確提交或取消。最近的錯誤和不支援的設定項會自動附上，無需 GitHub 帳號。",
-		LangJapanese:           "\U0001F4EE 問題や要望の完全なマスキング済みプレビューを作成します：\n`/feedback <内容を記述>`\n全項目を確認してから明示的に送信または破棄します。直近のエラーや未対応キーは自動添付され、GitHub アカウントは不要です。",
-		LangSpanish:            "\U0001F4EE Crea una vista previa completa y redactada de cualquier problema o deseo:\n`/feedback <descr\u00edbelo>`\nRevisa todos los campos y luego env\u00edala o desc\u00e1rtala expl\u00edcitamente. Los errores recientes y las claves no admitidas se adjuntan autom\u00e1ticamente; no se necesita cuenta de GitHub.",
-	},
-	MsgFeedbackPreview: {
-		LangEnglish:            "📋 **Complete feedback preview**\n\n**Description**\n%s\n\n**Recent error**\n%s\n\n**Capability gaps**\n%s\n\n**Environment**\n- Product: `%s`\n- Version: `%s`\n- OS/Arch: `%s/%s`\n- Agent: `%s`",
-		LangChinese:            "📋 **完整反馈预览**\n\n**描述**\n%s\n\n**最近错误**\n%s\n\n**能力缺口**\n%s\n\n**环境**\n- 产品：`%s`\n- 版本：`%s`\n- OS/Arch：`%s/%s`\n- Agent：`%s`",
-		LangTraditionalChinese: "📋 **完整回饋預覽**\n\n**描述**\n%s\n\n**最近錯誤**\n%s\n\n**能力缺口**\n%s\n\n**環境**\n- 產品：`%s`\n- 版本：`%s`\n- OS/Arch：`%s/%s`\n- Agent：`%s`",
-		LangJapanese:           "📋 **フィードバックの完全プレビュー**\n\n**説明**\n%s\n\n**直近のエラー**\n%s\n\n**不足している機能**\n%s\n\n**環境**\n- 製品: `%s`\n- バージョン: `%s`\n- OS/Arch: `%s/%s`\n- Agent: `%s`",
-		LangSpanish:            "📋 **Vista previa completa del feedback**\n\n**Descripción**\n%s\n\n**Error reciente**\n%s\n\n**Capacidades faltantes**\n%s\n\n**Entorno**\n- Producto: `%s`\n- Versión: `%s`\n- OS/Arch: `%s/%s`\n- Agent: `%s`",
-	},
-	MsgFeedbackPreviewEmpty: {
-		LangEnglish:            "None",
-		LangChinese:            "无",
-		LangTraditionalChinese: "無",
-		LangJapanese:           "なし",
-		LangSpanish:            "Ninguno",
-	},
-	MsgFeedbackPreviewConfirm: {
-		LangEnglish:            "Review every field above. Send `/feedback confirm` to submit this exact preview, or `/feedback cancel` to discard it.",
-		LangChinese:            "请检查上面的全部字段。发送 `/feedback confirm` 提交这份精确预览，或发送 `/feedback cancel` 取消。",
-		LangTraditionalChinese: "請檢查上面的全部欄位。傳送 `/feedback confirm` 提交這份精確預覽，或傳送 `/feedback cancel` 取消。",
-		LangJapanese:           "上の全項目を確認してください。`/feedback confirm` でこのプレビューを送信し、`/feedback cancel` で破棄します。",
-		LangSpanish:            "Revisa todos los campos. Envía `/feedback confirm` para enviar exactamente esta vista previa o `/feedback cancel` para descartarla.",
+		LangEnglish:            "\U0001F4EE Submit a bounded, redacted report for any problem or wish:\n`/feedback <describe it>`\nThe explicit command submits immediately. Recent errors and unsupported config keys are attached automatically; no preview, second confirmation, or GitHub account is needed.",
+		LangChinese:            "\U0001F4EE 直接提交使用中的问题或想要的能力：\n`/feedback <描述>`\n这条明确命令会立即提交有界、脱敏的报告。最近的错误和不支持的配置项会自动附上，无需预览、二次确认或 GitHub 账号。",
+		LangTraditionalChinese: "\U0001F4EE 直接提交使用中的問題或想要的能力：\n`/feedback <描述>`\n這條明確命令會立即提交有界、去敏的報告。最近的錯誤和不支援的設定項會自動附上，無需預覽、二次確認或 GitHub 帳號。",
+		LangJapanese:           "\U0001F4EE 問題や要望を、範囲制限・マスキング済みのレポートとして直接送信します：\n`/feedback <内容を記述>`\nこの明示的なコマンドで直ちに送信されます。直近のエラーや未対応キーは自動添付され、プレビュー、再確認、GitHub アカウントは不要です。",
+		LangSpanish:            "\U0001F4EE Envía directamente un informe acotado y redactado sobre cualquier problema o deseo:\n`/feedback <descríbelo>`\nEl comando explícito lo envía de inmediato. Los errores recientes y las claves no admitidas se adjuntan automáticamente; no hacen falta vista previa, segunda confirmación ni cuenta de GitHub.",
 	},
 	MsgFeedbackPendingMissing: {
-		LangEnglish:            "There is no current feedback preview to submit. Start with `/feedback <describe it>`.",
-		LangChinese:            "当前没有可提交的反馈预览，请先发送 `/feedback <描述>`。",
-		LangTraditionalChinese: "目前沒有可提交的回饋預覽，請先傳送 `/feedback <描述>`。",
-		LangJapanese:           "送信待ちのフィードバックプレビューがありません。まず `/feedback <内容>` を送信してください。",
-		LangSpanish:            "No hay una vista previa pendiente. Empieza con `/feedback <descríbelo>`.",
-	},
-	MsgFeedbackDismissed: {
-		LangEnglish:            "Feedback preview discarded. Nothing was submitted.",
-		LangChinese:            "反馈预览已取消，没有提交任何内容。",
-		LangTraditionalChinese: "回饋預覽已取消，沒有提交任何內容。",
-		LangJapanese:           "フィードバックのプレビューを破棄しました。何も送信されていません。",
-		LangSpanish:            "Vista previa descartada. No se envió nada.",
+		LangEnglish:            "This prepared feedback action is no longer available. Trigger Feedback again.",
+		LangChinese:            "这次预备反馈操作已不可用，请重新触发 Feedback。",
+		LangTraditionalChinese: "這次預備回饋操作已不可用，請重新觸發 Feedback。",
+		LangJapanese:           "準備済みのフィードバック操作は使用できなくなりました。もう一度 Feedback を実行してください。",
+		LangSpanish:            "Esta acción de feedback preparada ya no está disponible. Vuelve a activar Feedback.",
 	},
 	MsgFeedbackAskTitle: {
 		LangEnglish:            "Report to the author?",
@@ -3824,13 +3792,6 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "回饋給作者",
 		LangJapanese:           "作者に報告",
 		LangSpanish:            "Informar al autor",
-	},
-	MsgFeedbackBtnDismiss: {
-		LangEnglish:            "Ignore",
-		LangChinese:            "忽略",
-		LangTraditionalChinese: "忽略",
-		LangJapanese:           "無視する",
-		LangSpanish:            "Ignorar",
 	},
 	MsgFeedbackSubmitted: {
 		LangEnglish:            "Submission succeeded",
@@ -3854,11 +3815,18 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "El canal de feedback está deshabilitado en este despliegue ([feedback] en config.toml).",
 	},
 	MsgFeedbackHint: {
-		LangEnglish:            "\U0001F4A1 Missing a capability? Send `/feedback <describe it>` to review the complete redacted draft before submitting it to the author.",
-		LangChinese:            "\U0001F4A1 需要的能力不存在？发送 `/feedback <描述>`，先检查完整脱敏草稿，再提交给作者。",
-		LangTraditionalChinese: "\U0001F4A1 需要的能力不存在？傳送 `/feedback <描述>`，先檢查完整去敏草稿，再提交給作者。",
-		LangJapanese:           "\U0001F4A1 必要な機能がありませんか？`/feedback <内容>` で完全なマスキング済み草稿を確認してから作者へ送信できます。",
-		LangSpanish:            "\U0001F4A1 \u00bfFalta una capacidad? Env\u00eda `/feedback <descr\u00edbela>` para revisar el borrador completo y redactado antes de enviarlo al autor.",
+		LangEnglish:            "\U0001F4A1 Report this problem or a missing capability with `/feedback <describe it>`; it submits a bounded, redacted diagnostic report directly to the author.",
+		LangChinese:            "\U0001F4A1 要反馈当前问题或缺失能力，可发送 `/feedback <描述>`；它会直接向作者提交有界、脱敏的诊断报告。",
+		LangTraditionalChinese: "\U0001F4A1 要回饋目前問題或缺失能力，可傳送 `/feedback <描述>`；它會直接向作者提交有界、去敏的診斷報告。",
+		LangJapanese:           "\U0001F4A1 この問題や不足している機能は `/feedback <内容>` で報告できます。範囲制限・マスキング済みの診断レポートが作者へ直接送信されます。",
+		LangSpanish:            "\U0001F4A1 Informa de este problema o de una capacidad ausente con `/feedback <descríbela>`; enviará directamente al autor un informe de diagnóstico acotado y redactado.",
+	},
+	MsgFeedbackOfferSubmit: {
+		LangEnglish:            "Send `/feedback submit-token %s` to submit this prepared, redacted diagnostic report.",
+		LangChinese:            "发送 `/feedback submit-token %s`，即可提交这份已准备并脱敏的诊断报告。",
+		LangTraditionalChinese: "傳送 `/feedback submit-token %s`，即可提交這份已準備並去敏的診斷報告。",
+		LangJapanese:           "`/feedback submit-token %s` を送信すると、準備済み・マスキング済みの診断レポートを提出します。",
+		LangSpanish:            "Envía `/feedback submit-token %s` para remitir este informe de diagnóstico preparado y redactado.",
 	},
 	MsgWhoamiTitle: {
 		LangEnglish:            "🪪 **Your Identity**",

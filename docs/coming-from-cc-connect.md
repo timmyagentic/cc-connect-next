@@ -32,7 +32,7 @@ Official CC Connect queues busy-time messages FIFO: they wait for the next turn.
 
 ### 5. When something breaks, feedback stays one short flow
 
-`/feedback` renders the complete redacted Foundation draft first; a separate button or `confirm` submits that exact preview through the anonymous author relay. Cancel and missing approval make no request, no GitHub account is needed, and failed turns can prepare the same reviewable preview proactively.
+An explicit `/feedback <description>` command or Feedback card action submits the bounded, redacted Foundation Draft immediately through the anonymous author relay—there is no preview or second confirmation, and the visible result contains no Issue link. Automatic failed-turn offers make no request until the user clicks once, and no GitHub account is needed.
 
 Everything else (14 agents × 15 platforms, cron & webhooks, voice in/out, web admin, five-language i18n) is in the [main README](../README.en.md).
 

@@ -105,8 +105,8 @@ var agentToolDefinitions = []agentToolDefinition{
 		},
 		fallback: CapabilityFallback{
 			Mode:          "chat-command",
-			Description:   "The Agent path fails closed without a live turn credential or exact approval token; use /feedback in chat for a user-visible preview and confirmation.",
-			DescriptionZH: "缺少活动回合凭证或精确 approval token 时 Agent 路径会失败关闭；可改用聊天内 /feedback 展示并确认。",
+			Description:   "The Agent path fails closed without a live turn credential or exact approval token; an explicit /feedback action in chat submits directly without a preview or second confirmation.",
+			DescriptionZH: "缺少活动回合凭证或精确 approval token 时 Agent 路径会失败关闭；聊天内明确触发 /feedback 会直接提交，无需预览或二次确认。",
 		},
 	},
 	{

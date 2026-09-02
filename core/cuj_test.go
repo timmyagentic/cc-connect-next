@@ -2196,18 +2196,19 @@ func TestCUJ_G4_AgentCrashReturnsErrorAndRecovers(t *testing.T) {
 	}
 }
 
-// CUJ-J1 · Feedback is previewed, can be cancelled with zero requests, and
-// only a later explicit action submits the exact pending Foundation Draft.
-func TestCUJ_J1_FeedbackPreviewCancelAndExactApproval(t *testing.T) {
+// CUJ-J1 · Every explicit chat Feedback action submits its structured,
+// redacted Draft immediately. No preview or second confirmation is shown, and
+// the visible result never exposes the Relay reference URL.
+func TestCUJ_J1_FeedbackExplicitTriggerSubmitsDirectly(t *testing.T) {
 	env := newCUJEnv(t)
 	env.engine.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
 	previousVersion := CurrentVersion
 	CurrentVersion = "v0.2.1"
 	t.Cleanup(func() { CurrentVersion = previousVersion })
-	submitted := make(chan appfeatures.FeedbackReport, 1)
+	submitted := make(chan appfeatures.FeedbackReport, 3)
 	env.engine.feedbackSubmitFn = func(_ context.Context, draft appfeatures.FeedbackDraft, approved bool) (appfeatures.FeedbackReceipt, error) {
 		if !approved {
-			t.Fatal("submission was not explicitly approved")
+			t.Fatal("explicit chat Feedback was not treated as approval")
 		}
 		submitted <- draft.Report()
 		return appfeatures.FeedbackReceipt{ReferenceURL: "https://github.com/timmyagentic/cc-connect-next/issues/7"}, nil
@@ -2216,39 +2217,24 @@ func TestCUJ_J1_FeedbackPreviewCancelAndExactApproval(t *testing.T) {
 	session.AddHistory("user", "why is beta called stable? token=private-value")
 	session.AddHistory("assistant", "The current updater exposes LatestStable from /Users/private/project.")
 
-	// 1. Preview, but do not submit.
-	env.userSends("feedback", "/feedback first problem")
-	if !env.sentContains("Complete feedback preview") || !env.sentContains("first problem") || !env.sentContains("Related diagnostic context") || !env.sentContains("LatestStable") || !env.sentContains("[REDACTED") || !env.sentContains("OS/Arch") {
-		t.Fatalf("user did not see every preview section: %v", env.plat.getSent())
-	}
-	if env.sentContains("private-value") || env.sentContains("/Users/private") {
-		t.Fatalf("feedback preview leaked adjacent context: %v", env.plat.getSent())
-	}
-	select {
-	case <-submitted:
-		t.Fatal("preview made a request")
-	default:
-	}
-
-	// 2. Cancel and prove the first draft can never be submitted.
-	env.userSends("feedback", "/feedback cancel")
-	if !env.sentContains("Nothing was submitted") {
-		t.Fatalf("cancel acknowledgement missing: %v", env.plat.getSent())
-	}
-
-	// 3/4. Create a different draft, then approve it separately.
-	env.userSends("feedback", "/feedback second problem")
-	env.userSends("feedback", "/feedback confirm")
-	select {
-	case report := <-submitted:
-		if !strings.Contains(report.Description, "second problem") || !strings.Contains(report.Description, "Related diagnostic context") {
-			t.Fatalf("submitted report drifted: %#v", report)
+	for _, description := range []string{"first problem", "second problem", "third problem"} {
+		env.userSends("feedback", "/feedback "+description)
+		select {
+		case report := <-submitted:
+			if !strings.Contains(report.Description, description) || !strings.Contains(report.Description, "Related diagnostic context") || !strings.Contains(report.Description, "LatestStable") || !strings.Contains(report.Description, "[REDACTED") {
+				t.Fatalf("explicit Feedback submitted the wrong Draft: %#v", report)
+			}
+			if strings.Contains(report.Description, "private-value") || strings.Contains(report.Description, "/Users/private") {
+				t.Fatalf("submitted Draft leaked adjacent context: %#v", report)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("explicit Feedback %q did not submit directly", description)
 		}
-	case <-time.After(time.Second):
-		t.Fatal("approved draft was not submitted")
 	}
-	if !env.sentContains("Submission succeeded") || env.sentContains("issues/7") {
-		t.Fatalf("user did not receive a link-free success status: %v", env.plat.getSent())
+
+	visible := strings.Join(env.plat.getSent(), "\n")
+	if strings.Count(visible, "Submission succeeded") != 3 || strings.Contains(strings.ToLower(visible), "preview") || strings.Contains(visible, "issues/7") || strings.Contains(visible, "private-value") || strings.Contains(visible, "/Users/private") {
+		t.Fatalf("user did not receive only direct, link-free result statuses: %v", env.plat.getSent())
 	}
 }
 

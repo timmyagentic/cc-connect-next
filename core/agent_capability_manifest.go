@@ -576,7 +576,7 @@ func (e *Engine) commandCapabilityAvailability(id, probe string, snapshot capabi
 		enabled := e.feedbackEnabled
 		e.feedbackMu.Unlock()
 		if enabled {
-			return available("The feedback channel is enabled; a bounded redacted adjacent diagnostic context is included in the complete preview, and submission still requires confirmation.", "反馈通道已启用；完整预览会加入有界、脱敏的相邻诊断上下文，提交仍需确认。")
+			return available("The chat feedback channel is enabled; an explicit /feedback command or Feedback card action directly submits a bounded, redacted adjacent diagnostic context with no preview or second confirmation.", "聊天反馈通道已启用；明确的 /feedback 命令或 Feedback 卡片动作会直接提交有界、脱敏的相邻诊断上下文，无需预览或二次确认。")
 		}
 		return unavailable("The feedback channel is disabled by configuration.", "反馈通道已被配置禁用。")
 	case "agent_feedback":

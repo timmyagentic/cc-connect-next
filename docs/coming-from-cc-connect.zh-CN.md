@@ -32,7 +32,7 @@ cc-connect-next 是一个**独立后继**，不是补丁、代理或伴生插件
 
 ### 5. 出了问题，保持短流程反馈
 
-聊天里 `/feedback` 先展示完整脱敏的 Foundation 草稿；独立按钮或 `confirm` 才把同一份预览经匿名作者中继提交。取消和未批准始终零请求，不需要 GitHub 账号；回合失败时 daemon 也能主动准备同样可审阅的预览。
+聊天里明确执行 `/feedback <描述>` 或点击 Feedback 动作，会立即经匿名作者中继提交有界、脱敏的 Foundation Draft，不展示预览、不要求二次确认，最终也不回显 Issue 链接。回合失败时 daemon 的自动提示在用户点击前始终零请求；一次点击即可提交，且不需要 GitHub 账号。
 
 其余能力（14 种 Agent × 15 个平台、cron 与 webhook、语音输入输出、Web 管理台、五种语言 i18n）见[主 README](../README.md)。
 

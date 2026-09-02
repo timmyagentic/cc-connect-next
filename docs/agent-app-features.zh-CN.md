@@ -13,16 +13,15 @@ CC Connect Next 继续负责命令、卡片、文本回退、本地化、最近�
 提示和公开 fallback；Foundation 负责结构化报告、环境白名单、脱敏与限长、opaque
 批准值以及拒绝重定向的 HTTP Client。
 
-1. `/feedback <描述>` 生成完整脱敏 Draft。
-2. 宿主展示 `Draft.Report()` 的全部字段，并用绑定 session 与发起用户的 opaque token
-   保存这份精确 Draft 十分钟。
-3. 只有携带 token 的独立按钮或无歧义的 `/feedback confirm` 才调用 `Approve(true)`；
-   旧卡片、其他群成员、取消、过期、歧义和未批准始终零请求。
-4. Manifest 声明的本地 Agent CLI 复用同一 builder 与 submit 函数。活动回合 HMAC
+1. 明确执行 `/feedback <描述>` 或点击 Feedback 卡片动作后，宿主立即生成完整脱敏
+   Draft、调用 `Approve(true)` 并提交；聊天端不展示 Draft 预览，也不要求二次确认。
+2. 自动错误与能力缺口提示只会用 opaque token 准备精确 Draft，本身始终零请求；
+   用户一次点击即提交，过期、重放或 session/user 不匹配都会安全失败。
+3. Manifest 声明的本地 Agent CLI 复用同一 builder 与 submit 函数。活动回合 HMAC
    凭证解析可信 project/session/user；`feedback preview` 只返回 JSON-safe Draft
    投影且零请求，`feedback submit` 只接受该预览绑定 session/user 的一次性 token。
    CLI 不能指定路由、伪造入站消息或选择旧 schema 回退。
-5. Relay 在服务端固定 GitHub 仓库，负责 title/body、label、Token、限流和尽力去重。
+4. Relay 在服务端固定 GitHub 仓库，负责 title/body、label、Token、限流和尽力去重。
 
 ## Update
 
