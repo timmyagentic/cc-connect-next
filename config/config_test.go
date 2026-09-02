@@ -189,6 +189,24 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
+func TestConfigUpdateChannelDefaultsToStableAndRejectsUnknownValues(t *testing.T) {
+	cfg := Config{Projects: []ProjectConfig{validProject("demo")}}
+	if got := cfg.ResolveUpdateChannel(); got != "stable" {
+		t.Fatalf("default update channel = %q", got)
+	}
+	cfg.UpdateChannel = "beta"
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("beta channel rejected: %v", err)
+	}
+	if got := cfg.ResolveUpdateChannel(); got != "beta" {
+		t.Fatalf("beta update channel = %q", got)
+	}
+	cfg.UpdateChannel = "nightly"
+	if err := cfg.validate(); err == nil || !strings.Contains(err.Error(), "update_channel") {
+		t.Fatalf("unknown channel error = %v", err)
+	}
+}
+
 func TestConfigValidate_ContractRelationships(t *testing.T) {
 	boolPtr := func(value bool) *bool { return &value }
 	intPtr := func(value int) *int { return &value }

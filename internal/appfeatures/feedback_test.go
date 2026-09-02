@@ -117,6 +117,33 @@ func TestBuildFeedbackDraftDropsStaleError(t *testing.T) {
 	}
 }
 
+func TestBuildFeedbackDraftBoundsAndRedactsTypedAdjacentContext(t *testing.T) {
+	draft, err := BuildFeedbackDraft(FeedbackContext{
+		Description:               "channel copy is wrong",
+		PreviousUserMessage:       "token=never-send-this " + strings.Repeat("用户上下文 ", 300),
+		PreviousAssistantResponse: "/Users/private/project " + strings.Repeat("diagnosis ", 500),
+		Version:                   "v0.3.0-beta.2",
+		Agent:                     "codex",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := draft.Report().Description
+	if len(description) > featurefeedback.MaxDescriptionBytes {
+		t.Fatalf("description size = %d", len(description))
+	}
+	for _, want := range []string{"Related diagnostic context", "Previous user message", "Previous assistant response", "[REDACTED"} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("description missing %q: %s", want, description)
+		}
+	}
+	for _, leaked := range []string{"never-send-this", "/Users/private"} {
+		if strings.Contains(description, leaked) {
+			t.Fatalf("description leaked %q", leaked)
+		}
+	}
+}
+
 func TestApprovedFeedbackV1FixtureMatchesFoundationEncoder(t *testing.T) {
 	draft, err := (featurefeedback.Builder{Now: func() time.Time {
 		return time.Date(2026, 8, 30, 6, 1, 0, 0, time.UTC)

@@ -62,9 +62,9 @@
 
 ### 反馈与更新 (`feedback-updates`)
 
-控制匿名反馈能力和稳定版升级提醒投递。
+控制匿名反馈能力、发布通道选择和升级提醒投递。
 
-相关配置： `feedback.enabled`, `feedback.endpoint`, `update_notice`
+相关配置： `feedback.enabled`, `feedback.endpoint`, `update_channel`, `update_notice`
 
 ### 项目与工作区 (`multi-project`)
 
@@ -5618,6 +5618,21 @@ Agent 流式输出期间持续更新一条预览消息。
 - 默认值来源：`runtime`
 - 生效方式：`restart`
 - 示例: `voice_id = "value"`
+
+### `update_channel`
+
+选择 daemon 提醒与聊天更新 Plan 使用的发布通道。stable 是兼容默认值；beta 需要显式选择，且不会改变 npm/GitHub Latest。
+
+- 来源：`toml`
+- 配置位置：`config.toml root`
+- 作用域：`global`
+- 类型：`string`
+- 要求：`可选`
+- 默认值：`stable`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 允许值: `stable`, `beta`
+- 示例: `update_channel = "beta"`
 
 ### `update_notice`
 

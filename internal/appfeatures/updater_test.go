@@ -16,12 +16,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	featureupdater "github.com/timmyagentic/awesome-agent-app-features/updater"
+	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
 type memoryUpdateSource struct {
@@ -31,6 +33,10 @@ type memoryUpdateSource struct {
 }
 
 func (source *memoryUpdateSource) LatestStable(context.Context) (featureupdater.Release, error) {
+	return source.release, nil
+}
+
+func (source *memoryUpdateSource) LatestPrerelease(context.Context) (featureupdater.Release, error) {
 	return source.release, nil
 }
 
@@ -325,6 +331,127 @@ func TestUpdateServiceDetectsAndAppliesExactNPMVersion(t *testing.T) {
 	want := []string{"install", "--global", "--prefix", resolvedPrefix, ProductName + "@1.2.3"}
 	if !reflect.DeepEqual(arguments, want) {
 		t.Fatalf("npm arguments = %#v, want %#v", arguments, want)
+	}
+}
+
+func TestUpdateServiceBetaChannelAppliesExactPrereleaseNPMVersion(t *testing.T) {
+	prefix := t.TempDir()
+	packageDir := filepath.Join(prefix, "lib", "node_modules", ProductName)
+	binDir := filepath.Join(packageDir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	packageJSON := filepath.Join(packageDir, "package.json")
+	writePackageMetadata(t, packageJSON, "0.3.0-beta.1")
+	executable := filepath.Join(binDir, ProductName)
+	if err := os.WriteFile(executable, versionScript("v0.3.0-beta.1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := &memoryUpdateSource{release: featureupdater.Release{Tag: "v0.3.0-beta.2", Prerelease: true}}
+	var arguments []string
+	service, err := NewUpdateService(UpdateConfig{
+		CurrentVersion: "v0.3.0-beta.1",
+		Channel:        updatechannel.Beta,
+		ExecutablePath: executable,
+		Source:         source,
+		Runner: func(_ context.Context, _ string, args ...string) error {
+			arguments = append([]string(nil), args...)
+			writePackageMetadata(t, packageJSON, "0.3.0-beta.2")
+			return os.WriteFile(executable, versionScript("v0.3.0-beta.2"), 0o755)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := service.Prepare(context.Background())
+	if err != nil {
+		t.Fatalf("Prepare beta: %v", err)
+	}
+	if !plan.Available() || plan.Release().Tag != "v0.3.0-beta.2" || service.Channel() != updatechannel.Beta {
+		t.Fatalf("beta plan = %#v channel=%s", plan.Release(), service.Channel())
+	}
+	result, err := service.Apply(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Apply beta: %v", err)
+	}
+	if !result.Updated || !slices.Contains(arguments, ProductName+"@0.3.0-beta.2") {
+		t.Fatalf("result=%#v arguments=%v", result, arguments)
+	}
+}
+
+func TestUpdateServiceBetaChannelAppliesChecksumVerifiedStandalonePlan(t *testing.T) {
+	target, source := updateFixture(t, "v0.3.0-beta.1", "v0.3.0-beta.2")
+	source.release.Prerelease = true
+	service, err := newUpdateService(UpdateConfig{
+		CurrentVersion: "v0.3.0-beta.1",
+		Channel:        updatechannel.Beta,
+		ExecutablePath: target,
+		Source:         source,
+	}, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := service.Prepare(context.Background())
+	if err != nil {
+		t.Fatalf("Prepare beta standalone: %v", err)
+	}
+	if !plan.Available() || plan.ArchiveAsset().Name == "" {
+		t.Fatalf("beta standalone plan = %#v / %#v", plan.Release(), plan.ArchiveAsset())
+	}
+	result, err := service.Apply(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Apply beta standalone: %v", err)
+	}
+	if !result.Updated {
+		t.Fatalf("beta standalone result = %#v", result)
+	}
+	assertTargetVersion(t, target, "v0.3.0-beta.2")
+}
+
+func TestUpdateServiceBetaStandaloneRollsBackFailedInstalledProbe(t *testing.T) {
+	target, source := updateFixture(t, "v0.3.0-beta.1", "v0.3.0-beta.2")
+	source.release.Prerelease = true
+	var probes atomic.Int32
+	verifier := featureupdater.VersionVerifierFunc(func(_ context.Context, _, _ string) error {
+		if probes.Add(1) == 2 {
+			return errors.New("installed probe failed")
+		}
+		return nil
+	})
+	service, err := newUpdateService(UpdateConfig{
+		CurrentVersion: "v0.3.0-beta.1", Channel: updatechannel.Beta,
+		ExecutablePath: target, Source: source, Verifier: verifier,
+	}, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := service.Prepare(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Apply(context.Background(), plan); err == nil || !strings.Contains(err.Error(), "installed probe failed") {
+		t.Fatalf("Apply error = %v", err)
+	}
+	assertTargetVersion(t, target, "v0.3.0-beta.1")
+	if _, err := os.Lstat(target + ".old"); !os.IsNotExist(err) {
+		t.Fatalf("rollback backup remained: %v", err)
+	}
+}
+
+func TestValidateUpdateReleaseForChannelRejectsMislabeledPrereleases(t *testing.T) {
+	stable := featureupdater.Release{Tag: "v1.2.3"}
+	beta := featureupdater.Release{Tag: "v1.3.0-beta.2", Prerelease: true}
+	if err := validateUpdateReleaseForChannel(stable, updatechannel.Stable); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateUpdateReleaseForChannel(beta, updatechannel.Beta); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateUpdateReleaseForChannel(beta, updatechannel.Stable); err == nil {
+		t.Fatal("stable channel accepted a prerelease")
+	}
+	if err := validateUpdateReleaseForChannel(stable, updatechannel.Beta); err == nil {
+		t.Fatal("beta channel accepted a stable release")
 	}
 }
 

@@ -28,7 +28,7 @@ cc-connect-next 是一个**独立后继**，不是补丁、代理或伴生插件
 
 ### 4. 安装会自己照顾自己
 
-`cc-connect-next update` 跟随 stable 渠道。独立安装使用 Foundation immutable Plan、同 Release checksum、双版本探针、备份和回滚，npm/Windows 保持显式宿主 adapter。新版本发布后，daemon 在每个项目最近会话里**只提醒一次**，并要求先查看精确计划再确认。`doctor` 一条命令检查配置、Agent CLI 登录态、平台、依赖和网络。
+`cc-connect-next update [stable|beta]` 显式选择通道并默认使用 Stable。独立安装使用 immutable Plan、同 Release checksum、双版本探针、锁、备份和回滚。daemon 跟随 `update_channel`，按通道/版本向配置的管理员**只提醒一次**，并要求先查看精确计划再确认。`doctor` 一条命令检查配置、Agent CLI 登录态、平台、依赖和网络。
 
 ### 5. 出了问题，保持短流程反馈
 

@@ -29,11 +29,11 @@ Run Claude Code, Codex, Cursor, or any of 14 coding agents on your own machine �
 - 🎛️ **Steer the running turn** — messages that arrive while the agent is busy join the task **already running** (the default) via Codex's native `turn/steer`, with the live card handing over to the newest message; agents without the capability fall back to the FIFO queue transparently, and `busy_message_mode = "queue"` restores queue-always. `/ps` steers explicitly on any mode.
 - 🚚 **Auditable one-command migration** — `cc-connect-next migrate` inventories the official install, hashes every source file, stages, verifies, and activates atomically with timestamped backups and a full SHA-256 manifest. It fails closed rather than ever activating an incomplete target.
 - 🪶 **One bot, an official lark-cli ready to use** — new installs and migrations can install the official `lark-cli`, reuse the Feishu bot Next already verified, create or reuse an isolated profile, and make it the default bot profile while preserving old profiles, user OAuth, and the secret boundary.
-- 🔔 **Self-maintaining installs** — `cc-connect-next update` follows the stable channel. Standalone binaries use the Foundation's immutable Plan, same-release checksum, two version probes, lock, backup, and rollback; npm/Windows remain explicit host adapters. Each release is announced once, and **Review update** or a plain “update” first shows the exact Release/artifact before confirmation—approval can never drift to a different latest release.
+- 🔔 **Self-maintaining installs** — `cc-connect-next update [stable|beta]` selects an explicit channel while `stable` remains the default. Standalone binaries keep an immutable Plan, same-release checksum, two version probes, lock, backup, and rollback. The daemon follows `update_channel`, announces each version once, and shows the exact channel, release type, and artifact before confirmation—approval can never drift to a different latest release.
 - 🤖 **14 agents × 15 platforms** — one process hosts multiple projects, each binding a code directory to its own agent and platforms, with per-project permissions, providers, models, and display settings.
 - 🌍 **Production niceties** — `doctor` diagnostics, launchd/systemd/Windows daemon, web admin (beta), cron & webhooks, bot-to-bot relay, voice in/out (STT/TTS), multi-workspace routing, and full i18n in five languages (en, zh, zh-TW, ja, es).
 
-- **Reviewable feedback for chat and Agents.** `/feedback` and the Manifest-declared `cc-connect-next feedback preview` build the same complete Foundation-redacted Draft. A separate button, `confirm`, or one-time Agent approval token submits only that Draft; cancel, missing approval, identity/schema mismatch, and replay make no request. The Agent CLI derives trusted project/session/user state from a live HMAC turn credential and never needs Feishu `send_as_user`. The author-side Relay owns the repository and Issue rendering, so no GitHub account is needed.
+- **Reviewable feedback for chat and Agents.** `/feedback` and the Manifest-declared `cc-connect-next feedback preview` build the same complete Foundation-redacted Draft and add only the recent adjacent, typed, bounded, redacted user/Agent diagnostic context. A separate button, `confirm`, or one-time Agent approval token submits only that Draft; cancel, missing approval, identity/schema mismatch, and replay make no request. The Agent CLI derives trusted project/session/user state from a live HMAC turn credential and never needs Feishu `send_as_user`. The author-side Relay owns the repository and Issue rendering, so no GitHub account is needed.
 
 ## 🎬 What it looks like
 
@@ -198,7 +198,7 @@ cc-connect-next forked from CC Connect v1.4.1 and tracks upstream through per-ch
 | Feishu answers | message stream / legacy cards | single Card 2.0 lifecycle with typewriter streaming |
 | Reasoning & tool details in chat | rendered | anonymous counts only, enforced at two layers |
 | Busy-session messages | FIFO queue; `/ps` raw send | native steer with card handoff by default, queue configurable |
-| Updates | manual | stable-channel updater + once-per-release daemon notice |
+| Updates | manual | explicit Stable/Beta channels + once-per-release daemon notice |
 | Migration path | — | audited one-command migration with manifest and rollback |
 | Runtime identity | `cc-connect` · `~/.cc-connect` | independent everything; both coexist |
 

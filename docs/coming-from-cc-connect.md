@@ -28,7 +28,7 @@ Official CC Connect queues busy-time messages FIFO: they wait for the next turn.
 
 ### 4. Installs take care of themselves
 
-`cc-connect-next update` follows the stable channel. Standalone installs use an immutable Foundation Plan with same-release checksums, staged/installed probes, backup, and rollback; npm and Windows remain explicit host adapters. After a release, the daemon reminds each project's most recent chat **once** and asks the user to review the exact plan before confirmation. `doctor` checks config, agent CLI login state, platforms, dependencies, and network in one command.
+`cc-connect-next update [stable|beta]` selects an explicit channel and defaults to Stable. Standalone installs use an immutable Plan with same-release checksums, staged/installed probes, locking, backup, and rollback. The daemon follows `update_channel`, reminds the configured administrators **once** per channel/version, and asks the user to review the exact plan before confirmation. `doctor` checks config, agent CLI login state, platforms, dependencies, and network in one command.
 
 ### 5. When something breaks, feedback stays one short flow
 

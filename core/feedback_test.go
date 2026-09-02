@@ -80,6 +80,56 @@ func TestCmdFeedback_PreviewsBeforeExplicitApproval(t *testing.T) {
 	}
 }
 
+func TestFeedbackDraftIncludesOnlyRecentRedactedAdjacentDiagnosticContext(t *testing.T) {
+	engine, platform := newFeedbackTestEngine(t)
+	key := feedbackTestMsg().SessionKey
+	session := engine.sessions.GetOrCreateActive(key)
+	session.AddHistory("user", "更新通道为什么把 beta 当 stable？ token=must-not-leak")
+	session.AddHistory("assistant", "诊断：当前只有 LatestStable。日志在 /Users/private/project/run.log")
+	submitted := captureFeedbackSubmissions(engine)
+
+	engine.cmdFeedback(platform, feedbackTestMsg(), "请反馈更新通道问题")
+	preview := strings.Join(platform.sentTexts(), "\n")
+	for _, want := range []string{"请反馈更新通道问题", "Related diagnostic context", "Previous user message", "Previous assistant response", "LatestStable", "[REDACTED"} {
+		if !strings.Contains(preview, want) {
+			t.Fatalf("preview missing %q: %s", want, preview)
+		}
+	}
+	for _, leaked := range []string{"must-not-leak", "/Users/private"} {
+		if strings.Contains(preview, leaked) {
+			t.Fatalf("preview leaked %q: %s", leaked, preview)
+		}
+	}
+	select {
+	case <-submitted:
+		t.Fatal("context-rich preview submitted without separate approval")
+	default:
+	}
+
+	engine.cmdFeedback(platform, feedbackTestMsg(), "confirm")
+	report := <-submitted
+	if report.Description != strings.TrimSpace(report.Description) || !strings.Contains(report.Description, "Related diagnostic context") {
+		t.Fatalf("submitted context drifted: %q", report.Description)
+	}
+}
+
+func TestFeedbackContextNeverPairsAnUnansweredUserMessageWithAnOlderAssistant(t *testing.T) {
+	engine, _ := newFeedbackTestEngine(t)
+	key := feedbackTestMsg().SessionKey
+	session := engine.sessions.GetOrCreateActive(key)
+	session.AddHistory("user", "old question")
+	session.AddHistory("assistant", "old unrelated diagnosis")
+	session.AddHistory("user", "new unanswered observation")
+	draft, err := engine.buildFeedbackDraft(key, "report it", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	description := draft.Report().Description
+	if !strings.Contains(description, "new unanswered observation") || strings.Contains(description, "old unrelated diagnosis") {
+		t.Fatalf("mismatched adjacent context: %s", description)
+	}
+}
+
 type feedbackResultCardPlatform struct {
 	stubCardPlatform
 	updatedCards []*Card

@@ -36,7 +36,7 @@ The npm installer downloads the same-version native asset from the GitHub releas
 cc-connect-next update
 ```
 
-`update` follows the stable channel only. It detects whether the running binary belongs to a global npm package or is a standalone executable. npm installs are updated in their existing global prefix to the exact stable version; standalone installs verify the release archive against `checksums.txt` before replacing the binary. Restart a running daemon after the command completes:
+`update` defaults to the Stable channel and accepts an explicit Beta opt-in: `cc-connect-next update [stable|beta]` or `--channel`. It detects whether the running binary belongs to a global npm package or is a standalone executable. npm installs are updated in their existing global prefix to the exact selected version; standalone installs verify the same-release archive against `checksums.txt`, stage and probe the binary, lock the target, and retain rollback protection before replacement. Restart a running daemon after the command completes:
 
 ```bash
 cc-connect-next daemon restart
@@ -44,7 +44,7 @@ cc-connect-next daemon restart
 
 Prerelease updates remain explicit through `npm install -g cc-connect-next@beta`; `cc-connect-next update --pre` and `--beta` are intentionally rejected.
 
-**How you learn about new releases.** A running daemon checks for newer stable releases (shortly after startup, then daily) and, when exactly one configured platform supports direct-user messaging, privately notifies all explicitly listed `admin_from` users. Recent groups, topics, and ordinary sessions are never reminder targets; empty, wildcard, or ambiguous targets stay silent because they cannot identify a fixed private recipient safely. A pass records the project/version only after every administrator succeeds; after a partial failure, the next pass sends to the full explicit list again, so an administrator whose first delivery succeeded may receive a repeat. From chat, `/upgrade` shows the details and `/upgrade confirm` performs the update. Set `update_notice = false` in `config.toml` to disable the reminder. Pull-based checks remain available anytime: `/upgrade` in chat or `cc-connect-next check-update` on the CLI.
+**How you learn about new releases.** A running daemon checks `update_channel` (`stable` by default, or explicit `beta`) shortly after startup and then daily. When exactly one configured platform supports direct-user messaging, it privately notifies all explicitly listed `admin_from` users. Recent groups, topics, and ordinary sessions are never reminder targets; empty, wildcard, or ambiguous targets stay silent because they cannot identify a fixed private recipient safely. A pass records the project/channel/version only after every administrator succeeds; after a partial failure, the next pass sends to the full explicit list again. From chat, `/upgrade [stable|beta]` shows the exact channel, release type, and artifact, and a later `/upgrade confirm` applies that immutable Plan. Set `update_notice = false` to disable reminders. Pull-based checks remain available with `/upgrade [stable|beta]` or `cc-connect-next check-update [stable|beta]`.
 
 ### Current source
 

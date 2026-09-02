@@ -9,15 +9,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
-// Update notice: a daemon-side reminder that a newer stable release exists.
+// Update notice: a daemon-side reminder that a newer release exists on the
+// explicitly configured channel (Stable by default).
 //
 // Before this, every update surface was pull-only (`/upgrade`, the
 // `check-update` CLI command, and the CLI usage-page hint), so a user running
 // an old daemon would never learn that a newer version had shipped. The
 // UpdateNotifier closes that gap: it periodically compares CurrentVersion
-// against the newest stable GitHub release and, when a newer one appears,
+// against the newest GitHub release on that channel and, when one appears,
 // sends one localized private notice to each project's explicit admin_from
 // users. Recent chats, groups, and topics are never notification targets. A
 // project/version is complete only when one pass reaches every administrator;
@@ -29,7 +32,7 @@ const (
 	updateNoticeStateFile    = "update_notice.json"
 )
 
-// UpdateNotifier periodically checks for a newer stable release and retries
+// UpdateNotifier periodically checks its configured release channel and retries
 // each project's full explicit-administrator list until one pass succeeds.
 type UpdateNotifier struct {
 	mu       sync.Mutex
@@ -37,6 +40,7 @@ type UpdateNotifier struct {
 	order    []string // registration order for deterministic iteration
 	dataDir  string
 	notified map[string]string
+	channel  updatechannel.Channel
 
 	initialDelay time.Duration
 	interval     time.Duration
@@ -49,7 +53,11 @@ type UpdateNotifier struct {
 
 // NewUpdateNotifier creates a notifier whose once-per-version state persists
 // under dataDir/run/update_notice.json.
-func NewUpdateNotifier(dataDir string) *UpdateNotifier {
+func NewUpdateNotifier(dataDir string, configured ...string) *UpdateNotifier {
+	channel := updatechannel.Stable
+	if len(configured) > 0 {
+		channel = updatechannel.Channel(configured[0]).Effective()
+	}
 	n := &UpdateNotifier{
 		engines:      make(map[string]*Engine),
 		dataDir:      dataDir,
@@ -57,8 +65,9 @@ func NewUpdateNotifier(dataDir string) *UpdateNotifier {
 		initialDelay: updateNoticeInitialDelay,
 		interval:     updateNoticeInterval,
 		stopCh:       make(chan struct{}),
+		channel:      channel,
 		checkFn: func(cur string) (*ReleaseInfo, error) {
-			return CheckForUpdate(cur, false)
+			return CheckForUpdateInChannel(cur, channel)
 		},
 	}
 	n.loadState()
@@ -126,9 +135,13 @@ func (n *UpdateNotifier) CheckOnce() {
 		return
 	}
 
-	slog.Info("update notice: newer stable release available",
+	if release.Channel == "" {
+		release.Channel = string(n.channel)
+	}
+	slog.Info("update notice: newer release available",
 		"current", cur,
 		"latest", release.TagName,
+		"channel", n.channel,
 	)
 
 	n.mu.Lock()
@@ -139,7 +152,7 @@ func (n *UpdateNotifier) CheckOnce() {
 	for _, name := range names {
 		n.mu.Lock()
 		e := n.engines[name]
-		already := n.notified[name] == release.TagName
+		already := updateNoticeAlreadyDelivered(n.notified[name], n.channel, release.TagName)
 		n.mu.Unlock()
 		if e == nil || already {
 			continue
@@ -148,13 +161,26 @@ func (n *UpdateNotifier) CheckOnce() {
 			continue
 		}
 		n.mu.Lock()
-		n.notified[name] = release.TagName
+		n.notified[name] = updateNoticeVersionKey(n.channel, release.TagName)
 		n.mu.Unlock()
 		changed = true
 	}
 	if changed {
 		n.saveState()
 	}
+}
+
+func updateNoticeVersionKey(channel updatechannel.Channel, tag string) string {
+	return string(channel.Effective()) + ":" + tag
+}
+
+func updateNoticeAlreadyDelivered(stored string, channel updatechannel.Channel, tag string) bool {
+	if stored == updateNoticeVersionKey(channel, tag) {
+		return true
+	}
+	// v0.2.x stored stable tags without a channel prefix. Preserve that
+	// once-only promise when upgrading an existing daemon.
+	return channel.Effective() == updatechannel.Stable && stored == tag
 }
 
 func (n *UpdateNotifier) statePath() string {
@@ -287,11 +313,12 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	if len(targets) == 0 {
 		return false
 	}
-	text := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, CurrentVersion)
-	action := e.i18n.Tf(MsgUpdateNoticeAvailableAction, release.TagName, CurrentVersion)
+	channel := updatechannel.Channel(release.Channel).Effective()
+	text := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, channel, CurrentVersion)
+	action := e.i18n.Tf(MsgUpdateNoticeAvailableAction, release.TagName, channel, CurrentVersion)
 	delivered := 0
 	for _, target := range targets {
-		if err := e.sendUpdateNoticeTarget(target, action, text); err != nil {
+		if err := e.sendUpdateNoticeTarget(target, channel, action, text); err != nil {
 			slog.Debug("update notice: admin private send failed",
 				"project", e.name, "platform", target.platform.Name(), "error", err)
 			continue
@@ -309,15 +336,15 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	return true
 }
 
-func (e *Engine) sendUpdateNoticeTarget(target updateNoticeTarget, actionCopy, textCopy string) error {
-	if err := e.sendDirectUpdateNotice(target.platform, target.sender, target.userID, actionCopy, textCopy); err != nil {
+func (e *Engine) sendUpdateNoticeTarget(target updateNoticeTarget, channel updatechannel.Channel, actionCopy, textCopy string) error {
+	if err := e.sendDirectUpdateNotice(target.platform, target.sender, target.userID, channel, actionCopy, textCopy); err != nil {
 		return err
 	}
 	e.updateIntents.recordDirectNotice(target.platform.Name(), target.userID)
 	return nil
 }
 
-func (e *Engine) sendDirectUpdateNotice(platform Platform, sender DirectUserSender, userID, actionCopy, textCopy string) error {
+func (e *Engine) sendDirectUpdateNotice(platform Platform, sender DirectUserSender, userID string, channel updatechannel.Channel, actionCopy, textCopy string) error {
 	if cards, ok := platform.(DirectUserCardSender); ok {
 		btnNow := e.i18n.T(MsgUpdateBtnNow)
 		btnLog := e.i18n.T(MsgUpdateBtnChangelog)
@@ -325,7 +352,7 @@ func (e *Engine) sendDirectUpdateNotice(platform Platform, sender DirectUserSend
 		card := e.renderCardForPlatform(platform, NewCard().
 			Markdown(actionCopy).
 			Buttons(
-				CardButton{Text: btnNow, Type: "primary", Value: "cmd:/upgrade"},
+				CardButton{Text: btnNow, Type: "primary", Value: "cmd:/upgrade " + string(channel.Effective())},
 				CardButton{Text: btnLog, Value: "nav:/upgrade"},
 			).
 			Note(hint).

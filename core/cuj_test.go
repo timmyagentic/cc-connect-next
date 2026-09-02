@@ -2212,11 +2212,17 @@ func TestCUJ_J1_FeedbackPreviewCancelAndExactApproval(t *testing.T) {
 		submitted <- draft.Report()
 		return appfeatures.FeedbackReceipt{ReferenceURL: "https://github.com/timmyagentic/cc-connect-next/issues/7"}, nil
 	}
+	session := env.engine.sessions.GetOrCreateActive("test:feedback")
+	session.AddHistory("user", "why is beta called stable? token=private-value")
+	session.AddHistory("assistant", "The current updater exposes LatestStable from /Users/private/project.")
 
 	// 1. Preview, but do not submit.
 	env.userSends("feedback", "/feedback first problem")
-	if !env.sentContains("Complete feedback preview") || !env.sentContains("first problem") || !env.sentContains("OS/Arch") {
+	if !env.sentContains("Complete feedback preview") || !env.sentContains("first problem") || !env.sentContains("Related diagnostic context") || !env.sentContains("LatestStable") || !env.sentContains("[REDACTED") || !env.sentContains("OS/Arch") {
 		t.Fatalf("user did not see every preview section: %v", env.plat.getSent())
+	}
+	if env.sentContains("private-value") || env.sentContains("/Users/private") {
+		t.Fatalf("feedback preview leaked adjacent context: %v", env.plat.getSent())
 	}
 	select {
 	case <-submitted:
@@ -2235,7 +2241,7 @@ func TestCUJ_J1_FeedbackPreviewCancelAndExactApproval(t *testing.T) {
 	env.userSends("feedback", "/feedback confirm")
 	select {
 	case report := <-submitted:
-		if report.Description != "second problem" {
+		if !strings.Contains(report.Description, "second problem") || !strings.Contains(report.Description, "Related diagnostic context") {
 			t.Fatalf("submitted report drifted: %#v", report)
 		}
 	case <-time.After(time.Second):

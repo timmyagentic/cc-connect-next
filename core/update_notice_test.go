@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
 type updateNoticeDirectCall struct {
@@ -299,6 +301,28 @@ func TestUpdateNotice_NewVersionAnnouncedAgain(t *testing.T) {
 	sent := plat.sentTexts()
 	if len(sent) != 2 || !strings.Contains(sent[1], "v0.1.3") {
 		t.Fatalf("a newer version must produce a fresh notice, got %v", sent)
+	}
+}
+
+func TestUpdateNoticeBetaChannelNamesAndPersistsTheExactChannel(t *testing.T) {
+	withCurrentVersion(t, "v0.3.0-beta.1")
+	e, platform := newUpdateNoticeTestEngine(t, "feishu")
+	n := NewUpdateNotifier(t.TempDir(), string(updatechannel.Beta))
+	n.checkFn = func(string) (*ReleaseInfo, error) {
+		return &ReleaseInfo{TagName: "v0.3.0-beta.2", Prerelease: true, Channel: string(updatechannel.Beta)}, nil
+	}
+	n.RegisterEngine("demo", e)
+	n.CheckOnce()
+	texts := platform.sentTexts()
+	if len(texts) != 1 || !strings.Contains(texts[0], "beta channel") || strings.Contains(texts[0], "stable release") {
+		t.Fatalf("beta notice copy = %v", texts)
+	}
+	state, err := os.ReadFile(n.statePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(state), "beta:v0.3.0-beta.2") {
+		t.Fatalf("beta notice state = %s", state)
 	}
 }
 

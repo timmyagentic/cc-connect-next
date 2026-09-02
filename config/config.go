@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/BurntSushi/toml"
+	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
 // validRunAsUserName is the portable-username character set plus digits.
@@ -115,6 +116,10 @@ type Config struct {
 	// admin_from user until one pass succeeds for all of them. nil/true = enabled
 	// (default); false = disabled.
 	UpdateNotice *bool `toml:"update_notice"`
+	// UpdateChannel selects which release line daemon notices and chat update
+	// plans follow. Empty/stable preserves the historical stable-only default;
+	// beta is an explicit opt-in to prereleases.
+	UpdateChannel string `toml:"update_channel,omitempty"`
 	// Feedback controls the in-app problem-reporting channel: /feedback plus
 	// proactive prompts when the config contains keys this build does not
 	// support. Submission always requires per-case user confirmation.
@@ -165,6 +170,17 @@ type FeedbackConfig struct {
 // FeedbackEnabled resolves the [feedback] enabled flag (default true).
 func (c *Config) FeedbackEnabled() bool {
 	return c.Feedback.Enabled == nil || *c.Feedback.Enabled
+}
+
+func (c *Config) ResolveUpdateChannel() string {
+	if c == nil {
+		return string(updatechannel.Stable)
+	}
+	channel, ok := updatechannel.Parse(c.UpdateChannel)
+	if !ok {
+		return string(updatechannel.Stable)
+	}
+	return string(channel)
 }
 
 func validateFeedbackEndpoint(raw string) error {
@@ -1195,6 +1211,9 @@ func (c *Config) validateInternal(permissive bool) error {
 	case "", "on", "off":
 	default:
 		return fmt.Errorf("config: attachment_send must be \"on\" or \"off\"")
+	}
+	if _, ok := updatechannel.Parse(c.UpdateChannel); !ok {
+		return fmt.Errorf("config: update_channel must be \"stable\" or \"beta\"")
 	}
 	if c.Relay.TimeoutSecs != nil && *c.Relay.TimeoutSecs < 0 {
 		return fmt.Errorf("config: relay.timeout_secs must be >= 0")
