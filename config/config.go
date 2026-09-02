@@ -122,7 +122,8 @@ type Config struct {
 	UpdateChannel string `toml:"update_channel,omitempty"`
 	// Feedback controls the in-app problem-reporting channel: /feedback plus
 	// proactive prompts when the config contains keys this build does not
-	// support. Submission always requires per-case user confirmation.
+	// support. An explicit chat command or card click is the per-case approval;
+	// proactive prompts make no request until the user acts.
 	Feedback        FeedbackConfig   `toml:"feedback"`
 	Webhook         WebhookConfig    `toml:"webhook"`
 	Bridge          BridgeConfig     `toml:"bridge"`

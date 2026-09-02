@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.3.0-beta.3 (2026-09-02)
+
+Third v0.3.0 Beta focused on explicit release channels and one-action,
+privacy-bounded chat Feedback.
+
+See `changelogs/v0.3.0-beta.3.md` for bilingual release notes, Beta channel
+behavior, and compatibility boundaries.
+
 - Added an explicit process-wide `update_channel = "stable" | "beta"`
   contract plus matching CLI/chat selectors. Stable remains the default;
   every discovery, notice, immutable Plan, and result identifies its channel
