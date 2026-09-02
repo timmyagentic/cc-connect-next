@@ -127,8 +127,10 @@ func RedactFeedbackText(text string) string {
 	return featurefeedback.Redact(redactCCConnectFeedback(featurefeedback.Redact(text)))
 }
 
-// FeedbackRelay submits a previously rendered draft. userApproved must come
-// from a separate explicit host action; false is rejected before any request.
+// FeedbackRelay submits a host-built Draft. userApproved must reflect an
+// explicit user action. Chat commands and card clicks are themselves approval;
+// callers such as the local-Agent CLI may keep a separate preview/token step.
+// False is always rejected before any request.
 type FeedbackRelay struct {
 	Endpoint   string
 	HTTPClient *http.Client

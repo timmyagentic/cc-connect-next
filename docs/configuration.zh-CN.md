@@ -830,7 +830,7 @@ projects.agent.options.codex_home 未设置时选择 Codex Home。
 
 ### `feedback.enabled`
 
-启用 /feedback 和能力缺口提示；每次提交仍需确认。
+启用直接提交的 /feedback 和零网络能力缺口提示；明确命令或卡片点击本身就是批准。
 
 - 来源：`toml`
 - 配置位置：`[feedback]`

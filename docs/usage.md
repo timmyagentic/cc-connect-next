@@ -151,25 +151,27 @@ The steer is sent as `turn/steer` with the active turn pinned via `expectedTurnI
 When you hit a problem — a failed turn, a config key this build does not
 support, or a capability you wish existed — you can report it straight to the
 project author from chat. No GitHub account is needed: the daemon submits the
-report through an author-operated relay and replies with the issue link.
+report through an author-operated relay and shows only submission success or
+failure, never the Issue link.
 
 ```text
-/feedback <describe it>   # build and render the complete redacted draft
-/feedback confirm         # submit that exact pending draft
-/feedback cancel          # discard it without a request
+/feedback <describe it>   # immediately submit bounded, redacted structured feedback
 ```
 
-The daemon also prepares previews proactively. Card platforms show the full
-description, recent error, capability gaps, and allowlisted environment beside
-submit/ignore buttons. Text platforms show the same fields and the confirm or
-cancel commands. Failed-turn previews are throttled per chat; unsupported
-config key sets are announced once across restarts.
+The explicit command is the approval: the Draft is enriched internally with
+recent adjacent, typed, bounded, redacted user/Agent diagnostic context and is
+then submitted immediately, with no preview or second confirmation. A Feishu
+Feedback card action behaves the same way in one click and replaces only that
+card with **Submission succeeded** or **Submission failed**.
 
-`/feedback` itself never submits. Credentials, chat/user ids, email addresses,
-and filesystem paths are redacted and bounded before the preview exists. Only
-the exact pending Foundation Draft can become an opaque Approved value after a
-separate action; cancellation, expiry, and missing approval make zero network
-requests. Disable the channel with `[feedback] enabled = false`.
+Automatic error and capability-gap offers never upload on their own. Card
+platforms show one **Report to author** action; text platforms provide a
+one-shot submit command. Until the user clicks or runs that command there are
+zero Relay requests; afterward the exact prepared Draft is submitted. Failed-
+turn offers are throttled per chat and unsupported config key sets are
+announced once across restarts. Credentials, chat/user IDs, email addresses,
+and filesystem paths are redacted and bounded before the Draft exists. Disable
+the channel with `[feedback] enabled = false`.
 
 An Agent can use the same flow without synthesizing a chat message or requiring
 Feishu `send_as_user`:

@@ -830,7 +830,7 @@ Show or hide Agent tool-progress messages.
 
 ### `feedback.enabled`
 
-Enable /feedback and capability-gap prompts; every submission still requires confirmation.
+Enable direct-submit /feedback and zero-network capability-gap offers; an explicit command or card click is the approval.
 
 - Source: `toml`
 - Placement: `[feedback]`

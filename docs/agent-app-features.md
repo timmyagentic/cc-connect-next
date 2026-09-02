@@ -14,19 +14,19 @@ error selection, capability-gap prompts, and public fallback URL. The
 Foundation owns the structured report, allowlisted environment, redaction and
 bounds, opaque approval value, and no-redirect HTTP client.
 
-1. `/feedback <description>` builds a fully redacted Draft.
-2. The host renders every `Draft.Report()` field and keeps that exact Draft for
-   ten minutes under an opaque token bound to the session and initiating user.
-3. A separate token-bearing button or unambiguous `/feedback confirm` calls
-   `Approve(true)` and sends the same Draft. Stale cards, another group user,
-   cancel, expiry, ambiguity, and missing approval make no request.
-4. The Manifest-declared local-Agent CLI uses the same builder and submit
+1. An explicit `/feedback <description>` command or Feedback card action builds
+   a fully redacted Draft, calls `Approve(true)`, and submits it immediately.
+   Chat never renders a Draft preview and never asks for a second confirmation.
+2. Automatic error and capability-gap offers prepare the exact Draft under an
+   opaque token but make no request. The user's single button click submits that
+   prepared Draft; expiry, replay, or a mismatched session/user fails closed.
+3. The Manifest-declared local-Agent CLI uses the same builder and submit
    function. A live HMAC turn credential resolves trusted project/session/user
    state; `feedback preview` exposes a JSON-safe projection with no request,
    and `feedback submit` accepts only its one-time session/user-bound token.
    The CLI cannot supply routing, forge an inbound message, or select a schema
    fallback.
-5. The Relay owns GitHub repository selection, title/body rendering, label,
+4. The Relay owns GitHub repository selection, title/body rendering, label,
    token, rate limiting, and best-effort deduplication.
 
 ## Updates

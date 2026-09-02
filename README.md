@@ -33,7 +33,7 @@
 - 🤖 **14 种 Agent × 15 个平台** —— 单进程承载多个项目，每个项目把一个代码目录绑定到独立的 Agent 与平台，各自拥有权限、provider、模型与展示配置。
 - 🌍 **生产级配套** —— `doctor` 诊断、launchd/systemd/Windows daemon、Web 管理台（Beta）、定时任务与 webhook、机器人间 relay、语音输入/输出（STT/TTS）、多工作区路由，五语言 i18n（en、zh、zh-TW、ja、es）。
 
-- **聊天与 Agent 都可审阅的反馈。** 遇到 bug 或缺失能力时，`/feedback` 与 Manifest 声明的 `cc-connect-next feedback preview` 生成同一份 Foundation 完整脱敏 Draft，并只加入最近相邻、字段化、有界且脱敏的用户/Agent 诊断上下文；只有独立按钮、`confirm` 或 Agent 一次性 approval token 才能提交该 Draft。Agent CLI 通过活动回合 HMAC 解析可信 project/session/user，不依赖飞书 `send_as_user`；取消、未批准、身份/schema 不匹配和重放始终零请求。作者侧 Relay 固定目标仓库并渲染 Issue，无需 GitHub 账号。
+- **一次触发即可提交的聊天反馈。** 遇到 bug 或缺失能力时，明确执行 `/feedback <描述>` 或点击 Feedback 动作，会立即提交 Foundation 完整脱敏 Draft；它只加入最近相邻、字段化、有界且脱敏的用户/Agent 诊断上下文，不展示预览、不要求二次确认。自动错误/能力缺口提示在用户点击前始终零请求，提交后的卡片只显示成功或失败，不附 Issue 链接。Manifest 声明的 Agent CLI 仍通过活动回合 HMAC 与一次性 approval token 提交同一类 Draft，不依赖飞书 `send_as_user`；身份/schema 不匹配和重放始终零请求。作者侧 Relay 固定目标仓库并渲染 Issue，无需 GitHub 账号。
 
 ## 🎬 实际效果
 
