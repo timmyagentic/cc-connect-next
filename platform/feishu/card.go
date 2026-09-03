@@ -13,6 +13,39 @@ import (
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
+const (
+	cardActionProjectKey    = "cc_project"
+	cardActionDirectUserKey = "cc_direct_user"
+)
+
+type cardActionTarget struct {
+	sessionKey   string
+	projectName  string
+	directUserID string
+}
+
+func (target cardActionTarget) value(action string, extra map[string]string) map[string]string {
+	value := make(map[string]string, len(extra)+4)
+	if action != "" {
+		value["action"] = action
+	}
+	for key, item := range extra {
+		value[key] = item
+	}
+	// Routing fields are owned by the platform renderer; CardButton.Extra must
+	// not be able to redirect a callback to another project or recipient.
+	if target.sessionKey != "" {
+		value["session_key"] = target.sessionKey
+	}
+	if target.projectName != "" {
+		value[cardActionProjectKey] = target.projectName
+	}
+	if target.directUserID != "" {
+		value[cardActionDirectUserKey] = target.directUserID
+	}
+	return value
+}
+
 func plainText(content string) map[string]any {
 	return map[string]any{"tag": "plain_text", "content": content}
 }
@@ -24,7 +57,7 @@ func (p *interactivePlatform) ReplyCard(ctx context.Context, rctx any, card *cor
 		return fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
 	}
 
-	cardJSON := renderCard(card, rc.sessionKey)
+	cardJSON := p.renderBoundCard(card, rc.sessionKey, "")
 	if !p.shouldUseThreadOrReplyAPI(rc) {
 		if rc.chatID == "" {
 			return fmt.Errorf("%s: chatID is empty, cannot send card", p.tag())
@@ -48,7 +81,7 @@ func (p *interactivePlatform) SendCard(ctx context.Context, rctx any, card *core
 		return p.ReplyCard(ctx, rctx, card)
 	}
 
-	cardJSON := renderCard(card, rc.sessionKey)
+	cardJSON := p.renderBoundCard(card, rc.sessionKey, "")
 	return p.createMessage(ctx, rc.chatID, larkim.MsgTypeInteractive, cardJSON, "send card")
 }
 
@@ -59,7 +92,7 @@ func (p *interactivePlatform) SendDirectUserCard(ctx context.Context, userID str
 	if userID == "" || !strings.HasPrefix(userID, "ou_") {
 		return fmt.Errorf("%s: direct user ID must be an app-scoped open_id", p.tag())
 	}
-	cardJSON := renderCard(card, "")
+	cardJSON := p.renderBoundCard(card, "", userID)
 	_, err := p.createMessageToReceiveID(ctx, userID, larkim.CreateMessageV1ReceiveIDTypeOpenId, larkim.MsgTypeInteractive, cardJSON, "send direct user card")
 	return err
 }
@@ -92,7 +125,7 @@ func (p *interactivePlatform) RefreshCard(ctx context.Context, sessionKey string
 }
 
 func (p *interactivePlatform) patchCard(ctx context.Context, messageID, sessionKey string, card *core.Card) error {
-	cardJSON := renderCard(card, sessionKey)
+	cardJSON := p.renderBoundCard(card, sessionKey, "")
 	req := larkim.NewPatchMessageReqBuilder().
 		MessageId(messageID).
 		Body(larkim.NewPatchMessageReqBodyBuilder().
@@ -113,10 +146,30 @@ func (p *interactivePlatform) patchCard(ctx context.Context, messageID, sessionK
 	})
 }
 
+func (p *Platform) cardActionTarget(sessionKey, directUserID string) cardActionTarget {
+	return cardActionTarget{
+		sessionKey:   sessionKey,
+		projectName:  p.boundProjectName(),
+		directUserID: directUserID,
+	}
+}
+
+func (p *Platform) renderBoundCardMap(card *core.Card, sessionKey, directUserID string) map[string]any {
+	return renderCardMapForTarget(card, p.cardActionTarget(sessionKey, directUserID))
+}
+
+func (p *Platform) renderBoundCard(card *core.Card, sessionKey, directUserID string) string {
+	return renderCardForTarget(card, p.cardActionTarget(sessionKey, directUserID))
+}
+
 // renderCardMap converts a core.Card into the Feishu Interactive Card map
-// using the v1 format. Used both for message API (via renderCard) and
-// callback responses (CardActionTriggerResponse).
+// using the v1 format. The unbound wrapper is retained for deterministic unit
+// rendering; production platform paths use renderBoundCardMap.
 func renderCardMap(card *core.Card, sessionKey string) map[string]any {
+	return renderCardMapForTarget(card, cardActionTarget{sessionKey: sessionKey})
+}
+
+func renderCardMapForTarget(card *core.Card, target cardActionTarget) map[string]any {
 	result := map[string]any{
 		"config": map[string]any{
 			"wide_screen_mode": true,
@@ -136,7 +189,7 @@ func renderCardMap(card *core.Card, sessionKey string) map[string]any {
 			"template": color,
 		}
 	}
-	if transformed, ok := renderDeleteModeCheckerCard(card, result); ok {
+	if transformed, ok := renderDeleteModeCheckerCard(card, result, target); ok {
 		return transformed
 	}
 
@@ -159,13 +212,7 @@ func renderCardMap(card *core.Card, sessionKey string) map[string]any {
 				if btnType == "" {
 					btnType = "default"
 				}
-				valMap := map[string]string{"action": btn.Value}
-				if sessionKey != "" {
-					valMap["session_key"] = sessionKey
-				}
-				for k, v := range btn.Extra {
-					valMap[k] = v
-				}
+				valMap := target.value(btn.Value, btn.Extra)
 				action := map[string]any{
 					"tag":   "button",
 					"text":  plainText(btn.Text),
@@ -210,13 +257,7 @@ func renderCardMap(card *core.Card, sessionKey string) map[string]any {
 			if btnType == "" {
 				btnType = "default"
 			}
-			valMap := map[string]string{"action": e.BtnValue}
-			if sessionKey != "" {
-				valMap["session_key"] = sessionKey
-			}
-			for k, v := range e.Extra {
-				valMap[k] = v
-			}
+			valMap := target.value(e.BtnValue, e.Extra)
 			elements = append(elements, map[string]any{
 				"tag":       "column_set",
 				"flex_mode": "none",
@@ -261,8 +302,8 @@ func renderCardMap(card *core.Card, sessionKey string) map[string]any {
 				"placeholder": plainText(e.Placeholder),
 				"options":     options,
 			}
-			if sessionKey != "" {
-				selectElem["value"] = map[string]string{"session_key": sessionKey}
+			if value := target.value("", nil); len(value) > 0 {
+				selectElem["value"] = value
 			}
 			if e.InitValue != "" {
 				selectElem["initial_option"] = e.InitValue
@@ -293,7 +334,7 @@ type deleteModeCheckerRow struct {
 	checked bool
 }
 
-func renderDeleteModeCheckerCard(card *core.Card, base map[string]any) (map[string]any, bool) {
+func renderDeleteModeCheckerCard(card *core.Card, base map[string]any, target cardActionTarget) (map[string]any, bool) {
 	if card == nil {
 		return nil, false
 	}
@@ -386,7 +427,7 @@ func renderDeleteModeCheckerCard(card *core.Card, base map[string]any) (map[stri
 					"type":             "danger",
 					"name":             "delete_mode_submit",
 					"form_action_type": "submit",
-					"value":            map[string]string{"action": "act:/delete-mode form-submit"},
+					"value":            target.value("act:/delete-mode form-submit", nil),
 				},
 			},
 		},
@@ -402,7 +443,7 @@ func renderDeleteModeCheckerCard(card *core.Card, base map[string]any) (map[stri
 					"text":  plainText(cancelText),
 					"type":  "default",
 					"name":  "delete_mode_cancel",
-					"value": map[string]string{"action": "act:/delete-mode cancel"},
+					"value": target.value("act:/delete-mode cancel", nil),
 				},
 			},
 		})
@@ -426,10 +467,7 @@ func renderDeleteModeCheckerCard(card *core.Card, base map[string]any) (map[stri
 			if btnType == "" {
 				btnType = "default"
 			}
-			valMap := map[string]string{"action": btn.Value}
-			for k, v := range btn.Extra {
-				valMap[k] = v
-			}
+			valMap := target.value(btn.Value, btn.Extra)
 			action := map[string]any{
 				"tag":   "button",
 				"text":  plainText(btn.Text),
@@ -483,7 +521,11 @@ func parseDeleteModeListItemAction(action string) (id string, selectable bool, o
 
 // renderCard converts a core.Card into the Feishu Interactive Card JSON string.
 func renderCard(card *core.Card, sessionKey string) string {
-	b, err := json.Marshal(renderCardMap(card, sessionKey))
+	return renderCardForTarget(card, cardActionTarget{sessionKey: sessionKey})
+}
+
+func renderCardForTarget(card *core.Card, target cardActionTarget) string {
+	b, err := json.Marshal(renderCardMapForTarget(card, target))
 	if err != nil {
 		slog.Error("feishu: renderCard marshal failed", "error", err)
 		return `{"config":{"wide_screen_mode":true},"elements":[]}`

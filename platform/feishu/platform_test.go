@@ -2587,6 +2587,219 @@ func TestCmdAction_WithoutAfterClick_DispatchesAndReturnsNil(t *testing.T) {
 	}
 }
 
+func TestCmdAction_DirectRecipientBypassesGroupAllowChat(t *testing.T) {
+	platformAny, err := New(map[string]any{
+		"app_id": "cli_xxx", "app_secret": "secret", "enable_feishu_card": true,
+		"allow_chat": "oc_allowed_group",
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	ip := platformAny.(*interactivePlatform)
+	core.NewEngine("release-project", nil, []core.Platform{ip}, "", core.LangEnglish)
+	ip.userNameCache.Store("ou_admin", "Admin")
+	ip.chatNameCache.Store("oc_private_chat", "Private")
+	msgCh := make(chan *core.Message, 1)
+	ip.handler = func(_ core.Platform, msg *core.Message) { msgCh <- msg }
+
+	_, err = ip.onCardAction(&callback.CardActionTriggerEvent{
+		Event: &callback.CardActionTriggerRequest{
+			Operator: &callback.Operator{OpenID: "ou_admin"},
+			Action: &callback.CallBackAction{Value: map[string]any{
+				"action": "cmd:/upgrade stable", "cc_project": "release-project", "cc_direct_user": "ou_admin",
+			}},
+			Context: &callback.Context{OpenChatID: "oc_private_chat", OpenMessageID: "om_notice"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("onCardAction() error = %v", err)
+	}
+	select {
+	case msg := <-msgCh:
+		if msg.Content != "/upgrade stable" || msg.UserID != "ou_admin" {
+			t.Fatalf("direct card dispatch = %#v", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("bound direct-user card action was filtered by group allow_chat")
+	}
+}
+
+func TestCmdAction_DirectRecipientBindingCannotAuthorizeAnotherUser(t *testing.T) {
+	platformAny, err := New(map[string]any{
+		"app_id": "cli_xxx", "app_secret": "secret", "enable_feishu_card": true,
+		"allow_chat": "oc_allowed_group",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip := platformAny.(*interactivePlatform)
+	core.NewEngine("release-project", nil, []core.Platform{ip}, "", core.LangEnglish)
+	ip.userNameCache.Store("ou_other", "Other")
+	ip.chatNameCache.Store("oc_private_chat", "Private")
+	msgCh := make(chan *core.Message, 1)
+	ip.handler = func(_ core.Platform, msg *core.Message) { msgCh <- msg }
+	_, err = ip.onCardAction(&callback.CardActionTriggerEvent{Event: &callback.CardActionTriggerRequest{
+		Operator: &callback.Operator{OpenID: "ou_other"},
+		Action: &callback.CallBackAction{Value: map[string]any{
+			"action": "cmd:/upgrade stable", "cc_project": "release-project", "cc_direct_user": "ou_admin",
+		}},
+		Context: &callback.Context{OpenChatID: "oc_private_chat", OpenMessageID: "om_notice"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case msg := <-msgCh:
+		t.Fatalf("different operator reused a bound direct-user card: %#v", msg)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestReplyCardBindsProjectOwner(t *testing.T) {
+	platformAny, err := New(map[string]any{"app_id": "cli_xxx", "app_secret": "secret", "enable_feishu_card": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip := platformAny.(*interactivePlatform)
+	core.NewEngine("feedback-owner", nil, []core.Platform{ip}, "", core.LangEnglish)
+	card := core.NewCard().Buttons(core.CardButton{Text: "Submit", Value: "cmd:/feedback submit-token abc"}).Build()
+	rendered := ip.renderBoundCard(card, "feishu:oc_chat:ou_user", "")
+	if !strings.Contains(rendered, `"cc_project":"feedback-owner"`) {
+		t.Fatalf("reply card action has no project owner: %s", rendered)
+	}
+	if strings.Contains(rendered, `"cc_direct_user"`) {
+		t.Fatalf("ordinary reply card was marked as direct-user delivery: %s", rendered)
+	}
+}
+
+func TestCmdAction_ProjectOwnerPreventsSiblingDispatch(t *testing.T) {
+	newSibling := func(project string) (*interactivePlatform, <-chan *core.Message) {
+		platformAny, err := New(map[string]any{
+			"app_id": "cli_shared", "app_secret": "secret", "enable_feishu_card": true, "allow_chat": "*",
+		})
+		if err != nil {
+			t.Fatalf("New(%s) error = %v", project, err)
+		}
+		ip := platformAny.(*interactivePlatform)
+		core.NewEngine(project, nil, []core.Platform{ip}, "", core.LangEnglish)
+		ip.userNameCache.Store("ou_user1", "User")
+		ip.chatNameCache.Store("oc_shared", "Shared")
+		messages := make(chan *core.Message, 1)
+		ip.handler = func(_ core.Platform, msg *core.Message) { messages <- msg }
+		return ip, messages
+	}
+	owner, ownerMessages := newSibling("owner-project")
+	sibling, siblingMessages := newSibling("sibling-project")
+	event := &callback.CardActionTriggerEvent{Event: &callback.CardActionTriggerRequest{
+		Operator: &callback.Operator{OpenID: "ou_user1"},
+		Action: &callback.CallBackAction{Value: map[string]any{
+			"action": "cmd:/feedback submit-token abc", "cc_project": "owner-project",
+		}},
+		Context: &callback.Context{OpenChatID: "oc_shared", OpenMessageID: "om_feedback"},
+	}}
+	for _, platform := range []*interactivePlatform{owner, sibling} {
+		if _, err := platform.onCardAction(event); err != nil {
+			t.Fatalf("onCardAction() error = %v", err)
+		}
+	}
+
+	select {
+	case <-ownerMessages:
+	case <-time.After(2 * time.Second):
+		t.Fatal("owning project did not receive its card action")
+	}
+	select {
+	case msg := <-siblingMessages:
+		t.Fatalf("sibling project received owned card action: %#v", msg)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestCmdAction_SharedOwnerlessCardFailsClosed(t *testing.T) {
+	firstAny, err := New(map[string]any{"app_id": "cli_shared", "app_secret": "secret", "allow_chat": "*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondAny, err := New(map[string]any{"app_id": "cli_shared", "app_secret": "secret", "allow_chat": "*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := firstAny.(*interactivePlatform)
+	second := secondAny.(*interactivePlatform)
+	first.userNameCache.Store("ou_user1", "User")
+	first.chatNameCache.Store("oc_shared", "Shared")
+	second.userNameCache.Store("ou_user1", "User")
+	second.chatNameCache.Store("oc_shared", "Shared")
+	group := &sharedWSGroup{platforms: []*Platform{first.Platform, second.Platform}}
+	first.sharedGroup = group
+	second.sharedGroup = group
+	firstMessages := make(chan *core.Message, 1)
+	secondMessages := make(chan *core.Message, 1)
+	first.handler = func(_ core.Platform, msg *core.Message) { firstMessages <- msg }
+	second.handler = func(_ core.Platform, msg *core.Message) { secondMessages <- msg }
+	event := &callback.CardActionTriggerEvent{Event: &callback.CardActionTriggerRequest{
+		Operator: &callback.Operator{OpenID: "ou_user1"},
+		Action:   &callback.CallBackAction{Value: map[string]any{"action": "cmd:/feedback submit-token legacy"}},
+		Context:  &callback.Context{OpenChatID: "oc_shared", OpenMessageID: "om_legacy"},
+	}}
+	for _, platform := range []*interactivePlatform{first, second} {
+		if _, err := platform.onCardAction(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, messages := range map[string]<-chan *core.Message{"first": firstMessages, "second": secondMessages} {
+		select {
+		case msg := <-messages:
+			t.Fatalf("%s sibling accepted ambiguous ownerless card action: %#v", name, msg)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+func TestCmdAction_SharedOwnerlessCardUsesUniqueChatOwner(t *testing.T) {
+	firstAny, err := New(map[string]any{"app_id": "cli_shared", "app_secret": "secret", "allow_chat": "oc_first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondAny, err := New(map[string]any{"app_id": "cli_shared", "app_secret": "secret", "allow_chat": "oc_second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := firstAny.(*interactivePlatform)
+	second := secondAny.(*interactivePlatform)
+	first.userNameCache.Store("ou_user1", "User")
+	first.chatNameCache.Store("oc_first", "First")
+	second.userNameCache.Store("ou_user1", "User")
+	second.chatNameCache.Store("oc_first", "First")
+	group := &sharedWSGroup{platforms: []*Platform{first.Platform, second.Platform}}
+	first.sharedGroup = group
+	second.sharedGroup = group
+	firstMessages := make(chan *core.Message, 1)
+	secondMessages := make(chan *core.Message, 1)
+	first.handler = func(_ core.Platform, msg *core.Message) { firstMessages <- msg }
+	second.handler = func(_ core.Platform, msg *core.Message) { secondMessages <- msg }
+	event := &callback.CardActionTriggerEvent{Event: &callback.CardActionTriggerRequest{
+		Operator: &callback.Operator{OpenID: "ou_user1"},
+		Action:   &callback.CallBackAction{Value: map[string]any{"action": "cmd:/status"}},
+		Context:  &callback.Context{OpenChatID: "oc_first", OpenMessageID: "om_legacy"},
+	}}
+	for _, platform := range []*interactivePlatform{first, second} {
+		if _, err := platform.onCardAction(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case <-firstMessages:
+	case <-time.After(2 * time.Second):
+		t.Fatal("unique allow_chat owner did not receive legacy card action")
+	}
+	select {
+	case msg := <-secondMessages:
+		t.Fatalf("non-owning sibling received uniquely scoped legacy card action: %#v", msg)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestCmdAction_WithAfterClick_DispatchesAndReturnsCard(t *testing.T) {
 	platformAny, err := New(map[string]any{"app_id": "cli_xxx", "app_secret": "secret", "enable_feishu_card": true})
 	if err != nil {

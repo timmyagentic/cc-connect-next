@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -27,6 +28,11 @@ func ValidateConfigOptionContract(owner string, options []ConfigOption, values m
 		if !configValueMatchesType(value, option.Type) {
 			return fmt.Errorf("%s: option %q must be %s, got %T", owner, option.Key, option.Type, value)
 		}
+		if configTypeIncludes(option.Type, "table") {
+			if key, child, ok := firstNonStringTableEntry(value); ok {
+				return fmt.Errorf("%s: option %q entry %q must be string, got %T", owner, option.Key, key, child)
+			}
+		}
 		if option.ClosedValues {
 			if stringValue, ok := value.(string); ok && !configContractContains(option.Values, stringValue) {
 				return fmt.Errorf("%s: option %q must be one of %s, got %q", owner, option.Key, strings.Join(option.Values, ", "), stringValue)
@@ -44,6 +50,43 @@ func ValidateConfigOptionContract(owner string, options []ConfigOption, values m
 		}
 	}
 	return nil
+}
+
+func configTypeIncludes(typeName, target string) bool {
+	for _, candidate := range strings.Split(typeName, "|") {
+		candidate = strings.TrimSpace(candidate)
+		if idx := strings.Index(candidate, " "); idx >= 0 {
+			candidate = candidate[:idx]
+		}
+		if candidate == target {
+			return true
+		}
+	}
+	return false
+}
+
+func firstNonStringTableEntry(value any) (string, any, bool) {
+	rv := reflect.ValueOf(value)
+	if !rv.IsValid() || rv.Kind() != reflect.Map || rv.Type().Key().Kind() != reflect.String {
+		return "", nil, false
+	}
+	entries := make(map[string]any, rv.Len())
+	iter := rv.MapRange()
+	for iter.Next() {
+		entries[iter.Key().String()] = iter.Value().Interface()
+	}
+	keys := make([]string, 0, len(entries))
+	for key := range entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		child := entries[key]
+		if _, ok := child.(string); !ok {
+			return key, child, true
+		}
+	}
+	return "", nil, false
 }
 
 func configContractContains(values []string, target string) bool {

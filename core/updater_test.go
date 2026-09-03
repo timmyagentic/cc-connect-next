@@ -129,6 +129,86 @@ func TestCmdUpgradeBetaLabelsChannelAndPrereleaseWithoutCallingItStable(t *testi
 	}
 }
 
+func TestCmdUpgrade_ChannelQualifiedConfirmRejectsDifferentPendingPlan(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		prepared     updatechannel.Channel
+		confirmed    updatechannel.Channel
+		preparedTag  string
+		isPrerelease bool
+	}{
+		{name: "stable cannot confirm beta", prepared: updatechannel.Beta, confirmed: updatechannel.Stable, preparedTag: "v1.1.0-beta.1", isPrerelease: true},
+		{name: "beta cannot confirm stable", prepared: updatechannel.Stable, confirmed: updatechannel.Beta, preparedTag: "v1.1.0"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			drainTestRestartRequests()
+			t.Cleanup(drainTestRestartRequests)
+			platform := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+			engine := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+			engine.SetAdminFrom("ou_admin")
+			engine.SetUpdateChannel(string(test.prepared))
+			service := &stubCoreUpdateService{
+				plan: PreparedUpdate{
+					Release: ReleaseInfo{
+						TagName: test.preparedTag, Channel: string(test.prepared), Prerelease: test.isPrerelease,
+					},
+					ArchiveAsset: "candidate.tar.gz", Available: true, token: "prepared-plan",
+				},
+				result: UpdateResult{Release: ReleaseInfo{TagName: test.preparedTag}, Updated: true},
+			}
+			engine.SetUpdateService(service)
+			withCurrentVersion(t, "v1.0.0")
+			message := &Message{SessionKey: "feishu:group", Platform: "feishu", UserID: "ou_admin", ReplyCtx: "rc"}
+
+			engine.cmdUpgrade(platform, message, []string{string(test.prepared)})
+			engine.cmdUpgrade(platform, message, []string{string(test.confirmed), "confirm"})
+
+			if service.applyCalls != 0 {
+				t.Fatalf("%s confirmation applied pending %s Plan", test.confirmed, test.prepared)
+			}
+			engine.updateServiceMu.Lock()
+			token := ""
+			for candidate := range engine.updatePlans {
+				token = candidate
+				break
+			}
+			engine.updateServiceMu.Unlock()
+			if token == "" {
+				t.Fatal("channel mismatch consumed the pending Plan")
+			}
+			engine.cmdUpgrade(platform, message, []string{string(test.confirmed), "confirm", token})
+			if service.applyCalls != 0 {
+				t.Fatalf("explicit token let %s confirmation apply pending %s Plan", test.confirmed, test.prepared)
+			}
+		})
+	}
+}
+
+func TestCmdUpgrade_ChannelQualifiedConfirmAppliesMatchingPendingPlan(t *testing.T) {
+	drainTestRestartRequests()
+	t.Cleanup(drainTestRestartRequests)
+	platform := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+	engine := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangEnglish)
+	engine.SetAdminFrom("ou_admin")
+	engine.SetUpdateChannel(string(updatechannel.Beta))
+	service := &stubCoreUpdateService{
+		plan: PreparedUpdate{
+			Release:      ReleaseInfo{TagName: "v1.1.0-beta.1", Channel: string(updatechannel.Beta), Prerelease: true},
+			ArchiveAsset: "candidate.tar.gz", Available: true, token: "prepared-plan",
+		},
+		result: UpdateResult{Release: ReleaseInfo{TagName: "v1.1.0-beta.1"}, Updated: true},
+	}
+	engine.SetUpdateService(service)
+	withCurrentVersion(t, "v1.0.0")
+	message := &Message{SessionKey: "feishu:group", Platform: "feishu", UserID: "ou_admin", ReplyCtx: "rc"}
+
+	engine.cmdUpgrade(platform, message, []string{"beta"})
+	engine.cmdUpgrade(platform, message, []string{"beta", "confirm"})
+	if service.applyCalls != 1 || service.appliedPlan.Release.Channel != "beta" {
+		t.Fatalf("matching beta confirmation did not apply exact Plan: calls=%d plan=%#v", service.applyCalls, service.appliedPlan)
+	}
+}
+
 func TestFoundationUpdateServiceRejectsForeignToken(t *testing.T) {
 	service := &foundationUpdateService{}
 	_, err := service.Apply(context.Background(), PreparedUpdate{token: "not a foundation plan"})

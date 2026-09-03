@@ -769,7 +769,8 @@ func load(path string) (*Config, error) {
 	// capabilities this build lacks, and both deserve a visible prompt instead
 	// of silent no-op behavior. Dynamic Agent/Platform option children are
 	// preserved in map[string]any even though the TOML metadata reports their
-	// leaves as undecoded; their top-level option is validated by the adapter.
+	// leaves as undecoded; their option and string-valued entries are validated
+	// by the adapter's compiled contract.
 	for _, key := range md.Undecoded() {
 		if isDynamicPluginOptionChild(key) {
 			continue
@@ -795,9 +796,9 @@ func load(path string) (*Config, error) {
 // isDynamicPluginOptionChild identifies leaves below a free-form Agent or
 // Platform option. BurntSushi/toml preserves these values in map[string]any
 // but reports the nested leaves as undecoded because `any` has no concrete Go
-// shape. Normal startup validates the top-level option name and value through
-// the selected adapter's schema; treating its children as typed config gaps
-// would only create false unsupported-config warnings.
+// shape. Normal startup validates the option plus its string-valued table
+// entries through the selected adapter's schema; treating those children as
+// typed config gaps would only create false unsupported-config warnings.
 func isDynamicPluginOptionChild(key toml.Key) bool {
 	parts := []string(key)
 	return len(parts) >= 5 &&

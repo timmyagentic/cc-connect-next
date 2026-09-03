@@ -16,6 +16,14 @@ type Platform interface {
 	Stop() error
 }
 
+// ProjectBinder gives a platform the stable project identity that owns it.
+// NewEngine calls this once before the platform starts. Multiplexed transports
+// can use the identity only for routing metadata; authorization remains in the
+// Engine's normal command and user-policy gates.
+type ProjectBinder interface {
+	BindProject(name string)
+}
+
 // DirectUserSender is an optional proactive-messaging capability for sending
 // a private message to one platform-scoped user ID without borrowing any
 // recent chat, group, topic, or session target.

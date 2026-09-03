@@ -81,6 +81,7 @@ func TestSendDirectUserRejectsNonOpenIDBeforeAPI(t *testing.T) {
 
 func TestSendDirectUserCardUsesOpenID(t *testing.T) {
 	const userID = "ou_update_admin"
+	const projectName = "release-project"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
@@ -101,6 +102,10 @@ func TestSendDirectUserCardUsesOpenID(t *testing.T) {
 			if body.ReceiveID != userID || body.MsgType != "interactive" || !strings.Contains(body.Content, "cmd:/upgrade") {
 				t.Fatalf("direct card request = %+v", body)
 			}
+			if !strings.Contains(body.Content, `"cc_project":"`+projectName+`"`) ||
+				!strings.Contains(body.Content, `"cc_direct_user":"`+userID+`"`) {
+				t.Fatalf("direct card action is not bound to project/recipient: %s", body.Content)
+			}
 			writeJSON(t, w, map[string]any{"code": 0, "msg": "success", "data": map[string]any{"message_id": "om_update_notice"}})
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
@@ -112,11 +117,15 @@ func TestSendDirectUserCardUsesOpenID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	core.NewEngine(projectName, nil, []core.Platform{platform}, "", core.LangEnglish)
 	sender, ok := platform.(core.DirectUserCardSender)
 	if !ok {
 		t.Fatalf("interactive Feishu wrapper does not expose DirectUserCardSender: %T", platform)
 	}
-	card := core.NewCard().Markdown("update available").Buttons(core.CardButton{Text: "Review", Value: "cmd:/upgrade"}).Build()
+	card := core.NewCard().Markdown("update available").Buttons(core.CardButton{
+		Text: "Review", Value: "cmd:/upgrade",
+		Extra: map[string]string{"cc_project": "forged-project", "cc_direct_user": "ou_other"},
+	}).Build()
 	if err := sender.SendDirectUserCard(context.Background(), userID, card); err != nil {
 		t.Fatal(err)
 	}

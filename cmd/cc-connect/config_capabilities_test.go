@@ -51,6 +51,51 @@ func TestWriteConfigCapabilities_FiltersCurrentAdaptersAndSearches(t *testing.T)
 	}
 }
 
+func TestDynamicStringTableContractsRejectNonStringEntries(t *testing.T) {
+	tests := []struct {
+		name     string
+		validate func() error
+		want     []string
+	}{
+		{
+			name: "agent env",
+			validate: func() error {
+				return core.ValidateAgentOptions("codex", map[string]any{"env": map[string]any{"TOKEN": int64(1)}})
+			},
+			want: []string{`option "env"`, `entry "TOKEN"`, "must be string"},
+		},
+		{
+			name: "Feishu peer bots",
+			validate: func() error {
+				return core.ValidatePlatformOptions("feishu", map[string]any{
+					"app_id": "cli_test", "app_secret": "secret", "peer_bots": map[string]any{"cli_peer": int64(1)},
+				})
+			},
+			want: []string{`option "peer_bots"`, `entry "cli_peer"`, "must be string"},
+		},
+		{
+			name: "Feishu mention map",
+			validate: func() error {
+				return core.ValidatePlatformOptions("feishu", map[string]any{
+					"app_id": "cli_test", "app_secret": "secret", "resolve_mentions": true,
+					"mention_map": map[string]any{"Reviewer": int64(1)},
+				})
+			},
+			want: []string{"mention_map", `"Reviewer"`, "must be a string"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.validate()
+			for _, want := range test.want {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("validation error = %v, want %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestConfigurationCapabilityBrief_IsBoundedAndActiveAdapterSpecific(t *testing.T) {
 	brief := core.BuildAgentCapabilityBrief(config.CapabilityCatalog("v-test"), "codex", []string{"feishu"})
 	if len(brief) > 16_000 {
