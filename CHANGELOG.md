@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.3.0-beta.4 (2026-09-04)
+
+Fourth v0.3.0 Beta focused on fail-closed release confirmation, project-owned
+Feishu card actions, and stricter dynamic configuration validation.
+
+See `changelogs/v0.3.0-beta.4.md` for bilingual release notes, Beta channel
+behavior, and compatibility boundaries.
+
 - Bound channel-qualified `/upgrade ... confirm` commands to the reviewed
   immutable Plan's exact Stable/Beta channel, so an explicit selector can no
   longer apply a pending Plan from the other channel.
