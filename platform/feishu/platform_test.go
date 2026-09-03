@@ -7,6 +7,8 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -729,10 +731,10 @@ func TestInteractivePlatform_ModelCardActionReturnsCardUpdate(t *testing.T) {
 		t.Fatal("expected non-empty session key")
 	}
 	ip.cardActionMsgMu.Lock()
-	tracked := ip.cardActionMsgIDs[gotSessionKey]
+	tracked := ip.cardActionTargets[gotSessionKey]
 	ip.cardActionMsgMu.Unlock()
-	if tracked != "om_test_message" {
-		t.Fatalf("tracked message id = %q, want om_test_message", tracked)
+	if tracked.messageID != "om_test_message" {
+		t.Fatalf("tracked message id = %q, want om_test_message", tracked.messageID)
 	}
 }
 
@@ -2316,6 +2318,74 @@ func TestCardAction_NavSlow_ReturnsToastThenRefreshes(t *testing.T) {
 
 	if got := mock.refreshCalled.Load(); got != 1 {
 		t.Fatalf("RefreshCard called %d times, want 1", got)
+	}
+}
+
+func TestCardAction_NavSlow_PreservesDirectRecipientBinding(t *testing.T) {
+	const (
+		projectName = "release-project"
+		userID      = "ou_update_admin"
+		messageID   = "om_update_notice"
+	)
+	patched := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/open-apis/auth/v3/tenant_access_token/internal":
+			writeJSON(t, writer, map[string]any{
+				"code": 0, "msg": "success", "expire": 7200, "tenant_access_token": "test-token",
+			})
+		case "/open-apis/im/v1/messages/" + messageID:
+			var body struct {
+				Content string `json:"content"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			patched <- body.Content
+			writeJSON(t, writer, map[string]any{"code": 0, "msg": "success"})
+		default:
+			t.Fatalf("unexpected path %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	platformAny, err := newPlatform("feishu", server.URL, map[string]any{
+		"app_id": "cli_test", "app_secret": "secret", "allow_chat": "oc_allowed_group",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip := platformAny.(*interactivePlatform)
+	core.NewEngine(projectName, nil, []core.Platform{ip}, "", core.LangEnglish)
+	ip.cardNavHandler = func(string, string) *core.Card {
+		time.Sleep(cardNavTimeout + 100*time.Millisecond)
+		return core.NewCard().Buttons(core.CardButton{Text: "Back", Value: "nav:/help"}).Build()
+	}
+
+	response, err := ip.onCardAction(&callback.CardActionTriggerEvent{Event: &callback.CardActionTriggerRequest{
+		Operator: &callback.Operator{OpenID: userID},
+		Action: &callback.CallBackAction{Value: map[string]any{
+			"action": "nav:/upgrade", "cc_project": projectName, "cc_direct_user": userID,
+		}},
+		Context: &callback.Context{OpenChatID: "oc_private_chat", OpenMessageID: messageID},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response == nil || response.Toast == nil {
+		t.Fatalf("slow navigation response = %#v, want loading toast", response)
+	}
+
+	select {
+	case content := <-patched:
+		for _, want := range []string{`"cc_project":"` + projectName + `"`, `"cc_direct_user":"` + userID + `"`} {
+			if !strings.Contains(content, want) {
+				t.Fatalf("async refreshed direct card lost %s: %s", want, content)
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for async direct card refresh")
 	}
 }
 

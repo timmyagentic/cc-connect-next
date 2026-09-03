@@ -7,8 +7,9 @@
   longer apply a pending Plan from the other channel.
 - Bound Feishu card actions to their owning project and direct-message
   recipient. Administrator update cards now remain actionable with a group
-  `allow_chat` list, while ambiguous legacy cards fail closed when one App is
-  shared by multiple projects.
+  `allow_chat` list, including after an asynchronous card-navigation refresh,
+  while ambiguous legacy cards fail closed when one App is shared by multiple
+  projects.
 - Rejected non-string values inside dynamic Agent/Platform option tables
   instead of silently dropping entries such as numeric Agent environment
   variables or Feishu peer aliases.

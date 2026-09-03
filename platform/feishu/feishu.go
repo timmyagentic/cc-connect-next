@@ -260,6 +260,11 @@ type replyContext struct {
 	bootstrapDone   chan struct{}
 }
 
+type cardActionTargetSnapshot struct {
+	messageID    string
+	directUserID string
+}
+
 type threadIsolationMode uint8
 
 const (
@@ -358,10 +363,10 @@ type Platform struct {
 	sharedGroup  *sharedWSGroup // non-nil when sharing WebSocket with other platforms
 	isWSPrimary  bool           // true if this platform owns the shared WebSocket connection
 	connErr      error          // why the long connection ended; nil while it is usable
-	// cardActionMessageIDs tracks the most recent card-action messageID per
-	// session key, enabling async card refreshes via the Patch API.
-	cardActionMsgMu  sync.Mutex
-	cardActionMsgIDs map[string]string // sessionKey → messageID
+	// cardActionTargets tracks the most recent card-action message and its
+	// direct-recipient binding per session, enabling safe async Patch updates.
+	cardActionMsgMu   sync.Mutex
+	cardActionTargets map[string]cardActionTargetSnapshot // sessionKey → target
 	// activeThreadSessions tracks thread sessionKeys that have already been
 	// accepted by the bot. In group chats with thread_isolation, once a thread
 	// has been engaged (the first @bot message), subsequent attachment-only
@@ -1228,10 +1233,12 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	if strings.HasPrefix(actionVal, "nav:") || strings.HasPrefix(actionVal, "act:") {
 		if messageID != "" {
 			p.cardActionMsgMu.Lock()
-			if p.cardActionMsgIDs == nil {
-				p.cardActionMsgIDs = make(map[string]string)
+			if p.cardActionTargets == nil {
+				p.cardActionTargets = make(map[string]cardActionTargetSnapshot)
 			}
-			p.cardActionMsgIDs[sessionKey] = messageID
+			p.cardActionTargets[sessionKey] = cardActionTargetSnapshot{
+				messageID: messageID, directUserID: directUserID,
+			}
 			p.cardActionMsgMu.Unlock()
 		}
 		// Feishu uses native form checker for delete-mode toggle,
@@ -1302,7 +1309,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 			return nil, nil
 		}
 
-		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
+		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, directUserID: directUserID}
 		go p.dispatchCoreMessage(&core.Message{
 			SessionKey:           sessionKey,
 			Platform:             p.platformName,
@@ -1334,7 +1341,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 
 	// askq: — AskUserQuestion option selected, forward as user message
 	if strings.HasPrefix(actionVal, "askq:") {
-		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
+		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, directUserID: directUserID}
 		go p.dispatchCoreMessage(&core.Message{
 			SessionKey: sessionKey,
 			Platform:   p.platformName,
@@ -1366,7 +1373,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	// cmd: — async command dispatch, with optional in-place card replacement
 	if strings.HasPrefix(actionVal, "cmd:") {
 		cmdText := strings.TrimPrefix(actionVal, "cmd:")
-		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
+		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, directUserID: directUserID}
 
 		slog.Info(p.tag()+": card action dispatched as command", "cmd", cmdText, "user", userID)
 

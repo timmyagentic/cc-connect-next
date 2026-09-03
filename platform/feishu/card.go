@@ -106,7 +106,7 @@ func (p *interactivePlatform) UpdateCard(ctx context.Context, rctx any, card *co
 	if rc.messageID == "" {
 		return fmt.Errorf("%s: card action messageID is empty", p.tag())
 	}
-	return p.patchCard(ctx, rc.messageID, rc.sessionKey, card)
+	return p.patchCard(ctx, rc.messageID, rc.sessionKey, rc.directUserID, card)
 }
 
 // RefreshCard updates a previously rendered card in-place using the Patch API.
@@ -114,18 +114,18 @@ func (p *interactivePlatform) UpdateCard(ctx context.Context, rctx any, card *co
 // for the given session key and patches that message with the new card content.
 func (p *interactivePlatform) RefreshCard(ctx context.Context, sessionKey string, card *core.Card) error {
 	p.cardActionMsgMu.Lock()
-	msgID := p.cardActionMsgIDs[sessionKey]
+	target := p.cardActionTargets[sessionKey]
 	p.cardActionMsgMu.Unlock()
 
-	if msgID == "" {
+	if target.messageID == "" {
 		return fmt.Errorf("%s: no tracked card messageID for session %q", p.tag(), sessionKey)
 	}
 
-	return p.patchCard(ctx, msgID, sessionKey, card)
+	return p.patchCard(ctx, target.messageID, sessionKey, target.directUserID, card)
 }
 
-func (p *interactivePlatform) patchCard(ctx context.Context, messageID, sessionKey string, card *core.Card) error {
-	cardJSON := p.renderBoundCard(card, sessionKey, "")
+func (p *interactivePlatform) patchCard(ctx context.Context, messageID, sessionKey, directUserID string, card *core.Card) error {
+	cardJSON := p.renderBoundCard(card, sessionKey, directUserID)
 	req := larkim.NewPatchMessageReqBuilder().
 		MessageId(messageID).
 		Body(larkim.NewPatchMessageReqBodyBuilder().
