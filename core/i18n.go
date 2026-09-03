@@ -513,19 +513,20 @@ const (
 	MsgRestartSuccess    MsgKey = "restart_success"
 	MsgMigrationComplete MsgKey = "migration_complete"
 
-	MsgUpgradeChecking        MsgKey = "upgrade_checking"
-	MsgUpgradeCheckingChannel MsgKey = "upgrade_checking_channel"
-	MsgUpgradeUpToDate        MsgKey = "upgrade_up_to_date"
-	MsgUpgradeUpToDateChannel MsgKey = "upgrade_up_to_date_channel"
-	MsgUpgradeChannelUsage    MsgKey = "upgrade_channel_usage"
-	MsgUpgradeChannelSummary  MsgKey = "upgrade_channel_summary"
-	MsgUpgradeAvailable       MsgKey = "upgrade_available"
-	MsgUpgradeAvailableAction MsgKey = "upgrade_available_action"
-	MsgUpgradePlanDetails     MsgKey = "upgrade_plan_details"
-	MsgUpgradePlanMissing     MsgKey = "upgrade_plan_missing"
-	MsgUpgradeDownloading     MsgKey = "upgrade_downloading"
-	MsgUpgradeSuccess         MsgKey = "upgrade_success"
-	MsgUpgradeDevBuild        MsgKey = "upgrade_dev_build"
+	MsgUpgradeChecking            MsgKey = "upgrade_checking"
+	MsgUpgradeCheckingChannel     MsgKey = "upgrade_checking_channel"
+	MsgUpgradeUpToDate            MsgKey = "upgrade_up_to_date"
+	MsgUpgradeUpToDateChannel     MsgKey = "upgrade_up_to_date_channel"
+	MsgUpgradeChannelUsage        MsgKey = "upgrade_channel_usage"
+	MsgUpgradeChannelSummary      MsgKey = "upgrade_channel_summary"
+	MsgUpgradeAvailable           MsgKey = "upgrade_available"
+	MsgUpgradeAvailableAction     MsgKey = "upgrade_available_action"
+	MsgUpgradePlanDetails         MsgKey = "upgrade_plan_details"
+	MsgUpgradePlanMissing         MsgKey = "upgrade_plan_missing"
+	MsgUpgradePlanChannelMismatch MsgKey = "upgrade_plan_channel_mismatch"
+	MsgUpgradeDownloading         MsgKey = "upgrade_downloading"
+	MsgUpgradeSuccess             MsgKey = "upgrade_success"
+	MsgUpgradeDevBuild            MsgKey = "upgrade_dev_build"
 
 	MsgWebNotSupported MsgKey = "web_not_supported"
 	MsgWebNotEnabled   MsgKey = "web_not_enabled"
@@ -3348,6 +3349,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "已審閱的更新計畫不存在或已過期。請重新傳送 `/upgrade`，查看目前精確 Release 後再安裝。",
 		LangJapanese:           "確認済みの更新プランがないか期限切れです。`/upgrade` を再実行し、現在の正確なリリースを確認してからインストールしてください。",
 		LangSpanish:            "El plan de actualización revisado no existe o caducó. Ejecuta `/upgrade` de nuevo para revisar la versión exacta antes de instalar.",
+	},
+	MsgUpgradePlanChannelMismatch: {
+		LangEnglish:            "The reviewed update plan is for the `%s` channel, not the explicitly requested `%s` channel. Run `/upgrade %s` to review a matching exact release before installing.",
+		LangChinese:            "已审阅的更新计划属于 `%s` 通道，与明确请求的 `%s` 通道不一致。请发送 `/upgrade %s`，查看匹配的精确 Release 后再安装。",
+		LangTraditionalChinese: "已審閱的更新計畫屬於 `%s` 通道，與明確要求的 `%s` 通道不一致。請傳送 `/upgrade %s`，查看相符的精確 Release 後再安裝。",
+		LangJapanese:           "確認済みの更新プランは `%s` チャンネル用で、明示的に指定された `%s` チャンネルとは一致しません。`/upgrade %s` を実行し、一致する正確なリリースを確認してからインストールしてください。",
+		LangSpanish:            "El plan revisado pertenece al canal `%s`, no al canal `%s` solicitado explícitamente. Ejecuta `/upgrade %s` para revisar una versión exacta coincidente antes de instalar.",
 	},
 	MsgUpgradeDownloading: {
 		LangEnglish:            "⬇️ Downloading %s ...",

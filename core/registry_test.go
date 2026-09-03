@@ -73,6 +73,7 @@ func TestValidateConfigOptionContract_EnforcesRequiredTypeAndBounds(t *testing.T
 		{Key: "token", Type: "string", Requirement: ConfigRequirementRequired},
 		{Key: "window", Type: "integer", Minimum: &minimum, Maximum: &maximum},
 		{Key: "targets", Type: "string | string[]"},
+		{Key: "labels", Type: "table"},
 		{Key: "mode", Type: "string", Values: []string{"safe", "fast"}, ClosedValues: true},
 	}
 	tests := []struct {
@@ -87,6 +88,9 @@ func TestValidateConfigOptionContract_EnforcesRequiredTypeAndBounds(t *testing.T
 		{name: "enum", values: map[string]any{"token": "x", "window": 2, "mode": "unknown"}, wantErr: `option "mode" must be one of safe, fast`},
 		{name: "string union", values: map[string]any{"token": "x", "window": 2, "targets": "a"}},
 		{name: "array union", values: map[string]any{"token": "x", "window": 2, "targets": []any{"a", "b"}}},
+		{name: "dynamic table", values: map[string]any{"token": "x", "labels": map[string]any{"dynamic": "value"}}},
+		{name: "typed table", values: map[string]any{"token": "x", "labels": map[string]string{"typed": "value"}}},
+		{name: "table child type", values: map[string]any{"token": "x", "labels": map[string]any{"valid": "value", "ignored": int64(1)}}, wantErr: `option "labels" entry "ignored" must be string`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

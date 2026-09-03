@@ -62,6 +62,14 @@ func TestParseUpdateOptionsRejectsUnknownAndAmbiguousValues(t *testing.T) {
 	}
 }
 
+func TestParseUpdateOptionsRejectsLegacyPrereleaseAliases(t *testing.T) {
+	for _, alias := range []string{"--pre", "--beta"} {
+		if _, err := parseUpdateOptions([]string{alias}); err == nil {
+			t.Fatalf("parseUpdateOptions(%q) accepted a documented rejected alias", alias)
+		}
+	}
+}
+
 func TestParseUpdateOptionsSupportsExplicitStableAndBetaChannels(t *testing.T) {
 	for _, test := range []struct {
 		args []string
@@ -71,7 +79,6 @@ func TestParseUpdateOptionsSupportsExplicitStableAndBetaChannels(t *testing.T) {
 		{args: []string{"stable"}, want: "stable"},
 		{args: []string{"beta"}, want: "beta"},
 		{args: []string{"--channel", "beta"}, want: "beta"},
-		{args: []string{"--beta"}, want: "beta"},
 	} {
 		got, err := parseUpdateOptions(test.args)
 		if err != nil || string(got.Channel) != test.want {

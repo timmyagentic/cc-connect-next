@@ -89,9 +89,6 @@ func parseUpdateOptions(args []string) (updateOptions, error) {
 	}
 	if len(args) == 1 {
 		switch args[0] {
-		case "--beta", "--pre":
-			options.Channel = updatechannel.Beta
-			return options, nil
 		case "--stable":
 			return options, nil
 		}

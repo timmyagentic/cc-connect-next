@@ -960,6 +960,11 @@ func NewEngine(name string, ag Agent, platforms []Platform, sessionStorePath str
 		shellFlag:             defaultShellFlag(),
 		pendingRestartTimeout: defaultPendingRestartTimeout,
 	}
+	for _, platform := range platforms {
+		if binder, ok := platform.(ProjectBinder); ok {
+			binder.BindProject(name)
+		}
+	}
 
 	if ag != nil {
 		e.sessions.InvalidateForAgent(ag.Name())
@@ -16971,9 +16976,11 @@ func (e *Engine) cmdDoctor(p Platform, msg *Message) {
 
 func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 	channel := e.updateChannel.Effective()
+	channelSelected := false
 	if len(args) > 0 {
 		if selected, ok := updatechannel.Parse(args[0]); ok && strings.TrimSpace(args[0]) != "" {
 			channel = selected
+			channelSelected = true
 			args = args[1:]
 		}
 	}
@@ -16991,7 +16998,11 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 		if len(args) > 1 {
 			token = args[1]
 		}
-		e.cmdUpgradeConfirm(p, msg, token)
+		if channelSelected {
+			e.cmdUpgradeConfirmForChannel(p, msg, token, channel)
+		} else {
+			e.cmdUpgradeConfirm(p, msg, token)
+		}
 		return
 	}
 
@@ -17038,6 +17049,10 @@ func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 }
 
 func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message, token string) {
+	e.cmdUpgradeConfirmForChannel(p, msg, token, "")
+}
+
+func (e *Engine) cmdUpgradeConfirmForChannel(p Platform, msg *Message, token string, expectedChannel updatechannel.Channel) {
 	cur := CurrentVersion
 	if cur == "" || cur == "dev" {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradeDevBuild))
@@ -17049,8 +17064,16 @@ func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message, token string) {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradePlanMissing))
 		return
 	}
+	planChannel := updatechannel.Channel(plan.Release.Channel).Effective()
+	if expectedChannel != "" {
+		expectedChannel = expectedChannel.Effective()
+		if planChannel != expectedChannel {
+			e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradePlanChannelMismatch, planChannel, expectedChannel, expectedChannel))
+			return
+		}
+	}
 
-	service, err := e.currentUpdateService(updatechannel.Channel(plan.Release.Channel))
+	service, err := e.currentUpdateService(planChannel)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
@@ -17067,7 +17090,7 @@ func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message, token string) {
 	}
 	e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
 	if !result.Updated {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradeUpToDateChannel, updatechannel.Channel(plan.Release.Channel).Effective(), cur))
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradeUpToDateChannel, planChannel, cur))
 		return
 	}
 

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Bound channel-qualified `/upgrade ... confirm` commands to the reviewed
+  immutable Plan's exact Stable/Beta channel, so an explicit selector can no
+  longer apply a pending Plan from the other channel.
+- Bound Feishu card actions to their owning project and direct-message
+  recipient. Administrator update cards now remain actionable with a group
+  `allow_chat` list, including after an asynchronous card-navigation refresh,
+  while ambiguous legacy cards fail closed when one App is shared by multiple
+  projects.
+- Rejected non-string values inside dynamic Agent/Platform option tables
+  instead of silently dropping entries such as numeric Agent environment
+  variables or Feishu peer aliases.
+- Restored the documented fail-closed behavior for the unsupported
+  `cc-connect-next update --pre` and `--beta` aliases; explicit prerelease
+  selection remains available through `update beta` or `--channel beta`.
+
 ## v0.3.0-beta.3 (2026-09-02)
 
 Third v0.3.0 Beta focused on explicit release channels and one-action,

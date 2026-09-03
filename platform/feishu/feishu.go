@@ -260,6 +260,11 @@ type replyContext struct {
 	bootstrapDone   chan struct{}
 }
 
+type cardActionTargetSnapshot struct {
+	messageID    string
+	directUserID string
+}
+
 type threadIsolationMode uint8
 
 const (
@@ -309,6 +314,7 @@ func parseThreadIsolationMode(raw any) (threadIsolationMode, error) {
 type Platform struct {
 	mu                         sync.RWMutex
 	platformName               string
+	projectName                string
 	domain                     string
 	appID                      string
 	appSecret                  string
@@ -357,10 +363,10 @@ type Platform struct {
 	sharedGroup  *sharedWSGroup // non-nil when sharing WebSocket with other platforms
 	isWSPrimary  bool           // true if this platform owns the shared WebSocket connection
 	connErr      error          // why the long connection ended; nil while it is usable
-	// cardActionMessageIDs tracks the most recent card-action messageID per
-	// session key, enabling async card refreshes via the Patch API.
-	cardActionMsgMu  sync.Mutex
-	cardActionMsgIDs map[string]string // sessionKey → messageID
+	// cardActionTargets tracks the most recent card-action message and its
+	// direct-recipient binding per session, enabling safe async Patch updates.
+	cardActionMsgMu   sync.Mutex
+	cardActionTargets map[string]cardActionTargetSnapshot // sessionKey → target
 	// activeThreadSessions tracks thread sessionKeys that have already been
 	// accepted by the bot. In group chats with thread_isolation, once a thread
 	// has been engaged (the first @bot message), subsequent attachment-only
@@ -651,6 +657,18 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 }
 
 func (p *Platform) Name() string { return p.platformName }
+
+func (p *Platform) BindProject(name string) {
+	p.mu.Lock()
+	p.projectName = strings.TrimSpace(name)
+	p.mu.Unlock()
+}
+
+func (p *Platform) boundProjectName() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.projectName
+}
 
 func (p *Platform) threadIsolationEnabled() bool {
 	return p.threadMode != threadIsolationOff
@@ -1108,6 +1126,48 @@ func (p *Platform) webhookHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(resp.Body)
 }
 
+func cardActionString(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func (p *Platform) acceptsCardActionOwner(values map[string]any, chatID string) bool {
+	owner := cardActionString(values, cardActionProjectKey)
+	if owner != "" {
+		project := p.boundProjectName()
+		return project != "" && owner == project
+	}
+	// Cards rendered before project ownership was embedded remain compatible
+	// for a single adapter. A shared App may also route a legacy callback when
+	// exactly one sibling owns the chat; overlapping/default allowlists remain
+	// ambiguous and fail closed.
+	if p.sharedGroup == nil {
+		return true
+	}
+	platforms := p.sharedGroup.allPlatforms()
+	if len(platforms) <= 1 {
+		return true
+	}
+	var ownerCandidate *Platform
+	for _, candidate := range platforms {
+		if chatID == "" || !core.AllowList(candidate.allowChat, chatID) {
+			continue
+		}
+		if ownerCandidate != nil {
+			return false
+		}
+		ownerCandidate = candidate
+	}
+	return ownerCandidate == p
+}
+
+func (p *Platform) isBoundDirectUserCardAction(values map[string]any, userID string) bool {
+	project := p.boundProjectName()
+	return project != "" &&
+		cardActionString(values, cardActionProjectKey) == project &&
+		userID != "" && cardActionString(values, cardActionDirectUserKey) == userID
+}
+
 // onCardAction handles card.action.trigger callbacks via the official SDK event dispatcher.
 // Three prefixes are supported:
 //   - nav:/xxx   — render a card page and update the original card in-place
@@ -1117,15 +1177,32 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	if event.Event == nil || event.Event.Action == nil {
 		return nil, nil
 	}
+	values := event.Event.Action.Value
+	userID := ""
+	if event.Event.Operator != nil {
+		userID = event.Event.Operator.OpenID
+	}
+	chatID := ""
+	messageID := ""
+	if event.Event.Context != nil {
+		chatID = event.Event.Context.OpenChatID
+		messageID = event.Event.Context.OpenMessageID
+	}
+	if !p.acceptsCardActionOwner(values, chatID) {
+		return nil, nil
+	}
 
-	// Check allow_chat filter: skip card actions from chats this platform doesn't own.
-	if event.Event.Context != nil && event.Event.Context.OpenChatID != "" {
-		if !core.AllowList(p.allowChat, event.Event.Context.OpenChatID) {
+	// Ordinary cards retain the same allow_chat boundary as inbound messages.
+	// A direct-user card may originate from a P2P chat outside a group-only
+	// allowlist, so accept it only when immutable card metadata binds both the
+	// owning project and the exact callback operator.
+	if chatID != "" {
+		if !core.AllowList(p.allowChat, chatID) && !p.isBoundDirectUserCardAction(values, userID) {
 			return nil, nil
 		}
 	}
 
-	actionVal, _ := event.Event.Action.Value["action"].(string)
+	actionVal, _ := values["action"].(string)
 
 	// select_static callbacks put the chosen value in event.Event.Action.Option
 	if actionVal == "" && event.Event.Action.Option != "" {
@@ -1146,29 +1223,22 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 		}
 	}
 
-	userID := ""
-	if event.Event.Operator != nil {
-		userID = event.Event.Operator.OpenID
-	}
-	chatID := ""
-	messageID := ""
-	if event.Event.Context != nil {
-		chatID = event.Event.Context.OpenChatID
-		messageID = event.Event.Context.OpenMessageID
-	}
 	if chatID == "" {
 		chatID = userID
 	}
-	sessionKey := p.sessionKeyFromCardAction(chatID, userID, event.Event.Action.Value)
+	sessionKey := p.sessionKeyFromCardAction(chatID, userID, values)
+	directUserID := cardActionString(values, cardActionDirectUserKey)
 
 	// nav: / act: — synchronous card update
 	if strings.HasPrefix(actionVal, "nav:") || strings.HasPrefix(actionVal, "act:") {
 		if messageID != "" {
 			p.cardActionMsgMu.Lock()
-			if p.cardActionMsgIDs == nil {
-				p.cardActionMsgIDs = make(map[string]string)
+			if p.cardActionTargets == nil {
+				p.cardActionTargets = make(map[string]cardActionTargetSnapshot)
 			}
-			p.cardActionMsgIDs[sessionKey] = messageID
+			p.cardActionTargets[sessionKey] = cardActionTargetSnapshot{
+				messageID: messageID, directUserID: directUserID,
+			}
 			p.cardActionMsgMu.Unlock()
 		}
 		// Feishu uses native form checker for delete-mode toggle,
@@ -1193,7 +1263,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 					return &callback.CardActionTriggerResponse{
 						Card: &callback.Card{
 							Type: "raw",
-							Data: renderCardMap(card, sessionKey),
+							Data: p.renderBoundCardMap(card, sessionKey, directUserID),
 						},
 					}, nil
 				}
@@ -1239,7 +1309,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 			return nil, nil
 		}
 
-		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
+		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, directUserID: directUserID}
 		go p.dispatchCoreMessage(&core.Message{
 			SessionKey:           sessionKey,
 			Platform:             p.platformName,
@@ -1264,14 +1334,14 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 		return &callback.CardActionTriggerResponse{
 			Card: &callback.Card{
 				Type: "raw",
-				Data: renderCardMap(cb.Build(), sessionKey),
+				Data: p.renderBoundCardMap(cb.Build(), sessionKey, directUserID),
 			},
 		}, nil
 	}
 
 	// askq: — AskUserQuestion option selected, forward as user message
 	if strings.HasPrefix(actionVal, "askq:") {
-		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
+		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, directUserID: directUserID}
 		go p.dispatchCoreMessage(&core.Message{
 			SessionKey: sessionKey,
 			Platform:   p.platformName,
@@ -1295,7 +1365,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 		return &callback.CardActionTriggerResponse{
 			Card: &callback.Card{
 				Type: "raw",
-				Data: renderCardMap(cb.Build(), sessionKey),
+				Data: p.renderBoundCardMap(cb.Build(), sessionKey, directUserID),
 			},
 		}, nil
 	}
@@ -1303,7 +1373,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	// cmd: — async command dispatch, with optional in-place card replacement
 	if strings.HasPrefix(actionVal, "cmd:") {
 		cmdText := strings.TrimPrefix(actionVal, "cmd:")
-		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
+		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, directUserID: directUserID}
 
 		slog.Info(p.tag()+": card action dispatched as command", "cmd", cmdText, "user", userID)
 
@@ -1336,7 +1406,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 				return &callback.CardActionTriggerResponse{
 					Card: &callback.Card{
 						Type: "raw",
-						Data: renderCardMap(cb.Build(), sessionKey),
+						Data: p.renderBoundCardMap(cb.Build(), sessionKey, directUserID),
 					},
 				}, nil
 			}
