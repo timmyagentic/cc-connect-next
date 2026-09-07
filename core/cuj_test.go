@@ -2237,63 +2237,83 @@ func TestCUJ_J1_FeedbackExplicitTriggerSubmitsDirectly(t *testing.T) {
 		t.Fatalf("user did not receive only direct, link-free result statuses: %v", env.plat.getSent())
 	}
 
-	t.Run("shared-session error offer belongs to its initiating user", func(t *testing.T) {
-		env := newCUJEnv(t)
-		env.engine.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
-		submitted := captureFeedbackSubmissions(env.engine)
-		send := func(user, content string) {
-			env.engine.ReceiveMessage(env.plat, &Message{
-				SessionKey: "test:shared-topic", Platform: "test", UserID: user,
-				Content: content, ReplyCtx: "shared-reply",
-			})
-		}
-		send("owner", "hello")
-		env.waitFor("first response", 2*time.Second, func() bool { return env.sentContains("ok") })
-		env.agent.mu.Lock()
-		agentSession := env.agent.sessions[0]
-		env.agent.mu.Unlock()
-		agentSession.mu.Lock()
-		agentSession.nextEventOverride = &Event{Type: EventError, Error: errors.New("diagnostic failure"), Done: true}
-		agentSession.mu.Unlock()
-		env.plat.clearSent()
-		send("owner", "run the failing operation")
-		env.waitFor("feedback offer", 2*time.Second, func() bool { return env.sentContains("submit-token") })
-		token := feedbackSubmitTokenFromText(t, strings.Join(env.plat.getSent(), "\n"))
-		env.plat.clearSent()
-
-		send("another-user", "/feedback submit-token "+token)
-		if !env.sentContains(env.engine.i18n.T(MsgFeedbackPendingMissing)) {
-			t.Fatalf("another participant was not refused: %v", env.plat.getSent())
-		}
-		select {
-		case <-submitted:
-			t.Fatal("another participant sent the owner's diagnostics")
-		default:
-		}
-		env.plat.clearSent()
-		send("owner", "/feedback submit-token "+token)
-		if got := strings.Join(env.plat.getSent(), "\n"); got != "Submission succeeded" {
-			t.Fatalf("owner must see only the submit result: %q", got)
-		}
-		select {
-		case report := <-submitted:
-			if report.RecentError == nil || report.RecentError.Text != "diagnostic failure" {
-				t.Fatal("owner submitted a different report")
+	for _, mode := range []string{"shared session", "multi workspace", "forced work_dir"} {
+		t.Run("error offer owner/"+mode, func(t *testing.T) {
+			env := newCUJEnv(t)
+			if mode != "shared session" {
+				workspace := normalizeWorkspacePath(filepath.Join(env.tempDir, "workspace"))
+				if err := os.MkdirAll(workspace, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if mode == "multi workspace" {
+					env.engine.SetMultiWorkspace(env.tempDir, filepath.Join(env.tempDir, "bindings.json"))
+					env.engine.workspaceBindings.Bind("project:test", "test:shared-topic", "shared-topic", workspace)
+				} else {
+					env.engine.workspacePool = newWorkspacePool(DefaultWorkspaceIdleTimeout)
+					env.engine.bindSendWorkDir("test:shared-topic", workspace)
+				}
+				ws := env.engine.workspacePool.GetOrCreate(workspace)
+				ws.mu.Lock()
+				ws.agent = env.agent
+				ws.sessions = NewSessionManager(filepath.Join(env.tempDir, "workspace-sessions.json"))
+				ws.mu.Unlock()
 			}
-		default:
-			t.Fatal("owner's click did not submit")
-		}
-		env.plat.clearSent()
-		send("owner", "/feedback submit-token "+token)
-		if !env.sentContains(env.engine.i18n.T(MsgFeedbackPendingMissing)) {
-			t.Fatal("replayed action was not refused")
-		}
-		select {
-		case <-submitted:
-			t.Fatal("replayed action submitted twice")
-		default:
-		}
-	})
+			env.engine.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
+			submitted := captureFeedbackSubmissions(env.engine)
+			send := func(user, content string) {
+				env.engine.ReceiveMessage(env.plat, &Message{
+					SessionKey: "test:shared-topic", Platform: "test", UserID: user,
+					Content: content, ReplyCtx: "shared-reply", ChannelKey: "shared-topic",
+				})
+			}
+			send("owner", "hello")
+			env.waitFor("first response", 2*time.Second, func() bool { return env.sentContains("ok") })
+			env.agent.mu.Lock()
+			agentSession := env.agent.sessions[0]
+			env.agent.mu.Unlock()
+			agentSession.mu.Lock()
+			agentSession.nextEventOverride = &Event{Type: EventError, Error: errors.New("diagnostic failure"), Done: true}
+			agentSession.mu.Unlock()
+			env.plat.clearSent()
+			send("owner", "run the failing operation")
+			env.waitFor("feedback offer", 2*time.Second, func() bool { return env.sentContains("submit-token") })
+			token := feedbackSubmitTokenFromText(t, strings.Join(env.plat.getSent(), "\n"))
+			env.plat.clearSent()
+
+			send("another-user", "/feedback submit-token "+token)
+			if !env.sentContains(env.engine.i18n.T(MsgFeedbackPendingMissing)) {
+				t.Fatalf("another participant was not refused: %v", env.plat.getSent())
+			}
+			select {
+			case <-submitted:
+				t.Fatal("another participant sent the owner's diagnostics")
+			default:
+			}
+			env.plat.clearSent()
+			send("owner", "/feedback submit-token "+token)
+			if got := strings.Join(env.plat.getSent(), "\n"); got != "Submission succeeded" {
+				t.Fatalf("owner must see only the submit result: %q", got)
+			}
+			select {
+			case report := <-submitted:
+				if report.RecentError == nil || report.RecentError.Text != "diagnostic failure" {
+					t.Fatal("owner submitted a different report")
+				}
+			default:
+				t.Fatal("owner's click did not submit")
+			}
+			env.plat.clearSent()
+			send("owner", "/feedback submit-token "+token)
+			if !env.sentContains(env.engine.i18n.T(MsgFeedbackPendingMissing)) {
+				t.Fatal("replayed action was not refused")
+			}
+			select {
+			case <-submitted:
+				t.Fatal("replayed action submitted twice")
+			default:
+			}
+		})
+	}
 }
 
 // CUJ-J2 · Update review and approval are separate user actions; Apply gets

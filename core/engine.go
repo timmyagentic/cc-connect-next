@@ -5179,8 +5179,9 @@ func (e *Engine) runUnsolicitedReader(ctx context.Context, cancel context.Cancel
 				if event.Error != nil {
 					slog.Error("unsolicited agent error", "error", event.Error, "session", sessionKey)
 					e.send(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
-					e.recordFeedbackError(sessionKey, event.Error.Error())
-					e.maybeSendFeedbackErrorHint(p, replyCtx, sessionKey, state.feedbackUserID(sessionKey))
+					feedbackKey, feedbackUser := state.feedbackIdentity()
+					e.recordFeedbackError(feedbackKey, event.Error.Error())
+					e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser)
 				}
 				state.mu.Lock()
 				state.eventsNeedResync = true
@@ -7132,8 +7133,9 @@ func (terminal *turnTerminalHandler) handleIdleTimeout() {
 			e.send(timedOutPlatform, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), "agent session timed out (no response)"))
 		}
 	}
-	e.recordFeedbackError(sessionKey, fmt.Sprintf("agent session idle timeout: no events for %v, session killed", e.eventIdleTimeout))
-	e.maybeSendFeedbackErrorHint(timedOutPlatform, replyCtx, sessionKey, state.feedbackUserID(sessionKey))
+	feedbackKey, feedbackUser := state.feedbackIdentity()
+	e.recordFeedbackError(feedbackKey, fmt.Sprintf("agent session idle timeout: no events for %v, session killed", e.eventIdleTimeout))
+	e.maybeSendFeedbackErrorHint(timedOutPlatform, replyCtx, feedbackKey, feedbackUser)
 	e.cleanupInteractiveState(sessionKey, state)
 }
 
@@ -7170,8 +7172,9 @@ func (terminal *turnTerminalHandler) handleDeadline() {
 				fmt.Sprintf("agent turn exceeded maximum time (%v), stopping", e.maxTurnTime)))
 		}
 	}
-	e.recordFeedbackError(sessionKey, fmt.Sprintf("agent turn exceeded max_turn_time (%v), stopped", e.maxTurnTime))
-	e.maybeSendFeedbackErrorHint(deadlinePlatform, replyCtx, sessionKey, state.feedbackUserID(sessionKey))
+	feedbackKey, feedbackUser := state.feedbackIdentity()
+	e.recordFeedbackError(feedbackKey, fmt.Sprintf("agent turn exceeded max_turn_time (%v), stopped", e.maxTurnTime))
+	e.maybeSendFeedbackErrorHint(deadlinePlatform, replyCtx, feedbackKey, feedbackUser)
 
 	// Two-phase shutdown: first try a graceful stop so the agent can
 	// write its final state before dying (preserves --resume ability).
@@ -7371,10 +7374,11 @@ func (failure *turnFailure) handle() {
 	safePartial := persistVisibleRichPartial(p)
 	phase := richCardFailurePhase(event.Error)
 	updatedRichError := hasRichCard && markRichCardFailedWithPhase(p, cardMessageID, phase, safePartial)
+	feedbackKey, feedbackUser := state.feedbackIdentity()
 	if event.Error != nil {
 		errMsg := event.Error.Error()
 		slog.Error("agent error", "error", event.Error)
-		e.recordFeedbackError(sessionKey, errMsg)
+		e.recordFeedbackError(feedbackKey, errMsg)
 		e.hooks.Emit(HookEvent{
 			Event:      HookEventError,
 			SessionKey: sessionKey,
@@ -7405,7 +7409,7 @@ func (failure *turnFailure) handle() {
 		sendGenericRichFailure(p, replyCtx, cardMessageID, safePartial)
 	}
 	if event.Error != nil {
-		e.maybeSendFeedbackErrorHint(p, replyCtx, sessionKey, state.feedbackUserID(sessionKey))
+		e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser)
 	}
 	// Only drop queued messages if the agent session is dead.
 	// Some agents (e.g. Codex) emit EventError for per-turn failures
@@ -12308,12 +12312,13 @@ func (e *Engine) processCompressEvents(state *interactiveState, session *Session
 			e.drainQueuedMessagesAfterCompress(state, session, sessions, sessionKey, unlocked)
 			return
 		case EventError:
+			feedbackKey, feedbackUser := state.feedbackIdentity()
 			if event.Error != nil {
-				e.recordFeedbackError(sessionKey, "compress failed: "+event.Error.Error())
+				e.recordFeedbackError(feedbackKey, "compress failed: "+event.Error.Error())
 			}
 			if !auto && event.Error != nil {
 				e.reply(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
-				e.maybeSendFeedbackErrorHint(p, replyCtx, sessionKey, state.feedbackUserID(sessionKey))
+				e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser)
 			}
 			// Only drop queued messages if the agent is dead; some agents
 			// emit per-turn EventError while staying alive.

@@ -405,13 +405,13 @@ func (e *Engine) recordFeedbackError(sessionKey, errText string) {
 	e.feedbackErrors[sessionKey] = &feedbackError{Text: errText, At: time.Now()}
 }
 
-func (state *interactiveState) feedbackUserID(sessionKey string) string {
+func (state *interactiveState) feedbackIdentity() (sessionKey, userID string) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.currentSessionKey != sessionKey {
-		return ""
-	}
-	return state.currentUserID
+	// Event processors use workspace-prefixed internal keys. Feedback actions
+	// arrive with the raw transport key stored alongside the initiating user;
+	// snapshot the pair together for error storage, draft creation and approval.
+	return state.currentSessionKey, state.currentUserID
 }
 
 func (e *Engine) maybeSendFeedbackErrorHint(platform Platform, replyCtx any, sessionKey, userID string) {
