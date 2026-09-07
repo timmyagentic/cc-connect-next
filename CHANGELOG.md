@@ -11,7 +11,7 @@
   backups without clobbering concurrent files, and sync installation/rollback
   directory changes. Windows uses an exclusive cross-process lock and a
   no-clobber backup move.
-- Pin the CI-verified Foundation commit `3d4e766c2aa61137299cfc938800c01739c78a1f`
+- Pin the published Foundation `v0.1.2` patch (`9daaa15dcaf4512ce655c733264713d4d1eb72b6`)
   across the Go module, Relay subtree, and semantic lock validator; verify both
   published Stable and Beta updates using disposable executables.
 
