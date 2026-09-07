@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## v0.3.0 (2026-09-07)
+
+Stable candidate based on v0.3.0-beta.5, with no additional runtime changes.
+Release publication is tracked by the matching tag and GitHub Release.
+
+- Adopt Foundation v0.1.2 for structured, privacy-bounded Feedback and
+  immutable update transactions, with exact-source integration validation.
+- Add direct chat feedback submission, user-bound error offers, authenticated
+  local-Agent feedback tools, and safer Relay input/authentication handling.
+- Support explicit Stable/Beta update channels, administrator-only private
+  notices, exact-channel confirmations, and safer backup/rollback handling.
+- Preserve Agent turns during deferred daemon restart; isolate real Feishu P2P
+  topics and bind multi-project cards to their owner and recipient.
+- Fix dynamic option validation, slash-command rendering, and safe actionable
+  failure messages.
+
+See `changelogs/v0.3.0.md` for bilingual highlights and upgrade notes from v0.2.1.
+
 ## v0.3.0-beta.5 (2026-09-07)
 
 Fifth v0.3.0 Beta focused on feedback privacy, user-bound error offers, and
