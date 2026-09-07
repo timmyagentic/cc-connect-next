@@ -2,7 +2,7 @@
   "schema": 1,
   "source": {
     "repository": "timmyagentic/awesome-agent-app-features",
-    "commit": "2e30c73ee6c3192f057ef24fa5bb4f77b8346c81"
+    "commit": "3d4e766c2aa61137299cfc938800c01739c78a1f"
   },
   "features": [
     {
@@ -13,13 +13,13 @@
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/feedback",
           "target": "go.mod",
-          "version": "v0.1.1"
+          "version": "v0.1.2-0.20260907031834-3d4e766c2aa6"
         },
         {
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/feedback/httpclient",
           "target": "go.mod",
-          "version": "v0.1.1"
+          "version": "v0.1.2-0.20260907031834-3d4e766c2aa6"
         },
         {
           "mode": "source-subtree",
@@ -41,9 +41,12 @@
         "config/capabilities.go",
         "config/config.go",
         "config/feedback_config_test.go",
-        "core/engine.go",
+        "core/agent_feedback.go",
+        "core/agent_feedback_test.go",
         "core/cuj_test.go",
+        "core/engine.go",
         "core/feedback.go",
+        "core/feedback_privacy_test.go",
         "core/feedback_test.go",
         "core/i18n.go",
         "core/pending_action.go",
@@ -60,16 +63,16 @@
         "feedback-relay/README.md",
         "feedback-relay/package-lock.json",
         "feedback-relay/package.json",
-        "feedback-relay/src/index.js",
         "feedback-relay/src/compat.js",
         "feedback-relay/src/github-app.js",
+        "feedback-relay/src/index.js",
         "feedback-relay/src/relay.js",
         "feedback-relay/test/host-auth.runtime.spec.js",
         "feedback-relay/test/index.test.js",
         "feedback-relay/test/runtime.spec.js",
         "feedback-relay/tsconfig.json",
-        "feedback-relay/verify.sh",
         "feedback-relay/verify-host.sh",
+        "feedback-relay/verify.sh",
         "feedback-relay/vitest.config.js",
         "feedback-relay/vitest.host.config.js",
         "feedback-relay/worker-configuration.d.ts",
@@ -78,22 +81,23 @@
         "go.sum",
         "internal/appfeatures/feedback.go",
         "internal/appfeatures/feedback_contract.test.mjs",
+        "internal/appfeatures/feedback_privacy_test.go",
         "internal/appfeatures/feedback_relay_compat.test.mjs",
         "internal/appfeatures/feedback_test.go",
         "internal/appfeatures/live_test.go",
         "internal/appfeatures/testdata/approved-feedback-v1.json",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-08-30T17:02:37Z",
+      "verified_at": "2026-09-07T03:25:18Z",
       "checks": [
-		"GOWORK=off go test -race ./... -count=1",
-		"GOWORK=off go test ./core -run TestCUJ -count=1",
-		"node --test internal/appfeatures/feedback_contract.test.mjs",
-		"make test-feature-foundation"
+        "GOWORK=off GOTOOLCHAIN=go1.27.0 make test-full",
+        "GOWORK=off GOTOOLCHAIN=go1.27.0 go test ./core -run TestCUJ -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.27.0 make test-release-local",
+        "GOWORK=off GOTOOLCHAIN=go1.27.0 make test-feature-foundation"
       ],
       "unverified": [
-        "The public Cloudflare endpoint was not deployed or probed with a real approved report",
-        "No real GitHub issue, production credential, formal daemon, or messaging client was used"
+        "No production Relay was deployed or sent a real approved report; no real GitHub issue or production App credential was used",
+        "No formal daemon or messaging client was changed or exercised"
       ]
     },
     {
@@ -104,13 +108,13 @@
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/updater",
           "target": "go.mod",
-          "version": "v0.1.1"
+          "version": "v0.1.2-0.20260907031834-3d4e766c2aa6"
         },
         {
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/updater/github",
           "target": "go.mod",
-          "version": "v0.1.1"
+          "version": "v0.1.2-0.20260907031834-3d4e766c2aa6"
         }
       ],
       "files": [
@@ -123,8 +127,8 @@
         "agent-app-features.lock.json",
         "cmd/cc-connect/update.go",
         "cmd/cc-connect/update_test.go",
-        "core/engine.go",
         "core/cuj_test.go",
+        "core/engine.go",
         "core/i18n.go",
         "core/pending_action.go",
         "core/update_intent.go",
@@ -140,21 +144,35 @@
         "docs/usage.zh-CN.md",
         "go.mod",
         "go.sum",
-        "internal/appfeatures/updater.go",
-        "internal/appfeatures/updater_test.go",
         "internal/appfeatures/live_test.go",
+        "internal/appfeatures/update_lock.go",
+        "internal/appfeatures/update_lock_other.go",
+        "internal/appfeatures/update_lock_test.go",
+        "internal/appfeatures/update_lock_unix.go",
+        "internal/appfeatures/update_lock_unix_test.go",
+        "internal/appfeatures/update_lock_windows.go",
+        "internal/appfeatures/update_replace_unix.go",
+        "internal/appfeatures/update_replace_windows.go",
+        "internal/appfeatures/update_source.go",
+        "internal/appfeatures/update_source_test.go",
+        "internal/appfeatures/updater.go",
+        "internal/appfeatures/updater_safety_test.go",
+        "internal/appfeatures/updater_test.go",
+        "internal/updatechannel/channel.go",
+        "internal/updatechannel/channel_test.go",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-08-30T17:02:37Z",
+      "verified_at": "2026-09-07T03:25:18Z",
       "checks": [
-		"GOWORK=off go test -race ./... -count=1",
-		"GOWORK=off go test ./core -run TestCUJ -count=1",
-		"CC_NEXT_RUN_LIVE_FEATURE_FOUNDATION=1 GOWORK=off go test ./internal/appfeatures -run TestLiveUpdateServiceAgainstPublishedStableRelease -count=1",
-		"GOWORK=off GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags no_web ./..."
+        "GOWORK=off GOTOOLCHAIN=go1.27.0 make test-full",
+        "GOWORK=off GOTOOLCHAIN=go1.27.0 go test ./core -run TestCUJ -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.27.0 make test-release-local",
+        "CC_NEXT_RUN_LIVE_FEATURE_FOUNDATION=1 GOWORK=off GOTOOLCHAIN=go1.27.0 go test ./internal/appfeatures -run TestLiveUpdateServiceAgainstPublishedReleases -count=1 -v",
+        "GOWORK=off GOTOOLCHAIN=go1.27.0 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags no_web ./..."
       ],
       "unverified": [
-        "No formal installed binary or daemon was replaced or restarted",
-        "No production npm global installation or Windows machine was mutated"
+        "Windows replacement and cross-process locking were cross-compiled but not executed on a native Windows machine",
+        "No formal installed binary or daemon was replaced or restarted; no production npm global installation was changed"
       ]
     }
   ]

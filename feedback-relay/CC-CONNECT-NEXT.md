@@ -1,7 +1,7 @@
 # CC Connect Next host mapping
 
-This directory is copied from `awesome-agent-app-features v0.1.1`
-(`2e30c73ee6c3192f057ef24fa5bb4f77b8346c81`) and remains independently
+This directory is copied from `awesome-agent-app-features v0.1.2-0.20260907031834-3d4e766c2aa6`
+(`3d4e766c2aa61137299cfc938800c01739c78a1f`) and remains independently
 testable. Foundation files remain byte-identical; the host adds
 `CC-CONNECT-NEXT.md`, `src/compat.js`, `src/github-app.js`,
 `test/host-auth.runtime.spec.js`, and `vitest.host.config.js`, and owns
@@ -55,4 +55,8 @@ request before validation and server-side rendering. The legacy `install_id`
 is discarded, and legacy clients cannot select the repository or credential.
 This permits an in-place Worker rollout before a new CC Connect binary is
 released; remove the compatibility entrypoint only after the supported legacy
-client window has ended.
+client window has ended. Invalid UTF-8 is rejected before authentication;
+replacement-character decoding cannot turn malformed bytes into a valid report.
+Both installation-token exchange and Foundation GitHub API requests use manual
+redirect handling and reject non-success responses. Native workerd Request tests
+cover this boundary, including the short-lived App JWT.

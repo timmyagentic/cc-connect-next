@@ -18,7 +18,7 @@ import (
 const ProductName = "cc-connect-next"
 
 var (
-	ccConnectIdentifierKVRE = regexp.MustCompile(`(?i)\b(app[_-]?id|session[_-]?key)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)`)
+	ccConnectIdentifierKVRE = regexp.MustCompile(`(?i)\b(app[_-]?id|session[_-]?key)\b(["']?\s*[=:]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)`)
 	ccConnectKnownIDRE      = regexp.MustCompile(`\b(?:ou|oc|om|on|cli)_[0-9A-Za-z_-]{8,}\b`)
 )
 

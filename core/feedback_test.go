@@ -359,8 +359,8 @@ func TestFeedbackErrorOffer_ThrottledPerSessionAndZeroNetwork(t *testing.T) {
 	engine, platform := newFeedbackTestEngine(t)
 	submitted := captureFeedbackSubmissions(engine)
 	engine.recordFeedbackError("feishu:oc_chat:ou_user", "boom")
-	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user")
-	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user")
+	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user", "ou_user")
+	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user", "ou_user")
 	if sent := platform.sentTexts(); len(sent) != 1 || strings.Contains(sent[0], "boom") || !strings.Contains(sent[0], "submit-token") {
 		t.Fatalf("offer must be generic and sent once within the cooldown, got %v", sent)
 	}
@@ -371,7 +371,7 @@ func TestFeedbackErrorOffer_ThrottledPerSessionAndZeroNetwork(t *testing.T) {
 	}
 
 	engine.recordFeedbackError("feishu:oc_other:ou_user", "other boom")
-	engine.maybeSendFeedbackErrorHint(platform, "rctx2", "feishu:oc_other:ou_user")
+	engine.maybeSendFeedbackErrorHint(platform, "rctx2", "feishu:oc_other:ou_user", "ou_user")
 	if sent := platform.sentTexts(); len(sent) != 2 {
 		t.Fatalf("second session must get its own offer, got %v", sent)
 	}
@@ -400,7 +400,7 @@ func TestFeedbackErrorOffer_CardHasOneDirectSubmitActionAndNoPreview(t *testing.
 	engine, platform := newFeedbackCardEngine(t)
 	engine.recordFeedbackError("feishu:oc_chat:ou_user", "codex app-server turn/start: boom")
 	submitted := captureFeedbackSubmissions(engine)
-	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user")
+	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user", "ou_user")
 
 	platform.mu.Lock()
 	cards := append([]*Card(nil), platform.sentCards...)
@@ -445,7 +445,7 @@ func TestFeedbackOfferCardClickSubmitsOnceAndBecomesLinkFreeResult(t *testing.T)
 		}
 		return appfeatures.FeedbackReceipt{ReferenceURL: "https://github.com/timmyagentic/cc-connect-next/issues/99"}, nil
 	}
-	engine.maybeSendFeedbackErrorHint(platform, "original-card", "feishu:oc_chat:ou_user")
+	engine.maybeSendFeedbackErrorHint(platform, "original-card", "feishu:oc_chat:ou_user", "ou_user")
 
 	platform.mu.Lock()
 	if len(platform.sentCards) != 1 {
@@ -479,7 +479,7 @@ func TestFeedbackErrorOffer_TextFallbackSubmitsPreparedDraftInOneCommand(t *test
 	engine, platform := newFeedbackTestEngine(t)
 	engine.recordFeedbackError("feishu:oc_chat:ou_user", "boom")
 	submitted := captureFeedbackSubmissions(engine)
-	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user")
+	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user", "ou_user")
 	offer := strings.Join(platform.sentTexts(), "\n")
 	if strings.Contains(offer, "boom") || strings.Contains(strings.ToLower(offer), "preview") {
 		t.Fatalf("text offer exposed a Draft preview: %s", offer)

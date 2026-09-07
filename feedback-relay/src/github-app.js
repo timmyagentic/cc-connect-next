@@ -184,6 +184,7 @@ export async function installationAccessToken(
       `https://api.github.com/app/installations/${installationID}/access_tokens`,
       {
         method: "POST",
+        redirect: "manual",
         signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
         headers: {
           authorization: `Bearer ${jwt}`,

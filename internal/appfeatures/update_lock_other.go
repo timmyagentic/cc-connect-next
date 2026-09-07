@@ -1,11 +1,9 @@
-//go:build !darwin && !dragonfly && !freebsd && !linux && !netbsd && !openbsd
+//go:build !darwin && !dragonfly && !freebsd && !linux && !netbsd && !openbsd && !windows
 
 package appfeatures
 
-type processOnlyHostUpdateLock struct{}
+import "fmt"
 
 func tryHostUpdateLock(string) (hostUpdateLock, error) {
-	return processOnlyHostUpdateLock{}, nil
+	return nil, fmt.Errorf("standalone updates require an operating system file lock")
 }
-
-func (processOnlyHostUpdateLock) release() error { return nil }

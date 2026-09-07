@@ -411,7 +411,7 @@ func (service *UpdateService) applyHostStandalone(ctx context.Context, state *up
 		return "", err
 	}
 	defer func() { _ = os.Remove(staged) }()
-	if err := os.Chmod(staged, 0o755); err != nil {
+	if err := prepareHostStagedExecutable(staged, info.Mode().Perm()); err != nil {
 		return "", fmt.Errorf("prepare staged binary: %w", err)
 	}
 	stagedHash, err := updateFileSHA256(staged)
@@ -432,18 +432,29 @@ func (service *UpdateService) applyHostStandalone(ctx context.Context, state *up
 		return "", fmt.Errorf("inspect update backup: %w", err)
 	}
 	service.emit(featureupdater.Event{Stage: featureupdater.StageInstalling, TargetVersion: state.release.Tag, Asset: state.asset.Name})
-	if err := os.Rename(target, backup); err != nil {
+	if err := createHostUpdateBackup(target, backup); err != nil {
 		return "", fmt.Errorf("backup current executable: %w", err)
 	}
 	rollback := func(cause error) (string, error) {
-		_ = os.Remove(target)
+		if removeErr := os.Remove(target); removeErr != nil && !os.IsNotExist(removeErr) {
+			return backup, fmt.Errorf("%w; rollback cannot remove target: %v", cause, removeErr)
+		}
 		if restoreErr := os.Rename(backup, target); restoreErr != nil {
 			return backup, fmt.Errorf("%w; rollback failed: %v", cause, restoreErr)
 		}
+		if syncErr := syncHostUpdateDirectory(filepath.Dir(target)); syncErr != nil {
+			return "", fmt.Errorf("%w; restored executable but directory sync failed: %v", cause, syncErr)
+		}
 		return "", cause
+	}
+	if err := syncHostUpdateDirectory(filepath.Dir(target)); err != nil {
+		return rollback(fmt.Errorf("sync update backup: %w", err))
 	}
 	if err := os.Rename(staged, target); err != nil {
 		return rollback(fmt.Errorf("install staged executable: %w", err))
+	}
+	if err := syncHostUpdateDirectory(filepath.Dir(target)); err != nil {
+		return rollback(fmt.Errorf("sync installed executable: %w", err))
 	}
 	if err := requireUpdateFileHash(target, stagedHash, "installed binary changed before version verification"); err != nil {
 		return rollback(err)
@@ -458,7 +469,24 @@ func (service *UpdateService) applyHostStandalone(ctx context.Context, state *up
 	if err := os.Remove(backup); err != nil && !os.IsNotExist(err) {
 		return backup, nil
 	}
+	_ = syncHostUpdateDirectory(filepath.Dir(target))
 	return "", nil
+}
+
+func prepareHostStagedExecutable(path string, mode os.FileMode) error {
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	if err := file.Chmod(mode); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
 }
 
 func (service *UpdateService) removeVerifiedStaleBackup(ctx context.Context, target, backup string) error {
@@ -468,6 +496,11 @@ func (service *UpdateService) removeVerifiedStaleBackup(ctx context.Context, tar
 	}
 	if err != nil {
 		return fmt.Errorf("inspect stale update backup: %w", err)
+	}
+	// Only Windows leaves a previously running image behind after a successful
+	// replacement. A Unix recovery copy must never be removed implicitly.
+	if service.platformOS != "windows" {
+		return fmt.Errorf("refusing to overwrite existing update backup %s", backup)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return fmt.Errorf("existing update backup is unsafe: %s", backup)
