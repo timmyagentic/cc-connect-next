@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## v0.3.0-beta.5 (2026-09-07)
+
+Fifth v0.3.0 Beta focused on feedback privacy, user-bound error offers, and
+safer updater backups, using the published Foundation v0.1.2 patch.
+
+See `changelogs/v0.3.0-beta.5.md` for bilingual release notes.
+
 - Redact quoted/escaped diagnostic credentials and host identifiers before
   feedback previews, truncation, and submission; bind automatic error offers to
   the initiating user and exclude context with unknown or future timestamps.
