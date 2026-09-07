@@ -1,6 +1,6 @@
 import {describe, expect, it} from "vitest";
 
-import {createGitHubAppJWT} from "../src/github-app.js";
+import {createGitHubAppJWT, installationAccessToken} from "../src/github-app.js";
 
 function privateKeyPEM(bytes) {
   const encoded = btoa(String.fromCharCode(...new Uint8Array(bytes)));
@@ -43,5 +43,21 @@ describe("GitHub App auth in the Workers runtime", () => {
         new TextEncoder().encode(`${header}.${payload}`),
       ),
     ).toBe(true);
+
+    let outgoing;
+    const token = await installationAccessToken({
+      GITHUB_APP_ID: "123", GITHUB_APP_INSTALLATION_ID: "456", GITHUB_APP_PRIVATE_KEY: pem,
+    }, "owner/repository", async (url, init) => {
+      outgoing = new Request(url, init);
+      return Response.json({token: "test-token", expires_at: new Date(Date.now() + 60_000).toISOString()});
+    });
+    expect(token).toBe("test-token");
+    expect(outgoing.redirect).toBe("manual");
+
+    await expect(installationAccessToken({
+      GITHUB_APP_ID: "123", GITHUB_APP_INSTALLATION_ID: "456", GITHUB_APP_PRIVATE_KEY: pem,
+    }, "owner/repository", async () => new Response(null, {
+      status: 307, headers: {location: "https://untrusted.example/token"},
+    }))).rejects.toMatchObject({code: "GitHub App token request rejected", status: 307});
   });
 });

@@ -205,12 +205,11 @@ async function compatibilityHandler(request, env) {
     }
     return json(400, {error: "invalid JSON"});
   }
-  const raw = new TextDecoder().decode(bytes);
   let decoded;
   try {
-    decoded = JSON.parse(raw);
+    decoded = JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(bytes));
   } catch {
-    return rejectWithoutAuthentication(rebuiltRequest(request, raw), env);
+    return json(400, {error: "invalid JSON"});
   }
   const translated = translateLegacy(decoded);
   const submission = translated ?? decoded;

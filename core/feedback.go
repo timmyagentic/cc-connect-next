@@ -198,7 +198,7 @@ func (e *Engine) feedbackRelatedContext(sessionKey string) (previousUser, previo
 	latestIndex := -1
 	for index := len(entries) - 1; index >= 0; index-- {
 		entry := entries[index]
-		if !entry.Timestamp.IsZero() && now.Sub(entry.Timestamp) > feedbackContextWindow {
+		if entry.Timestamp.IsZero() || entry.Timestamp.After(now) || now.Sub(entry.Timestamp) > feedbackContextWindow {
 			continue
 		}
 		content := strings.TrimSpace(entry.Content)
@@ -220,7 +220,7 @@ func (e *Engine) feedbackRelatedContext(sessionKey string) (previousUser, previo
 	previousAssistant = strings.TrimSpace(latest.Content)
 	for index := latestIndex - 1; index >= 0; index-- {
 		entry := entries[index]
-		if !entry.Timestamp.IsZero() && now.Sub(entry.Timestamp) > feedbackContextWindow {
+		if entry.Timestamp.IsZero() || entry.Timestamp.After(now) || now.Sub(entry.Timestamp) > feedbackContextWindow {
 			continue
 		}
 		content := strings.TrimSpace(entry.Content)
@@ -405,8 +405,19 @@ func (e *Engine) recordFeedbackError(sessionKey, errText string) {
 	e.feedbackErrors[sessionKey] = &feedbackError{Text: errText, At: time.Now()}
 }
 
-func (e *Engine) maybeSendFeedbackErrorHint(platform Platform, replyCtx any, sessionKey string) {
-	if !e.feedbackActive() {
+func (state *interactiveState) feedbackUserID(sessionKey string) string {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.currentSessionKey != sessionKey {
+		return ""
+	}
+	return state.currentUserID
+}
+
+func (e *Engine) maybeSendFeedbackErrorHint(platform Platform, replyCtx any, sessionKey, userID string) {
+	// Shared chats and topics do not encode a user in the session key. Without
+	// a trusted initiating user, do not prepare someone else's diagnostic data.
+	if !e.feedbackActive() || strings.TrimSpace(userID) == "" {
 		return
 	}
 	e.feedbackMu.Lock()
@@ -427,12 +438,12 @@ func (e *Engine) maybeSendFeedbackErrorHint(platform Platform, replyCtx any, ses
 	if err != nil {
 		return
 	}
-	token, err := e.rememberPendingFeedback(sessionKey, "", draft)
+	token, err := e.rememberPendingFeedback(sessionKey, userID, draft)
 	if err != nil {
 		return
 	}
 	if err := e.deliverFeedbackOffer(platform, replyCtx, token, true); err != nil {
-		e.clearPendingFeedback(sessionKey, "", token)
+		e.clearPendingFeedback(sessionKey, userID, token)
 		slog.Debug("feedback: proactive offer failed", "session_key", sessionKey, "error", err)
 	}
 }

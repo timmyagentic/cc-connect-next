@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Redact quoted/escaped diagnostic credentials and host identifiers before
+  feedback previews, truncation, and submission; bind automatic error offers to
+  the initiating user and exclude context with unknown or future timestamps.
+- Reject malformed UTF-8 before Relay authentication and prevent GitHub App JWTs
+  and installation tokens from following HTTP redirects.
+- Preserve Unix Beta updater recovery backups and executable permissions, create
+  backups without clobbering concurrent files, and sync installation/rollback
+  directory changes. Windows uses an exclusive cross-process lock and a
+  no-clobber backup move.
+- Pin the CI-verified Foundation commit `3d4e766c2aa61137299cfc938800c01739c78a1f`
+  across the Go module, Relay subtree, and semantic lock validator; verify both
+  published Stable and Beta updates using disposable executables.
+
 ## v0.3.0-beta.4 (2026-09-04)
 
 Fourth v0.3.0 Beta focused on fail-closed release confirmation, project-owned

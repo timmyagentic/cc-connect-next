@@ -150,6 +150,30 @@ test("structured clients pass through unchanged", async () => {
   assert.equal(response.status, 200);
 });
 
+test("invalid UTF-8 fails before token minting or report delivery", async () => {
+  const prefix = Buffer.from('{"schema":1,"user_approved":true,"environment":{"product":"cc-connect-next"},"description":"');
+  const body = Buffer.concat([prefix, Buffer.from([0xff]), Buffer.from('"}')]);
+  const response = await worker.fetch(new Request("https://relay.example/v1/feedback", {
+    method: "POST", headers: {"content-type": "application/json"}, body,
+  }), relayEnv());
+  assert.equal(response.status, 400);
+  assert.equal(calls.length, 0, "invalid encoding reached GitHub authentication");
+});
+
+test("GitHub App token minting cannot redirect the signed JWT", async () => {
+  const response = await worker.fetch(new Request("https://relay.example/v1/feedback", {
+    method: "POST", headers: {"content-type": "application/json"},
+    body: JSON.stringify({
+      schema: 1, user_approved: true, environment: {product: "cc-connect-next"},
+      description: "Bounded report",
+    }),
+  }), relayEnv());
+  assert.equal(response.status, 200);
+  const request = calls.find((call) => call.url.includes("/access_tokens"));
+  assert.ok(request);
+  assert.equal(new Request(request.url, request.init).redirect, "manual");
+});
+
 test("legacy compatibility remains bounded and rejects expanded client control", async () => {
   const attacker = await worker.fetch(new Request("https://relay.example/v1/feedback", {
     method: "POST",

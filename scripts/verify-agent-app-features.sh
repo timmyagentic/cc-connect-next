@@ -18,7 +18,6 @@ case "$source_repository" in
   *) printf 'unexpected Foundation repository: %s\n' "$source_repository" >&2; exit 1 ;;
 esac
 printf '%s\n' "$source_commit" | grep -Eq '^[0-9a-f]{40}$'
-printf '%s\n' "$module_version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'
 
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/ccn-agent-app-features.XXXXXX")
 trap 'rm -rf -- "$temporary"' EXIT HUP INT TERM
@@ -70,7 +69,7 @@ printf '%s' "$module_json" | jq -e --arg version "$module_version" '
 
 cd "$workspace_root"
 GOWORK=off go run \
-  "github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@$module_version" \
+  "github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@$source_commit" \
   validate \
   --source "$source_root" \
   --source-commit "$source_commit" \

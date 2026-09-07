@@ -3,9 +3,10 @@
 [English](agent-app-features.md)
 
 CC Connect Next 固定使用
-`github.com/timmyagentic/awesome-agent-app-features v0.1.1`，对应源码提交
-`2e30c73ee6c3192f057ef24fa5bb4f77b8346c81`。没有本地 `replace`、Git
-submodule 或浮动 `main` 依赖。
+`github.com/timmyagentic/awesome-agent-app-features v0.1.2-0.20260907031834-3d4e766c2aa6`，对应源码提交
+`3d4e766c2aa61137299cfc938800c01739c78a1f`。没有本地 `replace`、Git
+submodule 或浮动 `main` 依赖。这是通过 CI 的不可变提交固定，并不表示发布了新的
+Foundation 版本标签。
 
 ## Feedback
 
@@ -15,13 +16,18 @@ CC Connect Next 继续负责命令、卡片、文本回退、本地化、最近�
 
 1. 明确执行 `/feedback <描述>` 或点击 Feedback 卡片动作后，宿主立即生成完整脱敏
    Draft、调用 `Approve(true)` 并提交；聊天端不展示 Draft 预览，也不要求二次确认。
-2. 自动错误与能力缺口提示只会用 opaque token 准备精确 Draft，本身始终零请求；
-   用户一次点击即提交，过期、重放或 session/user 不匹配都会安全失败。
+2. 自动提示只用 opaque token 准备精确 Draft，本身始终零请求。错误提示绑定发起
+   回合的用户，共享会话也不例外；无法确认用户时不生成提示。能力缺口提示只含通用
+   能力元数据，因此同一会话中的成员均可提交。过期、重放或 session/所需 user
+   不匹配都会安全失败。附带的相邻消息必须具有近期有效时间戳，未知、未来和过期
+   时间戳都不会进入诊断上下文。
 3. Manifest 声明的本地 Agent CLI 复用同一 builder 与 submit 函数。活动回合 HMAC
    凭证解析可信 project/session/user；`feedback preview` 只返回 JSON-safe Draft
    投影且零请求，`feedback submit` 只接受该预览绑定 session/user 的一次性 token。
    CLI 不能指定路由、伪造入站消息或选择旧 schema 回退。
 4. Relay 在服务端固定 GitHub 仓库，负责 title/body、label、Token、限流和尽力去重。
+   带引号的 JSON/配置键、转义值、带前缀的凭证、Cookie、URL 凭证和宿主标识符
+   均在预览、截断和提交前脱敏。
 
 ## Update
 
@@ -29,12 +35,14 @@ daemon 提醒只负责发现。`/upgrade` 准备 immutable Plan，展示同一 R
 和选定产物，并用 session/user opaque token 保存。携带 token 的确认只 Apply 这份
 Plan，不会重新解析 latest；存在多份待确认 Plan 时，泛化确认会被拒绝。
 
-- macOS/Linux 独立安装使用 Foundation checksum、staging、双版本探针、目标锁、
-  no-clobber backup、替换与回滚。
-- npm 宿主 adapter 安装已审阅的精确 stable package version，并验证 package metadata
-  与二进制版本。
-- Windows 保持显式宿主替换 adapter，但同样消费固定 Release、精确 archive/checksum、
-  staged/installed 探针、no-clobber backup 与回滚边界。
+- Stable 的 macOS/Linux 独立安装使用 Foundation checksum、staging、双版本探针、
+  目标锁、no-clobber backup、替换与回滚。
+- 显式 Beta 和 Windows 使用宿主替换 adapter，保持同一 immutable Release、精确
+  archive/checksum 与探针边界。Unix Beta 保留已有恢复备份和可执行权限，原子创建
+  不覆盖的备份，并同步安装和回滚的目录变更。Windows 使用不覆盖的移动及跨进程
+  独占文件句柄；只有它经过验证的旧运行映像备份可以在更新前清理。
+- npm 宿主 adapter 安装所选 Stable/Beta 通道中已审阅的精确 package version，并验证
+  package metadata 与二进制版本。
 - 重启、重启后回执、卡片、自然语言意图、授权和本地化仍由 CC Connect Next 负责。
 
 ## Relay source-subtree
@@ -46,7 +54,9 @@ Plan，不会重新解析 latest；存在多份待确认 Plan 时，泛化确认
 宿主自有的 Wrangler 入口为 `src/compat.js`：新结构化请求直接进入逐字节一致的
 Foundation Relay；旧 CC Connect schema-1 请求会先被精确识别和转换，`install_id`
 被丢弃，目标仓库与 Issue 渲染继续由服务端控制。这样可以先升级 Worker，再发布新
-客户端，而不会中断已有安装。
+客户端，而不会中断已有安装。无效 UTF-8 在换取 Token 前被拒绝；GitHub App
+换取 Token 和 Foundation GitHub API 请求均关闭自动重定向并拒绝重定向响应，
+避免 Authorization 跟随重定向到其他来源。
 
 所有 Relay 命令必须进入 `feedback-relay/` 后执行，不能用从其他 cwd 指向外部绝对
 目录的 `npm --prefix` 代替最终目标验证。
@@ -58,10 +68,10 @@ Foundation Relay；旧 CC Connect schema-1 请求会先被精确识别和转换�
 
 ```bash
 GOWORK=off go run \
-  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@v0.1.1 \
+  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@3d4e766c2aa61137299cfc938800c01739c78a1f \
   validate \
   --source "$EXACT_SOURCE_ROOT" \
-  --source-commit 2e30c73ee6c3192f057ef24fa5bb4f77b8346c81 \
+  --source-commit 3d4e766c2aa61137299cfc938800c01739c78a1f \
   --host "$CC_CONNECT_NEXT_ROOT" \
   --lock "$CC_CONNECT_NEXT_ROOT/agent-app-features.lock.json"
 ```
