@@ -1,7 +1,7 @@
 # CC Connect Next host mapping
 
-This directory is copied from `awesome-agent-app-features v0.1.2-0.20260907031834-3d4e766c2aa6`
-(`3d4e766c2aa61137299cfc938800c01739c78a1f`) and remains independently
+This directory is copied from `awesome-agent-app-features v0.1.2`
+(`9daaa15dcaf4512ce655c733264713d4d1eb72b6`) and remains independently
 testable. Foundation files remain byte-identical; the host adds
 `CC-CONNECT-NEXT.md`, `src/compat.js`, `src/github-app.js`,
 `test/host-auth.runtime.spec.js`, and `vitest.host.config.js`, and owns

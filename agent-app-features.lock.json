@@ -2,7 +2,7 @@
   "schema": 1,
   "source": {
     "repository": "timmyagentic/awesome-agent-app-features",
-    "commit": "3d4e766c2aa61137299cfc938800c01739c78a1f"
+    "commit": "9daaa15dcaf4512ce655c733264713d4d1eb72b6"
   },
   "features": [
     {
@@ -13,13 +13,13 @@
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/feedback",
           "target": "go.mod",
-          "version": "v0.1.2-0.20260907031834-3d4e766c2aa6"
+          "version": "v0.1.2"
         },
         {
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/feedback/httpclient",
           "target": "go.mod",
-          "version": "v0.1.2-0.20260907031834-3d4e766c2aa6"
+          "version": "v0.1.2"
         },
         {
           "mode": "source-subtree",
@@ -88,7 +88,7 @@
         "internal/appfeatures/testdata/approved-feedback-v1.json",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-09-07T03:25:18Z",
+      "verified_at": "2026-09-07T07:53:52Z",
       "checks": [
         "GOWORK=off GOTOOLCHAIN=go1.27.0 make test-full",
         "GOWORK=off GOTOOLCHAIN=go1.27.0 go test ./core -run TestCUJ -count=1",
@@ -108,13 +108,13 @@
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/updater",
           "target": "go.mod",
-          "version": "v0.1.2-0.20260907031834-3d4e766c2aa6"
+          "version": "v0.1.2"
         },
         {
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/updater/github",
           "target": "go.mod",
-          "version": "v0.1.2-0.20260907031834-3d4e766c2aa6"
+          "version": "v0.1.2"
         }
       ],
       "files": [
@@ -162,17 +162,17 @@
         "internal/updatechannel/channel_test.go",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-09-07T03:25:18Z",
+      "verified_at": "2026-09-07T07:53:52Z",
       "checks": [
         "GOWORK=off GOTOOLCHAIN=go1.27.0 make test-full",
         "GOWORK=off GOTOOLCHAIN=go1.27.0 go test ./core -run TestCUJ -count=1",
         "GOWORK=off GOTOOLCHAIN=go1.27.0 make test-release-local",
-        "CC_NEXT_RUN_LIVE_FEATURE_FOUNDATION=1 GOWORK=off GOTOOLCHAIN=go1.27.0 go test ./internal/appfeatures -run TestLiveUpdateServiceAgainstPublishedReleases -count=1 -v",
         "GOWORK=off GOTOOLCHAIN=go1.27.0 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags no_web ./..."
       ],
       "unverified": [
         "Windows replacement and cross-process locking were cross-compiled but not executed on a native Windows machine",
-        "No formal installed binary or daemon was replaced or restarted; no production npm global installation was changed"
+        "No formal installed binary or daemon was replaced or restarted; no production npm global installation was changed",
+        "Live published-release installation was not repeated for this dependency-only tag adoption"
       ]
     }
   ]
