@@ -25,6 +25,10 @@ import (
 
 const releaseRepository = "timmyagentic/cc-connect-next"
 
+// ErrUpdateInstalledUnverified means the installer finished, but its output
+// did not pass verification. Callers must not report success or restart.
+var ErrUpdateInstalledUnverified = errors.New("installed update could not be verified")
+
 type UpdateRelease = featureupdater.Release
 type UpdateAsset = featureupdater.Asset
 type UpdateEvent = featureupdater.Event
@@ -359,16 +363,19 @@ func (service *UpdateService) applyNPM(ctx context.Context, tag string) error {
 	if err := service.runner(ctx, npmExecutableName(), "install", "--global", "--prefix", installation.NPMPrefix, packageSpec); err != nil {
 		return fmt.Errorf("npm install %s: %w", packageSpec, err)
 	}
+	verificationFailed := func(err error) error {
+		return fmt.Errorf("%w: npm install %s completed, but verification failed: %w", ErrUpdateInstalledUnverified, packageSpec, err)
+	}
 
 	metadata, err := readPackageMetadata(filepath.Join(installation.PackageDir, "package.json"))
 	if err != nil {
-		return fmt.Errorf("verify updated npm package: %w", err)
+		return verificationFailed(fmt.Errorf("verify updated npm package: %w", err))
 	}
 	if metadata.Name != ProductName || strings.TrimPrefix(metadata.Version, "v") != targetVersion {
-		return fmt.Errorf("npm package metadata did not update to %s", targetVersion)
+		return verificationFailed(fmt.Errorf("npm package metadata did not update to %s", targetVersion))
 	}
 	if err := service.verifier.Verify(ctx, installation.ExecutablePath, tag); err != nil {
-		return fmt.Errorf("verify updated npm binary: %w", err)
+		return verificationFailed(fmt.Errorf("verify updated npm binary: %w", err))
 	}
 	service.emit(featureupdater.Event{Stage: featureupdater.StageInstalledVerified, TargetVersion: tag, Asset: packageSpec})
 	return nil

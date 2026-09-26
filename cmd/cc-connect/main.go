@@ -323,27 +323,6 @@ func main() {
 		}
 	}
 
-	// When started as a daemon (CC_LOG_FILE set), redirect logs to a rotating file.
-	// Log file setup happens before flag.Parse() so the rotating writer is in
-	// place before any slog output. To still honour --log-max-size, we
-	// pre-scan os.Args here for the flag value; this is a small, deliberate
-	// duplication of flag parsing for one well-known key.
-	var logWriter io.Writer
-	var logCloser io.Closer
-	if logFile := os.Getenv("CC_LOG_FILE"); logFile != "" {
-		maxSize, maxSizeSrc := resolveLogMaxSize(preScanLogMaxSizeFlag(os.Args[1:]))
-		maxBackups, maxBackupsSrc := resolveLogMaxBackups(preScanLogMaxBackupsFlag(os.Args[1:]))
-		fmt.Fprintf(os.Stderr, "log: redirecting to %s with max_size=%d bytes (source: %s), max_backups=%d (source: %s)\n", logFile, maxSize, maxSizeSrc, maxBackups, maxBackupsSrc)
-		w, err := daemon.NewRotatingWriter(logFile, maxSize, maxBackups)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "failed to open log file %s: %v\n", logFile, err)
-			os.Exit(1)
-		}
-		logWriter = w
-		logCloser = w
-		slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	}
-
 	configFlag := flag.String("config", "", "path to config file (default: ./config.toml or ~/.cc-connect-next/config.toml)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	observeFlag := flag.Bool("observe", false, "observe native terminal Claude Code sessions and forward to Slack")
@@ -358,11 +337,13 @@ func main() {
 		os.Exit(2)
 	}
 
-	// Cross-check: the rotating-writer setup above consumed a pre-scanned
-	// value of --log-max-size, but flag.Parse() may have been called for
-	// tests or wrappers that pre-scan differently. Validate the parsed flag
-	// value here so the binding is exercised and a typo caught by
-	// flag.Parse() surfaces a clear error.
+	if *showVersion {
+		fmt.Printf("cc-connect-next %s\ncommit:  %s\nbuilt:   %s\n", version, commit, buildTime)
+		return
+	}
+
+	// Validate parsed log flags only when starting the runtime. The log setup
+	// below keeps the existing flag/env/default precedence.
 	if strings.TrimSpace(*logMaxSizeFlag) != "" {
 		if _, err := daemon.ParseLogSize(*logMaxSizeFlag); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: --log-max-size=%q: %v\n", *logMaxSizeFlag, err)
@@ -372,9 +353,23 @@ func main() {
 		fmt.Fprintf(os.Stderr, "warning: --log-max-backups=%d must be >= 0 (0 means use env/default)\n", *logMaxBackupsFlag)
 	}
 
-	if *showVersion {
-		fmt.Printf("cc-connect-next %s\ncommit:  %s\nbuilt:   %s\n", version, commit, buildTime)
-		return
+	// When started as a daemon (CC_LOG_FILE set), redirect logs to a rotating file.
+	// Version probes return before any log file is opened or rotated. Keep the
+	// existing flag/env precedence for normal runtime startup.
+	var logWriter io.Writer
+	var logCloser io.Closer
+	if logFile := os.Getenv("CC_LOG_FILE"); logFile != "" {
+		maxSize, maxSizeSrc := resolveLogMaxSize(preScanLogMaxSizeFlag(os.Args[1:]))
+		maxBackups, maxBackupsSrc := resolveLogMaxBackups(preScanLogMaxBackupsFlag(os.Args[1:]))
+		fmt.Fprintf(os.Stderr, "log: redirecting to %s with max_size=%d bytes (source: %s), max_backups=%d (source: %s)\n", logFile, maxSize, maxSizeSrc, maxBackups, maxBackupsSrc)
+		w, err := daemon.NewRotatingWriter(logFile, maxSize, maxBackups)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "failed to open log file %s: %v\n", logFile, err)
+			os.Exit(1)
+		}
+		logWriter = w
+		logCloser = w
+		slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	}
 
 	core.VersionInfo = fmt.Sprintf("cc-connect-next %s\ncommit: %s\nbuilt: %s", version, commit, buildTime)
@@ -1556,11 +1551,21 @@ func main() {
 	slog.Info("bye")
 }
 
-// Feedback preview promises zero network I/O before approval, and submit must
-// make only the explicitly approved Relay request. Suppress the otherwise
-// global asynchronous release check for both feedback actions.
+// Feedback actions and version probes must not start background network I/O.
 func shouldCheckUpdateAsync(args []string) bool {
-	return len(args) == 0 || args[0] != "feedback"
+	if len(args) > 0 && args[0] == "feedback" {
+		return false
+	}
+	for _, arg := range args {
+		name, value, hasValue := strings.Cut(arg, "=")
+		if name == "--version" || name == "-version" {
+			enabled, err := strconv.ParseBool(value)
+			if !hasValue || err != nil || enabled {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // sessionStorePath builds a unique filename from project name + work_dir.

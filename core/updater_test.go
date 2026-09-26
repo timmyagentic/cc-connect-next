@@ -269,3 +269,44 @@ func TestCmdUpgradeConfirmWithoutReviewedPlanNeverApplies(t *testing.T) {
 		t.Fatalf("missing review guidance: %s", sent)
 	}
 }
+
+func TestCmdUpgradeVerificationFailureReportsInstalledStateWithoutRestart(t *testing.T) {
+	drainTestRestartRequests()
+	t.Cleanup(drainTestRestartRequests)
+	withCurrentVersion(t, "v1.0.0")
+	for _, test := range []struct {
+		lang     Language
+		guidance string
+	}{
+		{LangEnglish, "Installed files may have changed"},
+		{LangChinese, "磁盘上的文件可能已更新"},
+		{LangTraditionalChinese, "磁碟上的檔案可能已更新"},
+		{LangJapanese, "インストール済みのファイルは変更されている可能性"},
+		{LangSpanish, "Los archivos instalados pueden haber cambiado"},
+	} {
+		t.Run(string(test.lang), func(t *testing.T) {
+			platform := &updateIntentStubPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}
+			engine := NewEngine("test", &stubAgent{}, []Platform{platform}, "", test.lang)
+			engine.SetAdminFrom("user1")
+			service := &stubCoreUpdateService{
+				plan:     PreparedUpdate{Release: ReleaseInfo{TagName: "v1.1.0"}, Available: true, token: "exact"},
+				applyErr: ErrUpdateInstalledUnverified,
+			}
+			engine.SetUpdateService(service)
+			message := &Message{SessionKey: "test:user1", Platform: "test", UserID: "user1", ReplyCtx: "rc"}
+			engine.cmdUpgrade(platform, message, nil)
+			engine.cmdUpgrade(platform, message, []string{"confirm"})
+			if service.applyCalls != 1 {
+				t.Fatalf("installer was not called: %d", service.applyCalls)
+			}
+			if sent := strings.Join(platform.getSent(), "\n"); !strings.Contains(sent, test.guidance) {
+				t.Fatalf("missing localized installed-but-unverified guidance: %s", sent)
+			}
+			select {
+			case request := <-RestartCh:
+				t.Fatalf("unverified install triggered restart: %+v", request)
+			default:
+			}
+		})
+	}
+}

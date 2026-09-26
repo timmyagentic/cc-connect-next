@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Keep `--version` free of daemon log setup and background update checks so
+  old updaters can verify a newly installed binary even with inherited
+  `CC_LOG_FILE`. Report completed npm installs whose verification failed
+  explicitly and keep the running service alive without automatic restart.
+
 - Feishu/Lark now share ordinary group sessions by default and isolate real
   topics with `topics_only`, including when existing configurations omit the
   settings. Explicit `share_session_in_channel = false` and topic opt-outs

@@ -10,6 +10,10 @@ import (
 	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
+// ErrUpdateInstalledUnverified marks an install that finished without passing
+// verification, so presentation can distinguish it from a pre-install failure.
+var ErrUpdateInstalledUnverified = appfeatures.ErrUpdateInstalledUnverified
+
 // ReleaseInfo is the host projection used by notices and localized cards.
 // Body is publisher-controlled text from the exact GitHub Release.
 type ReleaseInfo struct {
