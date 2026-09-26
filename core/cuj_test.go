@@ -56,6 +56,7 @@ type cujAgent struct {
 	mu       sync.Mutex
 	sessions []*cujAgentSession
 	nextID   int
+	startIDs []string
 	listed   []AgentSessionInfo
 
 	// failStartCount lets tests simulate "agent process won't start" — the
@@ -150,9 +151,10 @@ func TestCUJ_H4_FeishuTopicsKeepWorkspaceBindingsIsolated(t *testing.T) {
 
 func (a *cujAgent) Name() string { return "cuj" }
 
-func (a *cujAgent) StartSession(_ context.Context, _ string) (AgentSession, error) {
+func (a *cujAgent) StartSession(_ context.Context, sessionID string) (AgentSession, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.startIDs = append(a.startIDs, sessionID)
 	if a.failStartCount > 0 {
 		a.failStartCount--
 		err := a.failStartErr
@@ -2194,6 +2196,52 @@ func TestCUJ_G4_AgentCrashReturnsErrorAndRecovers(t *testing.T) {
 	if gotSessions == 0 {
 		t.Fatalf("after recovery, agent.StartSession was never called successfully (sessions=%d)", gotSessions)
 	}
+	t.Run("login recovery preserves existing conversation", func(t *testing.T) {
+		env := newCUJEnv(t)
+		key := "test:login-user"
+		session := env.activeSession(key)
+		session.SetAgentSessionID("cuj-agent-session", env.agent.Name())
+		session.AddHistory("user", "earlier-conversation-context")
+		env.agent.mu.Lock()
+		env.agent.failStartCount = 1
+		env.agent.failStartErr = WrapAuthenticationRequired(errors.New("access token refresh requires sign-in"))
+		env.agent.mu.Unlock()
+
+		env.userSends("login-user", "continue while login is invalid")
+		env.waitFor("sign-in guidance", 2*time.Second, func() bool {
+			return env.sentContains("Sign in again") && !session.Busy()
+		})
+		env.agent.mu.Lock()
+		starts := append([]string(nil), env.agent.startIDs...)
+		env.agent.mu.Unlock()
+		if len(starts) != 1 || starts[0] != "cuj-agent-session" {
+			t.Fatalf("login failure retried a fresh thread: %v", starts)
+		}
+		env.plat.clearSent()
+		env.userSends("login-user", "/history")
+		if !env.sentContains("earlier-conversation-context") {
+			t.Fatalf("login failure hid history: %v", env.plat.getSent())
+		}
+
+		// The external CLI now accepts authentication; the user retries without /new.
+		env.plat.clearSent()
+		env.userSends("login-user", "retry-after-restoring-login")
+		env.waitFor("recovered answer", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
+		env.agent.mu.Lock()
+		starts = append([]string(nil), env.agent.startIDs...)
+		env.agent.mu.Unlock()
+		if len(starts) != 2 || starts[1] != "cuj-agent-session" {
+			t.Fatalf("recovery changed thread: %v", starts)
+		}
+		env.plat.clearSent()
+		env.userSends("login-user", "/history")
+		for _, want := range []string{"earlier-conversation-context", "retry-after-restoring-login"} {
+			if !env.sentContains(want) {
+				t.Fatalf("recovery history missing %q: %v", want, env.plat.getSent())
+			}
+		}
+	})
+
 }
 
 // CUJ-J1 · Every explicit chat Feedback action submits its structured,
@@ -2296,6 +2344,44 @@ func TestCUJ_J1_FeedbackExplicitTriggerSubmitsDirectly(t *testing.T) {
 		case <-submitted:
 			t.Fatal("an automatic offer submitted feedback without a user action")
 		default:
+		}
+	})
+
+	t.Run("lost login keeps manual feedback available", func(t *testing.T) {
+		env := newCUJEnv(t)
+		env.engine.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
+		submitted := captureFeedbackSubmissions(env.engine)
+		key := env.userSends("auth-user", "hello")
+		session := env.activeSession(key)
+		env.waitFor("initial answer", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
+		env.agent.mu.Lock()
+		as := env.agent.sessions[0]
+		env.agent.mu.Unlock()
+		as.mu.Lock()
+		as.nextEventOverride = &Event{Type: EventError, Error: ErrAuthenticationRequired}
+		as.mu.Unlock()
+		env.plat.clearSent()
+		env.userSends("auth-user", "continue after account changed")
+		env.waitFor("login failure", 2*time.Second, func() bool { return env.sentContains("Sign in again") && !session.Busy() })
+		if len(env.plat.getSent()) != 1 || env.sentContains("submit-token") {
+			t.Fatalf("login failure offered a bug report: %v", env.plat.getSent())
+		}
+		select {
+		case <-submitted:
+			t.Fatal("login failure submitted feedback automatically")
+		default:
+		}
+		env.userSends("auth-user", "/feedback login diagnosis seems wrong")
+		select {
+		case report := <-submitted:
+			if report.RecentError == nil || report.RecentError.Text != ErrAuthenticationRequired.Error() {
+				t.Fatalf("manual feedback lost login diagnostic: %+v", report)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("manual feedback no longer works after login failure")
+		}
+		if !env.sentContains("Submission succeeded") {
+			t.Fatalf("manual report has no receipt: %v", env.plat.getSent())
 		}
 	})
 

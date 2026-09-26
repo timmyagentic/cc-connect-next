@@ -1259,6 +1259,22 @@ type = "feishu"  # 或 wps-xiezuo, dingtalk, telegram, slack, discord, wecom, we
 下面这些是 issue 区里反复出现、维护者已经回答过的问题。每条都附上了
 原始 issue / PR 链接，方便继续深入。
 
+### Codex 提示需要重新登录
+
+如果 Codex 在退出、切换账号或 refresh token 过期/重复使用后提示 access token
+无法刷新，请先恢复 CLI 登录，再重试消息。用运行 cc-connect-next 的**同一系统用户**执行
+`codex login`，并确保使用该项目相同的 `CODEX_HOME` / `codex_home` 配置目录。
+在另一个用户或配置目录下登录，不能修复当前服务的登录状态。参见
+[Codex 认证文档](https://developers.openai.com/codex/auth/)。
+
+cc-connect-next 会显示当前语言的重新登录指引，并在认证阻止恢复旧会话时保留会话绑定。
+恢复登录后重试消息即可，无需 `/new`。程序不会自动登录、切换账号、清除凭证或重放失败请求。
+普通代理 401、API key 错误、临时刷新/网络失败不会一概归为这类登录失效。
+
+登录失效不会自动弹出 bug 反馈建议；如果判断不正确，仍可主动发送
+`/feedback <问题描述>`。省略描述时，反馈会把有效近期错误摘要放在有限诊断上下文之前，
+让生成的 Issue 标题反映实际问题。
+
 ### cc-connect-next 是否支持 OpenClaw？(issue #501)
 
 支持。OpenClaw 通过 [Agent Client Protocol (ACP)](https://agentclientprotocol.com/get-started/agents) 接入。

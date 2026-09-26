@@ -45,12 +45,16 @@ type FeedbackContext struct {
 // report and applies product-specific identifier redaction in addition to the
 // foundation's generic credential and path redaction.
 func BuildFeedbackDraft(input FeedbackContext) (FeedbackDraft, error) {
+	now := time.Now()
 	var recentError *featurefeedback.RecentError
-	if strings.TrimSpace(input.RecentError) != "" {
+	// Use the Foundation freshness boundary for both the diagnostic and its
+	// title summary, so stale/future errors cannot reappear in Description.
+	if age := now.Sub(input.RecentErrorAt); strings.TrimSpace(input.RecentError) != "" &&
+		!input.RecentErrorAt.IsZero() && age >= 0 && age <= featurefeedback.DefaultErrorMaxAge {
 		recentError = &featurefeedback.RecentError{Text: input.RecentError, At: input.RecentErrorAt}
 	}
-	return (featurefeedback.Builder{AdditionalRedact: redactCCConnectFeedback}).Build(featurefeedback.Input{
-		Description:    composeFeedbackDescription(input),
+	return (featurefeedback.Builder{Now: func() time.Time { return now }, AdditionalRedact: redactCCConnectFeedback}).Build(featurefeedback.Input{
+		Description:    composeFeedbackDescription(input, recentError),
 		RecentError:    recentError,
 		CapabilityGaps: input.CapabilityGaps,
 		Environment: featurefeedback.Environment{
@@ -63,8 +67,14 @@ func BuildFeedbackDraft(input FeedbackContext) (FeedbackDraft, error) {
 	})
 }
 
-func composeFeedbackDescription(input FeedbackContext) string {
+func composeFeedbackDescription(input FeedbackContext, recentError *featurefeedback.RecentError) string {
 	description := strings.TrimSpace(input.Description)
+	if description == "" && recentError != nil {
+		// Relay titles use Description's first line. Redact the complete error
+		// before extracting/bounding that line; context is supporting evidence.
+		firstLine, _, _ := strings.Cut(strings.TrimSpace(redactFeedbackContextText(recentError.Text)), "\n")
+		description = truncateFeedbackUTF8(firstLine, 400)
+	}
 	// Redact before the host-specific truncation. Truncating a credential first
 	// could cut away the syntax a redactor needs and expose a partial secret.
 	previousUser := strings.TrimSpace(redactFeedbackContextText(input.PreviousUserMessage))

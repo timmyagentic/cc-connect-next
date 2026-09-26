@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Recognize Codex login refresh failures with localized recovery guidance,
+  preserve saved conversations when authentication blocks resume, and keep
+  manual feedback available without automatic bug-report offers. Feedback
+  titles now prefer fresh error summaries over diagnostic-context headings.
+
 - Keep `--version` free of daemon log setup and background update checks so
   old updaters can verify a newly installed binary even with inherited
   `CC_LOG_FILE`. Report completed npm installs whose verification failed

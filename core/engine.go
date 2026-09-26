@@ -606,6 +606,7 @@ type interactiveState struct {
 	// prepended to a prompt for this state (guarded by mu).
 	capabilityBriefSent      bool
 	agentSession             AgentSession
+	startError               error // immutable outcome when backend startup failed
 	platform                 Platform
 	replyCtx                 any
 	currentMessageID         string
@@ -4233,7 +4234,12 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	defer stopRecallMonitor()
 
 	if state.agentSession == nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFailedToStartAgentSession))
+		if errors.Is(state.startError, ErrAuthenticationRequired) {
+			e.recordFeedbackError(msg.SessionKey, state.startError.Error())
+			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRichCardAuthRequiredBody, msg.Content))
+		} else {
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFailedToStartAgentSession))
+		}
 		return
 	}
 	if msg.AnswerProfile != "" {
@@ -4659,8 +4665,9 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	agentSession, err := agent.StartSession(e.ctx, startSessionID)
 	startElapsed := time.Since(startAt)
 	if err != nil {
-		// If resume/continue failed, try a fresh session as fallback.
-		if startSessionID != "" {
+		// A lost login does not make the saved conversation stale. Preserve its
+		// binding so the user's retry after signing in resumes the same thread.
+		if startSessionID != "" && !errors.Is(err, ErrAuthenticationRequired) {
 			slog.Error("session resume failed, falling back to fresh session",
 				"session_key", sessionKey, "failed_session_id", startSessionID,
 				"error", err, "elapsed", startElapsed)
@@ -4688,7 +4695,7 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 				Platform:   p.Name(),
 				Error:      fmt.Sprintf("failed to start session: %v", err),
 			})
-			newState := &interactiveState{platform: p, replyCtx: replyCtx, agent: agent, eventsNeedResync: true}
+			newState := &interactiveState{platform: p, replyCtx: replyCtx, agent: agent, startError: err, eventsNeedResync: true}
 			adoptPendingFromPlaceholder(e.interactiveStates[sessionKey], newState)
 			state = newState
 			e.interactiveStates[sessionKey] = state
@@ -5181,7 +5188,7 @@ func (e *Engine) runUnsolicitedReader(ctx context.Context, cancel context.Cancel
 			case EventError:
 				if event.Error != nil {
 					slog.Error("unsolicited agent error", "error", event.Error, "session", sessionKey)
-					e.send(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
+					e.send(p, replyCtx, e.agentErrorText(state, event.Error))
 					feedbackKey, feedbackUser := state.feedbackIdentity()
 					e.recordFeedbackError(feedbackKey, event.Error.Error())
 					e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser, event.Error)
@@ -5208,9 +5215,30 @@ const (
 	richCardGenericErrorPhase  = "error"
 	richCardUsageLimitPhase    = "usage_limit"
 	richCardModelCapacityPhase = "model_capacity"
+	richCardAuthRequiredPhase  = "authentication_required"
 )
 
+func (e *Engine) agentErrorText(state *interactiveState, err error) string {
+	if errors.Is(err, ErrAuthenticationRequired) {
+		// Background/compress failures belong to this conversation's latest
+		// turn, even if another session has since changed the auto locale.
+		if state != nil {
+			state.mu.Lock()
+			body := state.richCardCopy.AuthRequiredBody
+			state.mu.Unlock()
+			if body != "" {
+				return body
+			}
+		}
+		return e.i18n.T(MsgRichCardAuthRequiredBody)
+	}
+	return e.i18n.Tf(MsgError, err)
+}
+
 func richCardFailurePhase(err error) string {
+	if errors.Is(err, ErrAuthenticationRequired) {
+		return richCardAuthRequiredPhase
+	}
 	if errors.Is(err, ErrUsageLimit) {
 		return richCardUsageLimitPhase
 	}
@@ -5222,6 +5250,8 @@ func richCardFailurePhase(err error) string {
 
 func richCardFailureCopy(copy RichCardCopy, phase string) (summary, body string) {
 	switch phase {
+	case richCardAuthRequiredPhase:
+		return copy.AuthRequiredSummary, copy.AuthRequiredBody
 	case richCardUsageLimitPhase:
 		return copy.UsageLimitSummary, copy.UsageLimitBody
 	case richCardModelCapacityPhase:
@@ -12217,7 +12247,7 @@ func (e *Engine) runCompress(state *interactiveState, session *Session, sessions
 	}
 	if err := e.sendAgentTurn(turnAgent, agentSession, cmd, nil, nil, "", speedTier); err != nil {
 		if !auto {
-			e.reply(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), err))
+			e.reply(p, replyCtx, e.agentErrorText(state, err))
 		}
 		if !state.agentSession.Alive() {
 			e.cleanupInteractiveState(iKey)
@@ -12332,7 +12362,7 @@ func (e *Engine) processCompressEvents(state *interactiveState, session *Session
 				e.recordFeedbackError(feedbackKey, "compress failed: "+event.Error.Error())
 			}
 			if !auto && event.Error != nil {
-				e.reply(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
+				e.reply(p, replyCtx, e.agentErrorText(state, event.Error))
 				e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser, event.Error)
 			}
 			// Only drop queued messages if the agent is dead; some agents
@@ -17688,7 +17718,7 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 	if err != nil {
 		// Resume failed — fall back to a fresh session so the relay is not
 		// permanently broken by a corrupted/stale session ID.
-		if session.GetAgentSessionID() != "" {
+		if session.GetAgentSessionID() != "" && !errors.Is(err, ErrAuthenticationRequired) {
 			slog.Warn("relay: session resume failed, trying fresh session",
 				"relay_key", relaySessionKey, "error", err)
 			session.SetAgentSessionID("", agent.Name())

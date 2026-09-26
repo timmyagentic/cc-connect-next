@@ -15,6 +15,22 @@ var ErrUsageLimit = errors.New("agent usage limit reached")
 // for diagnostics, while presentation code renders only localized static copy.
 var ErrModelCapacity = errors.New("selected model is at capacity")
 
+// ErrAuthenticationRequired marks a login that must be restored by the user.
+// It must not be treated as a stale conversation or an automatic bug report.
+var ErrAuthenticationRequired = errors.New("agent sign-in required")
+
+// WrapAuthenticationRequired preserves diagnostics while allowing callers to
+// render static recovery guidance without exposing provider credentials.
+func WrapAuthenticationRequired(err error) error {
+	if err == nil {
+		return ErrAuthenticationRequired
+	}
+	if errors.Is(err, ErrAuthenticationRequired) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrAuthenticationRequired, err)
+}
+
 // Steer failure sentinels. SteerableSession implementations wrap these so the
 // engine can pick a deterministic fallback without inspecting error text.
 //

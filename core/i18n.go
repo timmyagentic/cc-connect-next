@@ -413,6 +413,9 @@ const (
 	MsgRichCardModelCapacity        MsgKey = "rich_card_model_capacity"
 	MsgRichCardModelCapacityBody    MsgKey = "rich_card_model_capacity_body"
 	MsgRichCardModelCapacitySummary MsgKey = "rich_card_model_capacity_summary"
+	MsgRichCardAuthRequired         MsgKey = "rich_card_authentication_required"
+	MsgRichCardAuthRequiredBody     MsgKey = "rich_card_authentication_required_body"
+	MsgRichCardAuthRequiredSummary  MsgKey = "rich_card_authentication_required_summary"
 	// Steer / presentation handoff (issue #27)
 	MsgRichCardSteering          MsgKey = "rich_card_steering"
 	MsgRichCardRedirected        MsgKey = "rich_card_redirected"
@@ -2870,6 +2873,21 @@ var messages = map[MsgKey]map[Language]string{
 		LangEnglish: "Selected model is at capacity", LangChinese: "所选模型当前容量已满", LangTraditionalChinese: "所選模型目前容量已滿",
 		LangJapanese: "選択したモデルは現在容量の上限に達しています", LangSpanish: "El modelo seleccionado no tiene capacidad disponible",
 	},
+	MsgRichCardAuthRequired: {
+		LangEnglish: "Sign-in required", LangChinese: "需要重新登录", LangTraditionalChinese: "需要重新登入",
+		LangJapanese: "再ログインが必要です", LangSpanish: "Es necesario iniciar sesión",
+	},
+	MsgRichCardAuthRequiredBody: {
+		LangEnglish:            "The Agent login is no longer valid, so this request could not continue.\n\nSign in again with the Agent CLI using the same system user and configuration directory as this service, then retry your message. You do not need to start a new conversation.",
+		LangChinese:            "Agent 的登录状态已失效，本次请求无法继续。\n\n请使用运行当前服务的同一系统用户和配置目录，重新登录对应的 Agent CLI，然后重试这条消息。无需新建会话。",
+		LangTraditionalChinese: "Agent 的登入狀態已失效，本次請求無法繼續。\n\n請使用執行目前服務的同一系統使用者與設定目錄，重新登入對應的 Agent CLI，然後重試這則訊息。無須建立新對話。",
+		LangJapanese:           "Agent のログイン状態が無効になったため、このリクエストを続行できません。\n\nこのサービスと同じシステムユーザーと設定ディレクトリを使用して Agent CLI に再ログインし、メッセージを再送してください。新しい会話を作成する必要はありません。",
+		LangSpanish:            "La sesión del Agent ya no es válida y no se pudo continuar con esta solicitud.\n\nVuelve a iniciar sesión con la CLI del Agent usando el mismo usuario del sistema y directorio de configuración que este servicio. Después, vuelve a enviar el mensaje. No necesitas crear una conversación nueva.",
+	},
+	MsgRichCardAuthRequiredSummary: {
+		LangEnglish: "Agent sign-in required", LangChinese: "Agent 需要重新登录", LangTraditionalChinese: "Agent 需要重新登入",
+		LangJapanese: "Agent への再ログインが必要です", LangSpanish: "Es necesario volver a iniciar sesión en el Agent",
+	},
 	MsgRichCardSteering: {
 		LangEnglish: "Adding this message to the current task...", LangChinese: "正在将此消息并入当前任务…", LangTraditionalChinese: "正在將此訊息併入目前任務…",
 		LangJapanese: "このメッセージを現在のタスクに追加しています…", LangSpanish: "Añadiendo este mensaje a la tarea en curso...",
@@ -4839,6 +4857,9 @@ func richCardCopyForLanguage(lang Language) RichCardCopy {
 		ModelCapacity:        t(MsgRichCardModelCapacity),
 		ModelCapacityBody:    t(MsgRichCardModelCapacityBody),
 		ModelCapacitySummary: t(MsgRichCardModelCapacitySummary),
+		AuthRequired:         t(MsgRichCardAuthRequired),
+		AuthRequiredBody:     t(MsgRichCardAuthRequiredBody),
+		AuthRequiredSummary:  t(MsgRichCardAuthRequiredSummary),
 		Steering:             t(MsgRichCardSteering),
 		Redirected:           t(MsgRichCardRedirected),
 		RedirectedBody:       t(MsgRichCardRedirectedBody),

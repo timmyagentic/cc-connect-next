@@ -40,8 +40,8 @@ When `resolve_mentions = true`, streaming and safe-partial card bodies resolve `
 Remote markdown images are uploaded once and reused by URL. A failed fetch or Feishu upload enters a one-minute backoff instead of a permanent denylist; after that window the next card that references the URL retries it. This avoids per-frame retry storms while allowing transient timeouts, rate limits, and network failures to recover without restarting the process.
 
 Terminal failure cards follow an allowlist-only disclosure policy. Known
-provider-neutral markers such as usage exhaustion and the Codex
-"selected model is at capacity" condition render localized host-owned copy
+provider-neutral markers such as usage exhaustion, a required Agent sign-in,
+and the Codex "selected model is at capacity" condition render localized host-owned copy
 with a concrete next step. The original provider error is never copied into
 the card or its fallback message, even after generic redaction, because it may
 contain credentials, local paths, internal IDs, commands, or private upstream
