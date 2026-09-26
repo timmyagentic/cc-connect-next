@@ -2494,10 +2494,44 @@ func TestCUJ_H1_MultiProjectLinkedToIntegration(t *testing.T) {
 	t.Log("CUJ-H1: covered by release-gate TestCC_MULTI_01_multi_project")
 }
 
-// CUJ-H3 · Within one project, shared session across platforms (configured
-// behavior). Covered at integration level.
-func TestCUJ_H3_SharedSessionLinkedToIntegration(t *testing.T) {
-	t.Log("CUJ-H3: covered by release-gate TestCC_SESSION_01_share_session")
+// CUJ-H3 · Different users continue the shared group conversation, while
+// another group/project stays isolated and /new resets the shared history.
+func TestCUJ_H3_SharedGroupHistoryAcrossUsers(t *testing.T) {
+	env := newCUJEnv(t)
+	otherProject := newCUJEnv(t)
+	send := func(target *cujEnv, key, user, content string) string {
+		t.Helper()
+		before := len(target.plat.getSent())
+		target.engine.ReceiveMessage(target.plat, &Message{
+			SessionKey: key, Platform: "test", MessageID: fmt.Sprintf("%s-%d", user, before),
+			UserID: user, UserName: user, Content: content, ReplyCtx: "ctx-" + user,
+		})
+		target.waitFor("shared group reply", 2*time.Second, func() bool {
+			return len(target.plat.getSent()) > before
+		})
+		return target.lastSent()
+	}
+
+	send(env, "test:group", "alice", "shared-alice-background")
+	send(env, "test:group", "bob", "shared-bob-followup")
+	history := send(env, "test:group", "bob", "/history")
+	for _, content := range []string{"shared-alice-background", "shared-bob-followup"} {
+		if !strings.Contains(history, content) {
+			t.Fatalf("Bob's shared history is missing %q: %s", content, history)
+		}
+	}
+	for _, history := range []string{
+		send(env, "test:other-group", "bob", "/history"),
+		send(otherProject, "test:group", "bob", "/history"),
+	} {
+		if strings.Contains(history, "shared-alice-background") {
+			t.Fatalf("shared group history crossed a group/project boundary: %s", history)
+		}
+	}
+	send(env, "test:group", "alice", "/new")
+	if history := send(env, "test:group", "bob", "/history"); strings.Contains(history, "shared-alice-background") {
+		t.Fatalf("Bob stayed in the old group conversation after Alice used /new: %s", history)
+	}
 }
 
 // ===========================================================================

@@ -1107,9 +1107,9 @@ app_secret = "your-feishu-app-secret"
 #                           # Optional: only these group chats bypass @mention; all other groups
 #                           # still require @. A TOML string array is also accepted.
 #                           # 可选：仅这些群聊无需 @；其他群聊仍需 @。也支持 TOML 字符串数组。
-# share_session_in_channel = false  # If true, all users in a group share one agent session
+# share_session_in_channel = true   # Feishu/Lark default: share ordinary group sessions; false opts out
 #                                   # 设为 true 时，群聊内所有用户共享同一个 Agent 会话
-# thread_isolation = "topics_only" # off | topics_only | topic_per_message; legacy true = topic_per_message, false = off
+# thread_isolation = "topics_only" # runtime default, including omitted old configs; off opts out; legacy true = topic_per_message
 #                                   # 关闭 | 仅真实话题隔离 | 每条群消息一个话题；旧 true 映射 topic_per_message，false 映射 off
 # reply_to_trigger = true   # Default: quote the trigger in ordinary chats. false posts a plain message there;
 #                           # topics isolated by thread_isolation always remain in their topic.

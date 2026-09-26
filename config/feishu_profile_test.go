@@ -22,22 +22,23 @@ func TestRecommendedFeishuProfileCoversTheDeployedShape(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"display.card_mode":              `"rich"`,
-		"display.thinking_messages":      "false",
-		"display.tool_messages":          "false",
-		"display.show_context_indicator": "false",
-		"display.reply_footer":           "true",
-		"display.hide_agent_footer":      "true",
-		"references.normalize_agents":    `["codex"]`,
-		"references.render_platforms":    `["feishu"]`,
-		"references.display_path":        `"smart"`,
-		"references.marker_style":        `"emoji"`,
-		"references.enclosure_style":     `"code"`,
-		"platform.enable_feishu_card":    "true",
-		"platform.reply_to_trigger":      "true",
-		"platform.thread_isolation":      `"topics_only"`,
-		"platform.done_emoji":            `"Done"`,
-		"platform.group_reply_all":       "true",
+		"display.card_mode":                 `"rich"`,
+		"display.thinking_messages":         "false",
+		"display.tool_messages":             "false",
+		"display.show_context_indicator":    "false",
+		"display.reply_footer":              "true",
+		"display.hide_agent_footer":         "true",
+		"references.normalize_agents":       `["codex"]`,
+		"references.render_platforms":       `["feishu"]`,
+		"references.display_path":           `"smart"`,
+		"references.marker_style":           `"emoji"`,
+		"references.enclosure_style":        `"code"`,
+		"platform.enable_feishu_card":       "true",
+		"platform.reply_to_trigger":         "true",
+		"platform.share_session_in_channel": "true",
+		"platform.thread_isolation":         `"topics_only"`,
+		"platform.done_emoji":               `"Done"`,
+		"platform.group_reply_all":          "true",
 	}
 	for key, value := range want {
 		setting, ok := byKey[key]
@@ -210,7 +211,7 @@ app_secret = "solo-secret"
 	if opts["group_reply_all"] != true || opts["reply_to_trigger"] != true || opts["enable_feishu_card"] != true {
 		t.Fatalf("platform options = %#v", opts)
 	}
-	if opts["thread_isolation"] != "topics_only" || opts["done_emoji"] != "Done" {
+	if opts["thread_isolation"] != "topics_only" || opts["share_session_in_channel"] != true || opts["done_emoji"] != "Done" {
 		t.Fatalf("platform options = %#v", opts)
 	}
 	// Credentials must survive untouched.

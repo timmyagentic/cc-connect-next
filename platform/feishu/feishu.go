@@ -273,6 +273,11 @@ const (
 	threadIsolationTopicPerMessage
 )
 
+const (
+	defaultThreadIsolation       = threadIsolationTopicsOnly
+	defaultShareSessionInChannel = true
+)
+
 func (m threadIsolationMode) String() string {
 	switch m {
 	case threadIsolationTopicsOnly:
@@ -287,7 +292,7 @@ func (m threadIsolationMode) String() string {
 func parseThreadIsolationMode(raw any) (threadIsolationMode, error) {
 	switch value := raw.(type) {
 	case nil:
-		return threadIsolationOff, nil
+		return defaultThreadIsolation, nil
 	case bool:
 		if value {
 			// Preserve the historical boolean behavior: every top-level group
@@ -330,6 +335,7 @@ type Platform struct {
 	groupReplyAllChats         map[string]struct{}
 	respondToAtEveryoneAndHere bool
 	shareSessionInChannel      bool
+	defaultGroupSharing        bool // omitted sharing changes groups, preserving existing ordinary P2P keys
 	threadMode                 threadIsolationMode
 	// noReplyToTrigger: when true, send via Create instead of Im.Message.Reply (no quote to the user's message).
 	noReplyToTrigger bool
@@ -546,7 +552,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		groupReplyAll = true
 	}
 	respondToAtEveryoneAndHere, _ := opts["respond_to_at_everyone_and_here"].(bool)
-	shareSessionInChannel, _ := opts["share_session_in_channel"].(bool)
+	shareSessionInChannel, shareSessionConfigured := opts["share_session_in_channel"].(bool)
 	threadMode, err := parseThreadIsolationMode(opts["thread_isolation"])
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
@@ -633,6 +639,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		groupReplyAllChats:         groupReplyAllChats,
 		respondToAtEveryoneAndHere: respondToAtEveryoneAndHere,
 		shareSessionInChannel:      shareSessionInChannel,
+		defaultGroupSharing:        !shareSessionConfigured && defaultShareSessionInChannel,
 		threadMode:                 threadMode,
 		resolveMentions:            resolveMentionsOpt,
 		noReplyToTrigger:           noReplyToTrigger,
@@ -4733,7 +4740,7 @@ func (p *Platform) makeSessionKey(msg *larkim.EventMessage, chatID, userID strin
 			return fmt.Sprintf("%s:%s:root:%s", p.tag(), chatID, rootID)
 		}
 	}
-	if p.shareSessionInChannel {
+	if p.shareSessionInChannel || (p.defaultGroupSharing && msg != nil && stringValue(msg.ChatType) == "group") {
 		return fmt.Sprintf("%s:%s", p.tag(), chatID)
 	}
 	return fmt.Sprintf("%s:%s:%s", p.tag(), chatID, userID)
@@ -4745,7 +4752,7 @@ func (p *Platform) sessionKeyFromCardAction(chatID, userID string, value map[str
 			return sessionKey
 		}
 	}
-	if p.shareSessionInChannel {
+	if p.shareSessionInChannel || (p.defaultGroupSharing && cardActionString(value, cardActionDirectUserKey) == "") {
 		return fmt.Sprintf("%s:%s", p.tag(), chatID)
 	}
 	return fmt.Sprintf("%s:%s:%s", p.tag(), chatID, userID)

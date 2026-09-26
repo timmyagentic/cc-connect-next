@@ -55,7 +55,7 @@ func TestNew_ThreadIsolationModesAndLegacyBooleans(t *testing.T) {
 		wantPlain string
 		wantTopic string
 	}{
-		{name: "omitted maps to off", wantPlain: "feishu:oc_group:ou_user", wantTopic: "feishu:oc_group:ou_user"},
+		{name: "omitted maps to topics only", wantPlain: "feishu:oc_group:ou_user", wantTopic: "feishu:oc_group:root:om_topic_root"},
 		{name: "legacy false maps to off", set: true, value: false, wantPlain: "feishu:oc_group:ou_user", wantTopic: "feishu:oc_group:ou_user"},
 		{name: "legacy true preserves topic per message", set: true, value: true, wantPlain: "feishu:oc_group:root:om_plain", wantTopic: "feishu:oc_group:root:om_topic_root"},
 		{name: "off mode", set: true, value: "off", wantPlain: "feishu:oc_group:ou_user", wantTopic: "feishu:oc_group:ou_user"},
@@ -64,7 +64,7 @@ func TestNew_ThreadIsolationModesAndLegacyBooleans(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := map[string]any{"app_id": "cli_xxx", "app_secret": "secret"}
+			opts := map[string]any{"app_id": "cli_xxx", "app_secret": "secret", "share_session_in_channel": false}
 			if tt.set {
 				opts["thread_isolation"] = tt.value
 			}
@@ -981,15 +981,15 @@ func TestLark_GroupReplyAllWithThreadIsolationKeepsPlainGroupSessionWithoutMenti
 
 	select {
 	case receivedMsg := <-msgCh:
-		if receivedMsg.SessionKey != "lark:oc_test:ou_test" {
-			t.Fatalf("SessionKey = %q, want lark:oc_test:ou_test", receivedMsg.SessionKey)
+		if receivedMsg.SessionKey != "lark:oc_test" {
+			t.Fatalf("SessionKey = %q, want lark:oc_test", receivedMsg.SessionKey)
 		}
 		rc, ok := receivedMsg.ReplyCtx.(replyContext)
 		if !ok {
 			t.Fatalf("ReplyCtx type = %T, want replyContext", receivedMsg.ReplyCtx)
 		}
-		if rc.sessionKey != "lark:oc_test:ou_test" {
-			t.Fatalf("replyContext.sessionKey = %q, want lark:oc_test:ou_test", rc.sessionKey)
+		if rc.sessionKey != "lark:oc_test" {
+			t.Fatalf("replyContext.sessionKey = %q, want lark:oc_test", rc.sessionKey)
 		}
 		if rc.messageID != "om_plain" {
 			t.Fatalf("replyContext.messageID = %q, want om_plain", rc.messageID)

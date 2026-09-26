@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Feishu/Lark now share ordinary group sessions by default and isolate real
+  topics with `topics_only`, including when existing configurations omit the
+  settings. Explicit `share_session_in_channel = false` and topic opt-outs
+  remain supported. Existing session histories are retained, not merged;
+  ordinary private-chat keys stay unchanged when sharing is omitted.
+
 ## v0.3.0 (2026-09-07)
 
 Stable candidate based on v0.3.0-beta.5, with no additional runtime changes.
