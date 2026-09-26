@@ -4037,17 +4037,18 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.share_session_in_channel` — `feishu, lark`
 
-让同一非隔离频道内的用户共享一个 Agent 会话；thread_isolation 仍可为真实话题建立独立会话。
+默认让同一非隔离群聊内的用户共享一个 Agent 会话。显式 false 保留按用户的群会话；隔离话题仍在各自话题内共享。省略该键时普通私聊保留原会话键；显式 true 延用历史频道级会话键。切换设置不会自动合并已有历史。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`boolean`
 - 要求：`可选`
-- 默认值：`false`
+- 默认值：`true`
 - 默认值来源：`builtin`
 - 生效方式：`restart`
-- 示例: `share_session_in_channel = false`
+- 示例: `share_session_in_channel = true`
+- 预设 `starter/recommended-feishu`: `true` — 普通群聊中的不同用户共享会话。
 
 ### `projects.platforms.options.state_dir` — `weixin`
 
@@ -4079,14 +4080,14 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.thread_isolation` — `feishu, lark`
 
-选择飞书/Lark 话题隔离范围。off 沿用旧版按用户/频道会话；topics_only 隔离事件携带 thread_id 的所有真实话题（包括 P2P 私聊话题），普通群消息留在群主会话，普通无话题私聊保持原会话；topic_per_message 还会让每条群主会话消息拥有独立话题/session。两种启用模式都会给真实话题独立 Agent 会话和工作区绑定。省略该键映射 off；旧 true 映射 topic_per_message，旧 false 映射 off；新 Starter 和推荐 Profile 写入 topics_only。
+选择飞书/Lark 话题隔离范围。off 使用配置指定的用户/群会话；topics_only 隔离事件携带 thread_id 的所有真实话题（包括 P2P 私聊话题），普通群消息留在群主会话；topic_per_message 还会让每条群主会话消息拥有独立话题/session。两种启用模式都会给真实话题独立 Agent 会话和工作区绑定。省略该键现在映射 topics_only，也适用于已有配置；旧 true 映射 topic_per_message，旧 false 映射 off；新 Starter 和推荐 Profile 写入 topics_only。已有历史保留，不会自动合并。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`string | boolean (legacy)`
 - 要求：`可选`
-- 默认值：`off`
+- 默认值：`topics_only`
 - 默认值来源：`builtin`
 - 生效方式：`restart`
 - 允许值: `off`, `topics_only`, `topic_per_message`

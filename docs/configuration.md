@@ -4037,17 +4037,18 @@ Share one Agent session among all users in a channel or room.
 
 ### `projects.platforms.options.share_session_in_channel` — `feishu, lark`
 
-Share one Agent session among users in the same non-isolated channel; thread_isolation can still give real topics separate sessions.
+Share one Agent session among users in the same non-isolated group by default. Explicit false keeps per-user group sessions; isolated topics remain shared within each topic. Omission preserves ordinary private-chat keys; explicit true retains the legacy channel-wide key. Existing histories are not merged when this setting changes.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
 - Scope: `platform` (`feishu, lark`)
 - Type: `boolean`
 - Requirement: `optional`
-- Default: `false`
+- Default: `true`
 - Default source: `builtin`
 - Takes effect: `restart`
-- Example: `share_session_in_channel = false`
+- Example: `share_session_in_channel = true`
+- Preset `starter/recommended-feishu`: `true` — Share ordinary group conversations across users.
 
 ### `projects.platforms.options.state_dir` — `weixin`
 
@@ -4079,14 +4080,14 @@ Use a separate Agent session for each platform thread or topic.
 
 ### `projects.platforms.options.thread_isolation` — `feishu, lark`
 
-Choose Feishu/Lark topic isolation scope. off keeps legacy per-user/channel sessions. topics_only isolates every real topic whose event carries thread_id, including P2P topics; ordinary group messages stay in the main chat and ordinary non-topic private messages keep their existing session. topic_per_message additionally gives every top-level group message its own topic/session. Real topics get an independent Agent session and workspace binding in both enabled modes. Omitting the key maps to off; legacy true maps to topic_per_message and false maps to off. New Starter and recommended profiles write topics_only.
+Choose Feishu/Lark topic isolation scope. off uses the configured per-user/group session. topics_only isolates every real topic whose event carries thread_id, including P2P topics; ordinary group messages stay in the main chat. topic_per_message additionally gives every top-level group message its own topic/session. Real topics get an independent Agent session and workspace binding in both enabled modes. Omitting the key now maps to topics_only, including existing configs; legacy true maps to topic_per_message and false maps to off. New Starter and recommended profiles write topics_only. Existing histories are retained, not merged.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
 - Scope: `platform` (`feishu, lark`)
 - Type: `string | boolean (legacy)`
 - Requirement: `optional`
-- Default: `off`
+- Default: `topics_only`
 - Default source: `builtin`
 - Takes effect: `restart`
 - Allowed values: `off`, `topics_only`, `topic_per_message`

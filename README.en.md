@@ -183,6 +183,7 @@ type = "feishu"
 app_id = "${FEISHU_APP_ID}"
 app_secret = "${FEISHU_APP_SECRET}"
 reply_to_trigger = true
+share_session_in_channel = true
 thread_isolation = "topics_only"
 done_emoji = "Done"
 ```

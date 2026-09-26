@@ -91,6 +91,8 @@ func RecommendedFeishuProfile(agentType string) []RecommendedFeishuSetting {
 			"use the interactive card client instead of plain messages"},
 		{feishuProfileTablePlatform, "reply_to_trigger", "true",
 			"reply in a quote of the message that triggered the turn"},
+		{feishuProfileTablePlatform, "share_session_in_channel", "true",
+			"share ordinary group conversations across users while keeping real topics separate"},
 		{feishuProfileTablePlatform, "thread_isolation", `"topics_only"`,
 			"isolate real Feishu topics while keeping ordinary group messages in the main chat"},
 		{feishuProfileTablePlatform, "done_emoji", `"Done"`,

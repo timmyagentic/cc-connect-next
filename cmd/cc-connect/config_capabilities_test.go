@@ -173,14 +173,18 @@ func TestCodexModeCatalogDistinguishesStarterFromOmissionFallback(t *testing.T) 
 	}
 }
 
-func TestFeishuThreadIsolationCatalogDistinguishesProfileFromOmissionFallback(t *testing.T) {
+func TestFeishuThreadIsolationCatalogMatchesRuntimeAndProfileDefaults(t *testing.T) {
 	for _, owner := range []string{"feishu", "lark"} {
 		option := findCatalogOption(t, core.PlatformConfigOptions(owner), "thread_isolation")
-		if option.Default != "off" || option.DefaultSource != core.ConfigDefaultBuiltin {
+		if option.Default != "topics_only" || option.DefaultSource != core.ConfigDefaultBuiltin {
 			t.Errorf("%s thread_isolation omitted default = %q source=%q", owner, option.Default, option.DefaultSource)
 		}
 		if !hasPresetValue(option.PresetValues, "starter/recommended-feishu", "topics_only") {
 			t.Errorf("%s thread_isolation presets = %#v", owner, option.PresetValues)
+		}
+		sharing := findCatalogOption(t, core.PlatformConfigOptions(owner), "share_session_in_channel")
+		if sharing.Default != "true" || !hasPresetValue(sharing.PresetValues, "starter/recommended-feishu", "true") {
+			t.Errorf("%s group sharing defaults = %#v", owner, sharing)
 		}
 		if option.Type != "string | boolean (legacy)" {
 			t.Errorf("%s thread_isolation type = %q", owner, option.Type)
@@ -204,6 +208,9 @@ func TestFeishuThreadIsolationCatalogDistinguishesProfileFromOmissionFallback(t 
 	}
 	if !strings.Contains(config.StarterConfigTOML(), `thread_isolation = "topics_only"`) {
 		t.Fatal("generated Starter config no longer writes thread_isolation = topics_only")
+	}
+	if !strings.Contains(config.StarterConfigTOML(), "share_session_in_channel = true") {
+		t.Fatal("generated Starter config does not enable group sharing")
 	}
 
 	var out bytes.Buffer
@@ -251,7 +258,7 @@ func TestFeishuCatalogMatchesRuntimeConfigurationContract(t *testing.T) {
 		"require_mention":                 "true",
 		"resolve_mentions":                "false",
 		"respond_to_at_everyone_and_here": "false",
-		"share_session_in_channel":        "false",
+		"share_session_in_channel":        "true",
 	}
 	wantTypes := map[string]string{
 		"group_reply_all_chats": "string | string[]",

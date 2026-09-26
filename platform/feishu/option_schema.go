@@ -122,15 +122,18 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 		case "respond_to_at_everyone_and_here":
 			option.Default = "false"
 		case "share_session_in_channel":
-			option.Default = "false"
-			option.Description = "Share one Agent session among users in the same non-isolated channel; thread_isolation can still give real topics separate sessions."
-			option.DescriptionZH = "让同一非隔离频道内的用户共享一个 Agent 会话；thread_isolation 仍可为真实话题建立独立会话。"
+			option.Default = strconv.FormatBool(defaultShareSessionInChannel)
+			option.Description = "Share one Agent session among users in the same non-isolated group by default. Explicit false keeps per-user group sessions; isolated topics remain shared within each topic. Omission preserves ordinary private-chat keys; explicit true retains the legacy channel-wide key. Existing histories are not merged when this setting changes."
+			option.DescriptionZH = "默认让同一非隔离群聊内的用户共享一个 Agent 会话。显式 false 保留按用户的群会话；隔离话题仍在各自话题内共享。省略该键时普通私聊保留原会话键；显式 true 延用历史频道级会话键。切换设置不会自动合并已有历史。"
+			option.Example = "share_session_in_channel = true"
+			option.PresetValues = []core.ConfigPresetValue{{Preset: "starter/recommended-feishu", Value: "true", Description: "Share ordinary group conversations across users.", DescriptionZH: "普通群聊中的不同用户共享会话。"}}
 		case "thread_isolation":
 			option.Type = "string | boolean (legacy)"
-			option.Default = "off"
+			option.Default = defaultThreadIsolation.String()
 			option.Values = []string{"off", "topics_only", "topic_per_message"}
-			option.Description = "Choose Feishu/Lark topic isolation scope. off keeps legacy per-user/channel sessions. topics_only isolates every real topic whose event carries thread_id, including P2P topics; ordinary group messages stay in the main chat and ordinary non-topic private messages keep their existing session. topic_per_message additionally gives every top-level group message its own topic/session. Real topics get an independent Agent session and workspace binding in both enabled modes. Omitting the key maps to off; legacy true maps to topic_per_message and false maps to off. New Starter and recommended profiles write topics_only."
-			option.DescriptionZH = "选择飞书/Lark 话题隔离范围。off 沿用旧版按用户/频道会话；topics_only 隔离事件携带 thread_id 的所有真实话题（包括 P2P 私聊话题），普通群消息留在群主会话，普通无话题私聊保持原会话；topic_per_message 还会让每条群主会话消息拥有独立话题/session。两种启用模式都会给真实话题独立 Agent 会话和工作区绑定。省略该键映射 off；旧 true 映射 topic_per_message，旧 false 映射 off；新 Starter 和推荐 Profile 写入 topics_only。"
+			option.Description = "Choose Feishu/Lark topic isolation scope. off uses the configured per-user/group session. topics_only isolates every real topic whose event carries thread_id, including P2P topics; ordinary group messages stay in the main chat. topic_per_message additionally gives every top-level group message its own topic/session. Real topics get an independent Agent session and workspace binding in both enabled modes. Omitting the key now maps to topics_only, including existing configs; legacy true maps to topic_per_message and false maps to off. New Starter and recommended profiles write topics_only. Existing histories are retained, not merged."
+			option.DescriptionZH = "选择飞书/Lark 话题隔离范围。off 使用配置指定的用户/群会话；topics_only 隔离事件携带 thread_id 的所有真实话题（包括 P2P 私聊话题），普通群消息留在群主会话；topic_per_message 还会让每条群主会话消息拥有独立话题/session。两种启用模式都会给真实话题独立 Agent 会话和工作区绑定。省略该键现在映射 topics_only，也适用于已有配置；旧 true 映射 topic_per_message，旧 false 映射 off；新 Starter 和推荐 Profile 写入 topics_only。已有历史保留，不会自动合并。"
+			option.Example = `thread_isolation = "topics_only"`
 			option.Keywords = []string{"topic isolation", "multiple topics", "话题隔离", "话题独立", "多个话题"}
 			option.PresetValues = []core.ConfigPresetValue{{Preset: "starter/recommended-feishu", Value: "topics_only", Description: "Isolate real topics without promoting ordinary group messages.", DescriptionZH: "隔离真实话题，不把普通群消息提升为话题。"}}
 		}
