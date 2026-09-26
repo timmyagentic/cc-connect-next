@@ -19,6 +19,7 @@ type contextTestPlatform struct {
 	backgrounds map[string]MessageContext
 	loadErrors  map[string]error
 	loads       []string
+	onLoad      func(int)
 }
 
 func (p *contextTestPlatform) MessageContextEnabled(target any) bool {
@@ -27,14 +28,19 @@ func (p *contextTestPlatform) MessageContextEnabled(target any) bool {
 }
 func (p *contextTestPlatform) LoadMessageContext(_ context.Context, target any) (MessageContext, error) {
 	p.contextMu.Lock()
-	defer p.contextMu.Unlock()
 	key := target.(string)
 	p.loads = append(p.loads, key)
+	loadCount, onLoad := len(p.loads), p.onLoad
 	result := p.backgrounds[key]
 	result.Scope = key
 	result.MaxChars = 8000
 	result.Messages = append([]ContextMessage(nil), result.Messages...)
-	return result, p.loadErrors[key]
+	err := p.loadErrors[key]
+	p.contextMu.Unlock()
+	if onLoad != nil {
+		onLoad(loadCount)
+	}
+	return result, err
 }
 func (p *contextTestPlatform) setBackground(key string, entries []ContextMessage, err error) {
 	p.contextMu.Lock()
@@ -188,5 +194,80 @@ func TestMessageContextCapabilityRemainsVisibleWhenUnavailable(t *testing.T) {
 	feature := findRuntimeFeature(t, adapter.Capabilities, "recent_conversation_context")
 	if feature.Availability.State != CapabilityUnavailable || feature.Fallback.Mode != "current-message" {
 		t.Fatalf("missing unavailable capability: %+v", feature)
+	}
+}
+
+func TestMessageContextDrainsEventsThatArriveDuringRead(t *testing.T) {
+	for _, queued := range []bool{false, true} {
+		name := "foreground"
+		if queued {
+			name = "queued"
+		}
+		t.Run(name, func(t *testing.T) {
+			env, p := newContextCUJEnv(t)
+			key := "test:group"
+			contextReceive(env, p, key, "alice", "warmup", "first question")
+			session := env.engine.sessions.GetOrCreateActive(key)
+			env.waitFor("warmup", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
+			as := contextLatestSession(env)
+			as.mu.Lock()
+			as.delayMs = 100
+			as.reply = "fresh answer"
+			as.mu.Unlock()
+			injectOnLoad := 2
+			if queued {
+				injectOnLoad = 3
+			} else {
+				env.engine.interactiveMu.Lock()
+				state := env.engine.interactiveStates[key]
+				env.engine.interactiveMu.Unlock()
+				state.mu.Lock()
+				state.eventsNeedResync = true
+				state.mu.Unlock()
+			}
+			p.contextMu.Lock()
+			p.onLoad = func(count int) {
+				if count == injectOnLoad {
+					as.events <- Event{Type: EventError, Error: errors.New("stale previous turn event")}
+				}
+			}
+			p.contextMu.Unlock()
+			env.plat.clearSent()
+			contextReceive(env, p, key, "alice", "next", "next question")
+			if queued {
+				env.waitFor("foreground send", time.Second, func() bool { return len(as.getSentPrompts()) == 2 })
+				contextReceive(env, p, key, "bob", "queued", "queued question")
+			}
+			env.waitFor("new turns finished", 3*time.Second, func() bool { return len(as.getSentPrompts()) == injectOnLoad && !session.Busy() })
+			if env.sentContains("stale previous turn event") {
+				t.Fatalf("old event failed the new turn: %v", env.plat.getSent())
+			}
+			if count := strings.Count(strings.Join(env.plat.getSent(), "\n"), "fresh answer"); count != injectOnLoad-1 {
+				t.Fatalf("new turns lost replies: %v", env.plat.getSent())
+			}
+		})
+	}
+}
+
+func TestMessageContextFailedResultDoesNotConsumeBackground(t *testing.T) {
+	env, p := newContextCUJEnv(t)
+	key := "test:group"
+	contextReceive(env, p, key, "alice", "warmup", "first question")
+	session := env.engine.sessions.GetOrCreateActive(key)
+	env.waitFor("warmup", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
+	as := contextLatestSession(env)
+	p.setBackground(key, []ContextMessage{{ID: "new-fact", SenderID: "bob", Text: "retryable discussion", Time: time.Now()}}, nil)
+	as.mu.Lock()
+	as.nextEventOverride = &Event{Type: EventResult, Done: true, Content: "failed result", Error: errors.New("failed result")}
+	as.mu.Unlock()
+	env.plat.clearSent()
+	contextReceive(env, p, key, "alice", "failed", "next question")
+	env.waitFor("failed result", 2*time.Second, func() bool { return env.sentContains("failed result") && !session.Busy() })
+	env.plat.clearSent()
+	contextReceive(env, p, key, "alice", "retry", "please retry")
+	env.waitFor("retry", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
+	prompts := as.getSentPrompts()
+	if len(prompts) != 3 || !strings.Contains(prompts[1], "retryable discussion") || !strings.Contains(prompts[2], "retryable discussion") {
+		t.Fatalf("failed result consumed the background: %v", prompts)
 	}
 }

@@ -4294,12 +4294,6 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// ownership to this foreground turn. Only drain events when the previous
 	// turn ended abnormally (eventsNeedResync=true, the default).
 	e.stopUnsolicitedReader(state)
-	state.mu.Lock()
-	needResync := state.eventsNeedResync
-	state.mu.Unlock()
-	if needResync {
-		drainEvents(state.agentSession.Events())
-	}
 
 	promptContent := e.prepareMessageContext(p, msg.ReplyCtx, session, state, msg.Content, msg.MessageID)
 	promptContent = e.buildCapabilityPrompt(state, e.buildSenderPrompt(promptContent, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
@@ -4314,8 +4308,14 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	speedTier := sessions.ServiceTier(session)
 	state.activeServiceTier = speedTier
 	as := state.agentSession // capture under lock to avoid race with cleanup
+	needResync := state.eventsNeedResync
 	state.mu.Unlock()
 	state.steerMu.Unlock()
+	// The context read can wait on network IO. Include late previous-turn
+	// events in the resync drain immediately before sending this turn.
+	if needResync && as != nil {
+		drainEvents(as.Events())
+	}
 
 	// Run Send concurrently with processInteractiveEvents. Some agents block inside
 	// Send until the prompt turn finishes (e.g. ACP session/prompt); they may emit
@@ -6388,7 +6388,9 @@ func (t *turnProcessor) run() {
 				t.persistAgentSessionID(state.agentSession.CurrentSessionID())
 			}
 
-			completeMessageContext(state, session, sessions)
+			if event.Error == nil {
+				completeMessageContext(state, session, sessions)
+			}
 
 			// Mark clean exit so unsolicited reader preserves buffered events.
 			state.mu.Lock()
@@ -6971,11 +6973,6 @@ func (queue *turnQueue) handle() {
 		// Agent continues working — don't add done reaction for this turn.
 		doneReaction = nil
 
-		// Drain stale events before starting the next turn. Between
-		// EventResult and Send(), the only buffered events would be
-		// stale leftovers (e.g. a deferred EventError from cmd.Wait()).
-		drainEvents(state.agentSession.Events())
-
 		if pendingSend != nil {
 			if err := <-pendingSend; err != nil {
 				slog.Debug("async send error before queued turn", "error", err)
@@ -6991,6 +6988,11 @@ func (queue *turnQueue) handle() {
 		state.mu.Unlock()
 		if turnAgent == nil {
 			turnAgent = e.agent
+		}
+		// Drain only after the prior Send and context read finish, so late
+		// events from the previous turn cannot become this turn's response.
+		if as != nil {
+			drainEvents(as.Events())
 		}
 
 		nextSend := make(chan error, 1)
