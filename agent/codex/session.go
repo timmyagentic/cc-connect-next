@@ -855,6 +855,20 @@ func (cs *codexSession) GetModel() string {
 	return model
 }
 
+func (cs *codexSession) DefaultTurnOptions() core.TurnOptions {
+	model, effort := cs.model, cs.effort
+	if model == "" || effort == "" {
+		nativeModel, nativeEffort := cs.runtimeConfig()
+		if model == "" {
+			model = nativeModel
+		}
+		if effort == "" {
+			effort = nativeEffort
+		}
+	}
+	return core.TurnOptions{Model: model, ReasoningEffort: effort, ServiceTier: cs.serviceTier}
+}
+
 func (cs *codexSession) GetReasoningEffort() string {
 	cs.turnOptionsMu.RLock()
 	turnOptions := cs.turnOptions

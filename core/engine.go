@@ -664,6 +664,7 @@ type interactiveState struct {
 	// turn. Empty means project defaults. turn/steer cannot change turn options,
 	// so a busy message that would cross this boundary must start a queued turn.
 	activeAnswerProfile AnswerProfileName
+	activeServiceTier   string // session override captured at turn admission
 
 	// Steer presentation handoff (issue #27). When a busy-session message is
 	// appended to the in-flight turn via SteerableSession, the visible
@@ -3421,7 +3422,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		state.mu.Unlock()
 		return false
 	}
-	if state.activeAnswerProfile != "" {
+	if state.activeAnswerProfile != "" || state.activeServiceTier != sessions.ServiceTier(session) {
 		state.mu.Unlock()
 		return false
 	}
@@ -4301,6 +4302,8 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.fromVoice = msg.FromVoice
 	state.sideText = ""
 	state.activeAnswerProfile = msg.AnswerProfile
+	speedTier := sessions.ServiceTier(session)
+	state.activeServiceTier = speedTier
 	as := state.agentSession // capture under lock to avoid race with cleanup
 	state.mu.Unlock()
 	state.steerMu.Unlock()
@@ -4314,7 +4317,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			sendDone <- fmt.Errorf("agent session became nil")
 			return
 		}
-		sendDone <- e.sendAgentTurn(agent, as, promptContent, msg.Images, scopeFileAttachments(msg.Files, msg.MessageID), msg.AnswerProfile)
+		sendDone <- e.sendAgentTurn(agent, as, promptContent, msg.Images, scopeFileAttachments(msg.Files, msg.MessageID), msg.AnswerProfile, speedTier)
 	}()
 
 	e.processInteractiveEvents(state, session, sessions, interactiveKey, msg.MessageID, turnStart, stopTyping, sendDone, msg.ReplyCtx)
@@ -6913,6 +6916,8 @@ func (queue *turnQueue) handle() {
 		state.currentUserID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
+		speedTier := sessions.ServiceTier(session)
+		state.activeServiceTier = speedTier
 		// Re-open the steer adoption window for the queued turn.
 		state.presentationOpen = true
 		state.mu.Unlock()
@@ -6958,7 +6963,7 @@ func (queue *turnQueue) handle() {
 				nextSend <- fmt.Errorf("agent session became nil")
 				return
 			}
-			nextSend <- e.sendAgentTurn(turnAgent, as, queuedPrompt, queued.images, queued.files, queued.answerProfile)
+			nextSend <- e.sendAgentTurn(turnAgent, as, queuedPrompt, queued.images, queued.files, queued.answerProfile, speedTier)
 		}()
 		pendingSend = nextSend
 
@@ -8498,6 +8503,8 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.currentUserID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
+		speedTier := sessions.ServiceTier(session)
+		state.activeServiceTier = speedTier
 		state.mu.Unlock()
 		state.steerMu.Unlock()
 		e.activateAgentTurnCredential(state, queued.userID, queued.msgSessionKey)
@@ -8535,7 +8542,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 				sendDone <- fmt.Errorf("agent session became nil")
 				return
 			}
-			sendDone <- e.sendAgentTurn(turnAgent, as, prompt, queued.images, queued.files, queued.answerProfile)
+			sendDone <- e.sendAgentTurn(turnAgent, as, prompt, queued.images, queued.files, queued.answerProfile, speedTier)
 		}()
 
 		var stopTyping func()
@@ -8858,6 +8865,8 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		e.cmdModel(p, msg, args)
 	case "reasoning":
 		e.cmdReasoning(p, msg, args)
+	case "speed":
+		e.cmdSpeed(p, msg, args)
 	case "mode":
 		e.cmdMode(p, msg, args)
 	case "lang":
@@ -12193,14 +12202,19 @@ func (e *Engine) runCompress(state *interactiveState, session *Session, sessions
 	}
 
 	cmd := compressor.CompressCommand()
+	state.steerMu.Lock()
 	state.mu.Lock()
 	turnAgent := state.agent
 	agentSession := state.agentSession
+	speedTier := sessions.ServiceTier(session)
+	state.activeServiceTier = speedTier
+	state.activeAnswerProfile = ""
 	state.mu.Unlock()
+	state.steerMu.Unlock()
 	if turnAgent == nil {
 		turnAgent = e.agent
 	}
-	if err := e.sendAgentTurn(turnAgent, agentSession, cmd, nil, nil, ""); err != nil {
+	if err := e.sendAgentTurn(turnAgent, agentSession, cmd, nil, nil, "", speedTier); err != nil {
 		if !auto {
 			e.reply(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), err))
 		}
@@ -17709,7 +17723,7 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 
 	saveRelaySessionID(agentSession.CurrentSessionID(), false)
 
-	if err := e.sendAgentTurn(agent, agentSession, message, nil, nil, ""); err != nil {
+	if err := e.sendAgentTurn(agent, agentSession, message, nil, nil, "", sessions.ServiceTier(session)); err != nil {
 		closeRelayAgentSession(agentSession, relaySessionKey)
 		return "", fmt.Errorf("send relay message: %w", err)
 	}

@@ -274,6 +274,7 @@
     "stop": "Stop session",
     "model": "Model",
     "reasoning": "Reasoning",
+    "speed": "Conversation speed",
     "mode": "Mode",
     "lang": "Language",
     "provider": "Provider",

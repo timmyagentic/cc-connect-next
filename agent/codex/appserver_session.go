@@ -46,6 +46,7 @@ type threadStartResponse struct {
 	Cwd             string  `json:"cwd"`
 	Model           string  `json:"model"`
 	ReasoningEffort *string `json:"reasoningEffort"`
+	ServiceTier     *string `json:"serviceTier"`
 	Thread          struct {
 		ID string `json:"id"`
 	} `json:"thread"`
@@ -55,6 +56,7 @@ type threadResumeResponse struct {
 	Cwd             string  `json:"cwd"`
 	Model           string  `json:"model"`
 	ReasoningEffort *string `json:"reasoningEffort"`
+	ServiceTier     *string `json:"serviceTier"`
 	Thread          struct {
 		ID string `json:"id"`
 	} `json:"thread"`
@@ -408,6 +410,7 @@ func (s *appServerSession) ensureThread(resumeID string) error {
 			return fmt.Errorf("codex app-server resume returned empty thread id")
 		}
 		s.applyThreadRuntimeState(resp.Cwd, resp.Model, resp.ReasoningEffort)
+		s.applyThreadServiceTier(resp.ServiceTier)
 		s.threadID.Store(resp.Thread.ID)
 		slog.Info("codex app-server thread resumed", "thread_id", resp.Thread.ID)
 		return nil
@@ -421,6 +424,7 @@ func (s *appServerSession) ensureThread(resumeID string) error {
 		return fmt.Errorf("codex app-server start returned empty thread id")
 	}
 	s.applyThreadRuntimeState(resp.Cwd, resp.Model, resp.ReasoningEffort)
+	s.applyThreadServiceTier(resp.ServiceTier)
 	s.threadID.Store(resp.Thread.ID)
 	slog.Info("codex app-server thread started", "thread_id", resp.Thread.ID)
 	return nil
@@ -1180,6 +1184,21 @@ func (s *appServerSession) GetModel() string {
 		return strings.TrimSpace(s.turnOptions.Model)
 	}
 	return strings.TrimSpace(s.model)
+}
+
+func (s *appServerSession) applyThreadServiceTier(tier *string) {
+	if tier == nil {
+		return
+	}
+	s.runtimeMu.Lock()
+	s.serviceTier = strings.TrimSpace(*tier)
+	s.runtimeMu.Unlock()
+}
+
+func (s *appServerSession) DefaultTurnOptions() core.TurnOptions {
+	s.runtimeMu.RLock()
+	defer s.runtimeMu.RUnlock()
+	return core.TurnOptions{Model: s.model, ReasoningEffort: s.effort, ServiceTier: s.serviceTier}
 }
 
 func (s *appServerSession) GetReasoningEffort() string {

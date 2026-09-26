@@ -181,6 +181,7 @@ var builtinCommands = []builtinCommandDefinition{
 	{id: "allow", category: "agent", usage: "/allow <tool>", parameters: []CapabilityParameter{capabilityParam("tool", "string", true, "Tool name to allow for the next Agent session.", "为下一个 Agent 会话预授权的工具名。")}, effects: []string{"agent_permission_state"}, probe: "tool_authorizer"},
 	{id: "model", category: "agent", usage: "/model [switch <name>]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Optional model action.", "可选模型操作。", "switch"), capabilityParam("name", "string", false, "Provider model identifier or displayed choice.", "Provider 模型标识或显示选项。")}, effects: []string{"configuration", "agent_process"}, probe: "model"},
 	{id: "reasoning", aliases: []string{"effort"}, category: "agent", usage: "/reasoning [level]", parameters: []CapabilityParameter{capabilityParam("level", "string", false, "Reasoning effort supported by the active Agent.", "当前 Agent 支持的推理强度。")}, effects: []string{"configuration", "agent_process"}, probe: "reasoning"},
+	{id: "speed", category: "agent", usage: "/speed [tier]", parameters: []CapabilityParameter{capabilityParam("tier", "string", false, "Omit to query. Choose default, fast, or another tier declared by the active model catalog. Saved for this conversation; affects subsequent turns without changing model/effort or interrupting a running turn. One-shot answer profiles take precedence.", "省略时只查询。选择 default、fast 或当前模型目录声明的其他档位。选择保存到当前会话；后续回合生效，不改变模型/推理强度或打断当前回合；单次回答预设优先。")}, effects: []string{"session_state", "persistent_state"}, probe: "speed"},
 	{id: "mode", category: "agent", usage: "/mode [name]", parameters: []CapabilityParameter{capabilityParam("name", "string", false, "Permission mode supported by the active Agent.", "当前 Agent 支持的权限模式。")}, effects: []string{"configuration", "agent_permission_state"}, probe: "mode"},
 	{id: "lang", category: "agent", usage: "/lang [en|zh|zh-TW|ja|es|auto]", parameters: []CapabilityParameter{capabilityParam("language", "string", false, "Reply language.", "回复语言。", "en", "zh", "zh-TW", "ja", "es", "auto")}, effects: []string{"configuration"}},
 	{id: "quiet", category: "agent", usage: "/quiet [on|off]", parameters: []CapabilityParameter{capabilityParam("state", "string", false, "Enable or disable quiet display mode.", "开启或关闭安静显示模式。", "on", "off")}, effects: []string{"configuration"}},
@@ -531,6 +532,16 @@ func (e *Engine) commandCapabilityAvailability(id, probe string, snapshot capabi
 			return available("The active Agent supports reasoning-effort switching.", "当前 Agent 支持推理强度切换。")
 		}
 		return unavailable("The active Agent does not implement reasoning-effort switching.", "当前 Agent 未实现推理强度切换。")
+	case "speed":
+		if _, ok := e.agent.(ServiceTierCatalog); !ok {
+			return unavailable("The active Agent does not implement model-aware speed switching.", "当前 Agent 未实现依据模型目录的速度切换。")
+		}
+		if snapshot.session != nil {
+			if _, ok := snapshot.session.(TurnOptionsSession); !ok {
+				return unavailable("The active session cannot apply per-turn settings.", "当前会话无法逐回合应用设置。")
+			}
+		}
+		return conditional("Choices are validated against the current model catalog at invocation time; query-only without arguments. Requires member access and a session supporting turn options. Missing catalog or persistence errors are reported without success.", "调用时依据当前模型目录校验可选值；无参数时只查询。需要成员访问权限及支持回合设置的会话。目录缺失或保存失败会明确报错，不会误报成功。")
 	case "mode":
 		if _, ok := e.agent.(ModeSwitcher); ok {
 			return available("The active Agent supports permission modes.", "当前 Agent 支持权限模式。")

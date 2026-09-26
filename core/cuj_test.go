@@ -2733,6 +2733,57 @@ func TestCUJ_F5_OneShotAnswerProfilesReturnToDefault(t *testing.T) {
 	})
 }
 
+// CUJ-F6: the user sees a saved speed, a distinct running-turn speed, and the
+// restored default without losing the conversation or interrupting a reply.
+func TestCUJ_F6_SavedSpeedKeepsTurnBoundaries(t *testing.T) {
+	e, p, a := newSpeedTestEngine(t, filepath.Join(t.TempDir(), "sessions.json"))
+	e.SetBusyMessageMode(BusyMessageModeSteer)
+	a.session.releaseFirst = make(chan struct{})
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			close(a.session.releaseFirst)
+		}
+	})
+	for _, step := range []struct{ input, want string }{
+		{"/speed", "Next-turn speed: `default`"},
+		{"/speed fast", "Session speed set to `fast`"},
+		{"/speed", "Next-turn speed: `fast`"},
+	} {
+		if got := speedCommand(t, e, p, step.input); !strings.Contains(got, step.want) {
+			t.Fatalf("%s: %q", step.input, got)
+		}
+	}
+	e.ReceiveMessage(p, answerProfileMessage("busy", "keep working"))
+	waitAnswerProfileCUJ(t, "first turn starts", func() bool { calls, _ := a.session.snapshot(); return len(calls) == 1 })
+	if got := speedCommand(t, e, p, "/speed default"); !strings.Contains(got, "running turn continues unchanged") {
+		t.Fatalf("busy change: %q", got)
+	}
+	if got := speedCommand(t, e, p, "/speed"); !strings.Contains(got, "Next-turn speed: `default`") || !strings.Contains(got, "Running-turn speed: `fast`") {
+		t.Fatalf("busy query: %q", got)
+	}
+	e.ReceiveMessage(p, answerProfileMessage("queued", "follow up"))
+	close(a.session.releaseFirst)
+	released = true
+	waitAnswerProfileCUJ(t, "both replies delivered", func() bool {
+		count := 0
+		for _, text := range p.getSent() {
+			if text == "ok" {
+				count++
+			}
+		}
+		return count == 2 && !e.sessions.GetOrCreateActive("test:user").Busy()
+	})
+	if got := speedCommand(t, e, p, "/speed"); !strings.Contains(got, "Next-turn speed: `default`") || strings.Contains(got, "Running-turn") {
+		t.Fatalf("idle query: %q", got)
+	}
+	// A new Engine loads the same conversation choice after a bridge restart.
+	restarted, restartedPlatform, _ := newSpeedTestEngine(t, e.sessions.StorePath())
+	if got := speedCommand(t, restarted, restartedPlatform, "/speed"); !strings.Contains(got, "Next-turn speed: `default`") || !strings.Contains(got, "Saved across bridge restarts") {
+		t.Fatalf("restart query: %q", got)
+	}
+}
+
 type answerProfileCUJAgent struct {
 	session *answerProfileCUJSession
 }

@@ -4,7 +4,7 @@ import {
   Search, MessageSquarePlus, List, ArrowRightLeft, Eye, History,
   Square, Brain, Cpu, Languages, Layers, Activity, Stethoscope, Info,
   Settings, Timer, HeartPulse, Terminal, Tag, Upload, Trash2,
-  FolderOpen, HelpCircle, User, BookOpen,
+  FolderOpen, HelpCircle, User, BookOpen, Gauge,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AgentCapabilityManifest } from '@/api/projects';
@@ -33,6 +33,7 @@ export const slashCommands: SlashCommand[] = [
   // Settings
   { cmd: '/model', labelKey: 'cmd.model', icon: Brain, group: 'settings' },
   { cmd: '/reasoning', labelKey: 'cmd.reasoning', icon: Cpu, group: 'settings' },
+  { cmd: '/speed', labelKey: 'cmd.speed', icon: Gauge, group: 'settings' },
   { cmd: '/mode', labelKey: 'cmd.mode', icon: Layers, group: 'settings' },
   { cmd: '/lang', labelKey: 'cmd.lang', icon: Languages, group: 'settings' },
   { cmd: '/provider', labelKey: 'cmd.provider', icon: Activity, group: 'settings' },

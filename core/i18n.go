@@ -333,6 +333,17 @@ const (
 	MsgModelCardSwitched                MsgKey = "model_card_switched"
 	MsgModelCardSwitchFailed            MsgKey = "model_card_switch_failed"
 	MsgModelNotSupported                MsgKey = "model_not_supported"
+	MsgSpeedNotSupported                MsgKey = "speed_not_supported"
+	MsgSpeedUnavailable                 MsgKey = "speed_unavailable"
+	MsgSpeedInvalid                     MsgKey = "speed_invalid"
+	MsgSpeedSaveFailed                  MsgKey = "speed_save_failed"
+	MsgSpeedChanged                     MsgKey = "speed_changed"
+	MsgSpeedCurrent                     MsgKey = "speed_current"
+	MsgSpeedActive                      MsgKey = "speed_active"
+	MsgSpeedInherited                   MsgKey = "speed_inherited"
+	MsgSpeedScopeSaved                  MsgKey = "speed_scope_saved"
+	MsgSpeedScopeMemory                 MsgKey = "speed_scope_memory"
+	MsgBuiltinCmdSpeed                  MsgKey = "speed"
 	MsgReasoningCurrent                 MsgKey = "reasoning_current"
 	MsgReasoningChanged                 MsgKey = "reasoning_changed"
 	MsgReasoningNotSupported            MsgKey = "reasoning_not_supported"
@@ -1109,6 +1120,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/allow <tool>\n  Pre-allow a tool (next session)\n\n" +
 			"/model [switch <name>]\n  View/switch model\n\n" +
 			"/reasoning [level]\n  View/switch reasoning effort\n\n" +
+			"/speed [default|fast|tier]\n  View/switch saved conversation speed (next turn)\n\n" +
 			"/mode [name]\n  View/switch permission mode\n\n" +
 			"/lang [en|zh|zh-TW|ja|es|auto]\n  View/switch language\n\n" +
 			"/compress\n  Compress conversation context\n\n" +
@@ -1153,6 +1165,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/allow <工具名>\n  预授权工具（下次会话生效）\n\n" +
 			"/model [switch <名称>]\n  查看/切换模型\n\n" +
 			"/reasoning [级别]\n  查看/切换推理强度\n\n" +
+			"/speed [default|fast|tier]\n  查看/切换会话速度并保存（后续回合生效）\n\n" +
 			"/mode [名称]\n  查看/切换权限模式\n\n" +
 			"/lang [en|zh|zh-TW|ja|es|auto]\n  查看/切换语言\n\n" +
 			"/compress\n  压缩会话上下文\n\n" +
@@ -1197,6 +1210,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/allow <工具名>\n  預授權工具（下次會話生效）\n\n" +
 			"/model [switch <名稱>]\n  查看/切換模型\n\n" +
 			"/reasoning [級別]\n  查看/切換推理強度\n\n" +
+			"/speed [default|fast|tier]\n  查看/切換會話速度並儲存（後續回合生效）\n\n" +
 			"/mode [名稱]\n  查看/切換權限模式\n\n" +
 			"/lang [en|zh|zh-TW|ja|es|auto]\n  查看/切換語言\n\n" +
 			"/compress\n  壓縮會話上下文\n\n" +
@@ -1239,6 +1253,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/allow <ツール名>\n  ツールを事前許可（次のセッションで有効）\n\n" +
 			"/model [switch <名前>]\n  モデルの表示/切り替え\n\n" +
 			"/reasoning [レベル]\n  推論レベルの表示/切り替え\n\n" +
+			"/speed [default|fast|tier]\n  会話の速度を表示/保存（次のターンから）\n\n" +
 			"/mode [名前]\n  権限モードの表示/切り替え\n\n" +
 			"/lang [en|zh|zh-TW|ja|es|auto]\n  言語の表示/切り替え\n\n" +
 			"/compress\n  会話コンテキストを圧縮\n\n" +
@@ -1281,6 +1296,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/allow <herramienta>\n  Pre-autorizar herramienta (próxima sesión)\n\n" +
 			"/model [switch <nombre>]\n  Ver/cambiar modelo\n\n" +
 			"/reasoning [nivel]\n  Ver/cambiar nivel de razonamiento\n\n" +
+			"/speed [default|fast|tier]\n  Ver/cambiar velocidad guardada (próximo turno)\n\n" +
 			"/mode [nombre]\n  Ver/cambiar modo de permisos\n\n" +
 			"/lang [en|zh|zh-TW|ja|es|auto]\n  Ver/cambiar idioma\n\n" +
 			"/compress\n  Comprimir contexto de conversación\n\n" +
@@ -2396,6 +2412,83 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前 Agent 不支援模型切換。",
 		LangJapanese:           "このエージェントはモデルの切り替えをサポートしていません。",
 		LangSpanish:            "Este agente no soporta el cambio de modelo.",
+	},
+	MsgSpeedNotSupported: {
+		LangEnglish:            "This agent/session does not support speed switching.",
+		LangChinese:            "当前 Agent/会话不支持速度切换。",
+		LangTraditionalChinese: "當前 Agent/會話不支援速度切換。",
+		LangJapanese:           "このエージェント/セッションは速度の切り替えに対応していません。",
+		LangSpanish:            "Este agente/sesión no admite cambios de velocidad.",
+	},
+	MsgSpeedUnavailable: {
+		LangEnglish:            "Cannot verify speed options: %s",
+		LangChinese:            "无法确认支持的速度档位：%s",
+		LangTraditionalChinese: "無法確認支援的速度檔位：%s",
+		LangJapanese:           "対応する速度を確認できません: %s",
+		LangSpanish:            "No se pueden verificar las velocidades: %s",
+	},
+	MsgSpeedInvalid: {
+		LangEnglish:            "Unsupported speed. Usage: /speed <%s>",
+		LangChinese:            "不支持该档位。用法：/speed <%s>",
+		LangTraditionalChinese: "不支援該檔位。用法：/speed <%s>",
+		LangJapanese:           "非対応の速度です。使い方: /speed <%s>",
+		LangSpanish:            "Velocidad no admitida. Uso: /speed <%s>",
+	},
+	MsgSpeedSaveFailed: {
+		LangEnglish:            "Speed was not changed: %s",
+		LangChinese:            "速度未更改：%s",
+		LangTraditionalChinese: "速度未變更：%s",
+		LangJapanese:           "速度は変更されませんでした: %s",
+		LangSpanish:            "La velocidad no se cambió: %s",
+	},
+	MsgSpeedChanged: {
+		LangEnglish:            "Session speed set to `%s` for subsequent turns. The running turn continues unchanged. Model and reasoning effort are unchanged.",
+		LangChinese:            "当前会话后续回合的速度已设为 `%s`。正在执行的回合继续，模型和推理强度不变。",
+		LangTraditionalChinese: "當前會話後續回合的速度已設為 `%s`。正在執行的回合繼續，模型和推理強度不變。",
+		LangJapanese:           "このセッションの次のターンから速度を `%s` に設定しました。実行中のターン、モデル、推論強度は変わりません。",
+		LangSpanish:            "Velocidad de esta sesión configurada a `%s` para los próximos turnos. El turno en curso, el modelo y el esfuerzo de razonamiento no cambian.",
+	},
+	MsgSpeedCurrent: {
+		LangEnglish:            "Next-turn speed: `%s`\nModel: `%s`\nSupported: %s\nUsage: /speed <tier>",
+		LangChinese:            "后续回合速度：`%s`\n模型：`%s`\n支持的档位：%s\n用法：/speed <档位>",
+		LangTraditionalChinese: "後續回合速度：`%s`\n模型：`%s`\n支援的檔位：%s\n用法：/speed <檔位>",
+		LangJapanese:           "次のターンの速度: `%s`\nモデル: `%s`\n対応する速度: %s\n使い方: /speed <速度>",
+		LangSpanish:            "Velocidad del próximo turno: `%s`\nModelo: `%s`\nOpciones: %s\nUso: /speed <velocidad>",
+	},
+	MsgSpeedActive: {
+		LangEnglish:            "Running-turn speed: `%s` (continues unchanged).",
+		LangChinese:            "当前回合速度：`%s`（继续执行，不受切换影响）。",
+		LangTraditionalChinese: "當前回合速度：`%s`（繼續執行，不受切換影響）。",
+		LangJapanese:           "実行中のターンの速度: `%s`（変更されません）。",
+		LangSpanish:            "Velocidad del turno en curso: `%s` (sin cambios).",
+	},
+	MsgSpeedInherited: {
+		LangEnglish:            "inherited from agent",
+		LangChinese:            "继承 Agent 设置",
+		LangTraditionalChinese: "繼承 Agent 設定",
+		LangJapanese:           "エージェント設定を継承",
+		LangSpanish:            "heredada del agente",
+	},
+	MsgSpeedScopeSaved: {
+		LangEnglish:            "Scope: current conversation. Saved across bridge restarts; /new inherits project defaults. One-shot /fast and /quality still override only their own turn.",
+		LangChinese:            "作用域：当前会话。设置会保存，桥接重启后保留；/new 继承项目默认值。/fast、/quality 仍只覆盖单次回合。",
+		LangTraditionalChinese: "作用域：當前會話。設定會儲存，橋接重啟後保留；/new 繼承專案預設值。/fast、/quality 仍只覆蓋單次回合。",
+		LangJapanese:           "対象: 現在の会話。再起動後も保存され、/new はプロジェクトの既定値を継承します。/fast と /quality はそのターンだけに適用されます。",
+		LangSpanish:            "Ámbito: conversación actual. Se guarda tras reiniciar; /new hereda los valores del proyecto. /fast y /quality siguen afectando solo a su turno.",
+	},
+	MsgSpeedScopeMemory: {
+		LangEnglish:            "Scope: current conversation, this process only (session storage is disabled). /new inherits project defaults; /fast and /quality remain one-shot overrides.",
+		LangChinese:            "作用域：当前会话，仅本次进程有效（未启用会话存储）。/new 继承项目默认值；/fast、/quality 仍只覆盖单次回合。",
+		LangTraditionalChinese: "作用域：當前會話，僅本次程序有效（未啟用會話儲存）。/new 繼承專案預設值；/fast、/quality 仍只覆蓋單次回合。",
+		LangJapanese:           "対象: 現在の会話、このプロセスのみ（保存は無効）。/new はプロジェクトの既定値を継承し、/fast と /quality は単発のままです。",
+		LangSpanish:            "Ámbito: conversación actual, solo este proceso (sin almacenamiento). /new hereda los valores del proyecto; /fast y /quality siguen siendo ajustes de un turno.",
+	},
+	MsgBuiltinCmdSpeed: {
+		LangEnglish:            "View/switch saved conversation speed, arg: [default|fast|catalog tier]; applies to subsequent turns",
+		LangChinese:            "查看/切换会话速度并保存，参数：[default|fast|目录档位]；后续回合生效",
+		LangTraditionalChinese: "查看/切換會話速度並儲存，參數：[default|fast|目錄檔位]；後續回合生效",
+		LangJapanese:           "会話の速度を表示/保存、引数: [default|fast|対応速度]。次のターンから適用",
+		LangSpanish:            "Ver/cambiar la velocidad guardada, arg: [default|fast|opción del catálogo]; se aplica a los próximos turnos",
 	},
 	MsgReasoningCurrent: {
 		LangEnglish:            "Current reasoning effort: %s",
