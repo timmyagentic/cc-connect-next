@@ -1373,6 +1373,27 @@ Quick answers to questions that came up repeatedly in issues and that the
 maintainers have resolved. Each entry links back to the originating issue
 or PR so you can dig further if needed.
 
+### Codex asks you to sign in again
+
+If Codex reports that an access token cannot be refreshed after logging out,
+switching accounts, or an expired/reused refresh token, restore the CLI login
+before retrying. Run `codex login` as the same operating-system user that runs
+cc-connect-next, using the same `CODEX_HOME` / configured `codex_home` as that
+project. Signing in under another user or configuration directory does not
+repair the service's login. See [Codex authentication](https://developers.openai.com/codex/auth/).
+
+cc-connect-next shows a localized sign-in notice and preserves the saved
+conversation when authentication blocks resume. Retry your message after
+restoring login; `/new` is not required. It does not log in, switch accounts,
+clear credentials, or replay the failed request automatically. Generic proxy
+401s, API-key errors, and temporary refresh/network failures keep their own
+diagnostics rather than being classified as this login condition.
+
+Login failures do not automatically offer bug feedback. An explicit
+`/feedback <description>` remains available if the diagnosis seems wrong.
+When a feedback description is omitted, a fresh error summary precedes the
+bounded diagnostic context so the resulting Issue has a meaningful title.
+
 ### Does cc-connect-next support OpenClaw? (issue #501)
 
 Yes. OpenClaw is supported via the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/get-started/agents). cc-connect-next ships an `acp` agent type that talks to any ACP-compatible CLI, including OpenClaw's `openclaw acp` subcommand.

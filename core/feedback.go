@@ -416,10 +416,10 @@ func (state *interactiveState) feedbackIdentity() (sessionKey, userID string) {
 }
 
 func (e *Engine) maybeSendFeedbackErrorHint(platform Platform, replyCtx any, sessionKey, userID string, cause error) {
-	// Usage exhaustion already has an actionable notice. Keep its diagnostic
+	// Usage exhaustion and lost logins already have actionable notices. Keep diagnostics
 	// available for manual feedback without preparing an offer or using up
 	// the cooldown for a later unexpected failure.
-	if errors.Is(cause, ErrUsageLimit) {
+	if errors.Is(cause, ErrUsageLimit) || errors.Is(cause, ErrAuthenticationRequired) {
 		return
 	}
 	// Shared chats and topics do not encode a user in the session key. Without

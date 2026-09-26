@@ -10,8 +10,11 @@ import (
 // classifyCodexError keeps provider-specific error recognition next to the
 // Codex transport. The core engine only consumes the provider-neutral marker.
 func classifyCodexError(err error) error {
-	if err == nil || errors.Is(err, core.ErrUsageLimit) {
+	if err == nil || isCodexClassifiedTerminalError(err) {
 		return err
+	}
+	if isCodexAuthenticationRequiredMessage(err.Error()) {
+		return core.WrapAuthenticationRequired(err)
 	}
 	if isCodexUsageLimitMessage(err.Error()) {
 		return core.WrapUsageLimit(err)
@@ -23,7 +26,26 @@ func classifyCodexError(err error) error {
 }
 
 func isCodexClassifiedTerminalError(err error) bool {
-	return errors.Is(err, core.ErrUsageLimit) || errors.Is(err, core.ErrModelCapacity)
+	return errors.Is(err, core.ErrUsageLimit) || errors.Is(err, core.ErrModelCapacity) || errors.Is(err, core.ErrAuthenticationRequired)
+}
+
+func isCodexAuthenticationRequiredMessage(message string) bool {
+	text := strings.ToLower(strings.TrimSpace(message))
+	for _, marker := range []string{
+		"refresh_token_reused", "refresh_token_expired", "refresh_token_invalidated",
+		"please run `codex login`", "please run codex login",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	// A failed refresh can also be a temporary network error. Require explicit
+	// evidence of a lost login; a generic 401 or API-key error is not enough.
+	if !strings.Contains(text, "access token") && !strings.Contains(text, "refresh token") {
+		return false
+	}
+	return strings.Contains(text, "sign in again") || strings.Contains(text, "log in again") ||
+		strings.Contains(text, "logged out") || strings.Contains(text, "signed in to another account")
 }
 
 func isCodexModelCapacityMessage(message string) bool {

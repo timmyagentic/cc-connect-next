@@ -122,6 +122,9 @@ type RichCardCopy struct {
 	ModelCapacity        string
 	ModelCapacityBody    string
 	ModelCapacitySummary string
+	AuthRequired         string
+	AuthRequiredBody     string
+	AuthRequiredSummary  string
 	// Steer / presentation handoff copy (issue #27).
 	Steering            string // pending phase title while a steer is awaiting acceptance
 	Redirected          string // header title of a card frozen by a successful steer
