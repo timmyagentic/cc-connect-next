@@ -2395,24 +2395,27 @@ func TestProcessInteractiveEvents_RichCardErrorStaysOnCardAndHidesDetails(t *tes
 	}
 }
 
-func TestProcessInteractiveEvents_RichCardUsageLimitUsesDedicatedCopy(t *testing.T) {
+func TestProcessInteractiveEvents_RichCardUsageLimitUsesDedicatedCopyWithoutFeedback(t *testing.T) {
 	p := &stubRichCardSilentPlatform{
 		stubPlatformEngine: stubPlatformEngine{n: "feishu"},
 	}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
 	e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: "rich"})
+	e.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
 	sessionKey := "feishu:user-rich-usage-limit"
 	session := e.sessions.GetOrCreateActive(sessionKey)
 	agentSession := newControllableSession("s-rich-usage-limit")
 	state := &interactiveState{
-		agentSession: agentSession,
-		platform:     p,
-		replyCtx:     "ctx-rich-usage-limit",
+		agentSession:      agentSession,
+		platform:          p,
+		replyCtx:          "ctx-rich-usage-limit",
+		currentSessionKey: sessionKey,
+		currentUserID:     "quota-user",
 	}
 	e.interactiveStates[sessionKey] = state
 
 	privateError := "You've reached your usage limit at /Users/example/project"
-	agentSession.events <- Event{Type: EventError, Error: WrapUsageLimit(errors.New(privateError))}
+	agentSession.events <- Event{Type: EventError, Error: fmt.Errorf("turn failed: %w", WrapUsageLimit(errors.New(privateError)))}
 	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-rich-usage-limit", time.Now(), nil, nil, state.replyCtx)
 
 	starts, streams, updates, deletes := p.snapshot()
@@ -2431,6 +2434,9 @@ func TestProcessInteractiveEvents_RichCardUsageLimitUsesDedicatedCopy(t *testing
 	}
 	if strings.Contains(rendered, copy.ErrorBody) || strings.Contains(rendered, privateError) {
 		t.Fatalf("usage-limit card used generic or private error copy: %q", rendered)
+	}
+	if sent := p.getSent(); len(sent) != 0 {
+		t.Fatalf("usage-limit card must not be followed by a feedback offer: %v", sent)
 	}
 }
 
