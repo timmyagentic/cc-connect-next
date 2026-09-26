@@ -5188,7 +5188,7 @@ func (e *Engine) runUnsolicitedReader(ctx context.Context, cancel context.Cancel
 			case EventError:
 				if event.Error != nil {
 					slog.Error("unsolicited agent error", "error", event.Error, "session", sessionKey)
-					e.send(p, replyCtx, e.agentErrorText(event.Error))
+					e.send(p, replyCtx, e.agentErrorText(state, event.Error))
 					feedbackKey, feedbackUser := state.feedbackIdentity()
 					e.recordFeedbackError(feedbackKey, event.Error.Error())
 					e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser, event.Error)
@@ -5218,8 +5218,18 @@ const (
 	richCardAuthRequiredPhase  = "authentication_required"
 )
 
-func (e *Engine) agentErrorText(err error) string {
+func (e *Engine) agentErrorText(state *interactiveState, err error) string {
 	if errors.Is(err, ErrAuthenticationRequired) {
+		// Background/compress failures belong to this conversation's latest
+		// turn, even if another session has since changed the auto locale.
+		if state != nil {
+			state.mu.Lock()
+			body := state.richCardCopy.AuthRequiredBody
+			state.mu.Unlock()
+			if body != "" {
+				return body
+			}
+		}
 		return e.i18n.T(MsgRichCardAuthRequiredBody)
 	}
 	return e.i18n.Tf(MsgError, err)
@@ -12237,7 +12247,7 @@ func (e *Engine) runCompress(state *interactiveState, session *Session, sessions
 	}
 	if err := e.sendAgentTurn(turnAgent, agentSession, cmd, nil, nil, "", speedTier); err != nil {
 		if !auto {
-			e.reply(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), err))
+			e.reply(p, replyCtx, e.agentErrorText(state, err))
 		}
 		if !state.agentSession.Alive() {
 			e.cleanupInteractiveState(iKey)
@@ -12352,7 +12362,7 @@ func (e *Engine) processCompressEvents(state *interactiveState, session *Session
 				e.recordFeedbackError(feedbackKey, "compress failed: "+event.Error.Error())
 			}
 			if !auto && event.Error != nil {
-				e.reply(p, replyCtx, e.agentErrorText(event.Error))
+				e.reply(p, replyCtx, e.agentErrorText(state, event.Error))
 				e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser, event.Error)
 			}
 			// Only drop queued messages if the agent is dead; some agents

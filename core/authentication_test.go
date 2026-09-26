@@ -137,3 +137,43 @@ func TestAuthenticationFailureQueuedNoticesUseEachUsersLanguage(t *testing.T) {
 		t.Fatalf("English recovery notice=%q", got)
 	}
 }
+
+func TestAuthenticationBackgroundErrorsKeepConversationLanguage(t *testing.T) {
+	for _, compress := range []bool{false, true} {
+		for _, language := range []struct {
+			text, other, want string
+		}{
+			{"请继续处理", "please continue", "重新登录"},
+			{"please continue", "请继续处理", "Sign in again"},
+		} {
+			name := "background/" + language.want
+			if compress {
+				name = "compress/" + language.want
+			}
+			t.Run(name, func(t *testing.T) {
+				p := &stubPlatformEngine{n: "test"}
+				e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangAuto)
+				t.Cleanup(func() { _ = e.Stop() })
+				as := newControllableSession("saved-thread")
+				key := "test:own-conversation"
+				session := e.sessions.GetOrCreateActive(key)
+				state := &interactiveState{agentSession: as, platform: p, replyCtx: "ctx", currentMessageID: "own-message"}
+				state.setTurnRichCardCopy("own-message", e.i18n.RichCardCopyForText(language.text))
+				// Another conversation has since changed the engine's auto locale.
+				e.i18n.DetectAndSet(language.other)
+				as.events <- Event{Type: EventError, Error: ErrAuthenticationRequired}
+				if compress {
+					unlocked := false
+					e.processCompressEvents(state, session, e.sessions, key, p, "ctx", &unlocked, false)
+				} else {
+					ctx, cancel := context.WithCancel(e.ctx)
+					defer cancel()
+					e.runUnsolicitedReader(ctx, cancel, make(chan struct{}), state, as, session, e.sessions, key, "")
+				}
+				if got := strings.Join(p.getSent(), "\n"); !strings.Contains(got, language.want) {
+					t.Fatalf("recovery notice borrowed another conversation's locale: %q", got)
+				}
+			})
+		}
+	}
+}
