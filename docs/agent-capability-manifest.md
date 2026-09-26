@@ -85,6 +85,33 @@ Agent command files may publish only an explicit frontmatter `description`. Thei
 
 Existence is not presented as executable availability: model/provider switching, TTS, multi-workspace, schedulers, Relay, Web setup, and in-flight-turn operations probe their corresponding runtime interfaces or components.
 
+## Conversation speed
+
+`/speed` queries the next-turn speed, the active model's supported tiers, and
+the running turn's speed when busy. `/speed fast` saves a speed for the current
+conversation; `/speed default` explicitly selects standard speed. It does not
+change model or reasoning effort, restart the bridge, or interrupt a turn.
+Messages crossing a speed boundary queue for a new turn, including when busy
+message steering is enabled. A queued message uses the choice in force when
+its turn starts. One-shot `/fast` and `/quality` settings take precedence for
+their own turn; ordinary replies then return to the saved conversation speed.
+
+The choice persists in session storage across bridge restarts. `/new` inherits
+project defaults; switching back restores that conversation's choice. The
+reply explicitly identifies nonpersistent operation when storage is disabled.
+The command requires member access and obeys user-role/disabled-command policy;
+its Manifest declares session and persistent-state effects. Omitting the tier
+is a read-only query.
+
+A connected Codex app-server validates choices through its live `model/list`
+catalog. Before a session starts, local Codex uses the catalog in its effective
+`CODEX_HOME` (`model_catalog_json`, otherwise `models_cache.json`). Catalog `priority` is
+exposed as `fast`; older `additional_speed_tiers` catalogs are also supported.
+Unknown models, missing catalogs, unsupported tiers, unverifiable remote or
+custom-argument configurations before a session is connected, and save failures return explicit errors.
+Refresh missing/stale metadata with Codex CLI. A saved choice is revalidated
+before future turns if the model/provider changes; there is no silent downgrade.
+
 ## Security boundary
 
 The Manifest never includes:

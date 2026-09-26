@@ -274,6 +274,7 @@
     "stop": "停止工作階段",
     "model": "模型",
     "reasoning": "推理模式",
+    "speed": "會話速度",
     "mode": "運行模式",
     "lang": "語言",
     "provider": "提供方",

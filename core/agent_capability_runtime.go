@@ -250,6 +250,7 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 	_, memory := e.agent.(MemoryFileProvider)
 	_, models := e.agent.(ModelSwitcher)
 	_, reasoning := e.agent.(ReasoningEffortSwitcher)
+	_, speed := e.agent.(ServiceTierCatalog)
 	_, usage := e.agent.(UsageReporter)
 	_, compressor := e.agent.(ContextCompressor)
 	_, commands := e.agent.(CommandProvider)
@@ -265,6 +266,7 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 		{"memory_files", "Read or append project/global Agent memory files.", "读取或追加项目/全局 Agent 记忆文件。", "Memory commands are unavailable.", "记忆命令不可用。", memory},
 		{"model_switching", "Switch the Agent model.", "切换 Agent 模型。", "Keep the constructor-configured model.", "保留构造时配置的模型。", models},
 		{"reasoning_effort", "Switch reasoning effort.", "切换推理强度。", "Keep the Agent's configured/default effort.", "保留 Agent 已配置/默认的推理强度。", reasoning},
+		{"service_tier", "Query model-supported speeds and save the current conversation's speed for subsequent turns.", "查询模型支持的速度，为当前会话保存后续回合的速度。", "Keep the Agent default; unavailable model catalogs or unsupported sessions reject changes.", "保留 Agent 默认值；模型目录不可用或会话不支持时拒绝变更。", speed},
 		{"usage_reporting", "Report provider quota usage.", "报告 Provider 配额用量。", "Usage reporting is unavailable.", "用量报告不可用。", usage},
 		{"context_compression", "Compress active conversation context.", "压缩活动会话上下文。", "Start a new session when context must be reset.", "需要重置上下文时创建新会话。", compressor},
 		{"custom_command_discovery", "Discover Agent-native command files.", "发现 Agent 原生命令文件。", "Only config-defined custom commands are available.", "仅可使用配置定义的自定义命令。", commands},

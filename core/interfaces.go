@@ -546,6 +546,31 @@ type ServiceTierProvider interface {
 	GetServiceTier() string
 }
 
+// ServiceTierCatalog validates session speed choices against the active model's
+// catalog. Value is the backend value; Name is the chat command spelling.
+// An empty Default means the effective inherited tier is not known.
+type ServiceTierOption struct {
+	Name  string
+	Value string
+}
+
+type ServiceTierCapabilities struct {
+	Model   string
+	Default string
+	Options []ServiceTierOption
+}
+
+type ServiceTierCatalog interface {
+	ServiceTierCapabilities(model string) (ServiceTierCapabilities, error)
+}
+
+// TurnDefaultsProvider exposes resolved startup defaults, excluding a previous
+// one-shot override. It preserves CLI-inherited model/effort when changing only
+// the speed or restoring defaults after a profiled turn.
+type TurnDefaultsProvider interface {
+	DefaultTurnOptions() TurnOptions
+}
+
 // SteerableSession is an optional capability for agent sessions that can
 // append user input to the turn that is already in flight ("steering"),
 // as opposed to Send, which starts the next turn.

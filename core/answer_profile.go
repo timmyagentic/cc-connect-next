@@ -83,8 +83,39 @@ func defaultTurnOptions(agent Agent) TurnOptions {
 	return options
 }
 
-func (e *Engine) resolveTurnOptions(agent Agent, profile AnswerProfileName) (TurnOptions, error) {
+func (e *Engine) resolveTurnOptions(agent Agent, profile AnswerProfileName, serviceTier ...string) (TurnOptions, error) {
+	return e.applyTurnOverrides(defaultTurnOptions(agent), profile, serviceTier...)
+}
+
+func turnDefaults(agent Agent, session AgentSession) TurnOptions {
 	options := defaultTurnOptions(agent)
+	if provider, ok := session.(TurnDefaultsProvider); ok {
+		defaults := provider.DefaultTurnOptions()
+		if options.Model == "" {
+			options.Model = defaults.Model
+		}
+		if options.ReasoningEffort == "" {
+			options.ReasoningEffort = defaults.ReasoningEffort
+		}
+		if options.ServiceTier == "" {
+			options.ServiceTier = defaults.ServiceTier
+		}
+	}
+	return options
+}
+
+func serviceTierCatalog(agent Agent, session AgentSession) (ServiceTierCatalog, bool) {
+	if catalog, ok := session.(ServiceTierCatalog); ok {
+		return catalog, true
+	}
+	catalog, ok := agent.(ServiceTierCatalog)
+	return catalog, ok
+}
+
+func (e *Engine) applyTurnOverrides(options TurnOptions, profile AnswerProfileName, serviceTier ...string) (TurnOptions, error) {
+	if len(serviceTier) > 0 && serviceTier[0] != "" {
+		options.ServiceTier = serviceTier[0]
+	}
 	if profile == "" {
 		return options, nil
 	}
@@ -105,17 +136,42 @@ func (e *Engine) resolveTurnOptions(agent Agent, profile AnswerProfileName) (Tur
 	return options, nil
 }
 
-func (e *Engine) sendAgentTurn(agent Agent, session AgentSession, prompt string, images []ImageAttachment, files []FileAttachment, profile AnswerProfileName) error {
+func (e *Engine) sendAgentTurn(agent Agent, session AgentSession, prompt string, images []ImageAttachment, files []FileAttachment, profile AnswerProfileName, serviceTier ...string) error {
 	sender, supportsOptions := session.(TurnOptionsSession)
-	if profile == "" && (!e.answerProfilesConfigured() || !supportsOptions) {
+	catalog, supportsSpeed := serviceTierCatalog(agent, session)
+	// A saved preference may outlive a change to an agent/backend without
+	// speed controls. It must not prevent ordinary chat on that backend.
+	if !supportsOptions || !supportsSpeed {
+		serviceTier = nil
+	}
+	hasSpeed := len(serviceTier) > 0 && serviceTier[0] != ""
+	if !hasSpeed && profile == "" && (!e.answerProfilesConfigured() || !supportsOptions) {
 		return session.Send(prompt, images, files)
 	}
 	if !supportsOptions {
 		return ErrTurnOptionsUnsupported
 	}
-	options, err := e.resolveTurnOptions(agent, profile)
+	options, err := e.applyTurnOverrides(turnDefaults(agent, session), profile, serviceTier...)
 	if err != nil {
 		return err
+	}
+	// A model/provider may have changed since the preference was saved. Never
+	// silently send an unsupported persistent choice to a different backend.
+	if hasSpeed {
+		profileOptions, _ := e.answerProfile(profile)
+		if profileOptions == nil || profileOptions.ServiceTier == "" {
+			caps, err := catalog.ServiceTierCapabilities(options.Model)
+			if err != nil {
+				return fmt.Errorf("validate saved speed: %w", err)
+			}
+			valid := false
+			for _, choice := range caps.Options {
+				valid = valid || options.ServiceTier == choice.Value
+			}
+			if !valid {
+				return fmt.Errorf("saved speed %q is unsupported by model %q; use /speed default", options.ServiceTier, caps.Model)
+			}
+		}
 	}
 	if profile != "" {
 		slog.Info("using one-shot answer profile",

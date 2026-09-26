@@ -29,10 +29,13 @@ type Session struct {
 	// `/provider switch` (the agent_session_id survives on disk while the
 	// in-memory active provider does not). Empty means "no explicit choice
 	// — use whatever the agent's default is".
-	ActiveProvider string         `json:"active_provider,omitempty"`
-	History        []HistoryEntry `json:"history"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ActiveProvider string `json:"active_provider,omitempty"`
+	// Empty inherits Agent defaults. A choice is scoped to this conversation,
+	// survives bridge restarts, and is captured only when a new turn starts.
+	ServiceTier string         `json:"service_tier,omitempty"`
+	History     []HistoryEntry `json:"history"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
 	// LastUserActivity records when a real user message was last received.
 	// Unlike UpdatedAt (bumped by every session.Unlock including heartbeats and
 	// unsolicited agent output), this field is only updated when the engine
@@ -708,14 +711,14 @@ func (sm *SessionManager) deleteByIDLocked(id string) {
 
 // Save persists current state to disk. Safe to call from outside (e.g. after message processing).
 func (sm *SessionManager) Save() {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
 	sm.saveLocked()
 }
 
-func (sm *SessionManager) saveLocked() {
+func (sm *SessionManager) saveLocked() error {
 	if sm.storePath == "" {
-		return
+		return nil
 	}
 
 	// Auto-clear legacyData once every session has at least one tracked ID.
@@ -747,15 +750,48 @@ func (sm *SessionManager) saveLocked() {
 	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		slog.Error("session: failed to marshal", "error", err)
-		return
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(sm.storePath), 0o755); err != nil {
 		slog.Error("session: failed to create dir", "error", err)
-		return
+		return err
 	}
 	if err := AtomicWriteFile(sm.storePath, data, 0o644); err != nil {
 		slog.Error("session: failed to write", "path", sm.storePath, "error", err)
+		return err
 	}
+	return nil
+}
+
+// ServiceTier serializes turn admission with durable preference changes, so a
+// failed save cannot leak a temporary choice into an already starting turn.
+func (sm *SessionManager) ServiceTier(s *Session) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ServiceTier
+}
+
+func (sm *SessionManager) SetServiceTier(s *Session, tier string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	s.mu.Lock()
+	previous := s.ServiceTier
+	previousActivation := s.ExplicitActivatedAt
+	s.ServiceTier = tier
+	// Choosing a setting for this conversation is explicit user intent. Keep
+	// the next message here even if the conversation was previously idle.
+	s.ExplicitActivatedAt = time.Now()
+	s.mu.Unlock()
+	if err := sm.saveLocked(); err != nil {
+		s.mu.Lock()
+		s.ServiceTier = previous
+		s.ExplicitActivatedAt = previousActivation
+		s.mu.Unlock()
+		return fmt.Errorf("save session speed: %w", err)
+	}
+	return nil
 }
 
 func (sm *SessionManager) load() {
