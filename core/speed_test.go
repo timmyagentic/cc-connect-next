@@ -354,6 +354,14 @@ func TestSpeedManifestHelpAndMenuContract(t *testing.T) {
 		if !strings.Contains(i18n.T(MsgHelp), "/speed") || i18n.T(MsgBuiltinCmdSpeed) == string(MsgBuiltinCmdSpeed) {
 			t.Fatalf("speed missing from help/menu for %s", lang)
 		}
+		e.i18n = i18n
+		card := e.handleCardNav("nav:/help agent", "test:user")
+		if card == nil || !strings.Contains(card.RenderText(), "**/speed**  "+i18n.T(MsgBuiltinCmdSpeed)) {
+			t.Fatalf("speed missing from rich-card help for %s", lang)
+		}
+		if _, ok := findCardAction(card, "cmd:/speed"); !ok {
+			t.Fatalf("speed query action missing from rich-card help for %s", lang)
+		}
 	}
 	found := false
 	for _, published := range e.GetBridgePublishedCommands() {
@@ -368,6 +376,37 @@ func TestSpeedManifestHelpAndMenuContract(t *testing.T) {
 	command = findManifestCommand(t, e.QueryAgentCapabilityManifest("", "", false).Commands, "speed")
 	if command.Availability.State != CapabilityUnavailable {
 		t.Fatalf("disabled speed advertised as %+v", command.Availability)
+	}
+}
+
+func TestSpeedSavedPreferenceDoesNotBlockUnsupportedCapabilities(t *testing.T) {
+	for _, hasCatalog := range []bool{false, true} {
+		t.Run(fmt.Sprintf("catalog_%t", hasCatalog), func(t *testing.T) {
+			e, _, speedAgent := newSpeedTestEngine(t, "")
+			var agent Agent = &speedAgent.answerProfileTestAgent
+			if hasCatalog {
+				agent = speedAgent
+			}
+			plainSession := newResultAgentSession("still works")
+			if err := e.sendAgentTurn(agent, plainSession, "continue", nil, nil, "", "priority"); err != nil {
+				t.Fatalf("saved speed blocked a session without turn options: %v", err)
+			}
+			if len(plainSession.sentPrompts) != 1 {
+				t.Fatal("ordinary message was not sent")
+			}
+		})
+	}
+	// An agent may support one-shot model/effort overrides without speed.
+	e, _, speedAgent := newSpeedTestEngine(t, "")
+	e.SetAnswerProfiles(AnswerProfiles{Fast: &AnswerProfileOptions{ReasoningEffort: "low"}})
+	for _, profile := range []AnswerProfileName{"", AnswerProfileFast} {
+		if err := e.sendAgentTurn(&speedAgent.answerProfileTestAgent, speedAgent.session, "continue", nil, nil, profile, "priority"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls, _ := speedAgent.session.snapshot()
+	if calls[0].options.ServiceTier != "default" || calls[1].options.ServiceTier != "default" || calls[1].options.ReasoningEffort != "low" {
+		t.Fatalf("unsupported saved speed affected default/profile options: %+v", calls)
 	}
 }
 

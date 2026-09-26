@@ -2782,6 +2782,25 @@ func TestCUJ_F6_SavedSpeedKeepsTurnBoundaries(t *testing.T) {
 	if got := speedCommand(t, restarted, restartedPlatform, "/speed"); !strings.Contains(got, "Next-turn speed: `default`") || !strings.Contains(got, "Saved across bridge restarts") {
 		t.Fatalf("restart query: %q", got)
 	}
+	// Changing to an agent without speed support must not strand the saved
+	// conversation: /speed is unavailable, but chat and history still work.
+	otherPlatform := &stubPlatformEngine{n: "test"}
+	other := NewEngine("test", &resultAgent{session: newResultAgentSession("continued after agent change")}, []Platform{otherPlatform}, e.sessions.StorePath(), LangEnglish)
+	t.Cleanup(func() { _ = other.Stop() })
+	if got := speedCommand(t, other, otherPlatform, "/speed"); !strings.Contains(got, "does not support speed") {
+		t.Fatalf("unsupported agent speed query: %q", got)
+	}
+	otherPlatform.clearSent()
+	other.ReceiveMessage(otherPlatform, answerProfileMessage("after-agent-change", "continue our discussion"))
+	waitAnswerProfileCUJ(t, "reply after agent change", func() bool {
+		return len(otherPlatform.getSent()) > 0 && !other.sessions.GetOrCreateActive("test:user").Busy()
+	})
+	if got := strings.Join(otherPlatform.getSent(), "\n"); !strings.Contains(got, "continued after agent change") {
+		t.Fatalf("saved speed prevented ordinary chat: %q", got)
+	}
+	if got := speedCommand(t, other, otherPlatform, "/history"); !strings.Contains(got, "keep working") || !strings.Contains(got, "continue our discussion") {
+		t.Fatalf("agent change lost conversation history: %q", got)
+	}
 }
 
 type answerProfileCUJAgent struct {

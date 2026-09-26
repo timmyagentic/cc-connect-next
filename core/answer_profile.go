@@ -138,6 +138,12 @@ func (e *Engine) applyTurnOverrides(options TurnOptions, profile AnswerProfileNa
 
 func (e *Engine) sendAgentTurn(agent Agent, session AgentSession, prompt string, images []ImageAttachment, files []FileAttachment, profile AnswerProfileName, serviceTier ...string) error {
 	sender, supportsOptions := session.(TurnOptionsSession)
+	catalog, supportsSpeed := serviceTierCatalog(agent, session)
+	// A saved preference may outlive a change to an agent/backend without
+	// speed controls. It must not prevent ordinary chat on that backend.
+	if !supportsOptions || !supportsSpeed {
+		serviceTier = nil
+	}
 	hasSpeed := len(serviceTier) > 0 && serviceTier[0] != ""
 	if !hasSpeed && profile == "" && (!e.answerProfilesConfigured() || !supportsOptions) {
 		return session.Send(prompt, images, files)
@@ -154,10 +160,6 @@ func (e *Engine) sendAgentTurn(agent Agent, session AgentSession, prompt string,
 	if hasSpeed {
 		profileOptions, _ := e.answerProfile(profile)
 		if profileOptions == nil || profileOptions.ServiceTier == "" {
-			catalog, ok := serviceTierCatalog(agent, session)
-			if !ok {
-				return fmt.Errorf("saved speed is unsupported by the current agent")
-			}
 			caps, err := catalog.ServiceTierCapabilities(options.Model)
 			if err != nil {
 				return fmt.Errorf("validate saved speed: %w", err)
