@@ -5181,7 +5181,7 @@ func (e *Engine) runUnsolicitedReader(ctx context.Context, cancel context.Cancel
 					e.send(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
 					feedbackKey, feedbackUser := state.feedbackIdentity()
 					e.recordFeedbackError(feedbackKey, event.Error.Error())
-					e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser)
+					e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser, event.Error)
 				}
 				state.mu.Lock()
 				state.eventsNeedResync = true
@@ -7135,7 +7135,7 @@ func (terminal *turnTerminalHandler) handleIdleTimeout() {
 	}
 	feedbackKey, feedbackUser := state.feedbackIdentity()
 	e.recordFeedbackError(feedbackKey, fmt.Sprintf("agent session idle timeout: no events for %v, session killed", e.eventIdleTimeout))
-	e.maybeSendFeedbackErrorHint(timedOutPlatform, replyCtx, feedbackKey, feedbackUser)
+	e.maybeSendFeedbackErrorHint(timedOutPlatform, replyCtx, feedbackKey, feedbackUser, nil)
 	e.cleanupInteractiveState(sessionKey, state)
 }
 
@@ -7174,7 +7174,7 @@ func (terminal *turnTerminalHandler) handleDeadline() {
 	}
 	feedbackKey, feedbackUser := state.feedbackIdentity()
 	e.recordFeedbackError(feedbackKey, fmt.Sprintf("agent turn exceeded max_turn_time (%v), stopped", e.maxTurnTime))
-	e.maybeSendFeedbackErrorHint(deadlinePlatform, replyCtx, feedbackKey, feedbackUser)
+	e.maybeSendFeedbackErrorHint(deadlinePlatform, replyCtx, feedbackKey, feedbackUser, nil)
 
 	// Two-phase shutdown: first try a graceful stop so the agent can
 	// write its final state before dying (preserves --resume ability).
@@ -7409,7 +7409,7 @@ func (failure *turnFailure) handle() {
 		sendGenericRichFailure(p, replyCtx, cardMessageID, safePartial)
 	}
 	if event.Error != nil {
-		e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser)
+		e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser, event.Error)
 	}
 	// Only drop queued messages if the agent session is dead.
 	// Some agents (e.g. Codex) emit EventError for per-turn failures
@@ -12318,7 +12318,7 @@ func (e *Engine) processCompressEvents(state *interactiveState, session *Session
 			}
 			if !auto && event.Error != nil {
 				e.reply(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
-				e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser)
+				e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser, event.Error)
 			}
 			// Only drop queued messages if the agent is dead; some agents
 			// emit per-turn EventError while staying alive.

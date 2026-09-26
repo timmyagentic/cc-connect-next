@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -414,7 +415,13 @@ func (state *interactiveState) feedbackIdentity() (sessionKey, userID string) {
 	return state.currentSessionKey, state.currentUserID
 }
 
-func (e *Engine) maybeSendFeedbackErrorHint(platform Platform, replyCtx any, sessionKey, userID string) {
+func (e *Engine) maybeSendFeedbackErrorHint(platform Platform, replyCtx any, sessionKey, userID string, cause error) {
+	// Usage exhaustion already has an actionable notice. Keep its diagnostic
+	// available for manual feedback without preparing an offer or using up
+	// the cooldown for a later unexpected failure.
+	if errors.Is(cause, ErrUsageLimit) {
+		return
+	}
 	// Shared chats and topics do not encode a user in the session key. Without
 	// a trusted initiating user, do not prepare someone else's diagnostic data.
 	if !e.feedbackActive() || strings.TrimSpace(userID) == "" {

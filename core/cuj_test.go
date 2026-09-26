@@ -2237,6 +2237,68 @@ func TestCUJ_J1_FeedbackExplicitTriggerSubmitsDirectly(t *testing.T) {
 		t.Fatalf("user did not receive only direct, link-free result statuses: %v", env.plat.getSent())
 	}
 
+	t.Run("usage limit keeps manual feedback and later error offers", func(t *testing.T) {
+		env := newCUJEnv(t)
+		env.engine.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
+		submitted := captureFeedbackSubmissions(env.engine)
+		key := env.userSends("quota-user", "hello")
+		session := env.activeSession(key)
+		env.waitFor("first response", 2*time.Second, func() bool {
+			return env.sentContains("ok") && !session.Busy()
+		})
+		env.agent.mu.Lock()
+		agentSession := env.agent.sessions[0]
+		env.agent.mu.Unlock()
+
+		agentSession.mu.Lock()
+		agentSession.nextEventOverride = &Event{Type: EventError, Error: ErrUsageLimit}
+		agentSession.mu.Unlock()
+		env.plat.clearSent()
+		env.userSends("quota-user", "continue until the allowance is exhausted")
+		env.waitFor("usage-limit response", 2*time.Second, func() bool {
+			return env.sentContains("allowance resets") && !session.Busy()
+		})
+		if sent := env.plat.getSent(); len(sent) != 1 || env.sentContains("submit-token") {
+			t.Fatalf("usage exhaustion must show only its actionable notice: %v", sent)
+		}
+		select {
+		case <-submitted:
+			t.Fatal("usage exhaustion submitted feedback without a user action")
+		default:
+		}
+
+		// A user can still report an incorrectly detected limit, with the
+		// original diagnostic attached to their explicit report.
+		env.userSends("quota-user", "/feedback the allowance should not be exhausted")
+		select {
+		case report := <-submitted:
+			if report.RecentError == nil || report.RecentError.Text != ErrUsageLimit.Error() {
+				t.Fatalf("manual feedback lost the usage-limit diagnostic: %#v", report)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("manual feedback after usage exhaustion did not submit")
+		}
+		if !env.sentContains("Submission succeeded") {
+			t.Fatalf("manual feedback has no success reply: %v", env.plat.getSent())
+		}
+
+		// Suppression must not consume the automatic-offer cooldown, and
+		// merely mentioning quota must not hide an unclassified failure.
+		agentSession.mu.Lock()
+		agentSession.nextEventOverride = &Event{Type: EventError, Error: errors.New("quota accounting crashed")}
+		agentSession.mu.Unlock()
+		env.plat.clearSent()
+		env.userSends("quota-user", "try another operation")
+		env.waitFor("ordinary error feedback offer", 2*time.Second, func() bool {
+			return env.sentContains("submit-token") && !session.Busy()
+		})
+		select {
+		case <-submitted:
+			t.Fatal("an automatic offer submitted feedback without a user action")
+		default:
+		}
+	})
+
 	for _, mode := range []string{"shared session", "multi workspace", "forced work_dir"} {
 		t.Run("error offer owner/"+mode, func(t *testing.T) {
 			env := newCUJEnv(t)
