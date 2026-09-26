@@ -1107,6 +1107,13 @@ app_secret = "your-feishu-app-secret"
 #                           # Optional: only these group chats bypass @mention; all other groups
 #                           # still require @. A TOML string array is also accepted.
 #                           # 可选：仅这些群聊无需 @；其他群聊仍需 @。也支持 TOML 字符串数组。
+# group_context = false    # Opt in to bounded recent discussion on explicit @ only / 被 @ 时补读有界近期讨论
+# group_context_max_messages = 20    # 1-100 human messages / 人类消息条数
+# group_context_window_minutes = 30  # 1-1440 minutes before the trigger / 触发消息之前的分钟数
+# group_context_max_chars = 8000     # 512-32000 Unicode characters, including metadata / 含元数据的字符数
+# Requires group_reply_all=false, empty group_reply_all_chats, require_mention=true,
+# and respond_to_at_everyone_and_here=false. No attachment downloads or extra permissions.
+# 需关闭全部免 @ 回复选项；不自动下载附件、不申请新权限。忙时按独立回合排队。
 # share_session_in_channel = true   # Feishu/Lark default: share ordinary group sessions; false opts out
 #                                   # 设为 true 时，群聊内所有用户共享同一个 Agent 会话
 # thread_isolation = "topics_only" # runtime default, including omitted old configs; off opts out; legacy true = topic_per_message

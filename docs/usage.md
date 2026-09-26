@@ -1373,6 +1373,32 @@ Quick answers to questions that came up repeatedly in issues and that the
 maintainers have resolved. Each entry links back to the originating issue
 or PR so you can dig further if needed.
 
+### Read recent Feishu/Lark discussion when mentioned
+
+Group session sharing does not automatically include unmentioned chat messages.
+Set `group_context = true` in that platform's `[projects.platforms.options]` to
+read recent human text when explicitly mentioned. Set `group_reply_all = false`,
+clear `group_reply_all_chats`, and disable `respond_to_at_everyone_and_here`;
+`require_mention` must stay true. Starter/recommended profiles may have enabled
+mention-free replies, so update those settings together. Restart to apply.
+
+The independent feature defaults off. Defaults are 20 human messages within
+30 minutes before the trigger, up to 8000 Unicode characters including JSON
+attribution. Tune `group_context_max_messages` (1–100),
+`group_context_window_minutes` (1–1440), and `group_context_max_chars` (512–32000).
+Reads are limited to four 50-record pages and four seconds, using existing
+access only. Actual topics use their own history container; private chats and
+other topics are excluded. Unmentioned attachments stay silent too.
+
+Text/rich-text background replaces automatic quote-chain/root downloads for
+these group turns; attachments and cards are not fetched. Unreadable/truncated
+context is disclosed. Sender, time, and reply metadata remain quoted untrusted
+data after command/permission routing. Only IDs from successful turns are
+persisted for deduplication; background text still enters the Agent's native
+conversation. Failed turns can retry; `/new` starts a fresh cursor. Busy
+mentions queue as distinct turns, with their original time window. This adds
+no polling, new permissions, or separate chat archive.
+
 ### Codex asks you to sign in again
 
 If Codex reports that an access token cannot be refreshed after logging out,

@@ -606,7 +606,8 @@ type interactiveState struct {
 	// prepended to a prompt for this state (guarded by mu).
 	capabilityBriefSent      bool
 	agentSession             AgentSession
-	startError               error // immutable outcome when backend startup failed
+	startError               error    // immutable outcome when backend startup failed
+	contextMessageIDs        []string // candidate background IDs; committed only on successful completion
 	platform                 Platform
 	replyCtx                 any
 	currentMessageID         string
@@ -3400,7 +3401,8 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	// turn/steer cannot carry model, reasoning-effort, or service-tier
 	// overrides. A profiled message must remain a distinct queued turn or the
 	// user would be told a profile was applied when it was not.
-	if msg.AnswerProfile != "" {
+	if msg.AnswerProfile != "" || hasMessageContext(p, msg.ReplyCtx) {
+		// Background reads need an ordered turn and a successful completion receipt.
 		return false
 	}
 	e.interactiveMu.Lock()
@@ -4299,7 +4301,8 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 		drainEvents(state.agentSession.Events())
 	}
 
-	promptContent := e.buildCapabilityPrompt(state, e.buildSenderPrompt(msg.Content, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
+	promptContent := e.prepareMessageContext(p, msg.ReplyCtx, session, state, msg.Content, msg.MessageID)
+	promptContent = e.buildCapabilityPrompt(state, e.buildSenderPrompt(promptContent, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
 
 	sendStart := time.Now()
 	state.steerMu.Lock()
@@ -6385,6 +6388,8 @@ func (t *turnProcessor) run() {
 				t.persistAgentSessionID(state.agentSession.CurrentSessionID())
 			}
 
+			completeMessageContext(state, session, sessions)
+
 			// Mark clean exit so unsolicited reader preserves buffered events.
 			state.mu.Lock()
 			state.eventsNeedResync = false
@@ -6977,7 +6982,8 @@ func (queue *turnQueue) handle() {
 			}
 		}
 
-		queuedPrompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
+		queuedPrompt := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
+		queuedPrompt = e.buildCapabilityPrompt(state, e.buildSenderPrompt(queuedPrompt, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
 
 		state.mu.Lock()
 		as := state.agentSession // capture under lock to avoid race with cleanup
@@ -8542,7 +8548,8 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		queuedRichCardCopy := e.i18n.RichCardCopyForText(queued.content)
 		e.i18n.DetectAndSet(queued.content)
 		state.setTurnRichCardCopy(queued.messageID, queuedRichCardCopy)
-		prompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
+		prompt := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
+		prompt = e.buildCapabilityPrompt(state, e.buildSenderPrompt(prompt, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
 
 		state.mu.Lock()
 		as := state.agentSession // capture under lock to avoid race with cleanup (mirrors #1436)

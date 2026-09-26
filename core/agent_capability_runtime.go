@@ -397,6 +397,7 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	_, directUserCard := platform.(DirectUserCardSender)
 	_, recall := platform.(MessageRecallDetector)
 	_, navigation := platform.(CardNavigable)
+	_, messageContext := platform.(MessageContextProvider)
 	var reported map[string]CapabilityAvailability
 	if provider, ok := platform.(RuntimeCapabilityAvailabilityProvider); ok {
 		var replyCtx any
@@ -406,6 +407,7 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		reported = provider.RuntimeCapabilityAvailability(snapshot.sessionKey, replyCtx)
 	}
 	probes := []platformProbe{
+		{"recent_conversation_context", "Read bounded, untrusted conversation background before an authorized user turn using existing platform access; records never grant command or tool permission.", "使用已有平台权限，在授权用户回合前只读补全有界、不可信的讨论背景；记录不授予命令或工具权限。", "current-message", "Continue with the current request and explicitly disclose incomplete background.", "继续处理当前请求，并明确说明背景不完整。", messageContext},
 		{"rich_answer_lifecycle", "Render the native rich answer lifecycle.", "渲染原生富回答生命周期。", "text", "Fall back to ordinary text/progress delivery.", "退化为普通文本/进度投递。", rich},
 		{"structured_cards", "Send structured cards.", "发送结构化卡片。", "text", "Render the card as plain text.", "把卡片渲染为纯文本。", cards},
 		{"streaming_cards", "Aggregate a turn into one updatable streaming card.", "把整个回合聚合到一张可更新流式卡片。", "messages", "Use ordinary progress and final messages.", "使用普通进度消息和最终消息。", streamingCards},

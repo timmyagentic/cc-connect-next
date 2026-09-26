@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add opt-in Feishu/Lark recent discussion context on explicit group mentions,
+  with separate chat/topic reads, sender/time/reply attribution, bounded history
+  access, successful-turn deduplication and clear incomplete-context notices.
+  Unmentioned messages stay silent; no extra permissions or polling are added.
+
 - Recognize Codex login refresh failures with localized recovery guidance,
   preserve saved conversations when authentication blocks resume, and keep
   manual feedback available without automatic bug-report offers. Feedback

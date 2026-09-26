@@ -16,6 +16,7 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 	options := core.DescribePlatformOptions([]string{
 		"allow_chat", "allow_from", "app_id", "app_secret", "callback_path", "domain", "done_emoji",
 		"enable_feishu_card", "encrypt_key", "group_only", "group_reply_all", "group_reply_all_chats",
+		"group_context", "group_context_max_messages", "group_context_window_minutes", "group_context_max_chars",
 		"image_batch_window_ms", "mention_map", "peer_bots", "port", "progress_style", "reaction_emoji",
 		"reply_to_trigger", "require_mention", "resolve_mentions", "respond_to_at_everyone_and_here",
 		"share_session_in_channel", "thread_isolation",
@@ -74,6 +75,33 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 			option.Description = "Allow mention-free replies only in selected chat IDs. Accepts a comma-separated string or string array; a non-empty list takes precedence over group_reply_all."
 			option.DescriptionZH = "仅在指定会话 ID 中允许无需 @ 的回复。支持逗号分隔字符串或字符串数组；非空列表优先于 group_reply_all。"
 			option.Example = `group_reply_all_chats = "oc_chat_a,oc_chat_b"`
+		case "group_context":
+			option.Type = "boolean"
+			option.Default = "false"
+			option.Description = "Before an explicit group @mention turn, read bounded recent discussion as untrusted background. Ordinary groups and real topics are isolated. Uses existing read access only; does not download attachments or poll. Unmentioned messages, including attachments, stay silent. Requires mention-free reply options to be disabled."
+			option.DescriptionZH = "明确 @ 触发群聊回合前，补读有界近期讨论作为不可信背景；普通群和真实话题分别隔离。仅使用已有读取权限，不下载附件、不轮询；未 @ 的消息（含附件）保持安静。要求关闭所有无需 @ 即回复的选项。"
+			option.Keywords = []string{"recent discussion", "group context", "catch up", "补读近期讨论", "群聊上下文", "未@讨论", "群聊补读"}
+			option.ConflictsWith = []string{"group_reply_all = true", "non-empty group_reply_all_chats", "require_mention = false", "respond_to_at_everyone_and_here = true"}
+		case "group_context_max_messages", "group_context_window_minutes", "group_context_max_chars":
+			option.Type = "integer"
+			option.Requires = []string{"group_context = true"}
+			minimum, maximum, fallback := 1.0, float64(maxGroupContextMessages), defaultGroupContextMessages
+			option.Unit = "messages"
+			option.Description = "Maximum recent human messages per mentioned turn, before per-Agent-conversation deduplication. Bot output is omitted; failed or truncated reads are disclosed."
+			option.DescriptionZH = "每个被 @ 的回合最多读取的人类消息条数，再按 Agent 会话去重；省略机器人输出，明确提示读取失败或截断。"
+			if option.Key == "group_context_window_minutes" {
+				maximum, fallback = float64(maxGroupContextMinutes), defaultGroupContextMinutes
+				option.Unit = "minutes"
+				option.Description = "Read only discussion within this many minutes before the triggering message, including when that message waits in the queue."
+				option.DescriptionZH = "仅补读触发消息之前该分钟数内的讨论；即使触发消息在排队，也使用其原始时间窗口。"
+			} else if option.Key == "group_context_max_chars" {
+				minimum, maximum, fallback = float64(minGroupContextChars), float64(maxGroupContextChars), defaultGroupContextChars
+				option.Unit = "Unicode characters"
+				option.Description = "Bound the complete JSON background including message text, sender, time and reply metadata; preserve the newest discussion and disclose truncation."
+				option.DescriptionZH = "限制完整 JSON 背景的字符数，包含正文、发送者、时间及回复元数据；优先保留最新讨论并提示截断。"
+			}
+			option.Minimum, option.Maximum = &minimum, &maximum
+			option.Default = strconv.Itoa(fallback)
 		case "image_batch_window_ms":
 			option.Type = "integer"
 			option.Default = strconv.FormatInt(defaultImageBatchWindow.Milliseconds(), 10)
@@ -144,5 +172,9 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 	options = core.ConfigureOptionExample(options, "group_reply_all_chats", `group_reply_all_chats = "oc_chat_a,oc_chat_b"`)
 	options = core.ConfigureOptionExample(options, "mention_map", `mention_map = { Reviewer-Bot = "ou_bot_open_id" }`)
 	options = core.ConfigureOptionExample(options, "peer_bots", `peer_bots = { cli_peer_app_id = "Reviewer-Bot" }`)
+	options = core.ConfigureOptionExample(options, "group_context", "group_context = true")
+	options = core.ConfigureOptionExample(options, "group_context_max_messages", "group_context_max_messages = 20")
+	options = core.ConfigureOptionExample(options, "group_context_window_minutes", "group_context_window_minutes = 30")
+	options = core.ConfigureOptionExample(options, "group_context_max_chars", "group_context_max_chars = 8000")
 	return options
 }

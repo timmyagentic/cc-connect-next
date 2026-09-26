@@ -66,6 +66,12 @@
 
 相关配置： `feedback.enabled`, `feedback.endpoint`, `update_channel`, `update_notice`
 
+### 补读近期群聊讨论 (`group-conversation-context`)
+
+仅在明确被 @ 时补读有界近期消息，隔离话题、保留归因并按会话去重。
+
+相关配置： `projects.platforms.options.group_context`, `projects.platforms.options.group_context_max_messages`, `projects.platforms.options.group_context_window_minutes`, `projects.platforms.options.group_context_max_chars`
+
 ### 项目与工作区 (`multi-project`)
 
 运行多个命名项目、动态绑定工作区、隔离 OS 用户并回收空闲工作区。
@@ -3531,6 +3537,69 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 生效方式：`restart`
 - 敏感信息：是；优先使用环境变量占位符。
 - 示例: `encrypt_key = "${ENCRYPT_KEY}"`
+
+### `projects.platforms.options.group_context` — `feishu, lark`
+
+明确 @ 触发群聊回合前，补读有界近期讨论作为不可信背景；普通群和真实话题分别隔离。仅使用已有读取权限，不下载附件、不轮询；未 @ 的消息（含附件）保持安静。要求关闭所有无需 @ 即回复的选项。
+
+- 来源：`toml`
+- 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`boolean`
+- 要求：`可选`
+- 默认值：`false`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 冲突: `group_reply_all = true`, `non-empty group_reply_all_chats`, `require_mention = false`, `respond_to_at_everyone_and_here = true`
+- 示例: `group_context = true`
+
+### `projects.platforms.options.group_context_max_chars` — `feishu, lark`
+
+限制完整 JSON 背景的字符数，包含正文、发送者、时间及回复元数据；优先保留最新讨论并提示截断。
+
+- 来源：`toml`
+- 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`integer`
+- 要求：`可选`
+- 默认值：`8000`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 依赖: `group_context = true`
+- 范围: `512` 到 `32000` `Unicode characters`
+- 示例: `group_context_max_chars = 8000`
+
+### `projects.platforms.options.group_context_max_messages` — `feishu, lark`
+
+每个被 @ 的回合最多读取的人类消息条数，再按 Agent 会话去重；省略机器人输出，明确提示读取失败或截断。
+
+- 来源：`toml`
+- 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`integer`
+- 要求：`可选`
+- 默认值：`20`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 依赖: `group_context = true`
+- 范围: `1` 到 `100` `messages`
+- 示例: `group_context_max_messages = 20`
+
+### `projects.platforms.options.group_context_window_minutes` — `feishu, lark`
+
+仅补读触发消息之前该分钟数内的讨论；即使触发消息在排队，也使用其原始时间窗口。
+
+- 来源：`toml`
+- 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`integer`
+- 要求：`可选`
+- 默认值：`30`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 依赖: `group_context = true`
+- 范围: `1` 到 `1440` `minutes`
+- 示例: `group_context_window_minutes = 30`
 
 ### `projects.platforms.options.group_only` — `feishu, lark`
 
