@@ -32,10 +32,11 @@ type Session struct {
 	ActiveProvider string `json:"active_provider,omitempty"`
 	// Empty inherits Agent defaults. A choice is scoped to this conversation,
 	// survives bridge restarts, and is captured only when a new turn starts.
-	ServiceTier string         `json:"service_tier,omitempty"`
-	History     []HistoryEntry `json:"history"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	ServiceTier     string           `json:"service_tier,omitempty"`
+	ContextReceipts *ContextReceipts `json:"context_receipts,omitempty"`
+	History         []HistoryEntry   `json:"history"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
 	// LastUserActivity records when a real user message was last received.
 	// Unlike UpdatedAt (bumped by every session.Unlock including heartbeats and
 	// unsolicited agent output), this field is only updated when the engine

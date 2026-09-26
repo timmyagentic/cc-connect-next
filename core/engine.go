@@ -606,7 +606,8 @@ type interactiveState struct {
 	// prepended to a prompt for this state (guarded by mu).
 	capabilityBriefSent      bool
 	agentSession             AgentSession
-	startError               error // immutable outcome when backend startup failed
+	startError               error    // immutable outcome when backend startup failed
+	contextMessageIDs        []string // candidate background IDs; committed only on successful completion
 	platform                 Platform
 	replyCtx                 any
 	currentMessageID         string
@@ -3400,7 +3401,8 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	// turn/steer cannot carry model, reasoning-effort, or service-tier
 	// overrides. A profiled message must remain a distinct queued turn or the
 	// user would be told a profile was applied when it was not.
-	if msg.AnswerProfile != "" {
+	if msg.AnswerProfile != "" || hasMessageContext(p, msg.ReplyCtx) {
+		// Background reads need an ordered turn and a successful completion receipt.
 		return false
 	}
 	e.interactiveMu.Lock()
@@ -4292,14 +4294,9 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// ownership to this foreground turn. Only drain events when the previous
 	// turn ended abnormally (eventsNeedResync=true, the default).
 	e.stopUnsolicitedReader(state)
-	state.mu.Lock()
-	needResync := state.eventsNeedResync
-	state.mu.Unlock()
-	if needResync {
-		drainEvents(state.agentSession.Events())
-	}
 
-	promptContent := e.buildCapabilityPrompt(state, e.buildSenderPrompt(msg.Content, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
+	promptContent := e.prepareMessageContext(p, msg.ReplyCtx, session, state, msg.Content, msg.MessageID)
+	promptContent = e.buildCapabilityPrompt(state, e.buildSenderPrompt(promptContent, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
 
 	sendStart := time.Now()
 	state.steerMu.Lock()
@@ -4311,8 +4308,14 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	speedTier := sessions.ServiceTier(session)
 	state.activeServiceTier = speedTier
 	as := state.agentSession // capture under lock to avoid race with cleanup
+	needResync := state.eventsNeedResync
 	state.mu.Unlock()
 	state.steerMu.Unlock()
+	// The context read can wait on network IO. Include late previous-turn
+	// events in the resync drain immediately before sending this turn.
+	if needResync && as != nil {
+		drainEvents(as.Events())
+	}
 
 	// Run Send concurrently with processInteractiveEvents. Some agents block inside
 	// Send until the prompt turn finishes (e.g. ACP session/prompt); they may emit
@@ -6385,6 +6388,10 @@ func (t *turnProcessor) run() {
 				t.persistAgentSessionID(state.agentSession.CurrentSessionID())
 			}
 
+			if event.Error == nil {
+				completeMessageContext(state, session, sessions)
+			}
+
 			// Mark clean exit so unsolicited reader preserves buffered events.
 			state.mu.Lock()
 			state.eventsNeedResync = false
@@ -6966,18 +6973,14 @@ func (queue *turnQueue) handle() {
 		// Agent continues working — don't add done reaction for this turn.
 		doneReaction = nil
 
-		// Drain stale events before starting the next turn. Between
-		// EventResult and Send(), the only buffered events would be
-		// stale leftovers (e.g. a deferred EventError from cmd.Wait()).
-		drainEvents(state.agentSession.Events())
-
 		if pendingSend != nil {
 			if err := <-pendingSend; err != nil {
 				slog.Debug("async send error before queued turn", "error", err)
 			}
 		}
 
-		queuedPrompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
+		queuedPrompt := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
+		queuedPrompt = e.buildCapabilityPrompt(state, e.buildSenderPrompt(queuedPrompt, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
 
 		state.mu.Lock()
 		as := state.agentSession // capture under lock to avoid race with cleanup
@@ -6985,6 +6988,11 @@ func (queue *turnQueue) handle() {
 		state.mu.Unlock()
 		if turnAgent == nil {
 			turnAgent = e.agent
+		}
+		// Drain only after the prior Send and context read finish, so late
+		// events from the previous turn cannot become this turn's response.
+		if as != nil {
+			drainEvents(as.Events())
 		}
 
 		nextSend := make(chan error, 1)
@@ -8542,7 +8550,8 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		queuedRichCardCopy := e.i18n.RichCardCopyForText(queued.content)
 		e.i18n.DetectAndSet(queued.content)
 		state.setTurnRichCardCopy(queued.messageID, queuedRichCardCopy)
-		prompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
+		prompt := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
+		prompt = e.buildCapabilityPrompt(state, e.buildSenderPrompt(prompt, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
 
 		state.mu.Lock()
 		as := state.agentSession // capture under lock to avoid race with cleanup (mirrors #1436)

@@ -66,6 +66,12 @@ Control anonymous feedback availability, release-channel selection, and update r
 
 Related configuration: `feedback.enabled`, `feedback.endpoint`, `update_channel`, `update_notice`
 
+### Catch up on recent group discussion (`group-conversation-context`)
+
+Read bounded recent messages only when explicitly mentioned, with topic isolation, attribution and per-conversation deduplication.
+
+Related configuration: `projects.platforms.options.group_context`, `projects.platforms.options.group_context_max_messages`, `projects.platforms.options.group_context_window_minutes`, `projects.platforms.options.group_context_max_chars`
+
 ### Projects and workspaces (`multi-project`)
 
 Run multiple named projects, dynamically bind workspaces, isolate OS users, and reap idle workspaces.
@@ -3531,6 +3537,69 @@ Leave unset to consume events over WebSocket; set the event encrypt key to selec
 - Takes effect: `restart`
 - Sensitive: yes; prefer an environment-variable placeholder.
 - Example: `encrypt_key = "${ENCRYPT_KEY}"`
+
+### `projects.platforms.options.group_context` — `feishu, lark`
+
+Before an explicit group @mention turn, read bounded recent discussion as untrusted background. Ordinary groups and real topics are isolated. Uses existing read access only; does not download attachments or poll. Unmentioned messages, including attachments, stay silent. Requires mention-free reply options to be disabled.
+
+- Source: `toml`
+- Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
+- Scope: `platform` (`feishu, lark`)
+- Type: `boolean`
+- Requirement: `optional`
+- Default: `false`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Conflicts with: `group_reply_all = true`, `non-empty group_reply_all_chats`, `require_mention = false`, `respond_to_at_everyone_and_here = true`
+- Example: `group_context = true`
+
+### `projects.platforms.options.group_context_max_chars` — `feishu, lark`
+
+Bound the complete JSON background including message text, sender, time and reply metadata; preserve the newest discussion and disclose truncation.
+
+- Source: `toml`
+- Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
+- Scope: `platform` (`feishu, lark`)
+- Type: `integer`
+- Requirement: `optional`
+- Default: `8000`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Requires: `group_context = true`
+- Range: `512` to `32000` `Unicode characters`
+- Example: `group_context_max_chars = 8000`
+
+### `projects.platforms.options.group_context_max_messages` — `feishu, lark`
+
+Maximum recent human messages per mentioned turn, before per-Agent-conversation deduplication. Bot output is omitted; failed or truncated reads are disclosed.
+
+- Source: `toml`
+- Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
+- Scope: `platform` (`feishu, lark`)
+- Type: `integer`
+- Requirement: `optional`
+- Default: `20`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Requires: `group_context = true`
+- Range: `1` to `100` `messages`
+- Example: `group_context_max_messages = 20`
+
+### `projects.platforms.options.group_context_window_minutes` — `feishu, lark`
+
+Read only discussion within this many minutes before the triggering message, including when that message waits in the queue.
+
+- Source: `toml`
+- Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
+- Scope: `platform` (`feishu, lark`)
+- Type: `integer`
+- Requirement: `optional`
+- Default: `30`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Requires: `group_context = true`
+- Range: `1` to `1440` `minutes`
+- Example: `group_context_window_minutes = 30`
 
 ### `projects.platforms.options.group_only` — `feishu, lark`
 

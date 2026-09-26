@@ -85,6 +85,18 @@ Agent command files may publish only an explicit frontmatter `description`. Thei
 
 Existence is not presented as executable availability: model/provider switching, TTS, multi-workspace, schedulers, Relay, Web setup, and in-flight-turn operations probe their corresponding runtime interfaces or components.
 
+## Recent conversation background
+
+The optional Platform capability `recent_conversation_context` reads bounded,
+untrusted discussion using existing platform access before a verified user
+turn. It does not execute quoted commands or grant tool permissions. Its
+availability reports disabled configuration, an ineligible target, or the
+conditional need for existing history access; unavailable adapters retain the
+entry with a current-message fallback. Failed/truncated reads are disclosed.
+The associated `group_context` configuration defaults off. Reads occur only
+for accepted mentions and never by polling; ID receipts persist only after a
+successful turn. Busy requests queue to preserve that ordering.
+
 ## Conversation speed
 
 `/speed` queries the next-turn speed, the active model's supported tiers, and

@@ -910,3 +910,34 @@ func configContractAcceptsType(contract, asserted string) bool {
 	}
 	return false
 }
+
+func TestGroupContextConfigurationIsSearchableAndBounded(t *testing.T) {
+	for _, owner := range []string{"feishu", "lark"} {
+		for _, test := range []struct {
+			key, defaultValue string
+			min, max          float64
+		}{
+			{"group_context_max_messages", "20", 1, 100},
+			{"group_context_window_minutes", "30", 1, 1440},
+			{"group_context_max_chars", "8000", 512, 32000},
+		} {
+			option := findCatalogOption(t, core.PlatformConfigOptions(owner), test.key)
+			if option.Default != test.defaultValue || option.Minimum == nil || option.Maximum == nil || *option.Minimum != test.min || *option.Maximum != test.max {
+				t.Fatalf("wrong bounds: %+v", option)
+			}
+		}
+		option := findCatalogOption(t, core.PlatformConfigOptions(owner), "group_context")
+		if option.Default != "false" || len(option.ConflictsWith) == 0 || len(option.PresetValues) != 0 {
+			t.Fatalf("context must be opt-in: %+v", option)
+		}
+	}
+	for _, query := range []string{"群聊补读", "recent discussion"} {
+		var out bytes.Buffer
+		if err := writeConfigCapabilities(&out, []string{"--platform", "feishu", "--search", query, "--format", "json"}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "group_context_max_chars") || !strings.Contains(out.String(), "group_context_window_minutes") {
+			t.Fatalf("intent query lost context configuration: %s", out.String())
+		}
+	}
+}

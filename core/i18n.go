@@ -413,6 +413,7 @@ const (
 	MsgRichCardModelCapacity        MsgKey = "rich_card_model_capacity"
 	MsgRichCardModelCapacityBody    MsgKey = "rich_card_model_capacity_body"
 	MsgRichCardModelCapacitySummary MsgKey = "rich_card_model_capacity_summary"
+	MsgRecentContextIncomplete      MsgKey = "recent_context_incomplete"
 	MsgRichCardAuthRequired         MsgKey = "rich_card_authentication_required"
 	MsgRichCardAuthRequiredBody     MsgKey = "rich_card_authentication_required_body"
 	MsgRichCardAuthRequiredSummary  MsgKey = "rich_card_authentication_required_summary"
@@ -2872,6 +2873,13 @@ var messages = map[MsgKey]map[Language]string{
 	MsgRichCardModelCapacitySummary: {
 		LangEnglish: "Selected model is at capacity", LangChinese: "所选模型当前容量已满", LangTraditionalChinese: "所選模型目前容量已滿",
 		LangJapanese: "選択したモデルは現在容量の上限に達しています", LangSpanish: "El modelo seleccionado no tiene capacidad disponible",
+	},
+	MsgRecentContextIncomplete: {
+		LangEnglish:            "Recent discussion context is incomplete: some messages could not be read or exceeded the configured window or size limits. I will answer using the available context.",
+		LangChinese:            "近期讨论上下文不完整：部分消息未能读取，或超出了配置的窗口与长度限制。我会基于可用内容回答。",
+		LangTraditionalChinese: "近期討論上下文不完整：部分訊息未能讀取，或超出了設定的時間範圍與長度限制。我會根據可用內容回答。",
+		LangJapanese:           "最近の会話の文脈は不完全です。一部のメッセージを取得できなかったか、設定された期間やサイズの上限を超えました。取得できた内容に基づいて回答します。",
+		LangSpanish:            "El contexto reciente está incompleto: no se pudieron leer algunos mensajes o se superaron los límites de tiempo o tamaño configurados. Responderé con el contexto disponible.",
 	},
 	MsgRichCardAuthRequired: {
 		LangEnglish: "Sign-in required", LangChinese: "需要重新登录", LangTraditionalChinese: "需要重新登入",

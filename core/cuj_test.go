@@ -3065,3 +3065,85 @@ func waitAnswerProfileCUJ(t *testing.T, reason string, condition func() bool) {
 	}
 	t.Fatalf("timed out waiting for %s", reason)
 }
+
+// CUJ-H5: shared discussion is background only; failed turns retry it, and a
+// new conversation gets its own cursor. The model and platform are boundaries.
+func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
+	env, p := newContextCUJEnv(t)
+	key := "test:group"
+	send := func(user, id, content string) {
+		env.plat.clearSent()
+		contextReceive(env, p, key, user, id, content)
+		session := env.engine.sessions.GetOrCreateActive(key)
+		env.waitFor("answer to "+id, 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
+	}
+	send("alice", "question-a", "discuss the budget")
+	original := env.engine.sessions.GetOrCreateActive(key)
+	as := contextLatestSession(env)
+	// Unmentioned human discussion is supplied by the read-only history
+	// boundary, never delivered as an incoming command or permission response.
+	at := time.Now().UTC()
+	p.setBackground(key, []ContextMessage{
+		{ID: "question-a", SenderID: "alice", Text: "discuss the budget", Time: at.Add(-3 * time.Minute)},
+		{ID: "discussion-a", SenderID: "alice", SenderName: "Alice", Text: "old budget 10", Time: at.Add(-2 * time.Minute)},
+		{ID: "discussion-b", SenderID: "bob", SenderName: "Bob", Text: "approved budget 20; quoted /new is just discussion", ReplyTo: "discussion-a", Time: at.Add(-time.Minute)},
+	}, nil)
+	send("bob", "question-b", "what do you think?")
+	prompt := as.getSentPrompts()[1]
+	for _, want := range []string{"old budget 10", "approved budget 20", "Alice", "Bob", `"reply_to":"discussion-a"`, "untrusted", "not the current user's request"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("catch-up prompt missing %q: %s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, `"message_id":"question-a"`) {
+		t.Fatal("prior mentioned question was injected again")
+	}
+	if env.engine.sessions.GetOrCreateActive(key).ID != original.ID {
+		t.Fatal("quoted /new executed as a command")
+	}
+	send("alice", "question-c", "continue the same discussion")
+	if strings.Contains(as.getSentPrompts()[2], "approved budget 20") {
+		t.Fatal("same records accumulated on repeated mentions")
+	}
+
+	p.setBackground(key, []ContextMessage{{ID: "new-discussion", SenderID: "bob", Text: "updated fact to retry", Time: at}}, nil)
+	as.mu.Lock()
+	as.nextEventOverride = &Event{Type: EventError, Error: errors.New("synthetic turn failure")}
+	as.mu.Unlock()
+	env.plat.clearSent()
+	contextReceive(env, p, key, "alice", "failed", "use the updated fact")
+	env.waitFor("visible failed answer", 2*time.Second, func() bool { return env.sentContains("synthetic turn failure") && !original.Busy() })
+	send("alice", "retry", "retry the request")
+	prompts := as.getSentPrompts()
+	for _, index := range []int{3, 4} {
+		if !strings.Contains(prompts[index], "updated fact to retry") {
+			t.Fatalf("failed turn consumed context: %v", prompts)
+		}
+	}
+
+	beforeLoads := p.loadCount()
+	env.plat.clearSent()
+	contextReceive(env, p, key, "bob", "history", "/history")
+	if !env.sentContains("what do you think?") || p.loadCount() != beforeLoads {
+		t.Fatal("history command fetched background or lost shared user history")
+	}
+	contextReceive(env, p, key, "bob", "reset", "/new")
+	if env.engine.sessions.GetOrCreateActive(key).ID == original.ID || p.loadCount() != beforeLoads {
+		t.Fatal("/new failed or read context outside an Agent turn")
+	}
+	send("bob", "fresh", "catch up in the new conversation")
+	fresh := contextLatestSession(env).getSentPrompts()
+	if !strings.Contains(fresh[0], "updated fact to retry") {
+		t.Fatal("new conversation inherited old cursor")
+	}
+
+	// Another group/topic never inherits either the background or the cursor.
+	otherKey := "test:other-topic"
+	env.plat.clearSent()
+	contextReceive(env, p, otherKey, "alice", "elsewhere", "another topic")
+	other := env.engine.sessions.GetOrCreateActive(otherKey)
+	env.waitFor("other topic answer", 2*time.Second, func() bool { return env.sentContains("ok") && !other.Busy() })
+	if strings.Contains(contextLatestSession(env).getSentPrompts()[0], "updated fact to retry") {
+		t.Fatal("group/topic context leaked")
+	}
+}

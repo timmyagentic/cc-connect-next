@@ -141,6 +141,9 @@ func validatePlatformOptions(name string) core.OptionsValidator {
 				return fmt.Errorf("%s: image_batch_window_ms must be >= 0, got %d", name, milliseconds)
 			}
 		}
+		if _, err := parseGroupContextConfig(opts); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
 		if _, err := parseGroupReplyAllChats(opts["group_reply_all_chats"]); err != nil {
 			return fmt.Errorf("%s: invalid group_reply_all_chats: %w", name, err)
 		}
@@ -249,6 +252,9 @@ func parseMentionMap(raw any) (map[string]string, error) {
 }
 
 type replyContext struct {
+	contextEligible bool // authorized, explicitly mentioned group trigger only
+	contextTimeMs   int64
+	contextRootID   string
 	messageID       string
 	chatID          string
 	sessionKey      string
@@ -317,6 +323,7 @@ func parseThreadIsolationMode(raw any) (threadIsolationMode, error) {
 }
 
 type Platform struct {
+	groupContext               groupContextConfig
 	mu                         sync.RWMutex
 	platformName               string
 	projectName                string
@@ -541,6 +548,10 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 	core.CheckAllowFrom(name, allowFrom)
 	allowChat, _ := opts["allow_chat"].(string)
 	groupOnly, _ := opts["group_only"].(bool)
+	groupContext, err := parseGroupContextConfig(opts)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
 	groupReplyAll, _ := opts["group_reply_all"].(bool)
 	groupReplyAllChats, err := parseGroupReplyAllChats(opts["group_reply_all_chats"])
 	if err != nil {
@@ -624,6 +635,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 	}
 
 	base := &Platform{
+		groupContext:               groupContext,
 		platformName:               name,
 		domain:                     domain,
 		appID:                      appID,
@@ -860,8 +872,9 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 	// on a successful bot-info API call. Older private deployments may not support
 	// the same auth/bootstrap flow as the public SDK path, but the webhook server
 	// can still receive events and operate correctly. We therefore only attempt
-	// bot open_id discovery eagerly for WebSocket mode.
-	if !p.shouldUseWebhookMode() {
+	// bot open_id discovery eagerly for WebSocket mode. Opting into recent
+	// context requires a verified mention gate in webhook mode as well.
+	if !p.shouldUseWebhookMode() || p.groupContext.enabled {
 		if err := p.recoverBotIdentity(context.Background()); err != nil {
 			p.markBotIdentityUnavailable(err)
 			slog.Error(p.platformName+": failed to get bot open_id; group mention filter is fail-closed until recovery", "error", err)
@@ -1855,6 +1868,12 @@ func (p *Platform) onMessageRecalled(_ context.Context, event *larkim.P2MessageR
 }
 
 func (p *Platform) shouldDispatchGroupMessage(msg *larkim.EventMessage, msgType, chatID, sessionKey string, groupReplyAllForChat bool) bool {
+	if stringValue(msg.ChatType) == "group" && p.groupContext.enabled {
+		// Opt-in background reading stays silent for every unmentioned message,
+		// including attachments and deployments without a resolved bot identity.
+		botID := p.getBotOpenID()
+		return botID != "" && isBotMentioned(msg.Mentions, botID)
+	}
 	if stringValue(msg.ChatType) != "group" || groupReplyAllForChat {
 		return true
 	}
@@ -1991,6 +2010,14 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	parentID := stringValue(msg.ParentId)
 
 	rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, threadID: stringValue(msg.ThreadId)}
+	if chatType == "group" && p.groupContext.enabled {
+		rctx.contextEligible = true // shouldDispatchGroupMessage verified @bot above
+		rctx.contextTimeMs = createTimeMs
+		if rctx.contextTimeMs == 0 {
+			rctx.contextTimeMs = time.Now().UnixMilli()
+		}
+		rctx.contextRootID = stringValue(msg.RootId)
+	}
 	if chatType == "p2p" && stringValue(msg.ThreadId) == "" {
 		rctx.directUserID = userID
 	}
@@ -2003,8 +2030,10 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	// Mark this thread as bot-engaged so subsequent attachment-only messages
 	// can pass through. The first accepted mention in a pre-existing topic also
 	// bootstraps the isolated agent session from the root message once.
-	rctx.bootstrapThread, rctx.bootstrapQueued, rctx.bootstrapWait, rctx.bootstrapDone =
-		p.prepareThreadBootstrapDispatch(sessionKey)
+	if !rctx.contextEligible {
+		rctx.bootstrapThread, rctx.bootstrapQueued, rctx.bootstrapWait, rctx.bootstrapDone =
+			p.prepareThreadBootstrapDispatch(sessionKey)
+	}
 	if (rctx.bootstrapThread || rctx.bootstrapQueued) && parentID == "" {
 		parentID = stringValue(msg.RootId)
 	}
@@ -2066,7 +2095,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 	// The first accepted mention is the exception because earlier unmentioned
 	// root content never reached the new agent session.
 	var quoted quotedMessage
-	if parentID != "" && (!p.threadIsolationEnabled() || !isThreadSessionKey(sessionKey) || rctx.bootstrapThread) {
+	if parentID != "" && !p.MessageContextEnabled(rctx) && (!p.threadIsolationEnabled() || !isThreadSessionKey(sessionKey) || rctx.bootstrapThread) {
 		var fetched bool
 		quoted, fetched = p.fetchQuotedMessageWithStatus(ctx, parentID)
 		if rctx.bootstrapThread {
