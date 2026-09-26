@@ -2430,6 +2430,37 @@ func TestCUJ_J2_UpdateReviewAppliesExactPlanOnce(t *testing.T) {
 	if service.applyCalls != 1 || !env.sentContains("reviewed update plan") {
 		t.Fatalf("repeated confirm was not rejected: calls=%d sent=%v", service.applyCalls, env.plat.getSent())
 	}
+
+	t.Run("installed but verification failed", func(t *testing.T) {
+		previousInfo := VersionInfo
+		VersionInfo = "cc-connect-next v1.0.0"
+		t.Cleanup(func() { VersionInfo = previousInfo })
+		failed := newCUJEnv(t)
+		failed.engine.SetAdminFrom("updater")
+		failed.engine.SetUpdateService(&stubCoreUpdateService{
+			plan:     PreparedUpdate{Release: ReleaseInfo{TagName: "v1.1.0", Body: "reviewed update"}, Available: true, token: "exact"},
+			applyErr: ErrUpdateInstalledUnverified,
+		})
+		failed.userSends("updater", "/upgrade")
+		if !failed.sentContains("reviewed update") {
+			t.Fatal("user did not see update review")
+		}
+		failed.plat.clearSent()
+		failed.userSends("updater", "/upgrade confirm")
+		if !failed.sentContains("Installed files may have changed") || !failed.sentContains("has not been restarted") {
+			t.Fatalf("unverified install state is unclear: %v", failed.plat.getSent())
+		}
+		failed.plat.clearSent()
+		failed.userSends("updater", "/version")
+		if !failed.sentContains("v1.0.0") {
+			t.Fatalf("running version changed after failed verification: %v", failed.plat.getSent())
+		}
+		select {
+		case request := <-RestartCh:
+			t.Fatalf("unverified install requested restart: %+v", request)
+		default:
+		}
+	})
 }
 
 // CUJ-G5 · Tool call failure: agent emits EventError mid-turn (e.g. bash
@@ -2507,7 +2538,9 @@ func TestCUJ_H3_SharedGroupHistoryAcrossUsers(t *testing.T) {
 			UserID: user, UserName: user, Content: content, ReplyCtx: "ctx-" + user,
 		})
 		target.waitFor("shared group reply", 2*time.Second, func() bool {
-			return len(target.plat.getSent()) > before
+			// A queued acknowledgement is not the Agent's completed reply.
+			return len(target.plat.getSent()) > before &&
+				(strings.HasPrefix(content, "/") || target.lastSent() == "ok")
 		})
 		return target.lastSent()
 	}
@@ -2574,6 +2607,11 @@ func TestCUJ_H2_TwoPlatformsConcurrentNoBleed(t *testing.T) {
 	pB := &stubPlatformEngine{n: "platB"}
 	agent := &cujAgent{}
 	e := NewEngine("test", agent, []Platform{pA, pB}, dir+"/sessions.json", LangEnglish)
+	t.Cleanup(func() {
+		if err := e.Stop(); err != nil {
+			t.Errorf("stop CUJ engine: %v", err)
+		}
+	})
 
 	// Fire 5 messages on each platform concurrently.
 	var wg sync.WaitGroup

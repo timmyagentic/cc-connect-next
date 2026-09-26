@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/timmyagentic/cc-connect-next/internal/appfeatures"
 	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
@@ -73,9 +75,16 @@ func runUpdate() {
 		err = runChannelUpdate(options)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Update failed: %v\n", err)
+		fmt.Fprintln(os.Stderr, formatCLIUpdateError(err))
 		os.Exit(1)
 	}
+}
+
+func formatCLIUpdateError(err error) string {
+	if errors.Is(err, appfeatures.ErrUpdateInstalledUnverified) {
+		return core.NewI18n(core.LangEnglish).Tf(core.MsgUpgradeInstalledUnverified, err)
+	}
+	return fmt.Sprintf("Update failed: %v", err)
 }
 
 type updateOptions struct {

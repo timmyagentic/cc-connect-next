@@ -537,6 +537,7 @@ const (
 	MsgUpgradePlanChannelMismatch MsgKey = "upgrade_plan_channel_mismatch"
 	MsgUpgradeDownloading         MsgKey = "upgrade_downloading"
 	MsgUpgradeSuccess             MsgKey = "upgrade_success"
+	MsgUpgradeInstalledUnverified MsgKey = "upgrade_installed_unverified"
 	MsgUpgradeDevBuild            MsgKey = "upgrade_dev_build"
 
 	MsgWebNotSupported MsgKey = "web_not_supported"
@@ -3463,6 +3464,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 已成功更新到 **%s**！正在重啟...",
 		LangJapanese:           "✅ **%s** に更新しました！再起動中...",
 		LangSpanish:            "✅ ¡Actualizado a **%s** con éxito! Reiniciando...",
+	},
+	MsgUpgradeInstalledUnverified: {
+		LangEnglish:            "⚠️ The npm install command completed, but version verification failed. Installed files may have changed; the running service has not been restarted. Check the installed version before restarting.\n\n%s",
+		LangChinese:            "⚠️ npm 安装命令已完成，但版本校验失败。磁盘上的文件可能已更新，当前服务尚未重启。请先检查已安装版本，再决定是否重启。\n\n%s",
+		LangTraditionalChinese: "⚠️ npm 安裝命令已完成，但版本驗證失敗。磁碟上的檔案可能已更新，目前服務尚未重新啟動。請先檢查已安裝版本，再決定是否重新啟動。\n\n%s",
+		LangJapanese:           "⚠️ npm のインストールコマンドは完了しましたが、バージョン検証に失敗しました。インストール済みのファイルは変更されている可能性があります。実行中のサービスは再起動されていません。再起動前にインストール済みのバージョンを確認してください。\n\n%s",
+		LangSpanish:            "⚠️ El comando npm de instalación terminó, pero falló la verificación de versión. Los archivos instalados pueden haber cambiado; el servicio en ejecución no se ha reiniciado. Comprueba la versión instalada antes de reiniciar.\n\n%s",
 	},
 	MsgUpgradeDevBuild: {
 		LangEnglish:            "⚠️ Running a dev build — version check is not available. Please build from source or install a release version.",

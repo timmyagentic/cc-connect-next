@@ -17105,7 +17105,11 @@ func (e *Engine) cmdUpgradeConfirmForChannel(p Platform, msg *Message, token str
 		if terminalUpdatePlanError(err) {
 			e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
 		}
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		messageKey := MsgError
+		if errors.Is(err, ErrUpdateInstalledUnverified) {
+			messageKey = MsgUpgradeInstalledUnverified
+		}
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(messageKey, err))
 		return
 	}
 	e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
