@@ -80,7 +80,7 @@ func (e *Engine) loadFeedbackStateLocked() {
 		slog.Warn("feedback: local state unavailable")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, feedbackStoreMaxBytes+1))
 	if err != nil || len(data) > feedbackStoreMaxBytes {
 		return
@@ -328,7 +328,7 @@ func (e *Engine) saveFeedbackState() error {
 		return err
 	}
 	temporary := file.Name()
-	defer os.Remove(temporary)
+	defer func() { _ = os.Remove(temporary) }()
 	if _, err = file.Write(data); err == nil {
 		err = file.Sync()
 	}

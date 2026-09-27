@@ -383,7 +383,7 @@ func (sm *SessionManager) GetOrCreateActive(userKey string) *Session {
 		}
 	}
 	s := sm.createLocked(userKey, "default")
-	sm.saveLocked()
+	_ = sm.saveLocked()
 	return s
 }
 
@@ -391,7 +391,7 @@ func (sm *SessionManager) NewSession(userKey, name string) *Session {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	s := sm.createLocked(userKey, name)
-	sm.saveLocked()
+	_ = sm.saveLocked()
 	return s
 }
 
@@ -411,7 +411,7 @@ func (sm *SessionManager) NewSideSession(userKey, name string) *Session {
 	}
 	sm.sessions[id] = s
 	sm.userSessions[userKey] = append(sm.userSessions[userKey], id)
-	sm.saveLocked()
+	_ = sm.saveLocked()
 	return s
 }
 
@@ -439,7 +439,7 @@ func (sm *SessionManager) SwitchSession(userKey, target string) (*Session, error
 		if s != nil && (s.ID == target || s.Name == target) {
 			sm.activeSession[userKey] = s.ID
 			s.MarkExplicitlyActivated()
-			sm.saveLocked()
+			_ = sm.saveLocked()
 			return s, nil
 		}
 	}
@@ -465,7 +465,7 @@ func (sm *SessionManager) SwitchToAgentSession(userKey, agentSID, agentName, sum
 		if aid == agentSID {
 			sm.activeSession[userKey] = s.ID
 			s.MarkExplicitlyActivated()
-			sm.saveLocked()
+			_ = sm.saveLocked()
 			return s
 		}
 	}
@@ -473,7 +473,7 @@ func (sm *SessionManager) SwitchToAgentSession(userKey, agentSID, agentName, sum
 	s := sm.createLocked(userKey, summary)
 	s.SetAgentInfo(agentSID, agentName, summary)
 	s.MarkExplicitlyActivated()
-	sm.saveLocked()
+	_ = sm.saveLocked()
 	return s
 }
 
@@ -506,7 +506,7 @@ func (sm *SessionManager) SetSessionName(agentSessionID, name string) {
 	} else {
 		sm.sessionNames[agentSessionID] = name
 	}
-	sm.saveLocked()
+	_ = sm.saveLocked()
 }
 
 // GetSessionName returns the custom name for an agent session, or "".
@@ -555,7 +555,7 @@ func (sm *SessionManager) UpdateReplyTarget(sessionKey string, target Persistent
 		sm.userMeta[sessionKey] = meta
 	}
 	meta.ReplyTarget = &copyTarget
-	sm.saveLocked()
+	_ = sm.saveLocked()
 }
 
 // GetReplyTarget returns a deep copy so callers cannot mutate persisted state
@@ -664,7 +664,7 @@ func (sm *SessionManager) DeleteByID(id string) bool {
 		return false
 	}
 	sm.deleteByIDLocked(id)
-	sm.saveLocked()
+	_ = sm.saveLocked()
 	return true
 }
 
@@ -690,7 +690,7 @@ func (sm *SessionManager) DeleteByAgentSessionID(agentSessionID string) int {
 		removed++
 	}
 	if removed > 0 {
-		sm.saveLocked()
+		_ = sm.saveLocked()
 	}
 	return removed
 }
@@ -714,9 +714,11 @@ func (sm *SessionManager) deleteByIDLocked(id string) {
 func (sm *SessionManager) Save() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	sm.saveLocked()
+	_ = sm.saveLocked()
 }
 
+// saveLocked logs persistence failures even when a caller retains its in-memory
+// changes. Transactional callers can also propagate the error.
 func (sm *SessionManager) saveLocked() error {
 	if sm.storePath == "" {
 		return nil
@@ -882,7 +884,7 @@ func (sm *SessionManager) InvalidateForAgent(agentType string) {
 		s.mu.Unlock()
 	}
 	if invalidated > 0 {
-		sm.saveLocked()
+		_ = sm.saveLocked()
 	}
 }
 
@@ -1040,7 +1042,7 @@ func (sm *SessionManager) PruneDuplicateSessions(mergeHistory bool) PruneResult 
 	}
 
 	if len(result.RemovedSessions) > 0 {
-		sm.saveLocked()
+		_ = sm.saveLocked()
 		slog.Info("session: prune complete",
 			"removed", len(result.RemovedSessions),
 			"merged_history", result.MergedHistory,
@@ -1069,7 +1071,7 @@ func (sm *SessionManager) PruneEmptySessions() int {
 	}
 
 	if removed > 0 {
-		sm.saveLocked()
+		_ = sm.saveLocked()
 		slog.Info("session: pruned empty sessions", "removed", removed)
 	}
 	return removed

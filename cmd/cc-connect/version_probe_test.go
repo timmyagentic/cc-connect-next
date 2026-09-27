@@ -72,12 +72,13 @@ func TestVersionProbeWithDaemonLoggingDoesNotTouchLogs(t *testing.T) {
 			if err := verifier.Verify(context.Background(), binary, "v1.2.3"); err != nil {
 				t.Errorf("old updater rejects new binary: %v", err)
 			}
-			if scenario == "existing log" {
+			switch scenario {
+			case "existing log":
 				data, err := os.ReadFile(logPath)
 				if err != nil || !bytes.Equal(data, original) {
 					t.Errorf("version probe changed log: %q, %v", data, err)
 				}
-			} else if scenario == "new log" {
+			case "new log":
 				if _, err := os.Stat(logPath); !os.IsNotExist(err) {
 					t.Errorf("version probe created log: %v", err)
 				}

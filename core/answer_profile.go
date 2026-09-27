@@ -83,10 +83,6 @@ func defaultTurnOptions(agent Agent) TurnOptions {
 	return options
 }
 
-func (e *Engine) resolveTurnOptions(agent Agent, profile AnswerProfileName, serviceTier ...string) (TurnOptions, error) {
-	return e.applyTurnOverrides(defaultTurnOptions(agent), profile, serviceTier...)
-}
-
 func turnDefaults(agent Agent, session AgentSession) TurnOptions {
 	options := defaultTurnOptions(agent)
 	if provider, ok := session.(TurnDefaultsProvider); ok {
