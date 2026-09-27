@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve the initiating request and bounded, redacted turn diagnostics in
+  feedback after long tasks, backend failures and host restart. Keep existing
+  chat commands, cards and confirmation steps; persist approved report IDs and
+  Relay receipts so retries do not blindly create duplicate issues. Requires
+  the dual v1/v2 Relay and SQLite migration before the new client is released.
+
 - Add opt-in Feishu/Lark recent discussion context on explicit group mentions,
   with separate chat/topic reads, sender/time/reply attribution, bounded history
   access, successful-turn deduplication and clear incomplete-context notices.

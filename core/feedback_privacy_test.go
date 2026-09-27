@@ -9,7 +9,7 @@ import (
 func TestFeedbackProactiveOfferBindsInitiatingUserInSharedSession(t *testing.T) {
 	engine, platform := newFeedbackTestEngine(t)
 	const key = "feishu:shared-chat:root:topic"
-	engine.recordFeedbackError(key, "the owner's diagnostic context")
+	engine.recordFeedbackError(key, "owner-user", "the owner's diagnostic context")
 	submitted := captureFeedbackSubmissions(engine)
 	engine.maybeSendFeedbackErrorHint(platform, "reply", key, "owner-user", nil)
 	token := feedbackSubmitTokenFromText(t, strings.Join(platform.sentTexts(), "\n"))
@@ -47,7 +47,7 @@ func TestFeedbackContextRejectsUnknownOrFutureHistoryTimestamps(t *testing.T) {
 		session.mu.Lock()
 		session.History[0].Timestamp = timestamp
 		session.mu.Unlock()
-		draft, err := engine.buildFeedbackDraft(key, "explicit feedback", nil)
+		draft, err := engine.buildFeedbackDraft(key, "ou_user", "explicit feedback", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -59,7 +59,7 @@ func TestFeedbackContextRejectsUnknownOrFutureHistoryTimestamps(t *testing.T) {
 
 func TestFeedbackErrorOfferRequiresKnownInitiatingUser(t *testing.T) {
 	engine, platform := newFeedbackTestEngine(t)
-	engine.recordFeedbackError("test:shared-topic", "private error")
+	engine.recordFeedbackError("test:shared-topic", "ou_user", "private error")
 	engine.maybeSendFeedbackErrorHint(platform, "reply", "test:shared-topic", "", nil)
 	if len(platform.sentTexts()) != 0 {
 		t.Fatal("an ownerless error offer was sent")

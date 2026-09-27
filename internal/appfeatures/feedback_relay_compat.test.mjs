@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, test } from "node:test";
+import { readFileSync } from "node:fs";
 
 import worker from "../../feedback-relay/src/compat.js";
+import {reportHash, submitReport} from "../../feedback-relay/src/diagnostic.js";
 
 let originalFetch;
 let calls;
@@ -38,6 +40,7 @@ after(() => {
 });
 
 function relayEnv() {
+  const records = new Map();
   return {
     GITHUB_APP_ID: "123",
     GITHUB_APP_INSTALLATION_ID: "456",
@@ -45,6 +48,17 @@ function relayEnv() {
     GITHUB_REPO: "timmyagentic/cc-connect-next",
     GITHUB_LABEL: "user-feedback",
     RATE_LIMITER: {async limit() { return {success: true}; }},
+    FEEDBACK_REPORTS: {getByName(name) {
+      return {async submit(value, token) {
+        const store = {
+          async get() { return records.get(name); },
+          async put(record) { records.set(name, structuredClone(record)); },
+        };
+        return submitReport(store, value, (path, init) => fetch(`https://api.github.com${path}`, {
+          ...init, headers: {...init?.headers, authorization: `Bearer ${token}`}, redirect: "manual",
+        }), "timmyagentic/cc-connect-next", "user-feedback", await reportHash(value));
+      }};
+    }},
   };
 }
 
@@ -280,4 +294,50 @@ test("rejects missing App configuration and malformed successful token responses
   } finally {
     console.error = originalConsoleError;
   }
+});
+
+function diagnosticRequest(value) {
+  return new Request("https://relay.example/v2/feedback", {
+    method: "POST", headers: {"content-type": "application/json", "cf-connecting-ip": "192.0.2.7"}, body: JSON.stringify(value),
+  });
+}
+
+test("v2 approval and rate checks precede App authentication and durable dispatch", async () => {
+  const value = {schema: 2, user_approved: true, report_id: "1234567890abcdef1234567890abcdef", environment: {product: "cc-connect-next"}, description: "owned report"};
+  const env = relayEnv();
+  let limits = 0;
+  env.RATE_LIMITER = {async limit({key}) { assert.equal(key, "ip:192.0.2.7"); limits++; return {success: false}; }};
+  assert.equal((await worker.fetch(diagnosticRequest({...value, user_approved: false}), env)).status, 400);
+  assert.equal((await worker.fetch(diagnosticRequest({...value, body: "untrusted content"}), env)).status, 400);
+  assert.equal(limits, 0);
+  assert.equal((await worker.fetch(diagnosticRequest(value), env)).status, 429);
+  assert.equal(limits, 1);
+  assert.equal(calls.length, 0);
+});
+
+test("the long-turn CUJ approved payload reaches the GitHub issue intact and retries once per report", {skip: !process.env.CCN_FEEDBACK_CUJ_PAYLOAD}, async () => {
+  const payload = JSON.parse(readFileSync(process.env.CCN_FEEDBACK_CUJ_PAYLOAD, "utf8"));
+  assert.equal(payload.schema, 2);
+  assert.equal(payload.user_approved, true);
+  assert.equal(payload.environment.version, "v0.0.0-feedback-test");
+  assert.equal(payload.diagnostic.request, "Find why the overnight export never finishes");
+  assert.ok(Date.parse(payload.diagnostic.occurred_at) - Date.parse(payload.diagnostic.started_at) >= 2 * 60 * 60 * 1000);
+  const env = relayEnv();
+  let limits = 0;
+  env.RATE_LIMITER = {async limit() { limits++; return {success: true}; }};
+  const first = await worker.fetch(diagnosticRequest(payload), env);
+  assert.equal(first.status, 200, await first.clone().text());
+  const repeated = await worker.fetch(diagnosticRequest(payload), env);
+  assert.equal(repeated.status, 200);
+  assert.equal((await repeated.json()).deduplicated, true);
+  assert.equal(limits, 2, "the host and Foundation double-charged a single request");
+  const issueRequests = calls.filter(call => call.url.endsWith("/repos/timmyagentic/cc-connect-next/issues"));
+  assert.equal(issueRequests.length, 1);
+  const issue = JSON.parse(issueRequests[0].init.body);
+  for (const text of ["Original request", payload.diagnostic.request, "max_turn_time", '"phase": "agent_error"', payload.environment.version, payload.report_id]) {
+    assert.ok(issue.body.includes(text), `missing diagnostic content: ${text}`);
+  }
+  assert.doesNotMatch(issue.body, /INJECTED_CONTEXT_MUST_STAY_PRIVATE|test:alice/);
+  assert.equal((await worker.fetch(diagnosticRequest({...payload, description: "mutated approval"}), env)).status, 409);
+  assert.equal(calls.filter(call => call.url.endsWith("/repos/timmyagentic/cc-connect-next/issues")).length, 1);
 });

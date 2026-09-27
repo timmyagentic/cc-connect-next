@@ -2248,6 +2248,7 @@ func TestCUJ_G4_AgentCrashReturnsErrorAndRecovers(t *testing.T) {
 // redacted Draft immediately. No preview or second confirmation is shown, and
 // the visible result never exposes the Relay reference URL.
 func TestCUJ_J1_FeedbackExplicitTriggerSubmitsDirectly(t *testing.T) {
+	t.Run("long turn retains original context after new conversation", TestFeedbackLongTurnKeepsOriginalRequestAfterHistoryWindowExpires)
 	env := newCUJEnv(t)
 	env.engine.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
 	previousVersion := CurrentVersion
@@ -2269,7 +2270,7 @@ func TestCUJ_J1_FeedbackExplicitTriggerSubmitsDirectly(t *testing.T) {
 		env.userSends("feedback", "/feedback "+description)
 		select {
 		case report := <-submitted:
-			if !strings.Contains(report.Description, description) || !strings.Contains(report.Description, "Related diagnostic context") || !strings.Contains(report.Description, "LatestStable") || !strings.Contains(report.Description, "[REDACTED") {
+			if report.Description != description || report.Diagnostic != nil {
 				t.Fatalf("explicit Feedback submitted the wrong Draft: %#v", report)
 			}
 			if strings.Contains(report.Description, "private-value") || strings.Contains(report.Description, "/Users/private") {
@@ -2316,8 +2317,8 @@ func TestCUJ_J1_FeedbackExplicitTriggerSubmitsDirectly(t *testing.T) {
 		}
 
 		// A user can still report an incorrectly detected limit, with the
-		// original diagnostic attached to their explicit report.
-		env.userSends("quota-user", "/feedback the allowance should not be exhausted")
+		// original diagnostic attached by the existing bare command.
+		env.userSends("quota-user", "/feedback")
 		select {
 		case report := <-submitted:
 			if report.RecentError == nil || report.RecentError.Text != ErrUsageLimit.Error() {
@@ -2371,7 +2372,7 @@ func TestCUJ_J1_FeedbackExplicitTriggerSubmitsDirectly(t *testing.T) {
 			t.Fatal("login failure submitted feedback automatically")
 		default:
 		}
-		env.userSends("auth-user", "/feedback login diagnosis seems wrong")
+		env.userSends("auth-user", "/feedback")
 		select {
 		case report := <-submitted:
 			if report.RecentError == nil || report.RecentError.Text != ErrAuthenticationRequired.Error() {

@@ -165,6 +165,7 @@ func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files
 		prompt = prependCodexPromptPreamble(prompt, cs.promptPreamble)
 	}
 	args := cs.launchArgsWithTurnOptions(prompt, imagePaths, options)
+	cs.storeActiveTurnOptions(options)
 
 	bin := cs.cmd
 	if bin == "" {
@@ -192,7 +193,6 @@ func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("codexSession: start: %w", err)
 	}
-	cs.storeActiveTurnOptions(options)
 	cs.addCmd(cmd)
 
 	cs.wg.Add(1)

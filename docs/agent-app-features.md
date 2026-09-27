@@ -3,16 +3,18 @@
 [中文](agent-app-features.zh-CN.md)
 
 CC Connect Next consumes `github.com/timmyagentic/awesome-agent-app-features`
-at immutable version `v0.1.2` and source commit
-`9daaa15dcaf4512ce655c733264713d4d1eb72b6`. There is no local `replace`,
-submodule, or floating `main` dependency. This version is the published Foundation `v0.1.2` patch release.
+at immutable version `v0.1.3-0.20260927093303-0ab8c151f755` and source commit
+`0ab8c151f755080560eecf040f875a3e4413fd70`. There is no local `replace`,
+submodule, or floating `main` dependency. This is a CI-verified development
+commit, not a published release tag. Feedback and Updater use the same module.
 
 ## Feedback
 
 CC Connect Next owns the command, cards, text fallback, localization, recent
-error selection, capability-gap prompts, and public fallback URL. The
-Foundation owns the structured report, allowlisted environment, redaction and
-bounds, opaque approval value, and no-redirect HTTP client.
+selection, capability-gap prompts, and public fallback URL. The Foundation
+owns the versioned diagnostic report, allowlisted fields, redaction and bounds,
+opaque approval value, and no-redirect HTTP client. The additive
+`feedback/diagnostic` package and `/v2/feedback` preserve the original v1 API.
 
 1. An explicit `/feedback <description>` command or Feedback card action builds
    a fully redacted Draft, calls `Approve(true)`, and submits it immediately.
@@ -22,18 +24,40 @@ bounds, opaque approval value, and no-redirect HTTP client.
    sessions; an unknown user suppresses the offer. Capability-gap notices contain
    only generic capability metadata, so a participant in the same session may
    submit them. Expiry, replay, or a mismatched session/required user fails closed.
-   Adjacent diagnostic messages must have a known timestamp within the recent
-   context window; unknown, future, and stale timestamps are excluded.
+   Tokens retain their existing ten-minute lifetime and one-use semantics.
 3. The Manifest-declared local-Agent CLI uses the same builder and submit
    function. A live HMAC turn credential resolves trusted project/session/user
    state; `feedback preview` exposes a JSON-safe projection with no request,
    and `feedback submit` accepts only its one-time session/user-bound token.
    The CLI cannot supply routing, forge an inbound message, or select a schema
    fallback.
-4. The Relay owns GitHub repository selection, title/body rendering, label,
-   token, rate limiting, and best-effort deduplication. Quoted JSON/config keys,
+4. The host captures the initiating user's original text before enrichment or
+   Agent startup. Failures freeze the request, phase, runtime options, bounded
+   activity and transport facts before cleanup. Long turns no longer depend on
+   a recent-history window. Queues and accepted steering preserve ownership;
+   other participants' input and answers are excluded. Arbitrary history,
+   tool arguments/results, raw protocol events, credentials and configuration
+   maps are never collected. Unsupported backend fields are explicitly missing.
+5. Local redacted snapshots retain up to 20 turns and 64 pending/approved
+   submissions per project, bounded by 10 MiB. Frozen turns and approved records
+   expire after 72 hours; active turns survive that age boundary. Atomic files
+   under `data_dir/run/feedback` use mode 0600 and hashed routing identities.
+   Restart restores exact pending drafts, marks unfinished turns as interrupted
+   with an unknown backend outcome, and never resumes a network submission.
+6. An approved report retains its random ID and exact payload across bounded
+   retries and restart. The Relay persists dispatch intent and confirmed receipts
+   in a SQLite-backed Durable Object before responding. A lost create response
+   permits receipt reconciliation but no second blind issue creation. Empty
+   GitHub search results do not prove that a prior POST failed. Existing chat
+   success/failure wording and card behavior remain unchanged.
+
+The Relay owns repository selection, issue rendering, label, authentication and
+rate limiting. Quoted JSON/config keys,
    escaped values, prefixed credentials, cookies, URL credentials, and host
-   identifiers are redacted before previews, truncation, and submission.
+identifiers are redacted before local storage, previews, truncation and submission.
+The Codex adapter exposes cached request options, EOF/read state, queue/drop
+counters and terminal-received versus terminal-delivered facts without extra
+CLI or network calls. Other adapters degrade through the optional interface.
 
 ## Updates
 
@@ -64,7 +88,9 @@ than one Plan is pending.
 repository are host mappings; the Rate Limiting namespace remains a dry-run
 placeholder until an operator performs a separately authorized deployment.
 
-The host-owned Wrangler entrypoint is `src/compat.js`. It passes new structured
+The host-owned Wrangler entrypoint is `src/worker.js`, which exports the
+Foundation Durable Object and delegates HTTP authentication to `src/compat.js`.
+It passes new structured
 requests to the byte-identical Foundation Relay and translates only the exact
 legacy CC Connect schema-1 shape first, discarding `install_id` and retaining
 server-owned destination/rendering. This permits deploying the Worker before
@@ -72,6 +98,13 @@ releasing the new client without breaking existing installations. Invalid UTF-8
 is rejected before token exchange. GitHub App token exchange and Foundation
 GitHub API requests disable automatic redirects and reject redirect responses,
 so authorization cannot follow a redirect to another origin.
+
+Deploy the dual v1/v2 Relay and its `FEEDBACK_REPORTS` SQLite migration before
+releasing a client that sends v2. Existing configured `/v1/feedback` URLs are
+upgraded to the same origin's `/v2/feedback` internally; users need no new
+configuration or commands. There is no schema downgrade or alternate POST on
+rejection. Production deployment and real messaging-client validation remain
+separate, unverified boundaries until explicitly exercised.
 
 Run all Relay commands from `feedback-relay/`; do not use an external absolute
 `npm --prefix` invocation as a substitute for testing the final target.
@@ -84,10 +117,10 @@ Validate it against a temporary full extraction of the same source commit:
 
 ```bash
 GOWORK=off go run \
-  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@9daaa15dcaf4512ce655c733264713d4d1eb72b6 \
+  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@0ab8c151f755080560eecf040f875a3e4413fd70 \
   validate \
   --source "$EXACT_SOURCE_ROOT" \
-  --source-commit 9daaa15dcaf4512ce655c733264713d4d1eb72b6 \
+  --source-commit 0ab8c151f755080560eecf040f875a3e4413fd70 \
   --host "$CC_CONNECT_NEXT_ROOT" \
   --lock "$CC_CONNECT_NEXT_ROOT/agent-app-features.lock.json"
 ```

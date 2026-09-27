@@ -32,7 +32,6 @@ const (
 	feedbackPendingMax        = 64
 	feedbackErrorHintCooldown = 10 * time.Minute
 	feedbackErrorAttachWindow = 30 * time.Minute
-	feedbackContextWindow     = 15 * time.Minute
 )
 
 type feedbackError struct {
@@ -56,6 +55,9 @@ func (e *Engine) SetFeedbackConfig(enabled bool, endpoint string) {
 	defer e.feedbackMu.Unlock()
 	e.feedbackEnabled = enabled
 	e.feedbackEndpoint = strings.TrimSpace(endpoint)
+	if enabled {
+		e.loadFeedbackStateLocked()
+	}
 }
 
 // SetFeedbackCapabilityGaps records config keys this build does not consume;
@@ -109,12 +111,12 @@ func (e *Engine) cmdFeedback(platform Platform, message *Message, raw string) {
 		return
 	}
 
-	draft, err := e.buildFeedbackDraft(key, argument, nil)
+	draft, err := e.buildFeedbackDraft(key, message.UserID, argument, nil)
 	if err != nil {
 		e.reply(platform, message.ReplyCtx, e.i18n.T(MsgFeedbackUsage))
 		return
 	}
-	_, err = e.submitFeedbackDraft(e.ctx, draft)
+	_, err = e.submitFeedbackDraft(e.ctx, draft, key, message.UserID)
 	e.deliverFeedbackSubmitResult(platform, message, err == nil)
 }
 
@@ -146,91 +148,42 @@ func isLegacyFeedbackControl(argument string) bool {
 	}
 }
 
-func (e *Engine) buildFeedbackDraft(sessionKey, description string, overrideGaps []string) (appfeatures.FeedbackDraft, error) {
+func (e *Engine) buildFeedbackDraft(sessionKey, userID, description string, overrideGaps []string) (appfeatures.FeedbackDraft, error) {
+	key := e.feedbackContextKey(sessionKey, userID)
 	e.feedbackMu.Lock()
 	var recent *feedbackError
-	if value := e.feedbackErrors[sessionKey]; value != nil {
-		copy := *value
-		recent = &copy
+	if description == "" && userID != "" {
+		if value := e.feedbackErrors[key]; value != nil {
+			copy := *value
+			recent = &copy
+		}
 	}
 	gaps := append([]string(nil), e.feedbackGapKeys...)
 	e.feedbackMu.Unlock()
 	if overrideGaps != nil {
 		gaps = append([]string(nil), overrideGaps...)
 	}
-	if recent != nil && time.Since(recent.At) > feedbackErrorAttachWindow {
-		recent = nil
+	diagnostic, version, agent := e.feedbackDiagnosticFor(sessionKey, userID, description)
+	if recent != nil && diagnostic != nil && diagnostic.Error == "" && recent.At.After(diagnostic.OccurredAt) {
+		// An unbound late error cannot borrow the previous successful answer.
+		diagnostic = nil
 	}
-
-	previousUser, previousAssistant := e.feedbackRelatedContext(sessionKey)
-	input := appfeatures.FeedbackContext{
-		Description:               description,
-		PreviousUserMessage:       previousUser,
-		PreviousAssistantResponse: previousAssistant,
-		CapabilityGaps:            gaps,
-		Version:                   CurrentVersion,
-		Agent:                     e.agent.Name(),
+	if diagnostic == nil {
+		version, agent = CurrentVersion, e.agent.Name()
 	}
-	if recent != nil {
+	input := appfeatures.FeedbackContext{Description: description, CapabilityGaps: gaps, Version: version, Agent: agent, Diagnostic: diagnostic}
+	if diagnostic != nil && diagnostic.Error != "" {
+		input.RecentError = diagnostic.Error
+		input.RecentErrorAt = diagnostic.OccurredAt
+	} else if recent != nil && time.Since(recent.At) <= feedbackErrorAttachWindow {
 		input.RecentError = recent.Text
 		input.RecentErrorAt = recent.At
 	}
-	return appfeatures.BuildFeedbackDraft(input)
-}
-
-func (e *Engine) feedbackRelatedContext(sessionKey string) (previousUser, previousAssistant string) {
-	if strings.TrimSpace(sessionKey) == "" {
-		return "", ""
+	draft, err := appfeatures.BuildFeedbackDraft(input)
+	if err != nil {
+		return draft, err
 	}
-	_, sessions := e.sessionContextForKey(sessionKey)
-	if sessions == nil {
-		return "", ""
-	}
-	activeID := sessions.ActiveSessionID(sessionKey)
-	if activeID == "" {
-		return "", ""
-	}
-	session := sessions.FindByID(activeID)
-	if session == nil {
-		return "", ""
-	}
-	entries := session.GetHistory(8)
-	now := time.Now()
-	latestIndex := -1
-	for index := len(entries) - 1; index >= 0; index-- {
-		entry := entries[index]
-		if entry.Timestamp.IsZero() || entry.Timestamp.After(now) || now.Sub(entry.Timestamp) > feedbackContextWindow {
-			continue
-		}
-		content := strings.TrimSpace(entry.Content)
-		if content == "" || strings.HasPrefix(strings.ToLower(content), "/feedback") {
-			continue
-		}
-		if entry.Role == "assistant" || entry.Role == "user" {
-			latestIndex = index
-			break
-		}
-	}
-	if latestIndex < 0 {
-		return "", ""
-	}
-	latest := entries[latestIndex]
-	if latest.Role == "user" {
-		return strings.TrimSpace(latest.Content), ""
-	}
-	previousAssistant = strings.TrimSpace(latest.Content)
-	for index := latestIndex - 1; index >= 0; index-- {
-		entry := entries[index]
-		if entry.Timestamp.IsZero() || entry.Timestamp.After(now) || now.Sub(entry.Timestamp) > feedbackContextWindow {
-			continue
-		}
-		content := strings.TrimSpace(entry.Content)
-		if entry.Role == "user" && content != "" && !strings.HasPrefix(strings.ToLower(content), "/feedback") {
-			previousUser = content
-			break
-		}
-	}
-	return previousUser, previousAssistant
+	return e.reuseFeedbackSubmission(sessionKey, userID, draft), nil
 }
 
 func (e *Engine) rememberPendingFeedback(sessionKey, userID string, draft appfeatures.FeedbackDraft) (string, error) {
@@ -257,8 +210,9 @@ func (e *Engine) rememberPendingFeedbackForCaller(sessionKey, userID string, age
 		e.evictOldestFeedbackLocked()
 	}
 	e.feedbackPending[token] = pendingFeedback{
-		Draft: draft, At: now, SessionKey: sessionKey, UserID: userID, AgentOnly: agentOnly,
+		Draft: draft, At: now, SessionKey: e.feedbackBinding(sessionKey, ""), UserID: e.feedbackPendingUser(userID), AgentOnly: agentOnly,
 	}
+	e.scheduleFeedbackSaveLocked()
 	return token, now.Add(feedbackPendingTTL), nil
 }
 
@@ -274,7 +228,10 @@ func (e *Engine) takePendingFeedback(sessionKey, userID, token string) (appfeatu
 	if !exists {
 		return appfeatures.FeedbackDraft{}, false
 	}
-	if pending.AgentOnly || pending.SessionKey != sessionKey || (pending.UserID != "" && pending.UserID != userID) {
+	if pending.AgentOnly || pending.SessionKey != e.feedbackBinding(sessionKey, "") || (pending.UserID != "" && pending.UserID != e.feedbackPendingUser(userID)) {
+		return appfeatures.FeedbackDraft{}, false
+	}
+	if err := e.rememberApprovedFeedbackLocked(sessionKey, userID, pending.Draft); err != nil {
 		return appfeatures.FeedbackDraft{}, false
 	}
 	e.deletePendingFeedbackLocked(token)
@@ -285,13 +242,21 @@ func (e *Engine) clearPendingFeedback(sessionKey, userID, token string) {
 	e.feedbackMu.Lock()
 	defer e.feedbackMu.Unlock()
 	e.prunePendingFeedbackLocked(time.Now())
-	if pending, exists := e.feedbackPending[token]; exists && !pending.AgentOnly && pending.SessionKey == sessionKey && (pending.UserID == "" || pending.UserID == userID) {
+	if pending, exists := e.feedbackPending[token]; exists && !pending.AgentOnly && pending.SessionKey == e.feedbackBinding(sessionKey, "") && (pending.UserID == "" || pending.UserID == e.feedbackPendingUser(userID)) {
 		e.deletePendingFeedbackLocked(token)
 	}
 }
 
 func (e *Engine) deletePendingFeedbackLocked(token string) {
 	delete(e.feedbackPending, token)
+	e.scheduleFeedbackSaveLocked()
+}
+
+func (e *Engine) feedbackPendingUser(userID string) string {
+	if userID == "" {
+		return ""
+	}
+	return e.feedbackBinding("", userID)
 }
 
 func (e *Engine) prunePendingFeedbackLocked(now time.Time) {
@@ -326,7 +291,7 @@ func (e *Engine) submitPendingFeedback(platform Platform, message *Message, sess
 		return
 	}
 
-	_, err := e.submitFeedbackDraft(e.ctx, draft)
+	_, err := e.submitFeedbackDraft(e.ctx, draft, sessionKey, userID)
 	e.deliverFeedbackSubmitResult(platform, message, err == nil)
 }
 
@@ -394,16 +359,28 @@ func (e *Engine) deliverFeedbackOffer(platform Platform, replyCtx any, token str
 	return e.replyWithError(platform, replyCtx, text)
 }
 
-func (e *Engine) recordFeedbackError(sessionKey, errText string) {
+func (e *Engine) recordFeedbackError(sessionKey, userID, errText string) {
 	if !e.feedbackActive() || strings.TrimSpace(errText) == "" {
 		return
 	}
+	key := e.feedbackContextKey(sessionKey, userID)
 	e.feedbackMu.Lock()
 	defer e.feedbackMu.Unlock()
 	if e.feedbackErrors == nil {
 		e.feedbackErrors = make(map[string]*feedbackError)
 	}
-	e.feedbackErrors[sessionKey] = &feedbackError{Text: errText, At: time.Now()}
+	bounded := appfeatures.CaptureFeedbackDiagnostic(appfeatures.FeedbackDiagnostic{Error: errText}).Error
+	e.feedbackErrors[key] = &feedbackError{Text: bounded, At: time.Now()}
+	for len(e.feedbackErrors) > feedbackPendingMax {
+		oldestKey := ""
+		var oldest time.Time
+		for candidate, value := range e.feedbackErrors {
+			if oldestKey == "" || value.At.Before(oldest) {
+				oldestKey, oldest = candidate, value.At
+			}
+		}
+		delete(e.feedbackErrors, oldestKey)
+	}
 }
 
 func (state *interactiveState) feedbackIdentity() (sessionKey, userID string) {
@@ -441,7 +418,7 @@ func (e *Engine) maybeSendFeedbackErrorHint(platform Platform, replyCtx any, ses
 		return
 	}
 
-	draft, err := e.buildFeedbackDraft(sessionKey, "", nil)
+	draft, err := e.buildFeedbackDraft(sessionKey, userID, "", nil)
 	if err != nil {
 		return
 	}
@@ -459,7 +436,7 @@ func (e *Engine) NotifyCapabilityGap(keys []string) bool {
 	if !e.feedbackActive() || len(keys) == 0 {
 		return false
 	}
-	draft, err := e.buildFeedbackDraft("", "", keys)
+	draft, err := e.buildFeedbackDraft("", "", "", keys)
 	if err != nil {
 		return false
 	}

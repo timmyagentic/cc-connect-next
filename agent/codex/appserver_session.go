@@ -208,6 +208,7 @@ type appServerSession struct {
 
 	runtimeMu   sync.RWMutex
 	turnOptions *core.TurnOptions
+	diagnostics appServerDiagnostics
 }
 
 const (
@@ -519,6 +520,7 @@ func (s *appServerSession) send(prompt string, images []core.ImageAttachment, fi
 	}
 
 	params := s.turnStartParams(threadID, input, options)
+	s.beginTurnDiagnostic(params)
 
 	var resp turnStartResponse
 	if err := s.request("turn/start", params, &resp); err != nil {
@@ -1247,14 +1249,17 @@ func (s *appServerSession) Close() error {
 
 func (s *appServerSession) readLoop(r io.Reader) {
 	defer s.wg.Done()
+	s.observeProtocolRead("reading", false)
 	scanner := bufio.NewScanner(r)
 	scanBuf := make([]byte, 0, 64*1024)
 	const maxLineSize = 10 * 1024 * 1024 // 10MB
 	scanner.Buffer(scanBuf, maxLineSize)
 
 	for scanner.Scan() {
+		s.observeProtocolRead("reading", true)
 		select {
 		case <-s.ctx.Done():
+			s.observeProtocolRead("cancelled", false)
 			return
 		default:
 		}
@@ -1297,6 +1302,7 @@ func (s *appServerSession) readLoop(r io.Reader) {
 
 	err := scanner.Err()
 	if err != nil {
+		s.observeProtocolRead("error", false)
 		if s.ctx.Err() == nil && !errors.Is(err, io.EOF) {
 			slog.Warn("codex app-server read failed", "error", err)
 			if errors.Is(err, bufio.ErrTooLong) {
@@ -1311,6 +1317,7 @@ func (s *appServerSession) readLoop(r io.Reader) {
 		return
 	}
 
+	s.observeProtocolRead("eof", false)
 	s.alive.Store(false)
 	s.rejectPending(io.EOF)
 	s.rejectPendingApprovals(io.EOF)
@@ -1344,6 +1351,11 @@ func (s *appServerSession) waitLoop() {
 	}
 
 	err := cmd.Wait()
+	if cmd.ProcessState != nil {
+		s.diagnostics.mu.Lock()
+		s.diagnostics.exitCode = diagnosticPointer(cmd.ProcessState.ExitCode())
+		s.diagnostics.mu.Unlock()
+	}
 	if s.ctx.Err() == nil && err != nil {
 		slog.Warn("codex app-server exited unexpectedly", "error", err)
 		s.emitError(fmt.Errorf("codex app-server exited: %w", err))
@@ -1402,6 +1414,7 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 	case "turn/completed":
 		var notif turnNotification
 		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsActiveTurn(method, notif.ThreadID, notif.Turn.ID) {
+			s.observeTerminalProtocol()
 			if notif.Turn.Error != nil && strings.TrimSpace(notif.Turn.Error.Message) != "" {
 				s.failTurn(classifyCodexError(fmt.Errorf("%s", notif.Turn.Error.Message)))
 				return
@@ -1417,6 +1430,7 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 			} `json:"status"`
 		}
 		if err := json.Unmarshal(paramsRaw, &notif); err == nil && notif.Status.Type == "idle" && s.ownsThread(method, notif.ThreadID) {
+			s.observeTerminalProtocol()
 			// In codex 0.125+, thread going idle signals turn completion.
 			s.completeTurn()
 		}
@@ -1759,9 +1773,17 @@ func (s *appServerSession) flushPendingAsText() {
 }
 
 func (s *appServerSession) emit(event core.Event) {
+	s.diagnostics.mu.Lock()
+	defer s.diagnostics.mu.Unlock()
+	queued := len(s.events)
 	select {
 	case s.events <- event:
+		s.diagnostics.highWater = max(s.diagnostics.highWater, min(cap(s.events), queued+1))
+		if event.Type == core.EventResult || event.Type == core.EventError || event.Done {
+			s.diagnostics.terminalDelivered = true
+		}
 	default:
+		s.diagnostics.dropped++
 		slog.Warn("codex appserver: event channel full, dropping event", "type", event.Type)
 	}
 }

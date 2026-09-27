@@ -56,7 +56,7 @@ func TestAgentFeedbackRequiresPreviewAndSubmitsExactDraftOnce(t *testing.T) {
 	if preview.Schema != AgentFeedbackAPISchema || preview.Status != AgentFeedbackStatusApprovalRequired || preview.ApprovalToken == "" {
 		t.Fatalf("preview envelope = %#v", preview)
 	}
-	if preview.Draft.Description != "Agent needs a supported feedback tool" ||
+	if !strings.HasPrefix(preview.Draft.Description, "Agent needs a supported feedback tool\n") ||
 		preview.Draft.Environment.Product != "cc-connect-next" ||
 		len(preview.Draft.CapabilityGaps) != 1 ||
 		preview.Draft.CapabilityGaps[0] != "first.gap" {
@@ -67,7 +67,7 @@ func TestAgentFeedbackRequiresPreviewAndSubmitsExactDraftOnce(t *testing.T) {
 	}
 
 	engine.SetFeedbackCapabilityGaps([]string{"later.gap"})
-	engine.recordFeedbackError("feishu:d:chat:ou_user", "later error")
+	engine.recordFeedbackError("feishu:d:chat:ou_user", "ou_user", "later error")
 	receipt, err := engine.SubmitAgentFeedback(context.Background(), state.restartTurnToken, preview.ApprovalToken)
 	if err != nil {
 		t.Fatalf("SubmitAgentFeedback() error = %v", err)
@@ -80,7 +80,7 @@ func TestAgentFeedbackRequiresPreviewAndSubmitsExactDraftOnce(t *testing.T) {
 		t.Fatalf("Relay calls/reports = %d/%d", *calls, len(*reports))
 	}
 	report := (*reports)[0]
-	if report.Description != preview.Draft.Description || len(report.CapabilityGaps) != 1 ||
+	if agentFeedbackDraftPreview(report).Description != preview.Draft.Description || len(report.CapabilityGaps) != 1 ||
 		report.CapabilityGaps[0] != "first.gap" || report.RecentError != nil {
 		t.Fatalf("submitted Draft drifted after preview: %#v", report)
 	}

@@ -299,6 +299,9 @@ type LocationAttachment struct {
 
 // Message represents a unified incoming message from any platform.
 type Message struct {
+	feedbackText    string // captured before aliases, quotes and injected context
+	feedbackTextSet bool
+
 	SessionKey   string // unique key for user context, e.g. "feishu:{chatID}:{userID}"
 	Platform     string
 	MessageID    string // platform message ID for tracing

@@ -1,9 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cc-connect-feedback",
-  "main": "src/compat.js",
+  "main": "src/worker.js",
   "compatibility_date": "2026-08-30",
   "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{"name": "FEEDBACK_REPORTS", "class_name": "FeedbackReport"}]
+  },
+  "migrations": [{"tag": "feedback-reports-v1", "new_sqlite_classes": ["FeedbackReport"]}],
   "vars": {
     "GITHUB_REPO": "timmyagentic/cc-connect-next",
     "GITHUB_LABEL": "user-feedback",

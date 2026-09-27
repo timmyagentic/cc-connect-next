@@ -4,7 +4,9 @@ package appfeatures
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/url"
 	"regexp"
 	"runtime"
 	"strings"
@@ -12,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	featurefeedback "github.com/timmyagentic/awesome-agent-app-features/feedback"
+	featurediagnostic "github.com/timmyagentic/awesome-agent-app-features/feedback/diagnostic"
 	featurehttp "github.com/timmyagentic/awesome-agent-app-features/feedback/httpclient"
 )
 
@@ -22,14 +25,32 @@ var (
 	ccConnectKnownIDRE      = regexp.MustCompile(`\b(?:ou|oc|om|on|cli)_[0-9A-Za-z_-]{8,}\b`)
 )
 
-type FeedbackDraft = featurefeedback.Draft
-type FeedbackReport = featurefeedback.Report
+type FeedbackDraft = featurediagnostic.Draft
+type FeedbackReport = featurediagnostic.Report
 type FeedbackReceipt = featurehttp.Receipt
+type FeedbackDiagnostic = featurediagnostic.Diagnostic
+type FeedbackActivity = featurediagnostic.Activity
+type FeedbackRuntime = featurediagnostic.Runtime
+type FeedbackTransport = featurediagnostic.Transport
+
+// A protocol rejection proves this request was not accepted. Timeouts and
+// server failures do not: the remote issue may already exist.
+func FeedbackDefinitelyRejected(err error) bool {
+	var response *featurehttp.ResponseError
+	if !errors.As(err, &response) {
+		return false
+	}
+	switch response.StatusCode {
+	case 400, 401, 403, 404, 409, 413, 422, 429:
+		return true
+	}
+	return false
+}
 
 // FeedbackContext is the complete allowlist of host state that may enter a
-// feedback draft. It permits only two explicitly bounded adjacent-message
-// fields, never an arbitrary transcript, environment, card payload, tool event,
-// or credential-bearing configuration map.
+// feedback draft. It permits an owned, bounded turn diagnostic, never an
+// arbitrary transcript, environment, card payload, tool event or credential-
+// bearing configuration map. The adjacent-text fields remain for legacy callers.
 type FeedbackContext struct {
 	Description               string
 	PreviousUserMessage       string
@@ -39,9 +60,10 @@ type FeedbackContext struct {
 	CapabilityGaps            []string
 	Version                   string
 	Agent                     string
+	Diagnostic                *FeedbackDiagnostic
 }
 
-// BuildFeedbackDraft maps CC Connect Next state into the provider-neutral v1
+// BuildFeedbackDraft maps CC Connect Next state into the provider-neutral v2
 // report and applies product-specific identifier redaction in addition to the
 // foundation's generic credential and path redaction.
 func BuildFeedbackDraft(input FeedbackContext) (FeedbackDraft, error) {
@@ -53,10 +75,11 @@ func BuildFeedbackDraft(input FeedbackContext) (FeedbackDraft, error) {
 		!input.RecentErrorAt.IsZero() && age >= 0 && age <= featurefeedback.DefaultErrorMaxAge {
 		recentError = &featurefeedback.RecentError{Text: input.RecentError, At: input.RecentErrorAt}
 	}
-	return (featurefeedback.Builder{Now: func() time.Time { return now }, AdditionalRedact: redactCCConnectFeedback}).Build(featurefeedback.Input{
+	return (featurediagnostic.Builder{Now: func() time.Time { return now }, AdditionalRedact: redactCCConnectFeedback}).Build(featurediagnostic.Input{
 		Description:    composeFeedbackDescription(input, recentError),
 		RecentError:    recentError,
 		CapabilityGaps: input.CapabilityGaps,
+		Diagnostic:     input.Diagnostic,
 		Environment: featurefeedback.Environment{
 			Product: ProductName,
 			Version: input.Version,
@@ -67,8 +90,37 @@ func BuildFeedbackDraft(input FeedbackContext) (FeedbackDraft, error) {
 	})
 }
 
+// CaptureFeedbackDiagnostic applies the outbound allowlist before data enters
+// the host's bounded local diagnostic store.
+func CaptureFeedbackDiagnostic(value FeedbackDiagnostic) FeedbackDiagnostic {
+	return (featurediagnostic.Builder{AdditionalRedact: redactCCConnectFeedback}).Capture(value)
+}
+
+// FeedbackDraftSnapshot is local host storage, not a wire submission. Restoring
+// it still returns an unapproved Draft and cannot bypass explicit approval.
+type FeedbackDraftSnapshot struct {
+	PreparedAt time.Time
+	Input      featurediagnostic.Input
+}
+
+func SnapshotFeedbackDraft(draft FeedbackDraft) FeedbackDraftSnapshot {
+	r := draft.Report()
+	return FeedbackDraftSnapshot{PreparedAt: draft.PreparedAt(), Input: featurediagnostic.Input{
+		Description: r.Description, RecentError: r.RecentError, CapabilityGaps: r.CapabilityGaps,
+		Environment: r.Environment, Diagnostic: r.Diagnostic, ReportID: r.ReportID,
+	}}
+}
+
+func RestoreFeedbackDraft(value FeedbackDraftSnapshot) (FeedbackDraft, error) {
+	return (featurediagnostic.Builder{Now: func() time.Time { return value.PreparedAt }, AdditionalRedact: redactCCConnectFeedback}).Build(value.Input)
+}
+
 func composeFeedbackDescription(input FeedbackContext, recentError *featurefeedback.RecentError) string {
 	description := strings.TrimSpace(input.Description)
+	if description == "" && input.Diagnostic != nil && input.Diagnostic.Error != "" {
+		line, _, _ := strings.Cut(strings.TrimSpace(redactFeedbackContextText(input.Diagnostic.Error)), "\n")
+		description = truncateFeedbackUTF8(line, 400)
+	}
 	if description == "" && recentError != nil {
 		// Relay titles use Description's first line. Redact the complete error
 		// before extracting/bounding that line; context is supporting evidence.
@@ -151,9 +203,17 @@ func (relay FeedbackRelay) Submit(ctx context.Context, draft FeedbackDraft, user
 	if err != nil {
 		return FeedbackReceipt{}, err
 	}
+	endpoint := relay.Endpoint
+	// Existing configuration remains valid. Only the exact same-origin v1
+	// path is upgraded; validation still rejects credentials/query/redirects.
+	if parsed, parseErr := url.Parse(endpoint); parseErr == nil && parsed.EscapedPath() == featurehttp.EndpointPath {
+		parsed.Path = featurehttp.DiagnosticEndpointPath
+		parsed.RawPath = ""
+		endpoint = parsed.String()
+	}
 	return (featurehttp.Client{
-		Endpoint:   relay.Endpoint,
+		Endpoint:   endpoint,
 		HTTPClient: relay.HTTPClient,
-		UserAgent:  "cc-connect-next-feedback/1",
-	}).Submit(ctx, approved)
+		UserAgent:  "cc-connect-next-feedback/2",
+	}).SubmitDiagnostic(ctx, approved)
 }
