@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -94,6 +96,11 @@ func agentFeedbackDraftPreview(report appfeatures.FeedbackReport) AgentFeedbackD
 	if report.RecentError != nil {
 		preview.RecentError = &AgentFeedbackRecentError{Text: report.RecentError.Text, OccurredAt: report.RecentError.At}
 	}
+	if report.Diagnostic != nil {
+		data, _ := json.MarshalIndent(report.Diagnostic, "", "  ")
+		preview.Description += "\n\nCaptured diagnostic snapshot:\n" + string(data)
+	}
+	preview.Description += "\n\nReport ID: " + report.ReportID + "\nDiagnostic protocol: 2"
 	return preview
 }
 
@@ -143,7 +150,7 @@ func (e *Engine) PreviewAgentFeedback(credential, description string) (AgentFeed
 	if !e.feedbackActive() {
 		return AgentFeedbackPreviewResponse{}, ErrAgentFeedbackDisabled
 	}
-	draft, err := e.buildFeedbackDraft(sessionKey, description, nil)
+	draft, err := e.buildFeedbackDraft(sessionKey, userID, description, nil)
 	if err != nil {
 		return AgentFeedbackPreviewResponse{}, err
 	}
@@ -167,40 +174,100 @@ func (e *Engine) takeAgentPendingFeedback(sessionKey, userID, token string) (app
 	pending, exists := e.feedbackPending[strings.TrimSpace(token)]
 	if !exists ||
 		!pending.AgentOnly ||
-		pending.SessionKey != sessionKey ||
-		pending.UserID != userID {
+		pending.SessionKey != e.feedbackBinding(sessionKey, "") ||
+		pending.UserID != e.feedbackPendingUser(userID) {
+		return appfeatures.FeedbackDraft{}, false
+	}
+	draft, err := e.rememberApprovedFeedbackLocked(sessionKey, userID, pending.Draft)
+	if err != nil {
 		return appfeatures.FeedbackDraft{}, false
 	}
 	e.deletePendingFeedbackLocked(strings.TrimSpace(token))
-	return pending.Draft, true
+	return draft, true
 }
 
-func (e *Engine) submitFeedbackDraft(ctx context.Context, draft appfeatures.FeedbackDraft) (appfeatures.FeedbackReceipt, error) {
-	e.feedbackMu.Lock()
-	endpoint := e.feedbackEndpoint
-	submit := e.feedbackSubmitFn
-	e.feedbackMu.Unlock()
-	if submit == nil {
-		relay := appfeatures.FeedbackRelay{Endpoint: endpoint}
-		submit = relay.Submit
-	}
+func (e *Engine) submitFeedbackDraft(ctx context.Context, draft appfeatures.FeedbackDraft, sessionKey, userID string) (appfeatures.FeedbackReceipt, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	ctx, cancel := context.WithTimeout(ctx, feedbackSubmitTimeout)
 	defer cancel()
-	receipt, err := submit(ctx, draft, true)
+	e.feedbackMu.Lock()
+	approvedDraft, approvalErr := e.rememberApprovedFeedbackLocked(sessionKey, userID, draft)
+	if approvalErr != nil {
+		e.feedbackMu.Unlock()
+		return appfeatures.FeedbackReceipt{}, approvalErr
+	}
+	draft = approvedDraft
+	record := e.feedbackSubmissions[draft.Report().ReportID]
+	if record.Receipt != nil {
+		receipt := *record.Receipt
+		e.feedbackMu.Unlock()
+		return receipt, nil
+	}
+	if record.inFlight != nil {
+		finished := record.inFlight
+		e.feedbackMu.Unlock()
+		select {
+		case <-finished:
+		case <-ctx.Done():
+			return appfeatures.FeedbackReceipt{}, ctx.Err()
+		}
+		e.feedbackMu.Lock()
+		defer e.feedbackMu.Unlock()
+		if record.Receipt != nil {
+			return *record.Receipt, nil
+		}
+		return appfeatures.FeedbackReceipt{}, fmt.Errorf("feedback submission did not complete")
+	}
+	record.inFlight = make(chan struct{})
+	record.State = "dispatching"
+	endpoint, submit := e.feedbackEndpoint, e.feedbackSubmitFn
+	e.feedbackMu.Unlock()
+	var receipt appfeatures.FeedbackReceipt
+	err := e.saveFeedbackState()
+	dispatched := false
+	if err == nil {
+		if submit == nil {
+			relay := appfeatures.FeedbackRelay{Endpoint: endpoint}
+			submit = relay.Submit
+		}
+		dispatched = true
+		receipt, err = submit(ctx, draft, true)
+	} else {
+		err = fmt.Errorf("feedback approved report could not be saved")
+	}
+	e.feedbackMu.Lock()
+	if err == nil {
+		record.State = "submitted"
+		copy := receipt
+		record.Receipt = &copy
+	} else {
+		record.State = "outcome_unknown"
+		if !dispatched || appfeatures.FeedbackDefinitelyRejected(err) {
+			record.State = "definite_failed"
+		}
+	}
+	close(record.inFlight)
+	record.inFlight = nil
+	e.scheduleFeedbackSaveLocked()
+	e.feedbackMu.Unlock()
 	if err != nil {
-		slog.Warn("feedback: submission failed", "error", err)
+		slog.Warn("feedback: submission failed", "error", redactFeedbackText(err.Error()))
 		return appfeatures.FeedbackReceipt{}, err
+	}
+	// A persisted dispatch intent plus the Relay receipt is sufficient to
+	// recover even if the final local receipt write fails.
+	if err := e.saveFeedbackState(); err != nil {
+		slog.Warn("feedback: receipt could not be saved locally")
 	}
 	slog.Info("feedback: submitted", "reference_url", receipt.ReferenceURL, "deduplicated", receipt.Deduplicated)
 	return receipt, nil
 }
 
-// SubmitAgentFeedback consumes one Agent-only approval token before attempting
-// the shared Relay submission. Consumption-before-I/O prevents a retry or
-// protocol fallback from creating duplicates after an ambiguous response.
+// SubmitAgentFeedback exchanges the one-use Agent approval for a stored exact
+// report. The token cannot replay; bounded internal retries use that report ID
+// and the Relay's durable receipt without a protocol fallback.
 func (e *Engine) SubmitAgentFeedback(ctx context.Context, credential, approvalToken string) (AgentFeedbackSubmitResponse, error) {
 	sessionKey, userID, err := e.agentFeedbackTurnIdentity(credential)
 	if err != nil {
@@ -213,7 +280,7 @@ func (e *Engine) SubmitAgentFeedback(ctx context.Context, credential, approvalTo
 	if !ok {
 		return AgentFeedbackSubmitResponse{}, ErrAgentFeedbackApprovalInvalid
 	}
-	receipt, err := e.submitFeedbackDraft(ctx, draft)
+	receipt, err := e.submitFeedbackDraft(ctx, draft, sessionKey, userID)
 	if err != nil {
 		return AgentFeedbackSubmitResponse{}, err
 	}

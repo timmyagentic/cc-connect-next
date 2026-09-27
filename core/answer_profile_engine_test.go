@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -422,6 +423,10 @@ func TestEngineAnswerProfileFailsWhenSessionDoesNotSupportTurnOptions(t *testing
 	engine.SetAnswerProfiles(AnswerProfiles{
 		Fast: &AnswerProfileOptions{ReasoningEffort: "low"},
 	})
+	engine.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
+	dir := t.TempDir()
+	engine.sessions = NewSessionManager(filepath.Join(dir, "sessions.json"))
+	engine.SetDataDir(dir)
 	t.Cleanup(func() { _ = engine.Stop() })
 
 	engine.ReceiveMessage(platform, answerProfileMessage("m1", "/fast do it"))
@@ -433,6 +438,29 @@ func TestEngineAnswerProfileFailsWhenSessionDoesNotSupportTurnOptions(t *testing
 		}
 		return false
 	})
+	msg := answerProfileMessage("m1", "/fast do it")
+	draft, err := engine.buildFeedbackDraft(msg.SessionKey, msg.UserID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := draft.Report().Diagnostic; d == nil || d.Phase != "profile_unsupported" || d.ErrorCode != "profile_unsupported" {
+		t.Fatalf("unsupported profile was retained as a live turn: %#v", d)
+	}
+	if err := engine.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	restarted := NewEngine("test", &stubAgent{}, nil, "", LangEnglish)
+	restarted.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
+	restarted.sessions = NewSessionManager(filepath.Join(dir, "sessions.json"))
+	restarted.SetDataDir(dir)
+	t.Cleanup(func() { _ = restarted.Stop() })
+	draft, err = restarted.buildFeedbackDraft(msg.SessionKey, msg.UserID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := draft.Report().Diagnostic; d == nil || d.Phase != "profile_unsupported" || d.ErrorCode == "host_restart" {
+		t.Fatalf("restart misreported a rejected profile as an interrupted turn: %#v", d)
+	}
 }
 
 func sendAndWaitForCall(t *testing.T, engine *Engine, platform *stubPlatformEngine, wantCalls int, messageID, content string) {

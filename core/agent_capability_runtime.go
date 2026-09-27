@@ -259,7 +259,9 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 	_, titles := e.agent.(SessionTitleProvider)
 	_, workdir := e.agent.(WorkDirSwitcher)
 	_, modes := e.agent.(ModeSwitcher)
+	_, diagnostics := e.agent.(AgentDiagnosticProvider)
 	probes := []agentProbe{
+		{"feedback_diagnostics", "Read bounded cached facts for user-approved feedback.", "读取用于用户授权反馈的有界缓存诊断。", "Reports mark unsupported backend fields as unavailable.", "报告如实标记后端不支持的诊断字段。", diagnostics},
 		{"history", "Read backing Agent conversation history.", "读取 Agent 后端会话历史。", "Engine-local history remains available.", "仍可使用 Engine 本地历史。", history},
 		{"tool_authorization", "Dynamically pre-authorize Agent tools.", "动态预授权 Agent 工具。", "Use the Agent's configured permission mode.", "使用 Agent 已配置的权限模式。", authorizer},
 		{"provider_switching", "Switch configured API providers.", "切换已配置 API Provider。", "No runtime provider switch is available.", "无法在运行态切换 Provider。", providers},
@@ -307,6 +309,7 @@ type sessionRuntimeCapabilitySpec struct {
 }
 
 var sessionRuntimeCapabilitySpecs = []sessionRuntimeCapabilitySpec{
+	{id: "feedback_diagnostics", description: "Capture cached turn and transport diagnostics without probing the backend.", zh: "读取缓存的回合和传输诊断，不额外探测后端。", unboundDescription: "Capture cached feedback diagnostics.", unboundZH: "读取缓存的反馈诊断。", fallback: "Reports include host observations and mark unsupported backend fields as unavailable.", fallbackZH: "报告保留宿主观测，并标记后端不支持的字段。", supported: func(session AgentSession) bool { _, ok := session.(AgentDiagnosticProvider); return ok }},
 	{id: "turn_options", description: "Apply model, reasoning, service tier, or answer profile to one turn.", zh: "为单个回合应用模型、推理强度、服务等级或回答档位。", unboundDescription: "Apply runtime settings to one turn.", unboundZH: "为单个回合应用运行时设置。", fallback: "Use persistent Agent defaults.", fallbackZH: "使用 Agent 持久默认值。", supported: func(session AgentSession) bool { _, ok := session.(TurnOptionsSession); return ok }},
 	{id: "steer", description: "Append input to the active turn.", zh: "把输入并入当前回合。", unboundDescription: "Append input to the active turn.", unboundZH: "把输入并入当前回合。", fallback: "Use FIFO for ordinary busy messages; /ps rejects when it cannot safely supplement.", fallbackZH: "普通忙时消息使用 FIFO；/ps 无法安全补充时会拒绝。", supported: func(session AgentSession) bool { _, ok := session.(SteerableSession); return ok }},
 	{id: "context_usage", description: "Report live context-window usage.", zh: "报告实时上下文窗口用量。", unboundDescription: "Report live context-window usage.", unboundZH: "报告实时上下文窗口用量。", fallback: "No live context percentage is shown.", fallbackZH: "不显示实时上下文百分比。", unavailableReason: "Session context usage is intentionally unavailable because no production tool or API reads a session-level value.", unavailableReasonZH: "会话上下文用量已明确不可用，因为当前没有生产工具或 API 读取会话级数值。"},

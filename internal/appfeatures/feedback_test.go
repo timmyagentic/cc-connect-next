@@ -61,7 +61,7 @@ func TestFeedbackRelayRequiresApprovalBeforeNetwork(t *testing.T) {
 	var received map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requests.Add(1)
-		if request.URL.Path != "/v1/feedback" {
+		if request.URL.Path != "/v2/feedback" {
 			t.Errorf("path = %q", request.URL.Path)
 		}
 		if err := json.NewDecoder(request.Body).Decode(&received); err != nil {
@@ -88,7 +88,7 @@ func TestFeedbackRelayRequiresApprovalBeforeNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("approved Submit: %v", err)
 	}
-	if requests.Load() != 1 || received["user_approved"] != true || received["schema"] != float64(1) {
+	if requests.Load() != 1 || received["user_approved"] != true || received["schema"] != float64(2) {
 		t.Fatalf("approved payload mismatch: requests=%d payload=%#v", requests.Load(), received)
 	}
 	for _, forbidden := range []string{"title", "body", "install_id"} {

@@ -3,30 +3,47 @@
 [English](agent-app-features.md)
 
 CC Connect Next 固定使用
-`github.com/timmyagentic/awesome-agent-app-features v0.1.2`，对应源码提交
-`9daaa15dcaf4512ce655c733264713d4d1eb72b6`。没有本地 `replace`、Git
-submodule 或浮动 `main` 依赖。该版本对应已发布的 Foundation `v0.1.2` 补丁标签。
+`github.com/timmyagentic/awesome-agent-app-features v0.1.3`，对应源码提交
+`c8650a6886031ac722b4e7dd6bf25279ff8c93bf`。没有本地 `replace`、Git
+submodule 或浮动 `main` 依赖。正式发布的 v0.1.3 tag 及其已通过 CI 的源码提交均不可变；
+Feedback 和 Updater 使用同一模块版本。
 
 ## Feedback
 
-CC Connect Next 继续负责命令、卡片、文本回退、本地化、最近错误选择、能力缺口
-提示和公开 fallback；Foundation 负责结构化报告、环境白名单、脱敏与限长、opaque
-批准值以及拒绝重定向的 HTTP Client。
+CC Connect Next 继续负责命令、卡片、文本回退、本地化、故障选择、能力缺口
+提示和公开 fallback；Foundation 负责版本化诊断报告、字段白名单、脱敏与限长、
+opaque 批准值以及拒绝重定向的 HTTP Client。新增 `feedback/diagnostic` 和
+`/v2/feedback`，保持原有 v1 API 兼容。
 
 1. 明确执行 `/feedback <描述>` 或点击 Feedback 卡片动作后，宿主立即生成完整脱敏
    Draft、调用 `Approve(true)` 并提交；聊天端不展示 Draft 预览，也不要求二次确认。
 2. 自动提示只用 opaque token 准备精确 Draft，本身始终零请求。错误提示绑定发起
    回合的用户，共享会话也不例外；无法确认用户时不生成提示。能力缺口提示只含通用
    能力元数据，因此同一会话中的成员均可提交。过期、重放或 session/所需 user
-   不匹配都会安全失败。附带的相邻消息必须具有近期有效时间戳，未知、未来和过期
-   时间戳都不会进入诊断上下文。
+   不匹配都会安全失败。token 保持原有的十分钟有效期和一次性消费语义。
 3. Manifest 声明的本地 Agent CLI 复用同一 builder 与 submit 函数。活动回合 HMAC
    凭证解析可信 project/session/user；`feedback preview` 只返回 JSON-safe Draft
    投影且零请求，`feedback submit` 只接受该预览绑定 session/user 的一次性 token。
    CLI 不能指定路由、伪造入站消息或选择旧 schema 回退。
-4. Relay 在服务端固定 GitHub 仓库，负责 title/body、label、Token、限流和尽力去重。
-   带引号的 JSON/配置键、转义值、带前缀的凭证、Cookie、URL 凭证和宿主标识符
-   均在预览、截断和提交前脱敏。
+4. 在上下文补充和 Agent 启动前保存发起用户的原始输入。失败时先冻结请求、故障
+   阶段、运行参数、有界活动记录与传输状态，再清理进程；长任务不再依赖近期历史
+   窗口。排队和已接受的 steer 保持用户归属，不携带其他参与者的输入或回复。
+   不采集任意历史、工具参数或结果、原始协议事件、凭证和配置字典；后端不支持的
+   字段明确标记缺失。
+5. 每个项目最多保留 20 个回合快照和各 64 个待确认/已授权提交，文件上限 10 MiB。
+   已冻结快照和已授权记录保留 72 小时，仍在执行的长任务不受该年龄限制。
+   `data_dir/run/feedback` 下原子写入 0600 文件，路由身份只存哈希；落盘前已脱敏。
+   重启恢复原样的待确认报告，把未完成回合标记为中断、后端结果未知，不自动联网提交。
+6. 已授权报告的随机 ID 和精确 payload 在有界重试及重启后保持一致。Relay 使用
+   SQLite Durable Object 持久保存发送意图和成功回执。创建响应丢失后只核对回执，
+   不盲目再次创建；GitHub 搜索结果为空不能证明上次 POST 失败。聊天成功/失败
+   文案和卡片行为保持不变。
+
+Relay 在服务端固定 GitHub 仓库，负责 Issue 渲染、label、鉴权和限流。带引号的
+JSON/配置键、转义值、带前缀的凭证、Cookie、URL 凭证和宿主标识符均在落盘、
+预览、截断和提交前脱敏。Codex adapter 提供缓存的本回合请求参数、EOF/读取状态、
+队列及丢事件计数，并区分终态事件已接收和已投递，不额外调用 CLI 或网络。
+其他后端通过可选接口降级。
 
 ## Update
 
@@ -50,12 +67,18 @@ Plan，不会重新解析 latest；存在多份待确认 Plan 时，泛化确认
 `wrangler.jsonc` 与生成的 `worker-configuration.d.ts` 允许变化。Worker 名称和服务端
 目标仓库是宿主映射；Rate Limiting namespace 在单独授权部署前保持 dry-run 占位值。
 
-宿主自有的 Wrangler 入口为 `src/compat.js`：新结构化请求直接进入逐字节一致的
+宿主自有的 Wrangler 入口为 `src/worker.js`，导出 Foundation Durable Object，
+并委托 `src/compat.js` 处理 HTTP 鉴权。新结构化请求直接进入逐字节一致的
 Foundation Relay；旧 CC Connect schema-1 请求会先被精确识别和转换，`install_id`
 被丢弃，目标仓库与 Issue 渲染继续由服务端控制。这样可以先升级 Worker，再发布新
 客户端，而不会中断已有安装。无效 UTF-8 在换取 Token 前被拒绝；GitHub App
 换取 Token 和 Foundation GitHub API 请求均关闭自动重定向并拒绝重定向响应，
 避免 Authorization 跟随重定向到其他来源。
+
+发布 v2 客户端前，必须先部署兼容 v1/v2 的 Relay 及 `FEEDBACK_REPORTS` SQLite
+迁移。原配置中的 `/v1/feedback` 自动映射到同源 `/v2/feedback`，用户无需改配置、
+命令或操作习惯。拒绝时不降级 schema，也不换地址再次 POST。生产部署和真实
+消息客户端验证是独立边界，实际执行前均为 UNVERIFIED。
 
 所有 Relay 命令必须进入 `feedback-relay/` 后执行，不能用从其他 cwd 指向外部绝对
 目录的 `npm --prefix` 代替最终目标验证。
@@ -67,10 +90,10 @@ Foundation Relay；旧 CC Connect schema-1 请求会先被精确识别和转换�
 
 ```bash
 GOWORK=off go run \
-  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@9daaa15dcaf4512ce655c733264713d4d1eb72b6 \
+  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@c8650a6886031ac722b4e7dd6bf25279ff8c93bf \
   validate \
   --source "$EXACT_SOURCE_ROOT" \
-  --source-commit 9daaa15dcaf4512ce655c733264713d4d1eb72b6 \
+  --source-commit c8650a6886031ac722b4e7dd6bf25279ff8c93bf \
   --host "$CC_CONNECT_NEXT_ROOT" \
   --lock "$CC_CONNECT_NEXT_ROOT/agent-app-features.lock.json"
 ```

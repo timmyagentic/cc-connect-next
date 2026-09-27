@@ -107,45 +107,52 @@ func TestCmdFeedback_LegacyControlWordInDescriptionStillSubmits(t *testing.T) {
 	}
 }
 
-func TestFeedbackDirectSubmissionIncludesOnlyRecentRedactedAdjacentContext(t *testing.T) {
+func TestFeedbackDirectSubmissionIncludesOwnedRedactedTurnContext(t *testing.T) {
 	engine, platform := newFeedbackTestEngine(t)
-	key := feedbackTestMsg().SessionKey
-	session := engine.sessions.GetOrCreateActive(key)
-	session.AddHistory("user", "更新通道为什么把 beta 当 stable？ token=must-not-leak")
-	session.AddHistory("assistant", "诊断：当前只有 LatestStable。日志在 /Users/private/project/run.log")
+	msg := feedbackTestMsg()
+	msg.Content = "更新通道为什么把 beta 当 stable？ token=must-not-leak"
+	session := engine.sessions.GetOrCreateActive(msg.SessionKey)
+	session.AddHistory("user", "foreign participant history must stay private")
+	turn := engine.beginFeedbackTurn(platform, msg, session, engine.agent)
+	state := &interactiveState{feedbackTurn: turn}
+	engine.completeFeedbackTurn(state, "诊断：当前只有 LatestStable。日志在 /Users/private/project/run.log")
 	submitted := captureFeedbackSubmissions(engine)
-
-	engine.cmdFeedback(platform, feedbackTestMsg(), "请反馈更新通道问题")
+	engine.cmdFeedback(platform, msg, "请反馈更新通道问题")
 	report := <-submitted
-	for _, want := range []string{"请反馈更新通道问题", "Related diagnostic context", "Previous user message", "Previous assistant response", "LatestStable", "[REDACTED"} {
-		if !strings.Contains(report.Description, want) {
-			t.Fatalf("submitted Draft missing %q: %s", want, report.Description)
+	if report.Description != "请反馈更新通道问题" || report.Diagnostic == nil {
+		t.Fatalf("missing owned context: %#v", report)
+	}
+	context := report.Diagnostic.Request + report.Diagnostic.Response
+	for _, want := range []string{"beta", "LatestStable", "[REDACTED"} {
+		if !strings.Contains(context, want) {
+			t.Errorf("diagnostic missing %q: %s", want, context)
 		}
 	}
-	for _, leaked := range []string{"must-not-leak", "/Users/private"} {
-		if strings.Contains(report.Description, leaked) {
-			t.Fatalf("submitted Draft leaked %q: %s", leaked, report.Description)
+	for _, forbidden := range []string{"must-not-leak", "/Users/private", "foreign participant"} {
+		if strings.Contains(context, forbidden) {
+			t.Errorf("diagnostic leaked %q", forbidden)
 		}
 	}
 	if sent := strings.Join(platform.sentTexts(), "\n"); sent != "Submission succeeded" {
-		t.Fatalf("chat exposed Draft contents instead of only the result: %s", sent)
+		t.Fatalf("visible flow changed: %s", sent)
 	}
 }
 
 func TestFeedbackContextNeverPairsAnUnansweredUserMessageWithAnOlderAssistant(t *testing.T) {
-	engine, _ := newFeedbackTestEngine(t)
-	key := feedbackTestMsg().SessionKey
-	session := engine.sessions.GetOrCreateActive(key)
+	engine, platform := newFeedbackTestEngine(t)
+	msg := feedbackTestMsg()
+	session := engine.sessions.GetOrCreateActive(msg.SessionKey)
 	session.AddHistory("user", "old question")
 	session.AddHistory("assistant", "old unrelated diagnosis")
-	session.AddHistory("user", "new unanswered observation")
-	draft, err := engine.buildFeedbackDraft(key, "report it", nil)
+	msg.Content = "new unanswered observation"
+	engine.beginFeedbackTurn(platform, msg, session, engine.agent)
+	draft, err := engine.buildFeedbackDraft(msg.SessionKey, msg.UserID, "report it", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	description := draft.Report().Description
-	if !strings.Contains(description, "new unanswered observation") || strings.Contains(description, "old unrelated diagnosis") {
-		t.Fatalf("mismatched adjacent context: %s", description)
+	diagnostic := draft.Report().Diagnostic
+	if diagnostic == nil || diagnostic.Request != msg.Content || diagnostic.Response != "" {
+		t.Fatalf("mismatched turn context: %#v", diagnostic)
 	}
 }
 
@@ -331,21 +338,21 @@ func TestFeedbackNotifier_RetriesUntilSessionExists(t *testing.T) {
 func TestCmdFeedback_DirectSubmissionAttachesRecentErrorAndGaps(t *testing.T) {
 	engine, platform := newFeedbackTestEngine(t)
 	engine.SetFeedbackCapabilityGaps([]string{"display.sparkles"})
-	engine.recordFeedbackError("feishu:oc_chat:ou_user", "codex app-server turn/start: boom")
+	engine.recordFeedbackError("feishu:oc_chat:ou_user", "ou_user", "codex app-server turn/start: boom")
 	submitted := captureFeedbackSubmissions(engine)
 
-	engine.cmdFeedback(platform, feedbackTestMsg(), "sending fails")
+	engine.cmdFeedback(platform, feedbackTestMsg(), "")
 	report := <-submitted
-	if report.Description != "sending fails" || report.RecentError == nil || report.RecentError.Text != "codex app-server turn/start: boom" || len(report.CapabilityGaps) != 1 {
+	if report.Description != "codex app-server turn/start: boom" || report.RecentError == nil || report.RecentError.Text != "codex app-server turn/start: boom" || len(report.CapabilityGaps) != 1 {
 		t.Fatalf("submitted report = %#v", report)
 	}
 }
 
 func TestCmdFeedback_StaleErrorIsNotAttached(t *testing.T) {
 	engine, platform := newFeedbackTestEngine(t)
-	engine.recordFeedbackError("feishu:oc_chat:ou_user", "ancient failure")
+	engine.recordFeedbackError("feishu:oc_chat:ou_user", "ou_user", "ancient failure")
 	engine.feedbackMu.Lock()
-	engine.feedbackErrors["feishu:oc_chat:ou_user"].At = time.Now().Add(-time.Hour)
+	engine.feedbackErrors[engine.feedbackContextKey("feishu:oc_chat:ou_user", "ou_user")].At = time.Now().Add(-time.Hour)
 	engine.feedbackMu.Unlock()
 	submitted := captureFeedbackSubmissions(engine)
 
@@ -358,7 +365,7 @@ func TestCmdFeedback_StaleErrorIsNotAttached(t *testing.T) {
 func TestFeedbackErrorOffer_ThrottledPerSessionAndZeroNetwork(t *testing.T) {
 	engine, platform := newFeedbackTestEngine(t)
 	submitted := captureFeedbackSubmissions(engine)
-	engine.recordFeedbackError("feishu:oc_chat:ou_user", "boom")
+	engine.recordFeedbackError("feishu:oc_chat:ou_user", "ou_user", "boom")
 	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user", "ou_user", nil)
 	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user", "ou_user", nil)
 	if sent := platform.sentTexts(); len(sent) != 1 || strings.Contains(sent[0], "boom") || !strings.Contains(sent[0], "submit-token") {
@@ -370,7 +377,7 @@ func TestFeedbackErrorOffer_ThrottledPerSessionAndZeroNetwork(t *testing.T) {
 	default:
 	}
 
-	engine.recordFeedbackError("feishu:oc_other:ou_user", "other boom")
+	engine.recordFeedbackError("feishu:oc_other:ou_user", "ou_user", "other boom")
 	engine.maybeSendFeedbackErrorHint(platform, "rctx2", "feishu:oc_other:ou_user", "ou_user", nil)
 	if sent := platform.sentTexts(); len(sent) != 2 {
 		t.Fatalf("second session must get its own offer, got %v", sent)
@@ -398,7 +405,7 @@ func feedbackAskButtons(t *testing.T, card *Card) []CardButton {
 
 func TestFeedbackErrorOffer_CardHasOneDirectSubmitActionAndNoPreview(t *testing.T) {
 	engine, platform := newFeedbackCardEngine(t)
-	engine.recordFeedbackError("feishu:oc_chat:ou_user", "codex app-server turn/start: boom")
+	engine.recordFeedbackError("feishu:oc_chat:ou_user", "ou_user", "codex app-server turn/start: boom")
 	submitted := captureFeedbackSubmissions(engine)
 	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user", "ou_user", nil)
 
@@ -436,7 +443,7 @@ func TestFeedbackOfferCardClickSubmitsOnceAndBecomesLinkFreeResult(t *testing.T)
 	platform := &feedbackResultCardPlatform{stubCardPlatform: stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}}
 	engine := NewEngine("test", &stubAgent{}, []Platform{platform}, "", LangChinese)
 	engine.SetFeedbackConfig(true, "https://relay.example/v1/feedback")
-	engine.recordFeedbackError("feishu:oc_chat:ou_user", "one bounded failure")
+	engine.recordFeedbackError("feishu:oc_chat:ou_user", "ou_user", "one bounded failure")
 	calls := 0
 	engine.feedbackSubmitFn = func(_ context.Context, draft appfeatures.FeedbackDraft, approved bool) (appfeatures.FeedbackReceipt, error) {
 		calls++
@@ -477,7 +484,7 @@ func TestFeedbackOfferCardClickSubmitsOnceAndBecomesLinkFreeResult(t *testing.T)
 
 func TestFeedbackErrorOffer_TextFallbackSubmitsPreparedDraftInOneCommand(t *testing.T) {
 	engine, platform := newFeedbackTestEngine(t)
-	engine.recordFeedbackError("feishu:oc_chat:ou_user", "boom")
+	engine.recordFeedbackError("feishu:oc_chat:ou_user", "ou_user", "boom")
 	submitted := captureFeedbackSubmissions(engine)
 	engine.maybeSendFeedbackErrorHint(platform, "rctx", "feishu:oc_chat:ou_user", "ou_user", nil)
 	offer := strings.Join(platform.sentTexts(), "\n")
@@ -518,7 +525,7 @@ func TestNotifyCapabilityGap_CardOfferSubmitsExactPreparedKeys(t *testing.T) {
 func TestFeedbackOfferTokenBindsDraftAndInitiatingUserAndCannotReplay(t *testing.T) {
 	engine, platform := newFeedbackTestEngine(t)
 	submitted := captureFeedbackSubmissions(engine)
-	draft, err := engine.buildFeedbackDraft("feishu:oc_chat:ou_user", "owner-only problem", nil)
+	draft, err := engine.buildFeedbackDraft("feishu:oc_chat:ou_user", "ou_user", "owner-only problem", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,7 +558,7 @@ func TestFeedbackOfferTokenBindsDraftAndInitiatingUserAndCannotReplay(t *testing
 func TestCmdFeedback_ExpiredOfferCannotSubmit(t *testing.T) {
 	engine, platform := newFeedbackTestEngine(t)
 	submitted := captureFeedbackSubmissions(engine)
-	draft, err := engine.buildFeedbackDraft("feishu:oc_chat:ou_user", "one problem", nil)
+	draft, err := engine.buildFeedbackDraft("feishu:oc_chat:ou_user", "ou_user", "one problem", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

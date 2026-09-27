@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
 
-import worker from "../../feedback-relay/src/index.js";
+import {fetchHandler} from "../../feedback-relay/src/relay.js";
+const worker = {fetch: fetchHandler};
 
 test("Go-approved Feedback v1 fixture is accepted by the copied Worker", async () => {
   const payload = JSON.parse(

@@ -1,5 +1,6 @@
 import {GitHubAppAuthError, installationAccessToken} from "./github-app.js";
 import {fetchHandler, _test as relayTest} from "./relay.js";
+import {diagnosticFetchHandler, validateDiagnosticSubmission, MAX_DIAGNOSTIC_REQUEST_BYTES} from "./diagnostic.js";
 
 /** @typedef {Env & {GITHUB_APP_PRIVATE_KEY: string}} RelayEnv */
 
@@ -32,10 +33,10 @@ function json(status, payload) {
   });
 }
 
-/** @param {Request} request @returns {Promise<Uint8Array>} */
-async function readBoundedBody(request) {
+/** @param {Request} request @param {number} [maximum] @returns {Promise<Uint8Array>} */
+async function readBoundedBody(request, maximum = MAX_REQUEST_BYTES) {
   const declared = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_REQUEST_BYTES) {
+  if (Number.isFinite(declared) && declared > maximum) {
     throw new RequestTooLargeError();
   }
   if (!request.body) {
@@ -48,7 +49,7 @@ async function readBoundedBody(request) {
     const {done, value} = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_REQUEST_BYTES) {
+    if (total > maximum) {
       await reader.cancel();
       throw new RequestTooLargeError();
     }
@@ -183,13 +184,15 @@ function authorizedRelayEnv(env, token, acceptedKey) {
 
 /** @param {Request} request @param {RelayEnv} env @returns {Promise<Response>} */
 function rejectWithoutAuthentication(request, env) {
-  return fetchHandler(request, {...env, GITHUB_TOKEN: "invalid-request-placeholder"});
+  const handler = new URL(request.url).pathname === "/v2/feedback" ? diagnosticFetchHandler : fetchHandler;
+  return handler(request, {...env, GITHUB_TOKEN: "invalid-request-placeholder"});
 }
 
 /** @param {Request} request @param {RelayEnv} env @returns {Promise<Response>} */
 async function compatibilityHandler(request, env) {
   const url = new URL(request.url);
-  if (request.method !== "POST" || url.pathname !== "/v1/feedback" || url.search !== "") {
+  const diagnostic = url.pathname === "/v2/feedback";
+  if (request.method !== "POST" || (!diagnostic && url.pathname !== "/v1/feedback") || url.search !== "") {
     return rejectWithoutAuthentication(request, env);
   }
   const contentType = request.headers.get("content-type") || "";
@@ -198,7 +201,7 @@ async function compatibilityHandler(request, env) {
   }
   let bytes;
   try {
-    bytes = await readBoundedBody(request);
+    bytes = await readBoundedBody(request, diagnostic ? MAX_DIAGNOSTIC_REQUEST_BYTES : MAX_REQUEST_BYTES);
   } catch (error) {
     if (error instanceof RequestTooLargeError) {
       return json(413, {error: "request is too large"});
@@ -211,14 +214,14 @@ async function compatibilityHandler(request, env) {
   } catch {
     return json(400, {error: "invalid JSON"});
   }
-  const translated = translateLegacy(decoded);
+  const translated = diagnostic ? null : translateLegacy(decoded);
   const submission = translated ?? decoded;
   const body = JSON.stringify(submission);
   const delegatedRequest = rebuiltRequest(request, body);
-  if (relayTest.validateSubmission(submission)) {
+  if ((diagnostic ? validateDiagnosticSubmission : relayTest.validateSubmission)(submission)) {
     return rejectWithoutAuthentication(delegatedRequest, env);
   }
-  if (configurationError(env)) {
+  if (configurationError(env) || (diagnostic && !env.FEEDBACK_REPORTS)) {
     return json(500, {error: "relay is not configured"});
   }
 
@@ -248,7 +251,7 @@ async function compatibilityHandler(request, env) {
     }));
     return json(502, {error: "github app authentication failed"});
   }
-  return fetchHandler(delegatedRequest, authorizedRelayEnv(env, token, rateLimitKey));
+  return (diagnostic ? diagnosticFetchHandler : fetchHandler)(delegatedRequest, authorizedRelayEnv(env, token, rateLimitKey));
 }
 
 const worker = {fetch: compatibilityHandler};

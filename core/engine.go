@@ -511,6 +511,12 @@ type Engine struct {
 	feedbackErrorHintAt map[string]time.Time
 	feedbackPending     map[string]pendingFeedback
 	feedbackSubmitFn    feedbackSubmitFunc
+	feedbackTurns       map[string]*feedbackTurn
+	feedbackSubmissions map[string]*feedbackSubmission
+	feedbackStoreLoaded bool
+	feedbackSaveCh      chan struct{}
+	feedbackSaveDone    chan struct{}
+	feedbackPersistMu   sync.Mutex
 
 	// When true, /list etc. only show sessions tracked by cc-connect-next,
 	// hiding sessions created by direct CLI usage in the same work_dir.
@@ -584,6 +590,7 @@ type workspaceInitFlow struct {
 // The message is NOT sent to agent stdin at queue time; the event loop
 // sends it after the current turn completes to avoid mid-turn interference.
 type queuedMessage struct {
+	feedbackText      string
 	messageID         string
 	platform          Platform
 	replyCtx          any
@@ -602,6 +609,7 @@ type queuedMessage struct {
 
 // interactiveState tracks a running interactive agent session and its permission state.
 type interactiveState struct {
+	feedbackTurn *feedbackTurn // guarded by mu; diagnostic state has its own mutex
 	// capabilityBriefSent flips after the capability brief has been
 	// prepended to a prompt for this state (guarded by mu).
 	capabilityBriefSent      bool
@@ -696,6 +704,7 @@ type interactiveState struct {
 // steerHandoff transfers ownership of the in-flight turn's presentation from
 // the original trigger message/card to a newer steered message (issue #27).
 type steerHandoff struct {
+	feedbackText      string
 	messageID         string
 	platform          Platform
 	replyCtx          any
@@ -1759,6 +1768,11 @@ func (e *Engine) SetProjectStateStore(store *ProjectStateStore) {
 
 func (e *Engine) SetDataDir(dir string) {
 	e.dataDir = dir
+	e.feedbackMu.Lock()
+	if e.feedbackEnabled {
+		e.loadFeedbackStateLocked()
+	}
+	e.feedbackMu.Unlock()
 }
 
 // RemoveCommand removes a custom command by name. Returns false if not found.
@@ -2499,6 +2513,7 @@ func (e *Engine) Stop() error {
 	// Cancel after the bounded card-finalization window so late lifecycle
 	// callbacks observe shutdown and any stuck Agent/platform work can unwind.
 	e.cancel()
+	defer e.stopFeedbackStore()
 
 	if e.observeCancel != nil {
 		e.observeCancel()
@@ -2987,6 +3002,10 @@ func (e *Engine) startMessageRecallMonitor(sessionKey string) context.CancelFunc
 // an ordinary message without re-counting the inbound message or re-emitting
 // receive hooks.
 func (e *Engine) normalizeIncomingContent(p Platform, msg *Message) (string, bool) {
+	if !msg.feedbackTextSet {
+		msg.feedbackText = msg.Content
+		msg.feedbackTextSet = true
+	}
 	content := strings.TrimSpace(msg.Content)
 	if content == "" && msg.ExtraContent == "" && len(msg.Images) == 0 && len(msg.Files) == 0 && msg.Location == nil {
 		return "", false
@@ -3462,6 +3481,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 			"user", msg.UserName,
 		)
 		committed := e.commitSteerPresentation(interactiveKey, steerHandoff{
+			feedbackText:      feedbackUserContent(msg),
 			messageID:         msg.MessageID,
 			platform:          p,
 			replyCtx:          msg.ReplyCtx,
@@ -3602,6 +3622,7 @@ func (e *Engine) commitSteerPresentation(interactiveKey string, h steerHandoff) 
 	// Authorization-sensitive Agent actions must observe the newest steer as
 	// soon as the backend acceptance is committed, not only after the event loop
 	// gets around to adopting its presentation card.
+	e.adoptSteerFeedbackLocked(state, h)
 	state.currentUserID = h.userID
 	ch := state.handoffSignalChLocked()
 	state.mu.Unlock()
@@ -3662,6 +3683,7 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		return true // handled: queue-full reply sent
 	}
 	state.pendingMessages = append(state.pendingMessages, queuedMessage{
+		feedbackText:      feedbackUserContent(msg),
 		messageID:         msg.MessageID,
 		platform:          p,
 		replyCtx:          msg.ReplyCtx,
@@ -4197,6 +4219,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	turnStart := time.Now()
 
 	turnRichCardCopy := e.i18n.RichCardCopyForText(msg.Content)
+	feedbackTurn := e.beginFeedbackTurn(p, msg, session, agent)
 	e.i18n.DetectAndSet(msg.Content)
 	session.AddHistory("user", msg.Content)
 	// Persist user message immediately so crashes between user input and
@@ -4220,6 +4243,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 
 	// Update reply context for this turn
 	state.mu.Lock()
+	state.feedbackTurn = feedbackTurn
 	if state.currentMessageID != msg.MessageID {
 		state.lastRecallProbeMessageID = ""
 		state.lastRecallProbeAt = time.Time{}
@@ -4236,8 +4260,12 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	defer stopRecallMonitor()
 
 	if state.agentSession == nil {
+		cause := state.startError
+		if cause == nil {
+			cause = errors.New("agent session did not start")
+		}
+		e.recordFeedbackFailure(state, "agent_start", cause)
 		if errors.Is(state.startError, ErrAuthenticationRequired) {
-			e.recordFeedbackError(msg.SessionKey, state.startError.Error())
 			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRichCardAuthRequiredBody, msg.Content))
 		} else {
 			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgFailedToStartAgentSession))
@@ -4246,6 +4274,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	}
 	if msg.AnswerProfile != "" {
 		if _, ok := state.agentSession.(TurnOptionsSession); !ok {
+			e.recordFeedbackFailure(state, "profile_unsupported", errors.New("agent session does not support answer profiles"))
 			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgProfileNotSupported, msg.Content))
 			return
 		}
@@ -4451,17 +4480,19 @@ func (e *Engine) getOrCreateWorkspaceAgent(workspace string) (Agent, *SessionMan
 	}
 
 	// Create per-workspace session manager
-	h := sha256.Sum256([]byte(workspace))
-	sessionFile := ""
-	if storePath := e.sessions.StorePath(); storePath != "" {
-		sessionFile = filepath.Join(filepath.Dir(storePath),
-			fmt.Sprintf("%s_ws_%s.json", e.name, hex.EncodeToString(h[:4])))
-	}
-	sessions := NewSessionManager(sessionFile)
+	sessions := NewSessionManager(e.workspaceSessionFile(workspace))
 
 	ws.agent = agent
 	ws.sessions = sessions
 	return agent, sessions, nil
+}
+
+func (e *Engine) workspaceSessionFile(workspace string) string {
+	if storePath := e.sessions.StorePath(); storePath != "" {
+		h := sha256.Sum256([]byte(workspace))
+		return filepath.Join(filepath.Dir(storePath), fmt.Sprintf("%s_ws_%s.json", e.name, hex.EncodeToString(h[:4])))
+	}
+	return ""
 }
 
 func (e *Engine) resolveChannelWorkDir(workspace, interactiveKey string) string {
@@ -5190,10 +5221,10 @@ func (e *Engine) runUnsolicitedReader(ctx context.Context, cancel context.Cancel
 
 			case EventError:
 				if event.Error != nil {
+					e.recordFeedbackFailure(state, "background_error", event.Error)
 					slog.Error("unsolicited agent error", "error", event.Error, "session", sessionKey)
 					e.send(p, replyCtx, e.agentErrorText(state, event.Error))
 					feedbackKey, feedbackUser := state.feedbackIdentity()
-					e.recordFeedbackError(feedbackKey, event.Error.Error())
 					e.maybeSendFeedbackErrorHint(p, replyCtx, feedbackKey, feedbackUser, event.Error)
 				}
 				state.mu.Lock()
@@ -5647,7 +5678,13 @@ func (t *turnProcessor) run() {
 		e.sendForWorkspace(p, replyCtx, content, workspaceDir)
 	}
 	sendWorkspaceWithError := func(p Platform, replyCtx any, content string) error {
-		return e.sendWithErrorForWorkspace(p, replyCtx, content, workspaceDir)
+		err := e.sendWithErrorForWorkspace(p, replyCtx, content, workspaceDir)
+		if err != nil {
+			e.recordFeedbackFailure(state, "platform_delivery", err)
+		} else {
+			e.observeFeedbackDelivery(state)
+		}
+		return err
 	}
 
 	// Streaming card: aggregate entire turn into a single updatable card.
@@ -6100,6 +6137,7 @@ func (t *turnProcessor) run() {
 		},
 		onHandoff: applySteerHandoffs,
 		onSendError: func(err error) {
+			e.recordFeedbackFailure(state, "prompt_send", err)
 			slog.Error("failed to send prompt", "error", err, "session_key", sessionKey)
 			sp.discard()
 			discardStreamingCard()
@@ -6243,6 +6281,7 @@ func (t *turnProcessor) run() {
 		// Adopt any pending steer handoff before rendering this event so the
 		// post-boundary stream lands in the successor card, not the frozen one.
 		applySteerHandoffs()
+		e.observeFeedbackEvent(state, event)
 
 		state.mu.Lock()
 		p := state.platform
@@ -6639,6 +6678,9 @@ func (completion *turnCompletion) handle() bool {
 	}
 	delivery.deliver()
 	if !delivery.completed {
+		if !state.isStopped() && !state.shouldDiscardTurn(completion.msgID) && e.ctx.Err() == nil {
+			e.recordFeedbackFailure(state, "platform_delivery", errors.New("terminal answer could not be delivered"))
+		}
 		return false
 	}
 	if elapsed := time.Since(replyStart); elapsed >= slowPlatformSend {
@@ -6650,6 +6692,11 @@ func (completion *turnCompletion) handle() bool {
 	// user never received.
 	if completion.hasRichCard && !response.isSilent && completion.abortIfTerminalDeliveryCanceled() {
 		return false
+	}
+	if completion.event.Error != nil {
+		e.recordFeedbackFailure(state, "agent_error", completion.event.Error)
+	} else {
+		e.completeFeedbackTurn(state, response.base)
 	}
 	completion.commit(response, triggerAutoCompress, tokenEstimate)
 	return !completion.runAutoCompress(triggerAutoCompress)
@@ -6960,6 +7007,7 @@ func (queue *turnQueue) handle() {
 		state.mu.Unlock()
 		state.steerMu.Unlock()
 		e.activateAgentTurnCredential(state, queued.userID, queued.msgSessionKey)
+		e.adoptQueuedFeedbackTurn(state, queued, session)
 
 		// Stop the previous turn's typing indicator
 		if stopTyping != nil {
@@ -7148,6 +7196,7 @@ func (terminal *turnTerminalHandler) handleIdleTimeout() {
 	t := terminal.processor
 	e := t.engine
 	state := t.state
+	e.recordFeedbackFailure(state, "idle_timeout", fmt.Errorf("agent session idle timeout: no events for %v, session killed", e.eventIdleTimeout))
 	sessionKey := t.sessionKey
 	turnStart := *terminal.turnStart
 	replyCtx := *terminal.replyCtx
@@ -7177,7 +7226,6 @@ func (terminal *turnTerminalHandler) handleIdleTimeout() {
 		}
 	}
 	feedbackKey, feedbackUser := state.feedbackIdentity()
-	e.recordFeedbackError(feedbackKey, fmt.Sprintf("agent session idle timeout: no events for %v, session killed", e.eventIdleTimeout))
 	e.maybeSendFeedbackErrorHint(timedOutPlatform, replyCtx, feedbackKey, feedbackUser, nil)
 	e.cleanupInteractiveState(sessionKey, state)
 }
@@ -7186,6 +7234,7 @@ func (terminal *turnTerminalHandler) handleDeadline() {
 	t := terminal.processor
 	e := t.engine
 	state := t.state
+	e.recordFeedbackFailure(state, "turn_deadline", fmt.Errorf("agent turn exceeded max_turn_time (%v), stopped", e.maxTurnTime))
 	sessionKey := t.sessionKey
 	turnStart := *terminal.turnStart
 	replyCtx := *terminal.replyCtx
@@ -7216,7 +7265,6 @@ func (terminal *turnTerminalHandler) handleDeadline() {
 		}
 	}
 	feedbackKey, feedbackUser := state.feedbackIdentity()
-	e.recordFeedbackError(feedbackKey, fmt.Sprintf("agent turn exceeded max_turn_time (%v), stopped", e.maxTurnTime))
 	e.maybeSendFeedbackErrorHint(deadlinePlatform, replyCtx, feedbackKey, feedbackUser, nil)
 
 	// Two-phase shutdown: first try a graceful stop so the agent can
@@ -7260,6 +7308,7 @@ func (terminal *turnTerminalHandler) handleChannelClosed() {
 	t := terminal.processor
 	e := t.engine
 	state := t.state
+	e.recordFeedbackFailure(state, "event_channel_closed", errors.New("agent event channel closed before a terminal result"))
 	session := t.session
 	sessions := t.sessions
 	sessionKey := t.sessionKey
@@ -7395,6 +7444,7 @@ func (failure *turnFailure) handle() {
 	state := t.state
 	sessionKey := t.sessionKey
 	event := failure.event
+	e.recordFeedbackFailure(state, "agent_error", event.Error)
 	p := failure.platform
 	replyCtx := failure.replyCtx
 	cp := failure.progress
@@ -7421,7 +7471,6 @@ func (failure *turnFailure) handle() {
 	if event.Error != nil {
 		errMsg := event.Error.Error()
 		slog.Error("agent error", "error", event.Error)
-		e.recordFeedbackError(feedbackKey, errMsg)
 		e.hooks.Emit(HookEvent{
 			Event:      HookEventError,
 			SessionKey: sessionKey,
@@ -8546,6 +8595,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.mu.Unlock()
 		state.steerMu.Unlock()
 		e.activateAgentTurnCredential(state, queued.userID, queued.msgSessionKey)
+		e.adoptQueuedFeedbackTurn(state, queued, session)
 
 		queuedRichCardCopy := e.i18n.RichCardCopyForText(queued.content)
 		e.i18n.DetectAndSet(queued.content)
@@ -8647,6 +8697,7 @@ func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
 			session.AddHistory("user", text)
 			sessions.Save()
 			committed := e.commitSteerPresentation(iKey, steerHandoff{
+				feedbackText:      text,
 				messageID:         msg.MessageID,
 				platform:          p,
 				replyCtx:          msg.ReplyCtx,
@@ -12368,7 +12419,7 @@ func (e *Engine) processCompressEvents(state *interactiveState, session *Session
 		case EventError:
 			feedbackKey, feedbackUser := state.feedbackIdentity()
 			if event.Error != nil {
-				e.recordFeedbackError(feedbackKey, "compress failed: "+event.Error.Error())
+				e.recordFeedbackFailure(state, "compression", event.Error)
 			}
 			if !auto && event.Error != nil {
 				e.reply(p, replyCtx, e.agentErrorText(state, event.Error))
