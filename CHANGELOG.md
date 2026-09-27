@@ -2,11 +2,11 @@
 
 ## Unreleased
 
-## v0.4.0-beta.1 (2026-09-27)
+## v0.3.1-beta.1 (2026-09-28)
 
-First v0.4.0 Beta from the latest merged main after v0.3.0, with session speed
+First v0.3.1 Beta from the latest merged main after v0.3.0, with session speed
 selection, bounded Feishu discussion context, and more durable feedback.
-See `changelogs/v0.4.0-beta.1.md` for bilingual highlights and upgrade notes.
+See `changelogs/v0.3.1-beta.1.md` for bilingual highlights and upgrade notes.
 
 - Add persistent per-session `/speed`, `/speed fast`, and `/speed default`
   choices. Apply changes to subsequent turns using the agent's supported model
