@@ -10,16 +10,20 @@ import (
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
-func TestFeedbackDiagnosticsDistinguishLostTerminalFromMissingTerminal(t *testing.T) {
-	s := &appServerSession{events: make(chan core.Event, 1)}
+func TestFeedbackDiagnosticsDistinguishPendingTerminalFromMissingTerminal(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &appServerSession{ctx: ctx, events: make(chan core.Event, 1)}
 	s.threadID.Store("thread-1")
 	s.currentTurn = "turn-1"
 	s.beginTurnDiagnostic(map[string]any{"model": "model-for-this-turn", "effort": "high", "serviceTier": "fast"})
 	s.events <- core.Event{Type: core.EventThinking}
-	s.handleNotification("turn/completed", json.RawMessage(`{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}`))
+	// Observe the protocol before delivery so the blocked and delivered
+	// snapshots are deterministic without holding a diagnostic lock.
+	s.observeTerminalProtocol()
 	d := s.DiagnosticSnapshot()
-	if d.TerminalReceived == nil || !*d.TerminalReceived || d.TerminalDelivered == nil || *d.TerminalDelivered || *d.DroppedEvents < 1 {
-		t.Fatalf("lost terminal is indistinguishable from missing protocol: %#v", d)
+	if d.TerminalReceived == nil || !*d.TerminalReceived || d.TerminalDelivered == nil || *d.TerminalDelivered || *d.DroppedEvents != 0 {
+		t.Fatalf("pending terminal is indistinguishable from missing protocol: %#v", d)
 	}
 	if d.Model != "model-for-this-turn" || d.Effort != "high" || d.ServiceTier != "fast" || d.SettingsSource != "turn_start_request" {
 		t.Fatalf("wrong turn settings: %#v", d)
@@ -28,7 +32,20 @@ func TestFeedbackDiagnosticsDistinguishLostTerminalFromMissingTerminal(t *testin
 	if *s.DiagnosticSnapshot().DroppedEvents == 999 {
 		t.Fatal("snapshot points into mutable counters")
 	}
+	done := make(chan struct{})
+	go func() {
+		s.handleNotification("turn/completed", json.RawMessage(`{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed"}}`))
+		close(done)
+	}()
 	<-s.events
+	awaitTerminalTest(t, done)
+	if event := <-s.events; event.Type != core.EventResult || !event.Done {
+		t.Fatalf("terminal event = %#v", event)
+	}
+	d = s.DiagnosticSnapshot()
+	if !*d.TerminalReceived || !*d.TerminalDelivered || *d.DroppedEvents != 0 {
+		t.Fatalf("terminal delivery facts missing: %#v", d)
+	}
 	s.beginTurnDiagnostic(map[string]any{"model": nil, "effort": nil, "serviceTier": nil})
 	d = s.DiagnosticSnapshot()
 	if *d.TerminalReceived || *d.TerminalDelivered || *d.DroppedEvents != 0 || d.Model != "" {
@@ -36,7 +53,7 @@ func TestFeedbackDiagnosticsDistinguishLostTerminalFromMissingTerminal(t *testin
 	}
 }
 
-func TestFeedbackDiagnosticsCaptureEOFWithoutChangingEventBehavior(t *testing.T) {
+func TestFeedbackDiagnosticsCaptureIdleEOFWithoutTerminalEvent(t *testing.T) {
 	s := &appServerSession{ctx: context.Background(), events: make(chan core.Event, 8)}
 	s.alive.Store(true)
 	s.wg.Add(1)
