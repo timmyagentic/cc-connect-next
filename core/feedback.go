@@ -231,11 +231,12 @@ func (e *Engine) takePendingFeedback(sessionKey, userID, token string) (appfeatu
 	if pending.AgentOnly || pending.SessionKey != e.feedbackBinding(sessionKey, "") || (pending.UserID != "" && pending.UserID != e.feedbackPendingUser(userID)) {
 		return appfeatures.FeedbackDraft{}, false
 	}
-	if err := e.rememberApprovedFeedbackLocked(sessionKey, userID, pending.Draft); err != nil {
+	draft, err := e.rememberApprovedFeedbackLocked(sessionKey, userID, pending.Draft)
+	if err != nil {
 		return appfeatures.FeedbackDraft{}, false
 	}
 	e.deletePendingFeedbackLocked(token)
-	return pending.Draft, true
+	return draft, true
 }
 
 func (e *Engine) clearPendingFeedback(sessionKey, userID, token string) {

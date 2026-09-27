@@ -3,10 +3,10 @@
 [中文](agent-app-features.zh-CN.md)
 
 CC Connect Next consumes `github.com/timmyagentic/awesome-agent-app-features`
-at immutable version `v0.1.3-0.20260927093303-0ab8c151f755` and source commit
-`0ab8c151f755080560eecf040f875a3e4413fd70`. There is no local `replace`,
-submodule, or floating `main` dependency. This is a CI-verified development
-commit, not a published release tag. Feedback and Updater use the same module.
+at immutable version `v0.1.3` and source commit
+`c8650a6886031ac722b4e7dd6bf25279ff8c93bf`. There is no local `replace`,
+submodule, or floating `main` dependency. The published v0.1.3 tag and its CI-verified source commit are immutable.
+Feedback and Updater use the same module.
 
 ## Feedback
 
@@ -117,10 +117,10 @@ Validate it against a temporary full extraction of the same source commit:
 
 ```bash
 GOWORK=off go run \
-  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@0ab8c151f755080560eecf040f875a3e4413fd70 \
+  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@c8650a6886031ac722b4e7dd6bf25279ff8c93bf \
   validate \
   --source "$EXACT_SOURCE_ROOT" \
-  --source-commit 0ab8c151f755080560eecf040f875a3e4413fd70 \
+  --source-commit c8650a6886031ac722b4e7dd6bf25279ff8c93bf \
   --host "$CC_CONNECT_NEXT_ROOT" \
   --lock "$CC_CONNECT_NEXT_ROOT/agent-app-features.lock.json"
 ```

@@ -163,6 +163,83 @@ func TestFeedbackConcurrentSubmissionSharesOneApprovedIntent(t *testing.T) {
 	}
 }
 
+func TestFeedbackConcurrentIndependentDraftsShareOneApprovedIntent(t *testing.T) {
+	e, _ := newFeedbackTestEngine(t)
+	msg := feedbackTestMsg()
+	var drafts [2]appfeatures.FeedbackDraft
+	for i := range drafts {
+		var err error
+		drafts[i], err = e.buildFeedbackDraft(msg.SessionKey, msg.UserID, "same independently prepared report", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if drafts[0].Report().ReportID == drafts[1].Report().ReportID {
+		t.Fatal("test requires independently prepared report identities")
+	}
+	var calls atomic.Int32
+	e.feedbackSubmitFn = func(context.Context, appfeatures.FeedbackDraft, bool) (appfeatures.FeedbackReceipt, error) {
+		calls.Add(1)
+		return appfeatures.FeedbackReceipt{ReferenceURL: "https://github.com/owner/repo/issues/1"}, nil
+	}
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for _, draft := range drafts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if _, err := e.submitFeedbackDraft(context.Background(), draft, msg.SessionKey, msg.UserID); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if calls.Load() != 1 || len(e.feedbackSubmissions) != 1 {
+		t.Fatalf("independent approvals sent %d reports and stored %d intents", calls.Load(), len(e.feedbackSubmissions))
+	}
+}
+
+func TestFeedbackIndependentPendingApprovalsReturnCanonicalPayload(t *testing.T) {
+	for _, agentOnly := range []bool{false, true} {
+		t.Run(map[bool]string{false: "chat", true: "agent"}[agentOnly], func(t *testing.T) {
+			e, _ := newFeedbackTestEngine(t)
+			msg := feedbackTestMsg()
+			var tokens [2]string
+			for i := range tokens {
+				draft, err := e.buildFeedbackDraft(msg.SessionKey, msg.UserID, "same independently approved report", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tokens[i], _, err = e.rememberPendingFeedbackForCaller(msg.SessionKey, msg.UserID, agentOnly, draft)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			take := e.takePendingFeedback
+			if agentOnly {
+				take = e.takeAgentPendingFeedback
+			}
+			var canonical string
+			for _, token := range tokens {
+				draft, ok := take(msg.SessionKey, msg.UserID, token)
+				if !ok {
+					t.Fatal("independent approval was rejected")
+				}
+				payload := approvedFeedbackBytes(t, draft)
+				if canonical != "" && payload != canonical {
+					t.Fatal("same report approvals produced different approved bytes")
+				}
+				canonical = payload
+				if _, replay := take(msg.SessionKey, msg.UserID, token); replay {
+					t.Fatal("canonicalization made an approval reusable")
+				}
+			}
+		})
+	}
+}
+
 func TestFeedbackDisabledStopDoesNotOverwriteStoredReports(t *testing.T) {
 	e, _ := newFeedbackTestEngine(t)
 	dir := t.TempDir()

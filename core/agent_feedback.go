@@ -178,11 +178,12 @@ func (e *Engine) takeAgentPendingFeedback(sessionKey, userID, token string) (app
 		pending.UserID != e.feedbackPendingUser(userID) {
 		return appfeatures.FeedbackDraft{}, false
 	}
-	if err := e.rememberApprovedFeedbackLocked(sessionKey, userID, pending.Draft); err != nil {
+	draft, err := e.rememberApprovedFeedbackLocked(sessionKey, userID, pending.Draft)
+	if err != nil {
 		return appfeatures.FeedbackDraft{}, false
 	}
 	e.deletePendingFeedbackLocked(strings.TrimSpace(token))
-	return pending.Draft, true
+	return draft, true
 }
 
 func (e *Engine) submitFeedbackDraft(ctx context.Context, draft appfeatures.FeedbackDraft, sessionKey, userID string) (appfeatures.FeedbackReceipt, error) {
@@ -192,10 +193,12 @@ func (e *Engine) submitFeedbackDraft(ctx context.Context, draft appfeatures.Feed
 	ctx, cancel := context.WithTimeout(ctx, feedbackSubmitTimeout)
 	defer cancel()
 	e.feedbackMu.Lock()
-	if err := e.rememberApprovedFeedbackLocked(sessionKey, userID, draft); err != nil {
+	approvedDraft, approvalErr := e.rememberApprovedFeedbackLocked(sessionKey, userID, draft)
+	if approvalErr != nil {
 		e.feedbackMu.Unlock()
-		return appfeatures.FeedbackReceipt{}, err
+		return appfeatures.FeedbackReceipt{}, approvalErr
 	}
+	draft = approvedDraft
 	record := e.feedbackSubmissions[draft.Report().ReportID]
 	if record.Receipt != nil {
 		receipt := *record.Receipt

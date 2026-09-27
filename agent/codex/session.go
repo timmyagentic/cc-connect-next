@@ -48,13 +48,14 @@ type codexSession struct {
 
 	pendingMsgs []string // buffered agent_message texts awaiting classification
 
-	runtimeCfgMu       sync.Mutex
-	runtimeCfgModel    string
-	runtimeCfgEffort   string
-	runtimeCfgFetched  time.Time
-	runtimeCfgFetchErr error
-	turnOptionsMu      sync.RWMutex
-	turnOptions        *core.TurnOptions
+	runtimeCfgMu         sync.Mutex
+	runtimeCfgModel      string
+	runtimeCfgEffort     string
+	runtimeCfgFetched    time.Time
+	runtimeCfgFetchErr   error
+	turnOptionsMu        sync.RWMutex
+	turnOptions          *core.TurnOptions
+	attemptedTurnOptions *core.TurnOptions
 }
 
 var codexSessionCloseTimeout = 8 * time.Second
@@ -165,7 +166,7 @@ func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files
 		prompt = prependCodexPromptPreamble(prompt, cs.promptPreamble)
 	}
 	args := cs.launchArgsWithTurnOptions(prompt, imagePaths, options)
-	cs.storeActiveTurnOptions(options)
+	cs.storeLaunchDiagnostic(options)
 
 	bin := cs.cmd
 	if bin == "" {
@@ -193,6 +194,7 @@ func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("codexSession: start: %w", err)
 	}
+	cs.storeActiveTurnOptions(options)
 	cs.addCmd(cmd)
 
 	cs.wg.Add(1)

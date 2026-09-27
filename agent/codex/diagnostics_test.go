@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,5 +56,32 @@ func TestFeedbackDiagnosticsDoNotProbeCLI(t *testing.T) {
 	d := s.DiagnosticSnapshot()
 	if d.Model != "turn-model" || d.Effort != "high" || !s.runtimeCfgFetched.IsZero() {
 		t.Fatalf("diagnostic read changed/probed runtime: %#v", d)
+	}
+}
+
+func TestFeedbackFailedLaunchPreservesActiveTurnOptions(t *testing.T) {
+	dir := t.TempDir()
+	s, err := newCodexSession(context.Background(), codexSessionParams{
+		cliBin: filepath.Join(dir, "missing-codex"), workDir: dir,
+		model: "configured", effort: "low", serviceTier: "default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	s.storeActiveTurnOptions(&core.TurnOptions{Model: "previous-model", ReasoningEffort: "medium", ServiceTier: "default"})
+	err = s.SendWithTurnOptions("launch must fail", nil, nil, core.TurnOptions{Model: "attempted-model", ReasoningEffort: "high", ServiceTier: "fast"})
+	if err == nil {
+		t.Fatal("missing executable unexpectedly started")
+	}
+	if s.GetModel() != "previous-model" || s.GetReasoningEffort() != "medium" || s.turnOptions.ServiceTier != "default" {
+		t.Errorf("failed launch replaced active options: %#v", s.turnOptions)
+	}
+	d := s.DiagnosticSnapshot()
+	if d.Model != "attempted-model" || d.Effort != "high" || d.ServiceTier != "fast" || d.SettingsSource != "launch_attempt" {
+		t.Errorf("failed launch lost the attempted settings: %#v", d)
+	}
+	if !s.runtimeCfgFetched.IsZero() {
+		t.Fatal("failed-launch diagnostics probed the CLI")
 	}
 }

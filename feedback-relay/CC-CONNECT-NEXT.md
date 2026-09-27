@@ -1,8 +1,8 @@
 # CC Connect Next host mapping
 
-This directory is copied from the CI-verified Foundation development commit
-`0ab8c151f755080560eecf040f875a3e4413fd70` (Go version
-`v0.1.3-0.20260927093303-0ab8c151f755`) and remains independently
+This directory is copied from the published Foundation v0.1.3 source commit
+`c8650a6886031ac722b4e7dd6bf25279ff8c93bf` (Go version
+`v0.1.3`) and remains independently
 testable. Foundation files remain byte-identical; the host adds
 `CC-CONNECT-NEXT.md`, `src/worker.js`, `src/compat.js`, `src/github-app.js`,
 `test/host-auth.runtime.spec.js`, and `vitest.host.config.js`, and owns

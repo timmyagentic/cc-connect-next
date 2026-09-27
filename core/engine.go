@@ -4274,6 +4274,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	}
 	if msg.AnswerProfile != "" {
 		if _, ok := state.agentSession.(TurnOptionsSession); !ok {
+			e.recordFeedbackFailure(state, "profile_unsupported", errors.New("agent session does not support answer profiles"))
 			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgProfileNotSupported, msg.Content))
 			return
 		}

@@ -176,29 +176,38 @@ func feedbackApprovedHash(draft appfeatures.FeedbackDraft) (string, error) {
 
 // rememberApprovedFeedbackLocked atomically exchanges the one-use grant for
 // an immutable approved intent. A consumed token is never made reusable.
-func (e *Engine) rememberApprovedFeedbackLocked(sessionKey, userID string, draft appfeatures.FeedbackDraft) error {
+func (e *Engine) rememberApprovedFeedbackLocked(sessionKey, userID string, draft appfeatures.FeedbackDraft) (appfeatures.FeedbackDraft, error) {
 	owner := e.feedbackBinding(sessionKey, userID)
 	id := draft.Report().ReportID
 	hash, err := feedbackApprovedHash(draft)
 	if err != nil {
-		return err
+		return appfeatures.FeedbackDraft{}, err
 	}
 	if e.feedbackSubmissions == nil {
 		e.feedbackSubmissions = make(map[string]*feedbackSubmission)
 	}
 	if old := e.feedbackSubmissions[id]; old != nil {
 		if old.Owner != owner || old.PayloadHash != hash {
-			return fmt.Errorf("feedback approval does not match the stored report")
+			return appfeatures.FeedbackDraft{}, fmt.Errorf("feedback approval does not match the stored report")
 		}
-		return nil
+		return draft, nil
 	}
 	e.pruneFeedbackSubmissionsLocked(time.Now())
-	if len(e.feedbackSubmissions) >= feedbackPendingMax {
-		return fmt.Errorf("feedback submission storage is full")
+	content := feedbackContentKey(owner, draft)
+	// Independent previews may have been built before either was approved.
+	// Resolve their content under the same lock as insertion, then dispatch
+	// the original approved bytes and identity for every equivalent intent.
+	for _, item := range e.feedbackSubmissions {
+		if item.Owner == owner && item.ContentKey == content {
+			return appfeatures.RestoreFeedbackDraft(item.Draft)
+		}
 	}
-	e.feedbackSubmissions[id] = &feedbackSubmission{Draft: appfeatures.SnapshotFeedbackDraft(draft), Owner: owner, PayloadHash: hash, ContentKey: feedbackContentKey(owner, draft), At: time.Now(), State: "approved"}
+	if len(e.feedbackSubmissions) >= feedbackPendingMax {
+		return appfeatures.FeedbackDraft{}, fmt.Errorf("feedback submission storage is full")
+	}
+	e.feedbackSubmissions[id] = &feedbackSubmission{Draft: appfeatures.SnapshotFeedbackDraft(draft), Owner: owner, PayloadHash: hash, ContentKey: content, At: time.Now(), State: "approved"}
 	e.scheduleFeedbackSaveLocked()
-	return nil
+	return draft, nil
 }
 
 func (e *Engine) reuseFeedbackSubmission(sessionKey, userID string, draft appfeatures.FeedbackDraft) appfeatures.FeedbackDraft {

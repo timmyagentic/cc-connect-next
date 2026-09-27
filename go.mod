@@ -18,7 +18,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.23.1
 	github.com/stretchr/testify v1.11.1
-	github.com/timmyagentic/awesome-agent-app-features v0.1.3-0.20260927093303-0ab8c151f755
+	github.com/timmyagentic/awesome-agent-app-features v0.1.3
 	golang.org/x/mod v0.37.0
 	golang.org/x/sys v0.46.0
 	maunium.net/go/mautrix v0.27.0

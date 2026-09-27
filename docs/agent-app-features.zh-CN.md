@@ -3,9 +3,9 @@
 [English](agent-app-features.md)
 
 CC Connect Next 固定使用
-`github.com/timmyagentic/awesome-agent-app-features v0.1.3-0.20260927093303-0ab8c151f755`，对应源码提交
-`0ab8c151f755080560eecf040f875a3e4413fd70`。没有本地 `replace`、Git
-submodule 或浮动 `main` 依赖。这是已通过 CI 的开发提交，尚未正式发布；
+`github.com/timmyagentic/awesome-agent-app-features v0.1.3`，对应源码提交
+`c8650a6886031ac722b4e7dd6bf25279ff8c93bf`。没有本地 `replace`、Git
+submodule 或浮动 `main` 依赖。正式发布的 v0.1.3 tag 及其已通过 CI 的源码提交均不可变；
 Feedback 和 Updater 使用同一模块版本。
 
 ## Feedback
@@ -90,10 +90,10 @@ Foundation Relay；旧 CC Connect schema-1 请求会先被精确识别和转换�
 
 ```bash
 GOWORK=off go run \
-  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@0ab8c151f755080560eecf040f875a3e4413fd70 \
+  github.com/timmyagentic/awesome-agent-app-features/cmd/feature-lock@c8650a6886031ac722b4e7dd6bf25279ff8c93bf \
   validate \
   --source "$EXACT_SOURCE_ROOT" \
-  --source-commit 0ab8c151f755080560eecf040f875a3e4413fd70 \
+  --source-commit c8650a6886031ac722b4e7dd6bf25279ff8c93bf \
   --host "$CC_CONNECT_NEXT_ROOT" \
   --lock "$CC_CONNECT_NEXT_ROOT/agent-app-features.lock.json"
 ```

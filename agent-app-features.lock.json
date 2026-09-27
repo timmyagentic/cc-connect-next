@@ -2,7 +2,7 @@
   "schema": 1,
   "source": {
     "repository": "timmyagentic/awesome-agent-app-features",
-    "commit": "0ab8c151f755080560eecf040f875a3e4413fd70"
+    "commit": "c8650a6886031ac722b4e7dd6bf25279ff8c93bf"
   },
   "features": [
     {
@@ -13,19 +13,19 @@
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/feedback",
           "target": "go.mod",
-          "version": "v0.1.3-0.20260927093303-0ab8c151f755"
+          "version": "v0.1.3"
         },
         {
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/feedback/diagnostic",
           "target": "go.mod",
-          "version": "v0.1.3-0.20260927093303-0ab8c151f755"
+          "version": "v0.1.3"
         },
         {
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/feedback/httpclient",
           "target": "go.mod",
-          "version": "v0.1.3-0.20260927093303-0ab8c151f755"
+          "version": "v0.1.3"
         },
         {
           "mode": "source-subtree",
@@ -54,6 +54,7 @@
         "core/agent_capability_runtime.go",
         "core/agent_feedback.go",
         "core/agent_feedback_test.go",
+        "core/answer_profile_engine_test.go",
         "core/cuj_test.go",
         "core/engine.go",
         "core/feedback.go",
@@ -110,7 +111,7 @@
         "internal/appfeatures/testdata/approved-feedback-v1.json",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-09-27T09:47:47Z",
+      "verified_at": "2026-09-27T10:23:30Z",
       "checks": [
         "PATH=/usr/bin:/bin:$PATH GOWORK=off make test-full",
         "PATH=/usr/bin:/bin:$PATH GOWORK=off go test ./core -run TestCUJ -count=1",
@@ -130,13 +131,13 @@
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/updater",
           "target": "go.mod",
-          "version": "v0.1.3-0.20260927093303-0ab8c151f755"
+          "version": "v0.1.3"
         },
         {
           "mode": "go-module",
           "source": "github.com/timmyagentic/awesome-agent-app-features/updater/github",
           "target": "go.mod",
-          "version": "v0.1.3-0.20260927093303-0ab8c151f755"
+          "version": "v0.1.3"
         }
       ],
       "files": [
@@ -184,7 +185,7 @@
         "internal/updatechannel/channel_test.go",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-09-27T09:47:47Z",
+      "verified_at": "2026-09-27T10:23:30Z",
       "checks": [
         "PATH=/usr/bin:/bin:$PATH GOWORK=off make test-full",
         "PATH=/usr/bin:/bin:$PATH GOWORK=off go test ./core -run TestCUJ -count=1",
@@ -194,7 +195,7 @@
       "unverified": [
         "Windows replacement and cross-process locking were cross-compiled but not executed on a native Windows machine",
         "No formal installed binary or daemon was replaced or restarted; no production npm global installation was changed",
-        "No live published-release installation was performed for this immutable development dependency update"
+        "No live published-release installation was performed for this Foundation dependency upgrade"
       ]
     }
   ]

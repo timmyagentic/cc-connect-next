@@ -21,10 +21,23 @@ func (cs *codexSession) DiagnosticSnapshot() core.AgentDiagnosticSnapshot {
 	defer cs.turnOptionsMu.RUnlock()
 	value := core.AgentDiagnosticSnapshot{Backend: "exec", Model: cs.model, Effort: cs.effort,
 		ServiceTier: cs.serviceTier, Mode: cs.mode, SettingsSource: "launch_options"}
-	if cs.turnOptions != nil {
+	if cs.attemptedTurnOptions != nil {
+		value.Model, value.Effort, value.ServiceTier = cs.attemptedTurnOptions.Model, cs.attemptedTurnOptions.ReasoningEffort, cs.attemptedTurnOptions.ServiceTier
+		value.SettingsSource = "launch_attempt"
+	} else if cs.turnOptions != nil {
 		value.Model, value.Effort, value.ServiceTier = cs.turnOptions.Model, cs.turnOptions.ReasoningEffort, cs.turnOptions.ServiceTier
 	}
 	return value
+}
+
+func (cs *codexSession) storeLaunchDiagnostic(options *core.TurnOptions) {
+	requested := core.TurnOptions{Model: cs.model, ReasoningEffort: cs.effort, ServiceTier: cs.serviceTier}
+	if options != nil {
+		requested = *options
+	}
+	cs.turnOptionsMu.Lock()
+	cs.attemptedTurnOptions = &requested
+	cs.turnOptionsMu.Unlock()
 }
 
 type appServerDiagnostics struct {

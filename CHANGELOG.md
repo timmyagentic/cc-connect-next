@@ -7,6 +7,9 @@
   chat commands, cards and confirmation steps; persist approved report IDs and
   Relay receipts so retries do not blindly create duplicate issues. Requires
   the dual v1/v2 Relay and SQLite migration before the new client is released.
+  Pin the published Foundation v0.1.3 module and Relay source; coalesce independently
+  approved copies of the same report and preserve accurate diagnostics on rejected
+  answer profiles and failed process launches.
 
 - Add opt-in Feishu/Lark recent discussion context on explicit group mentions,
   with separate chat/topic reads, sender/time/reply attribution, bounded history
