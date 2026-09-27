@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## v0.4.0-beta.1 (2026-09-27)
+
+First v0.4.0 Beta from the latest merged main after v0.3.0, with session speed
+selection, bounded Feishu discussion context, and more durable feedback.
+See `changelogs/v0.4.0-beta.1.md` for bilingual highlights and upgrade notes.
+
+- Add persistent per-session `/speed`, `/speed fast`, and `/speed default`
+  choices. Apply changes to subsequent turns using the agent's supported model
+  catalog without restarting, changing model/effort, or interrupting a live turn.
+
+- Keep quota/usage-limit failures actionable without automatically offering a
+  bug report; explicit manual feedback remains available.
+
 - Preserve the initiating request and bounded, redacted turn diagnostics in
   feedback after long tasks, backend failures and host restart. Keep existing
   chat commands, cards and confirmation steps; persist approved report IDs and
