@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## v0.3.1-beta.1 (2026-09-28)
+
+First v0.3.1 Beta from the latest merged main after v0.3.0, with session speed
+selection, bounded Feishu discussion context, more durable feedback, and reliable
+Codex turn termination.
+See `changelogs/v0.3.1-beta.1.md` for bilingual highlights and upgrade notes.
+
+- Preserve decimals, amounts and slash-separated dates in automatic file-reference
+  rendering. Keep file names and web links distinct across inline-code boundaries
+  instead of replacing multiple values with the final reference (Issue #142).
+
+- End active Codex app-server turns promptly on EOF/read failure and retain
+  terminal events under queue backpressure. Drain stdout before reaping the
+  process, reject pending RPCs before blocked event delivery, and prevent late
+  turn/start responses from reviving completed turns. Avoid duplicate failures
+  after normal completion, idle EOF, or intentional shutdown.
+
+- Add persistent per-session `/speed`, `/speed fast`, and `/speed default`
+  choices. Apply changes to subsequent turns using the agent's supported model
+  catalog without restarting, changing model/effort, or interrupting a live turn.
+
+- Keep quota/usage-limit failures actionable without automatically offering a
+  bug report; explicit manual feedback remains available.
+
 - Preserve the initiating request and bounded, redacted turn diagnostics in
   feedback after long tasks, backend failures and host restart. Keep existing
   chat commands, cards and confirmation steps; persist approved report IDs and

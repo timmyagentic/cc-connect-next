@@ -3500,6 +3500,48 @@ func TestProcessInteractiveEvents_RichCardRendersWorkspaceReferences(t *testing.
 	}
 }
 
+func TestProcessInteractiveEvents_RichCardPreservesNumbersAndDistinctLinks(t *testing.T) {
+	p := &stubRichCardSilentPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+	a := &namedStubModelModeAgent{name: "claudecode"}
+	e := NewEngine("test", a, []Platform{p}, "", LangEnglish)
+	e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: "rich"})
+	e.SetReferenceConfig(ReferenceRenderCfg{
+		NormalizeAgents: []string{"claudecode"},
+		RenderPlatforms: []string{"feishu"},
+		DisplayPath:     "smart",
+		MarkerStyle:     "emoji",
+		EnclosureStyle:  "code",
+	})
+	sessionKey := "feishu:issue142"
+	session := e.sessions.GetOrCreateActive(sessionKey)
+	agentSession := newControllableSession("s-issue142")
+	state := &interactiveState{
+		agentSession: agentSession,
+		platform:     p,
+		replyCtx:     "ctx-issue142",
+		workspaceDir: t.TempDir(),
+	}
+	e.interactiveStates[sessionKey] = state
+	const row = "| 9/28 | 23.34 | 0.20 | 59.8 | 5.5 | 170,851.78 |"
+	const links = "[One](https://example.com/one) [Two](https://example.com/two)"
+	agentSession.events <- Event{
+		Type:    EventResult,
+		Content: "参考 `report.md`\n" + row + "\n" + links,
+		Done:    true,
+	}
+	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-issue142", time.Now(), nil, nil, state.replyCtx)
+	_, _, updates, _ := p.snapshot()
+	if len(updates) == 0 {
+		t.Fatal("expected a final rich-card update")
+	}
+	final := updates[len(updates)-1]
+	for _, want := range []string{"📄 `report.md`", row, links} {
+		if !strings.Contains(final, want) {
+			t.Errorf("final rich card = %q, want original content %q", final, want)
+		}
+	}
+}
+
 func TestProcessInteractiveEvents_FailedRichCardRendersWorkspaceReferences(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("TransformLocalReferences path handling assumes Unix separators")

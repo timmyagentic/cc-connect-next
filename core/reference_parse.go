@@ -42,11 +42,12 @@ type localReference struct {
 }
 
 var (
-	reMarkdownLink   = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)((?::\d+(?::\d+)?|:\d+-\d+)?)?`)
-	reHashLocation   = regexp.MustCompile(`^(.*?)(#L(\d+)(?:C(\d+))?)$`)
-	reColonLineCol   = regexp.MustCompile(`^(.*):(\d+):(\d+)$`)
-	reColonLineRange = regexp.MustCompile(`^(.*):(\d+)-(\d+)$`)
-	reColonLineOnly  = regexp.MustCompile(`^(.*):(\d+)$`)
+	reMarkdownLink     = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)((?::\d+(?::\d+)?|:\d+-\d+)?)?`)
+	reHashLocation     = regexp.MustCompile(`^(.*?)(#L(\d+)(?:C(\d+))?)$`)
+	reColonLineCol     = regexp.MustCompile(`^(.*):(\d+):(\d+)$`)
+	reColonLineRange   = regexp.MustCompile(`^(.*):(\d+)-(\d+)$`)
+	reColonLineOnly    = regexp.MustCompile(`^(.*):(\d+)$`)
+	reBareNumericValue = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:[.,/][0-9]+)*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?%?\.?$`)
 )
 
 func parseUserLocalReference(raw, workspaceDir string) (*localReference, error) {
@@ -136,7 +137,10 @@ func parseLocalReference(raw, workspaceDir string) (*localReference, bool) {
 }
 
 func parseRenderableLocalReference(raw, workspaceDir string) (*localReference, bool) {
-	if looksLikeSlashCommand(raw) {
+	// Bare numbers and slash-separated dates are ambiguous with file names.
+	// Preserve prose, including inline code; explicit paths and Markdown links
+	// can still refer to numeric files, and /show keeps its user-reference parser.
+	if reBareNumericValue.MatchString(strings.TrimSpace(raw)) || looksLikeSlashCommand(raw) {
 		return nil, false
 	}
 	return parseLocalReference(raw, workspaceDir)

@@ -89,12 +89,13 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 			option.Unit = "messages"
 			option.Description = "Maximum recent human messages per mentioned turn, before per-Agent-conversation deduplication. Bot output is omitted; failed or truncated reads are disclosed."
 			option.DescriptionZH = "每个被 @ 的回合最多读取的人类消息条数，再按 Agent 会话去重；省略机器人输出，明确提示读取失败或截断。"
-			if option.Key == "group_context_window_minutes" {
+			switch option.Key {
+			case "group_context_window_minutes":
 				maximum, fallback = float64(maxGroupContextMinutes), defaultGroupContextMinutes
 				option.Unit = "minutes"
 				option.Description = "Read only discussion within this many minutes before the triggering message, including when that message waits in the queue."
 				option.DescriptionZH = "仅补读触发消息之前该分钟数内的讨论；即使触发消息在排队，也使用其原始时间窗口。"
-			} else if option.Key == "group_context_max_chars" {
+			case "group_context_max_chars":
 				minimum, maximum, fallback = float64(minGroupContextChars), float64(maxGroupContextChars), defaultGroupContextChars
 				option.Unit = "Unicode characters"
 				option.Description = "Bound the complete JSON background including message text, sender, time and reply metadata; preserve the newest discussion and disclose truncation."

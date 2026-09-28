@@ -105,10 +105,7 @@ type FeedbackDraftSnapshot struct {
 
 func SnapshotFeedbackDraft(draft FeedbackDraft) FeedbackDraftSnapshot {
 	r := draft.Report()
-	return FeedbackDraftSnapshot{PreparedAt: draft.PreparedAt(), Input: featurediagnostic.Input{
-		Description: r.Description, RecentError: r.RecentError, CapabilityGaps: r.CapabilityGaps,
-		Environment: r.Environment, Diagnostic: r.Diagnostic, ReportID: r.ReportID,
-	}}
+	return FeedbackDraftSnapshot{PreparedAt: draft.PreparedAt(), Input: featurediagnostic.Input(r)}
 }
 
 func RestoreFeedbackDraft(value FeedbackDraftSnapshot) (FeedbackDraft, error) {

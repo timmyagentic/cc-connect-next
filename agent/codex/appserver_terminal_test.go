@@ -252,7 +252,9 @@ func TestAppServerSession_Issue138ProcessHelper(t *testing.T) {
 		return
 	}
 	if strings.HasPrefix(mode, "completed") {
-		fmt.Fprintln(os.Stdout, `{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}`)
+		if _, err := fmt.Fprintln(os.Stdout, `{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1"}}}`); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if mode == "failed" || mode == "completed_then_failed_exit" {
 		os.Exit(17)

@@ -139,7 +139,7 @@ func (a *Agent) ServiceTierCapabilities(model string) (core.ServiceTierCapabilit
 	}
 	data, err := os.ReadFile(catalog)
 	if err != nil {
-		return core.ServiceTierCapabilities{}, fmt.Errorf("Codex model catalog unavailable; refresh it with Codex CLI: %w", err)
+		return core.ServiceTierCapabilities{}, fmt.Errorf("codex model catalog unavailable; refresh it with Codex CLI: %w", err)
 	}
 	return parseServiceTierCapabilities(data, model, tier)
 }
