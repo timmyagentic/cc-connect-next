@@ -138,18 +138,7 @@ func transformTextOutsideFence(text string, cfg ReferenceRenderCfg, workspaceDir
 	var out strings.Builder
 	for _, part := range parts {
 		if !part.matched {
-			transformed, reps := transformNonCodeText(part.text, cfg, workspaceDir)
-			if len(replacements) > 0 && len(reps) > 0 {
-				offset := len(replacements)
-				for i := range reps {
-					oldPlaceholder := reps[i].placeholder
-					newPlaceholder := makeReferencePlaceholder(offset + i)
-					transformed = strings.ReplaceAll(transformed, oldPlaceholder, newPlaceholder)
-					reps[i].placeholder = newPlaceholder
-				}
-			}
-			out.WriteString(transformed)
-			replacements = append(replacements, reps...)
+			out.WriteString(transformNonCodeText(part.text, workspaceDir, &replacements))
 			continue
 		}
 		match := reInlineCodeSpan.FindStringSubmatch(part.text)
@@ -169,16 +158,17 @@ func transformTextOutsideFence(text string, cfg ReferenceRenderCfg, workspaceDir
 	return replaceReferencePlaceholders(out.String(), replacements, cfg)
 }
 
-func transformNonCodeText(text string, cfg ReferenceRenderCfg, workspaceDir string) (string, []placeholderReplacement) {
-	replacements := make([]placeholderReplacement, 0)
-	text = replaceProtectedSlashCommandLines(text, &replacements)
-	text = replaceProtectedWebMarkdownLinks(text, &replacements)
-	text = replaceProtectedLinks(text, reBareURL, &replacements)
-	text = replaceMarkdownLinks(text, &replacements, workspaceDir)
-	text = replaceLocalReferenceCandidates(text, reAbsOrFileRef, &replacements, workspaceDir)
-	text = replaceLocalReferenceCandidates(text, reRelativeRef, &replacements, workspaceDir)
-	text = replaceLocalReferenceCandidates(text, reBasenameFileRef, &replacements, workspaceDir)
-	return text, replacements
+func transformNonCodeText(text, workspaceDir string, replacements *[]placeholderReplacement) string {
+	// Share the allocator across inline-code boundaries. Renumbering separately
+	// allocated placeholders in place can overwrite another placeholder's ID.
+	text = replaceProtectedSlashCommandLines(text, replacements)
+	text = replaceProtectedWebMarkdownLinks(text, replacements)
+	text = replaceProtectedLinks(text, reBareURL, replacements)
+	text = replaceMarkdownLinks(text, replacements, workspaceDir)
+	text = replaceLocalReferenceCandidates(text, reAbsOrFileRef, replacements, workspaceDir)
+	text = replaceLocalReferenceCandidates(text, reRelativeRef, replacements, workspaceDir)
+	text = replaceLocalReferenceCandidates(text, reBasenameFileRef, replacements, workspaceDir)
+	return text
 }
 
 func replaceProtectedSlashCommandLines(text string, replacements *[]placeholderReplacement) string {

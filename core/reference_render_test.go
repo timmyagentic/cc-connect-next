@@ -285,3 +285,81 @@ func TestParseUserLocalReference_StillAcceptsSingleSegmentAbsolutePath(t *testin
 		t.Fatalf("parseUserLocalReference(/tmp) path = %q", ref.pathOriginal)
 	}
 }
+
+func TestTransformLocalReferences_PreservesNumbersAndDates(t *testing.T) {
+	cfg := ReferenceRenderCfg{
+		NormalizeAgents: []string{"all"},
+		RenderPlatforms: []string{"all"},
+		DisplayPath:     "smart",
+		MarkerStyle:     "emoji",
+		EnclosureStyle:  "code",
+	}
+	const table = "\n| 日期 | A | B | C | D | 合计 |\n| --- | --- | --- | --- | --- | --- |\n| 9/28 | 23.34 | 0.20 | 59.8 | 5.5 | 170,851.78 |"
+	cases := []struct{ name, input, want string }{
+		{"bare", "23.34 0.20 59.8 5.5 9/28 170,851.78", "23.34 0.20 59.8 5.5 9/28 170,851.78"},
+		{"inline_code", "`23.34` `0.20` `9/28` `170,851.78`", "`23.34` `0.20` `9/28` `170,851.78`"},
+		{"table_after_file", "参考 `report.md`" + table, "参考 📄 `report.md`" + table},
+		{"signed_and_percent", "-23.34 +0.20 59.8% -5.5% 1.25e-3", "-23.34 +0.20 59.8% -5.5% 1.25e-3"},
+		{"dates", "9/28 2026/9/28 9/28/2026", "9/28 2026/9/28 9/28/2026"},
+		{"sentence", "Amount 23.34. Date 9/28.", "Amount 23.34. Date 9/28."},
+		{"compact_table", "|9/28|23.34|170,851.78|", "|9/28|23.34|170,851.78|"},
+	}
+	for _, agent := range []string{"claudecode", "codex"} {
+		for _, platform := range []string{"feishu", "weixin"} {
+			for _, tc := range cases {
+				t.Run(agent+"/"+platform+"/"+tc.name, func(t *testing.T) {
+					if got := TransformLocalReferences(tc.input, cfg, agent, platform, t.TempDir()); got != tc.want {
+						t.Fatalf("rendered = %q, want %q", got, tc.want)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestTransformLocalReferences_KeepsDistinctReferencesAcrossCodeSpans(t *testing.T) {
+	cfg := ReferenceRenderCfg{
+		NormalizeAgents: []string{"claudecode"},
+		RenderPlatforms: []string{"feishu"},
+		DisplayPath:     "basename",
+		MarkerStyle:     "emoji",
+		EnclosureStyle:  "code",
+	}
+	cases := []struct{ name, input, want string }{
+		{"files", "`a.go` b.go c.go d.go", "📄 `a.go` 📄 `b.go` 📄 `c.go` 📄 `d.go`"},
+		{"urls", "`a.go` https://example.com/one https://example.com/two", "📄 `a.go` https://example.com/one https://example.com/two"},
+		{"markdown_links", "`a.go` [One](https://example.com/one) [Two](https://example.com/two)", "📄 `a.go` [One](https://example.com/one) [Two](https://example.com/two)"},
+		{"ordinary_code_boundary", "a.go `text` b.go c.go", "📄 `a.go` `text` 📄 `b.go` 📄 `c.go`"},
+		{"multiple_boundaries", "`a.go` b.go c.go `d.go` e.go f.go", "📄 `a.go` 📄 `b.go` 📄 `c.go` 📄 `d.go` 📄 `e.go` 📄 `f.go`"},
+		{"mixed", "`a.go` [One](https://example.com/one) b.go https://example.com/two c.go", "📄 `a.go` [One](https://example.com/one) 📄 `b.go` https://example.com/two 📄 `c.go`"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := TransformLocalReferences(tc.input, cfg, "claudecode", "feishu", t.TempDir()); got != tc.want {
+				t.Fatalf("rendered = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTransformLocalReferences_PreservesExplicitNumericFileReferences(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "23.34"), []byte("numeric filename"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := ReferenceRenderCfg{
+		NormalizeAgents: []string{"claudecode"},
+		RenderPlatforms: []string{"feishu"},
+		DisplayPath:     "basename",
+		MarkerStyle:     "emoji",
+		EnclosureStyle:  "code",
+	}
+	input := "23.34 `23.34` ./23.34 `./23.34` [file](23.34)"
+	want := "23.34 `23.34` 📄 `23.34` 📄 `23.34` 📄 `23.34`"
+	if got := TransformLocalReferences(input, cfg, "claudecode", "feishu", workspace); got != want {
+		t.Fatalf("rendered = %q, want %q", got, want)
+	}
+	if ref, err := parseUserLocalReference("23.34", workspace); err != nil || ref.pathOriginal != "23.34" {
+		t.Fatalf("explicit user reference = %#v, %v", ref, err)
+	}
+}

@@ -9,6 +9,10 @@ selection, bounded Feishu discussion context, more durable feedback, and reliabl
 Codex turn termination.
 See `changelogs/v0.3.1-beta.1.md` for bilingual highlights and upgrade notes.
 
+- Preserve decimals, amounts and slash-separated dates in automatic file-reference
+  rendering. Keep file names and web links distinct across inline-code boundaries
+  instead of replacing multiple values with the final reference (Issue #142).
+
 - End active Codex app-server turns promptly on EOF/read failure and retain
   terminal events under queue backpressure. Drain stdout before reaping the
   process, reject pending RPCs before blocked event delivery, and prevent late
