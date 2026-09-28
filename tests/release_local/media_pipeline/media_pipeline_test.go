@@ -18,7 +18,9 @@ type sendRecord struct {
 }
 
 type recordingAgent struct {
-	session *recordingSession
+	mu       sync.Mutex
+	session  *recordingSession
+	sessions []*recordingSession
 }
 
 func newRecordingAgent() *recordingAgent {
@@ -28,8 +30,17 @@ func newRecordingAgent() *recordingAgent {
 func (a *recordingAgent) Name() string { return "recording-agent" }
 
 func (a *recordingAgent) StartSession(_ context.Context, sessionID string) (core.AgentSession, error) {
-	a.session.setID(sessionID)
-	return a.session, nil
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	session := a.session
+	if len(a.sessions) > 0 {
+		// Each engine session owns its event stream. Sharing one lets a
+		// different foreground or unsolicited reader steal the final result.
+		session = newRecordingSession()
+	}
+	a.sessions = append(a.sessions, session)
+	session.setID(sessionID)
+	return session, nil
 }
 
 func (a *recordingAgent) ListSessions(_ context.Context) ([]core.AgentSessionInfo, error) {
@@ -37,7 +48,12 @@ func (a *recordingAgent) ListSessions(_ context.Context) ([]core.AgentSessionInf
 }
 
 func (a *recordingAgent) Stop() error {
-	return a.session.Close()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, session := range a.sessions {
+		_ = session.Close()
+	}
+	return nil
 }
 
 type recordingSession struct {
@@ -434,7 +450,7 @@ func TestSendToSessionWithAttachmentsRespectsDisabledAttachmentSend(t *testing.T
 }
 
 func TestSendToSessionWithAttachmentsRequiresSessionWhenMultipleSessionsHaveAttachments(t *testing.T) {
-	engine, agent, platform := newMediaEngine(t)
+	engine, _, platform := newMediaEngine(t)
 	first := mediaMessage("first")
 	first.SessionKey = "media:chat-1:user-1"
 	second := mediaMessage("second")
@@ -443,7 +459,6 @@ func TestSendToSessionWithAttachmentsRequiresSessionWhenMultipleSessionsHaveAtta
 
 	engine.ReceiveMessage(platform, first)
 	engine.ReceiveMessage(platform, second)
-	agent.session.waitRecords(t, 2)
 	// Both event loops must finish before the TempDir cleanup runs. Waiting for
 	// only the first reply leaves the second session able to persist state while
 	// the test directory is being removed, which makes this test flaky under a
