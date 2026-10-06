@@ -5,6 +5,7 @@ Complete guide to using cc-connect-next features.
 ## Table of Contents
 
 - [Session Management](#session-management)
+- [Account Quotas (`/usage`)](#account-quotas-usage)
 - [Busy Messages: Queue vs Steer](#busy-messages-queue-vs-steer)
 - [Feedback Channel (`/feedback`)](#feedback-channel-feedback)
 - [Permission Modes](#permission-modes)
@@ -73,6 +74,21 @@ The built-in default is `0`, which always continues the previous session.
 ### Model switch preserves history
 
 `/model` preserves the current session — the agent resumes the conversation with the new model (no extra token cost). Model switching affects the shared agent instance — if multiple platforms use the same project, the model change applies to all of them.
+
+---
+
+## Account Quotas (`/usage`)
+
+`/usage` queries the current agent's provider account on demand and shows quota
+percentages and reset times. Codex uses the locally signed-in ChatGPT OAuth
+account; Claude Code runs its native `/usage` command to read the current
+five-hour and weekly limits. Other agents report that this command is unsupported.
+
+Conversation context percentages and per-turn token accounting have been
+removed. `/usage` remains independent of them and does not read CPA's usage
+database. With CPA or an API-key-only Codex setup, a local ChatGPT OAuth login is
+still required; the result describes that login's account, not CPA's selected
+upstream account.
 
 ---
 

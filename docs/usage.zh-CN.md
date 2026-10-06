@@ -5,6 +5,7 @@ cc-connect-next 完整功能使用指南。
 ## 目录
 
 - [会话管理](#会话管理)
+- [账户额度（`/usage`）](#账户额度usage)
 - [忙时消息：排队 vs 并入（steer）](#忙时消息排队-vs-并入steer)
 - [反馈通道（`/feedback`）](#反馈通道feedback)
 - [权限模式](#权限模式)
@@ -67,6 +68,18 @@ reset_on_idle_mins = 60
 ### 切换模型时保留历史
 
 `/model` 切换模型时保留当前会话——agent 会在新模型下继续对话（不额外消耗 token）。注意模型切换作用于共享的 agent 实例——如果多个平台使用同一个 project，模型变更会影响所有平台。
+
+---
+
+## 账户额度（`/usage`）
+
+`/usage` 按需查询当前 Agent 的供应商账户，显示额度使用百分比和重置时间。
+Codex 查询本机登录的 ChatGPT OAuth 账户；Claude Code 调用自身的 `/usage`，
+读取当前 5 小时和一周的额度。其他 Agent 会提示不支持该命令。
+
+会话 context 百分比和每轮 token 统计已移除，`/usage` 独立保留。
+它不读取 CPA 的用量数据库。使用 CPA 或仅 API Key 的 Codex 配置时，仍需本机
+另有 ChatGPT OAuth 登录；结果对应该登录账户，不代表 CPA 当前选择的上游账户。
 
 ---
 

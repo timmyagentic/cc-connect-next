@@ -40,8 +40,8 @@ func TestHandleSessionEvent_AssistantMessage(t *testing.T) {
 		if evt.Content != "" {
 			t.Fatalf("content = %q, want empty final content because text was streamed", evt.Content)
 		}
-		if evt.OutputTokens != 42 {
-			t.Fatalf("outputTokens = %d, want 42", evt.OutputTokens)
+		if !evt.Done || evt.SessionID != "test-session" {
+			t.Fatalf("event = %+v, want completed test-session", evt)
 		}
 	default:
 		t.Fatal("no event emitted")

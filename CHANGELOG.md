@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Remove the remaining Claude Code and Copilot turn-token parsing, shared result
+  token fields, and token metadata in completion/compaction logs. Account quota
+  queries through `/usage` remain available independently of session telemetry.
+
 ## v0.3.1-beta.1 (2026-09-28)
 
 First v0.3.1 Beta from the latest merged main after v0.3.0, with session speed

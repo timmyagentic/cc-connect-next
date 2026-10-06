@@ -296,7 +296,7 @@ func TestBasicUserTurnContractAcrossInputModalities(t *testing.T) {
 			engine, agent, platform := newTurnEngine(t)
 			engine.SetReplyFooterEnabled(true)
 			agent.model = "turn-model"
-			agent.session.setResult(core.Event{Type: core.EventResult, Content: "final answer", InputTokens: 52000, Done: true})
+			agent.session.setResult(core.Event{Type: core.EventResult, Content: "final answer", Done: true})
 
 			msg := turnMessage(tt.content)
 			msg.Images = tt.images
@@ -355,7 +355,7 @@ func TestSideChannelEchoContractAcrossOutboundModalities(t *testing.T) {
 			if err := engine.SendToSessionWithAttachments(msg.SessionKey, sideText, tt.images, tt.files, nil, false); err != nil {
 				t.Fatalf("SendToSessionWithAttachments() error = %v", err)
 			}
-			agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: sideText, InputTokens: 52000, Done: true})
+			agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: sideText, Done: true})
 			assertStableSideChannelOnly(t, platform, sideText)
 		})
 	}
@@ -374,7 +374,7 @@ func TestSideChannelDifferentFinalContract(t *testing.T) {
 		t.Fatalf("SendToSessionWithAttachments() error = %v", err)
 	}
 
-	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "separate final answer", InputTokens: 52000, Done: true})
+	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "separate final answer", Done: true})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -409,7 +409,7 @@ func TestThinkingAndToolEventsContract(t *testing.T) {
 	agent.session.emit(core.Event{Type: core.EventThinking, Content: "planning the command"})
 	agent.session.emit(core.Event{Type: core.EventToolUse, ToolName: "Bash", ToolInput: "echo tool-output"})
 	agent.session.emit(core.Event{Type: core.EventToolResult, ToolName: "Bash", ToolResult: "tool-output", ToolStatus: "completed"})
-	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "final answer", InputTokens: 52000, Done: true})
+	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "final answer", Done: true})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -448,7 +448,7 @@ func TestHiddenToolEventsContractKeepsFinalAndHidesToolDetails(t *testing.T) {
 	agent.session.emit(core.Event{Type: core.EventThinking, Content: "planning hidden work"})
 	agent.session.emit(core.Event{Type: core.EventToolUse, ToolName: "Bash", ToolInput: "cat secret.txt"})
 	agent.session.emit(core.Event{Type: core.EventToolResult, ToolName: "Bash", ToolResult: "secret-output", ToolStatus: "completed"})
-	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "final answer", InputTokens: 52000, Done: true})
+	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "final answer", Done: true})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -513,7 +513,7 @@ func TestPermissionInteractionContractWhileAgentSendIsBlocked(t *testing.T) {
 		t.Fatalf("permission calls = %#v, want one allow response", agent.session.permissionCalls())
 	}
 
-	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "write complete", InputTokens: 52000, Done: true})
+	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "write complete", Done: true})
 	platform.waitTextContaining(t, "write complete")
 
 	records := agent.session.waitRecords(t, 1)
@@ -547,10 +547,9 @@ func TestStreamingPreviewFinalizationContractExposesDuplicateFinalSend(t *testin
 	platform.waitPreviewStarts(t, 1)
 
 	agent.session.releaseFirstResult(core.Event{
-		Type:        core.EventResult,
-		Content:     previewText,
-		InputTokens: 52000,
-		Done:        true,
+		Type:    core.EventResult,
+		Content: previewText,
+		Done:    true,
 	})
 
 	platform.waitPreviewUpdates(t, 1)
@@ -622,7 +621,7 @@ func TestStreamingPreviewConfigurationMatrix(t *testing.T) {
 
 			body := strings.Repeat("stream body ", 20)
 			agent.session.emit(core.Event{Type: core.EventText, Content: body})
-			agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: body, InputTokens: 52000, Done: true})
+			agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: body, Done: true})
 
 			if tt.wantPreview {
 				platform.waitPreviewUpdates(t, 1)
@@ -675,7 +674,7 @@ func TestStreamingPreviewMaxCharsOnlyTruncatesIntermediatePreview(t *testing.T) 
 	body := strings.Repeat("full final body ", 30)
 	agent.session.emit(core.Event{Type: core.EventText, Content: body})
 	platform.waitPreviewStarts(t, 1)
-	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: body, InputTokens: 52000, Done: true})
+	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: body, Done: true})
 	platform.waitPreviewUpdates(t, 1)
 
 	_, starts, updates, _ := platform.snapshotPreviewLifecycle()
@@ -736,7 +735,7 @@ func TestReplyMetadataConfigurationMatrix(t *testing.T) {
 			agent.workDir = "/tmp/release-agent"
 			engine.SetShowContextIndicator(tt.showCtx)
 			engine.SetReplyFooterEnabled(tt.showFooter)
-			agent.session.setResult(core.Event{Type: core.EventResult, Content: "answer", InputTokens: 28000, Done: true})
+			agent.session.setResult(core.Event{Type: core.EventResult, Content: "answer", Done: true})
 
 			engine.ReceiveMessage(platform, turnMessage("metadata matrix"))
 			platform.waitTextContaining(t, "answer")
@@ -766,7 +765,7 @@ func TestLongFinalResponseKeepsMetadataOnceAtTail(t *testing.T) {
 	engine.SetReplyFooterEnabled(true)
 
 	body := strings.Repeat("long-response ", 420)
-	agent.session.setResult(core.Event{Type: core.EventResult, Content: body, InputTokens: 28000, Done: true})
+	agent.session.setResult(core.Event{Type: core.EventResult, Content: body, Done: true})
 
 	engine.ReceiveMessage(platform, turnMessage("long final"))
 
@@ -823,7 +822,7 @@ func TestDisplayVisibilityConfigurationMatrix(t *testing.T) {
 			agent.session.emit(core.Event{Type: core.EventThinking, Content: "matrix thinking"})
 			agent.session.emit(core.Event{Type: core.EventToolUse, ToolName: "Bash", ToolInput: "echo visible"})
 			agent.session.emit(core.Event{Type: core.EventToolResult, ToolName: "Bash", ToolResult: "visible output", ToolStatus: "completed"})
-			agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "matrix final", InputTokens: 52000, Done: true})
+			agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "matrix final", Done: true})
 			platform.waitTextContaining(t, "matrix final")
 
 			texts, _, _, _ := platform.snapshot()
@@ -872,7 +871,7 @@ func TestRichCardModeKeepsAnonymousProgressAndFinalAnswerInOneCard(t *testing.T)
 	agent.session.emit(core.Event{Type: core.EventThinking, Content: "rich thinking"})
 	agent.session.emit(core.Event{Type: core.EventToolUse, ToolName: "Bash", ToolInput: "echo rich"})
 	agent.session.emit(core.Event{Type: core.EventToolResult, ToolName: "Bash", ToolResult: "rich output", ToolStatus: "completed"})
-	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "rich final", InputTokens: 28000, Done: true})
+	agent.session.releaseFirstResult(core.Event{Type: core.EventResult, Content: "rich final", Done: true})
 	platform.waitPreviewUpdates(t, 3)
 
 	texts, starts, updates, deletes := platform.snapshotPreviewLifecycle()

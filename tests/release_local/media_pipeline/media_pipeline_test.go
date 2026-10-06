@@ -370,7 +370,7 @@ func TestSendToSessionWithAttachmentsDeliversTextImagesAndFiles(t *testing.T) {
 	}
 }
 
-func TestSendToSessionWithAttachmentsDoesNotDuplicateEchoedFinalTextWithContextIndicator(t *testing.T) {
+func TestSendToSessionWithAttachmentsDoesNotEmitContextMetadata(t *testing.T) {
 	engine, agent, platform := newMediaEngine(t)
 	agent.session.blockFirstResult()
 
@@ -390,10 +390,9 @@ func TestSendToSessionWithAttachmentsDoesNotDuplicateEchoedFinalTextWithContextI
 	}
 
 	agent.session.releaseFirstEvent(core.Event{
-		Type:        core.EventResult,
-		Content:     sideText,
-		InputTokens: 52000,
-		Done:        true,
+		Type:    core.EventResult,
+		Content: sideText,
+		Done:    true,
 	})
 
 	deadline := time.Now().Add(300 * time.Millisecond)

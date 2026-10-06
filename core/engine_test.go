@@ -1056,36 +1056,6 @@ func TestProcessInteractiveEvents_SuppressesDuplicateSideChannelText(t *testing.
 	}
 }
 
-func TestProcessInteractiveEvents_SuppressesDuplicateSideChannelTextWithContextIndicator(t *testing.T) {
-	p := &stubMediaPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}
-	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
-	sessionKey := "test:user1"
-	session := e.sessions.GetOrCreateActive(sessionKey)
-	agentSession := newControllableSession("s1")
-	state := &interactiveState{
-		agentSession: agentSession,
-		platform:     p,
-		replyCtx:     "ctx-1",
-	}
-	e.interactiveStates[sessionKey] = state
-
-	sideText := "已发送 AGENTS.md 文件给你。"
-	if err := e.SendToSessionWithAttachments(sessionKey, sideText, nil, []FileAttachment{{
-		MimeType: "text/markdown",
-		Data:     []byte("body"),
-		FileName: "AGENTS.md",
-	}}, nil, false); err != nil {
-		t.Fatalf("SendToSessionWithAttachments returned error: %v", err)
-	}
-
-	agentSession.events <- Event{Type: EventResult, Content: sideText, InputTokens: 52000, Done: true}
-	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m1", time.Now(), nil, nil, nil)
-
-	if got := p.getSent(); len(got) != 1 || got[0] != sideText {
-		t.Fatalf("sent text = %#v, want only the side-channel message without duplicate ctx reply", got)
-	}
-}
-
 func TestProcessInteractiveEvents_DoesNotSuppressDifferentFinalText(t *testing.T) {
 	p := &stubMediaPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}
 	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
@@ -1143,11 +1113,10 @@ func TestProcessInteractiveEvents_NonTerminalResultContinuesTurn(t *testing.T) {
 	// Mid-turn compaction event: agent emits type:"result" with Done=false
 	// when it triggers automatic context compaction. Content is empty.
 	agentSession.events <- Event{
-		Type:        EventResult,
-		Content:     "",
-		Done:        false,
-		InputTokens: 50000,
-		Metadata:    map[string]any{"compaction_continue": true},
+		Type:     EventResult,
+		Content:  "",
+		Done:     false,
+		Metadata: map[string]any{"compaction_continue": true},
 	}
 
 	// Post-compaction assistant chunk: must still be observed by the engine
@@ -1273,7 +1242,7 @@ func TestProcessInteractiveEvents_FooterOmitsContextIndicator(t *testing.T) {
 	}
 	e.interactiveStates[sessionKey] = state
 
-	agentSession.events <- Event{Type: EventResult, Content: "answer", InputTokens: 28000, Done: true}
+	agentSession.events <- Event{Type: EventResult, Content: "answer", Done: true}
 	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-footer-context", time.Now(), nil, nil, state.replyCtx)
 
 	sent := p.getSent()
@@ -1312,7 +1281,7 @@ func TestProcessInteractiveEvents_ToolSegmentsKeepFinalFooter(t *testing.T) {
 	agentSession.events <- Event{Type: EventText, Content: "先检查一下。"}
 	agentSession.events <- Event{Type: EventToolUse, ToolName: "Bash", ToolInput: "pwd"}
 	agentSession.events <- Event{Type: EventText, Content: "已处理完成。"}
-	agentSession.events <- Event{Type: EventResult, Content: "已处理完成。", InputTokens: 28000, Done: true}
+	agentSession.events <- Event{Type: EventResult, Content: "已处理完成。", Done: true}
 	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-tool-footer", time.Now(), nil, nil, state.replyCtx)
 
 	sent := p.getSent()
