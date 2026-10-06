@@ -388,9 +388,18 @@ func (sm *SessionManager) GetOrCreateActive(userKey string) *Session {
 }
 
 func (sm *SessionManager) NewSession(userKey, name string) *Session {
+	return sm.newSession(userKey, name, false)
+}
+
+// newSession can acquire the busy lock before publishing the replacement to
+// other message receivers through activeSession.
+func (sm *SessionManager) newSession(userKey, name string, busy bool) *Session {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	s := sm.createLocked(userKey, name)
+	if busy {
+		s.TryLock()
+	}
 	_ = sm.saveLocked()
 	return s
 }

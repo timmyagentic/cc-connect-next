@@ -351,6 +351,7 @@ type Message struct {
 type EventType string
 
 const (
+	EventHookRejected      EventType = "hook_rejected"      // Stop hook rejected the preceding assistant draft
 	EventText              EventType = "text"               // intermediate or final text
 	EventToolUse           EventType = "tool_use"           // tool invocation info
 	EventToolResult        EventType = "tool_result"        // tool execution result

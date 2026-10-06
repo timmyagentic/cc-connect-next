@@ -313,6 +313,20 @@ Override the Claude Code configuration directory.
 - Takes effect: `restart`
 - Example: `export CLAUDE_CONFIG_DIR=/path/to/claude-config`
 
+### `CODEX_CLI_PATH` — `codex`
+
+Select an explicit Codex executable when cmd is unset. Explicit cmd takes precedence; invalid explicit paths fail. Omission searches PATH then current and legacy macOS desktop layouts.
+
+- Source: `environment`
+- Placement: `process environment`
+- Scope: `agent` (`codex`)
+- Type: `string`
+- Requirement: `optional`
+- Default: `PATH, then macOS ChatGPT/Codex desktop CLI`
+- Default source: `runtime`
+- Takes effect: `restart`
+- Example: `export CODEX_CLI_PATH=/path/to/codex`
+
 ### `CODEX_HOME` — `codex`
 
 Choose the Codex home used when projects.agent.options.codex_home is unset.
@@ -1462,17 +1476,31 @@ Override the Agent command, optionally including global arguments.
 - Required when: `one of cmd, cli_path, or command must be set`
 - Example: `cmd = "value"`
 
-### `projects.agent.options.cmd` — `antigravity, claudecode, codex, copilot, cursor, gemini, iflow, kimi, opencode, pi, qoder`
+### `projects.agent.options.cmd` — `antigravity, claudecode, copilot, cursor, gemini, iflow, kimi, opencode, pi, qoder`
 
 Override the Agent command, optionally including global arguments.
 
 - Source: `toml`
 - Placement: `[projects.agent.options] (inside one [[projects]])`
-- Scope: `agent` (`antigravity, claudecode, codex, copilot, cursor, gemini, iflow, kimi, opencode, pi, qoder`)
+- Scope: `agent` (`antigravity, claudecode, copilot, cursor, gemini, iflow, kimi, opencode, pi, qoder`)
 - Type: `string`
 - Requirement: `optional`
 - Default: `unset`
 - Default source: `adapter`
+- Takes effect: `restart`
+- Example: `cmd = "value"`
+
+### `projects.agent.options.cmd` — `codex`
+
+Select the Codex executable and optional global arguments. Explicit cmd takes precedence over CODEX_CLI_PATH. Omission discovers PATH then the current/legacy macOS ChatGPT or Codex desktop CLI.
+
+- Source: `toml`
+- Placement: `[projects.agent.options] (inside one [[projects]])`
+- Scope: `agent` (`codex`)
+- Type: `string`
+- Requirement: `optional`
+- Default: `CODEX_CLI_PATH, then PATH, then macOS desktop CLI`
+- Default source: `runtime`
 - Takes effect: `restart`
 - Example: `cmd = "value"`
 

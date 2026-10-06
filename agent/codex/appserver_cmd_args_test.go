@@ -22,7 +22,6 @@ func TestAppServerLaunchArgs_PropagatesCmdExtraArgs(t *testing.T) {
 		"-c", `service_tier="fast"`,
 		"-c", "features.fast_mode=true",
 		"app-server",
-		"--listen", "stdio://",
 		"-c", `model="o3"`,
 		"-c", `model_reasoning_effort="max"`,
 		"-c", `model_provider="myprov"`,
@@ -33,12 +32,11 @@ func TestAppServerLaunchArgs_PropagatesCmdExtraArgs(t *testing.T) {
 	}
 }
 
-func TestAppServerLaunchArgs_NoExtrasKeepsLegacyShape(t *testing.T) {
+func TestAppServerLaunchArgs_NoExtrasUsesStdio(t *testing.T) {
 	args := (&appServerSession{url: "stdio://", model: "o3", effort: "high"}).launchArgs()
 
 	want := []string{
 		"app-server",
-		"--listen", "stdio://",
 		"-c", `model="o3"`,
 		"-c", `model_reasoning_effort="high"`,
 	}
@@ -137,5 +135,23 @@ func TestAvailableReasoningEfforts_IncludesMax(t *testing.T) {
 	a := &Agent{}
 	if efforts := a.AvailableReasoningEfforts(); !slices.Contains(efforts, "max") {
 		t.Errorf("AvailableReasoningEfforts() = %q, want it to include \"max\"", efforts)
+	}
+}
+
+func TestAppServerLaunchArgs_StdioDoesNotOpenListener(t *testing.T) {
+	for _, url := range []string{"", " ", "stdio", "stdio://", " STDIO:// ", " StDiO "} {
+		t.Run(url, func(t *testing.T) {
+			args := (&appServerSession{url: url, cliExtraArgs: []string{"-c", "features.test=true"}}).launchArgs()
+			if slices.Contains(args, "--listen") {
+				t.Fatalf("stdio must use pipes without --listen: %q", args)
+			}
+			if !reflect.DeepEqual(args[:3], []string{"-c", "features.test=true", "app-server"}) {
+				t.Fatalf("global args changed: %q", args)
+			}
+		})
+	}
+	args := (&appServerSession{url: " ws://127.0.0.1:9000 "}).launchArgs()
+	if !reflect.DeepEqual(args, []string{"app-server", "--listen", "ws://127.0.0.1:9000"}) {
+		t.Fatalf("explicit listener changed: %q", args)
 	}
 }

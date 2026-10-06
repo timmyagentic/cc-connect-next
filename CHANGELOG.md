@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+## v0.3.1-beta.2 (2026-10-07)
+
+Adapt 14 upstream correctness fixes to Next's session, privacy, and single-card
+contracts. See `changelogs/v0.3.1-beta.2.md` for bilingual highlights.
+
+- Refresh Relay development-tool dependencies and pin patched sharp 0.35.5
+  so the required security audit passes without weakening release gates.
+
+- Enforce Feishu card callback user admission for commands, permissions,
+  navigation, and question answers; retain bound direct-user card ownership.
+- Deliver current rich-text files alongside approved quoted attachments. Download
+  file, audio and image resources with bounded, authenticated HTTP Range requests,
+  strict range/length validation, cancellation and transient retry.
+- Omit Codex stdio listener flags. Discover current/legacy macOS desktop CLIs,
+  support CODEX_CLI_PATH, and preserve explicit command/args across workspaces,
+  both execution backends, metadata queries and diagnostics.
+- Publish idle-reset replacement sessions already locked, retain late backend
+  session IDs on failed turns, and invalidate incompatible workspace IDs without
+  deleting history.
+- Keep AskUserQuestion interactive in Claude bypass modes; render single-choice
+  card answers in flat action rows with their existing answer metadata.
+- Clear Stop-hook-rejected drafts from replies and presentation/history caches.
+  Bound Claude inherited-pipe waits and kill confirmation; separate prompt user
+  stop from normal Stop-hook grace, interrupt blocked stdin writes, and fence overlapping close/respawn operations.
+- Restart loaded launchd services in place, retaining their existing domain.
+  Refuse ambiguous/unreadable service state rather than unloading blindly.
+- Render cron schedule, next and last run in each task's explicit timezone.
+
 - Remove the remaining Claude Code and Copilot turn-token parsing, shared result
   token fields, and token metadata in completion/compaction logs. Account quota
   queries through `/usage` remain available independently of session telemetry.

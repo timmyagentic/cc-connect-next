@@ -345,28 +345,31 @@ type Platform struct {
 	defaultGroupSharing        bool // omitted sharing changes groups, preserving existing ordinary P2P keys
 	threadMode                 threadIsolationMode
 	// noReplyToTrigger: when true, send via Create instead of Im.Message.Reply (no quote to the user's message).
-	noReplyToTrigger bool
-	resolveMentions  bool
-	client           *lark.Client
-	replayClient     *lark.Client
-	replayClientMu   sync.Mutex
-	wsClient         *larkws.Client
-	handler          core.MessageHandler
-	lifecycleHandler core.PlatformLifecycleHandler
-	cardNavHandler   core.CardNavigationHandler
-	cancel           context.CancelFunc
-	dedup            *core.MessageDedup
-	botOpenID        string
-	botIdentityErr   error
-	botOpenIDFetcher func() (string, error)
-	botRetryCancel   context.CancelFunc
-	peerBots         map[string]string // app_id -> friendly alias, for quoted-reply attribution
-	mentionMap       map[string]string // friendly bot name -> open_id, for outbound native @ notifications
-	userNameCache    sync.Map          // open_id -> display name
-	chatNameCache    sync.Map          // chat_id -> chat name
-	chatMemberCache  sync.Map          // chatID -> *chatMemberEntry
-	recalledMu       sync.Mutex
-	recalledMsgIDs   map[string]time.Time // message_id -> recall time, short TTL race guard
+	noReplyToTrigger     bool
+	resolveMentions      bool
+	client               *lark.Client
+	replayClient         *lark.Client
+	replayClientMu       sync.Mutex
+	wsClient             *larkws.Client
+	handler              core.MessageHandler
+	lifecycleHandler     core.PlatformLifecycleHandler
+	cardNavHandler       core.CardNavigationHandler
+	cancel               context.CancelFunc
+	dedup                *core.MessageDedup
+	botOpenID            string
+	botIdentityErr       error
+	botOpenIDFetcher     func() (string, error)
+	botRetryCancel       context.CancelFunc
+	peerBots             map[string]string // app_id -> friendly alias, for quoted-reply attribution
+	mentionMap           map[string]string // friendly bot name -> open_id, for outbound native @ notifications
+	userNameCache        sync.Map          // open_id -> display name
+	chatNameCache        sync.Map          // chat_id -> chat name
+	resourceDownloadHTTP *http.Client
+	resourceChunkSize    int64
+	resourceMaxBytes     int64
+	chatMemberCache      sync.Map // chatID -> *chatMemberEntry
+	recalledMu           sync.Mutex
+	recalledMsgIDs       map[string]time.Time // message_id -> recall time, short TTL race guard
 	// Webhook mode fields (for Lark international version)
 	server       *http.Server
 	port         string
@@ -1194,13 +1197,19 @@ func (p *Platform) isBoundDirectUserCardAction(values map[string]any, userID str
 //   - act:/xxx   — execute an action, then render and update the card in-place
 //   - cmd:/xxx   — legacy: dispatch as a user command (sends a new message)
 func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
-	if event.Event == nil || event.Event.Action == nil {
+	if event == nil || event.Event == nil || event.Event.Action == nil {
 		return nil, nil
 	}
 	values := event.Event.Action.Value
 	userID := ""
 	if event.Event.Operator != nil {
 		userID = event.Event.Operator.OpenID
+	}
+	// Card callbacks must respect the same per-user admission as messages,
+	// including navigation and permission/question responses.
+	if userID == "" || !core.AllowList(p.allowFrom, userID) {
+		slog.Debug(p.tag()+": card action from unauthorized user", "user", userID)
+		return nil, nil
 	}
 	chatID := ""
 	messageID := ""
@@ -2246,14 +2255,26 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 	case "post":
 		textParts, images := p.parsePostContent(messageID, content)
 		text := stripMentions(strings.Join(textParts, "\n"), mentions, p.getBotOpenID())
-		if text == "" && len(images) == 0 && quoted.text == "" && len(quoted.images) == 0 && len(quotedFiles) == 0 {
+		var files []core.FileAttachment
+		for _, file := range p.parsePostFiles(content) {
+			if file.FileKey == "" || file.IsFolder {
+				continue
+			}
+			data, err := p.downloadResourceContext(ctx, messageID, file.FileKey, "file")
+			if err != nil {
+				slog.Error(p.tag()+": download post file failed", "error", core.RedactToken(err.Error(), p.appSecret), "file_key", file.FileKey)
+				continue
+			}
+			files = append(files, core.FileAttachment{FileName: file.FileName, MimeType: detectMimeType(data), Data: data})
+		}
+		if text == "" && len(images) == 0 && len(files) == 0 && quoted.text == "" && len(quoted.images) == 0 && len(quotedFiles) == 0 {
 			return
 		}
 		dispatchToCore(&core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
-			Content: text, Images: images,
+			Content: text, Images: images, Files: files,
 			ReplyCtx:          rctx,
 			UserMessageTimeMs: createTimeMs,
 		})
@@ -4180,29 +4201,11 @@ func buildFeishuFileMessageContent(msgType, fileKey string) (string, error) {
 }
 
 func (p *Platform) downloadImage(messageID, imageKey string) ([]byte, string, error) {
-	resp, err := p.client.Im.MessageResource.Get(context.Background(),
-		larkim.NewGetMessageResourceReqBuilder().
-			MessageId(messageID).
-			FileKey(imageKey).
-			Type("image").
-			Build())
+	data, err := p.downloadResourceBytes(context.Background(), messageID, imageKey, "image")
 	if err != nil {
-		return nil, "", fmt.Errorf("%s: image API: %w", p.tag(), err)
+		return nil, "", err
 	}
-	if !resp.Success() {
-		return nil, "", fmt.Errorf("%s: image API code=%d msg=%s", p.tag(), resp.Code, resp.Msg)
-	}
-	if resp.File == nil {
-		return nil, "", fmt.Errorf("%s: image API returned nil file body", p.tag())
-	}
-	data, err := io.ReadAll(resp.File)
-	if err != nil {
-		return nil, "", fmt.Errorf("%s: read image: %w", p.tag(), err)
-	}
-
-	mimeType := detectMimeType(data)
-	slog.Debug(p.tag()+": downloaded image", "key", imageKey, "size", len(data), "mime", mimeType)
-	return data, mimeType, nil
+	return data, detectMimeType(data), nil
 }
 
 func (p *Platform) downloadResource(messageID, fileKey, resType string) ([]byte, error) {
@@ -4210,27 +4213,7 @@ func (p *Platform) downloadResource(messageID, fileKey, resType string) ([]byte,
 }
 
 func (p *Platform) downloadResourceContext(ctx context.Context, messageID, fileKey, resType string) ([]byte, error) {
-	resp, err := p.client.Im.MessageResource.Get(ctx,
-		larkim.NewGetMessageResourceReqBuilder().
-			MessageId(messageID).
-			FileKey(fileKey).
-			Type(resType).
-			Build())
-	if err != nil {
-		return nil, fmt.Errorf("%s: resource API: %w", p.tag(), err)
-	}
-	if !resp.Success() {
-		return nil, fmt.Errorf("%s: resource API code=%d msg=%s", p.tag(), resp.Code, resp.Msg)
-	}
-	if resp.File == nil {
-		return nil, fmt.Errorf("%s: resource API returned nil file body", p.tag())
-	}
-	data, err := io.ReadAll(resp.File)
-	if err != nil {
-		return nil, fmt.Errorf("%s: read resource: %w", p.tag(), err)
-	}
-	slog.Debug(p.tag()+": downloaded resource", "key", fileKey, "type", resType, "size", len(data))
-	return data, nil
+	return p.downloadResourceBytes(ctx, messageID, fileKey, resType)
 }
 
 func detectMimeType(data []byte) string {
@@ -6327,23 +6310,52 @@ type postElement struct {
 type postLang struct {
 	Title   string          `json:"title"`
 	Content [][]postElement `json:"content"`
+	Files   []postFile      `json:"files"`
+}
+
+type postFile struct {
+	FileKey  string `json:"file_key"`
+	FileName string `json:"file_name"`
+	IsFolder bool   `json:"is_folder"`
+}
+
+func (p *Platform) parsePostFiles(raw string) []postFile {
+	post := decodePost(raw)
+	if post == nil {
+		return nil
+	}
+	return post.Files
+}
+
+func decodePost(raw string) *postLang {
+	var flat postLang
+	if json.Unmarshal([]byte(raw), &flat) == nil && (flat.Content != nil || flat.Files != nil) {
+		return &flat
+	}
+	var languages map[string]postLang
+	if json.Unmarshal([]byte(raw), &languages) != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(languages))
+	for key := range languages {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		post := languages[key]
+		if post.Content != nil || post.Files != nil {
+			return &post
+		}
+	}
+	return nil
 }
 
 // parsePostContent handles both formats of feishu post content:
 // 1. {"title":"...", "content":[[...]]}  (receive event)
 // 2. {"zh_cn":{"title":"...", "content":[[...]]}}  (some SDK versions)
 func (p *Platform) parsePostContent(messageID, raw string) ([]string, []core.ImageAttachment) {
-	// try flat format first
-	var flat postLang
-	if err := json.Unmarshal([]byte(raw), &flat); err == nil && flat.Content != nil {
-		return p.extractPostParts(messageID, &flat)
-	}
-	// try language-keyed format
-	var langMap map[string]postLang
-	if err := json.Unmarshal([]byte(raw), &langMap); err == nil {
-		for _, lang := range langMap {
-			return p.extractPostParts(messageID, &lang)
-		}
+	if post := decodePost(raw); post != nil {
+		return p.extractPostParts(messageID, post)
 	}
 	slog.Error(p.tag()+": failed to parse post content", "raw", raw)
 	return nil, nil

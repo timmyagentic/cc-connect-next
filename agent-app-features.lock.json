@@ -2,7 +2,7 @@
   "schema": 1,
   "source": {
     "repository": "timmyagentic/awesome-agent-app-features",
-    "commit": "c8650a6886031ac722b4e7dd6bf25279ff8c93bf"
+    "commit": "f4429da87d048e34e3f183a5ee77838543487f6b"
   },
   "features": [
     {
@@ -111,16 +111,16 @@
         "internal/appfeatures/testdata/approved-feedback-v1.json",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-09-27T10:23:30Z",
+      "verified_at": "2026-10-06T17:02:35Z",
       "checks": [
-        "PATH=/usr/bin:/bin:$PATH GOWORK=off make test-full",
-        "PATH=/usr/bin:/bin:$PATH GOWORK=off go test ./core -run TestCUJ -count=1",
-        "PATH=/usr/bin:/bin:$PATH GOWORK=off make test-release-local",
-        "PATH=/usr/bin:/bin:$PATH GOWORK=off make test-feature-foundation"
+        "GOTOOLCHAIN=go1.25.13 make test-release",
+        "GOTOOLCHAIN=go1.25.13 go test ./core -run TestCUJ -count=1",
+        "GOTOOLCHAIN=go1.25.13 make test-release-local",
+        "GOTOOLCHAIN=go1.25.13 make test-feature-foundation"
       ],
       "unverified": [
         "No production Relay was deployed or sent a real approved report; no real GitHub issue or production App credential was used",
-        "No formal daemon or messaging client was changed or exercised"
+        "Real Feishu card taps, attachments and production feedback dispatch were not exercised by the fixture gates"
       ]
     },
     {
@@ -185,17 +185,16 @@
         "internal/updatechannel/channel_test.go",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-09-27T10:23:30Z",
+      "verified_at": "2026-10-06T17:02:35Z",
       "checks": [
-        "PATH=/usr/bin:/bin:$PATH GOWORK=off make test-full",
-        "PATH=/usr/bin:/bin:$PATH GOWORK=off go test ./core -run TestCUJ -count=1",
-        "PATH=/usr/bin:/bin:$PATH GOWORK=off make test-release-local",
-        "PATH=/usr/bin:/bin:$PATH GOWORK=off make test-feature-foundation"
+        "GOTOOLCHAIN=go1.25.13 make test-release",
+        "GOTOOLCHAIN=go1.25.13 go test ./core -run TestCUJ -count=1",
+        "GOTOOLCHAIN=go1.25.13 make test-release-local",
+        "GOTOOLCHAIN=go1.25.13 make test-feature-foundation"
       ],
       "unverified": [
         "Windows replacement and cross-process locking were cross-compiled but not executed on a native Windows machine",
-        "No formal installed binary or daemon was replaced or restarted; no production npm global installation was changed",
-        "No live published-release installation was performed for this Foundation dependency upgrade"
+        "Built-in updater Apply and rollback were verified with fixtures; no live Apply against the published Beta was exercised by the fixture gates"
       ]
     }
   ]

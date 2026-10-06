@@ -247,9 +247,9 @@ type appServerSessionParams struct {
 }
 
 func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appServerSession, error) {
-	cliBin := strings.TrimSpace(p.cliBin)
-	if cliBin == "" {
-		cliBin = "codex"
+	cliBin, err := resolveCodexExecutable(strings.TrimSpace(p.cliBin))
+	if err != nil {
+		return nil, fmt.Errorf("codex app-server resolve CLI: %w", err)
 	}
 	sessionCtx, cancel := context.WithCancel(ctx)
 	s := &appServerSession{
@@ -305,7 +305,7 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 func (s *appServerSession) launchArgs() []string {
 	args := append([]string(nil), s.cliExtraArgs...)
 	args = append(args, "app-server")
-	if url := strings.TrimSpace(s.url); url != "" {
+	if url := strings.TrimSpace(s.url); url != "" && !strings.EqualFold(url, "stdio") && !strings.EqualFold(url, "stdio://") {
 		args = append(args, "--listen", url)
 	}
 	if model := strings.TrimSpace(s.model); model != "" {

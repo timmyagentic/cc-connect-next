@@ -560,6 +560,8 @@ const (
 	MsgNewSessionCreated      MsgKey = "new_session_created"
 	MsgSessionAutoResetIdle   MsgKey = "session_auto_reset_idle"
 	MsgSessionClosingGraceful MsgKey = "session_closing_graceful"
+	MsgSessionCloseFailed     MsgKey = "session_close_failed"
+	MsgSessionResumeUnsafe    MsgKey = "session_resume_unsafe"
 
 	MsgDeleteUsage              MsgKey = "delete_usage"
 	MsgDeleteSuccess            MsgKey = "delete_success"
@@ -3612,6 +3614,20 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "⏳ 正在結束上一個會話（通常幾秒鐘，最多2分鐘）。新會話將自動啟動。",
 		LangJapanese:           "⏳ 前のセッションを終了中です（通常は数秒、最大2分）。新しいセッションは自動的に開始されます。",
 		LangSpanish:            "⏳ Cerrando la sesión anterior (normalmente unos segundos, hasta 2 minutos). La nueva sesión se iniciará automáticamente.",
+	},
+	MsgSessionCloseFailed: {
+		LangEnglish:            "The previous agent process could not be confirmed stopped. Its conversation will not be resumed automatically.",
+		LangChinese:            "未能确认上一个 Agent 进程已停止，将避免自动续接它的会话。",
+		LangTraditionalChinese: "未能確認上一個 Agent 進程已停止，將避免自動續接它的會話。",
+		LangJapanese:           "前の Agent プロセスの停止を確認できませんでした。その会話は自動で再開しません。",
+		LangSpanish:            "No se pudo confirmar que el proceso anterior se detuvo. Su conversación no se reanudará automáticamente.",
+	},
+	MsgSessionResumeUnsafe: {
+		LangEnglish:            "Starting a fresh agent conversation because the previous process could not be confirmed stopped.",
+		LangChinese:            "由于未能确认旧进程已停止，本次将使用新的 Agent 会话。",
+		LangTraditionalChinese: "由於未能確認舊進程已停止，本次將使用新的 Agent 會話。",
+		LangJapanese:           "前のプロセスの停止を確認できないため、新しい Agent 会話を開始します。",
+		LangSpanish:            "Se iniciará una conversación nueva porque no se pudo confirmar la detención del proceso anterior.",
 	},
 	MsgDeleteUsage: {
 		LangEnglish:            "Usage: `/delete <number>` or `/delete 1,2,3` or `/delete 3-7` or `/delete 1,3-5,8`.\nUse `/list` to see session numbers.",
