@@ -777,6 +777,38 @@ func TestCUJ_G1_LLMFailureSurfacesErrorToUser(t *testing.T) {
 // ===========================================================================
 
 func TestCUJ_E2_AgentCreatedCronShowsInList(t *testing.T) {
+	t.Run("timezone survives disable and enable", func(t *testing.T) {
+		env := newCUJEnv(t)
+		store, err := NewCronStore(env.tempDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scheduler := NewCronScheduler(store)
+		env.engine.SetCronScheduler(scheduler)
+		env.userSends("tz-user", "hello")
+		env.waitFor("first reply", time.Second, func() bool { return len(env.plat.getSent()) > 0 })
+		last, _ := time.Parse(time.RFC3339, "2026-09-19T19:00:00Z")
+		job := &CronJob{ID: "timezone-job", Project: "test", SessionKey: "test:tz-user", CronExpr: "CRON_TZ=America/New_York 0 15 * * *", Prompt: "timezone task", Enabled: true, LastRun: last}
+		if err := store.Add(job); err != nil {
+			t.Fatal(err)
+		}
+		if err := scheduler.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer scheduler.Stop()
+		env.plat.clearSent()
+		env.userSends("tz-user", "/cron")
+		env.waitFor("task-local timezone and last run", time.Second, func() bool { return env.sentContains("America/New_York") && env.sentContains("09-19 15:00") })
+		env.plat.clearSent()
+		env.userSends("tz-user", "/cron disable timezone-job")
+		env.waitFor("disabled reply", time.Second, func() bool { return len(env.plat.getSent()) > 0 })
+		env.plat.clearSent()
+		env.userSends("tz-user", "/cron enable timezone-job")
+		env.waitFor("enabled reply", time.Second, func() bool { return len(env.plat.getSent()) > 0 })
+		env.plat.clearSent()
+		env.userSends("tz-user", "/cron")
+		env.waitFor("timezone remains after re-enable", time.Second, func() bool { return env.sentContains("America/New_York") && env.sentContains("15:00") })
+	})
 	env := newCUJEnv(t)
 
 	// Wire up a CronScheduler + Store. Scheduler.Start() not called →
@@ -3147,4 +3179,44 @@ func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
 	if strings.Contains(contextLatestSession(env).getSentPrompts()[0], "updated fact to retry") {
 		t.Fatal("group/topic context leaked")
 	}
+}
+
+func TestCUJ_B6_LateSessionIDSurvivesFailureRetryAndHistory(t *testing.T) {
+	backend := &failOnceCodexLikeSession{threadID: "durable-thread", events: make(chan Event, 4)}
+	backend.alive.Store(true)
+	agent := &controllableAgent{nextSession: backend}
+	p := &stubPlatformEngine{n: "plain"}
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	e := NewEngine("test", agent, []Platform{p}, path, LangEnglish)
+	key := "test:late-id-history"
+	defer e.cleanupInteractiveState(key)
+	wait := func(name string, condition func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			if condition() {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("timed out: %s; sent=%v", name, p.getSent())
+	}
+	e.ReceiveMessage(p, &Message{SessionKey: key, Content: "original alert context", ReplyCtx: "first"})
+	wait("failure shown", func() bool {
+		return strings.Contains(strings.Join(p.getSent(), "\n"), "at capacity") && !e.sessions.GetOrCreateActive(key).Busy()
+	})
+	reloaded := NewSessionManager(path)
+	if got := reloaded.GetOrCreateActive(key).GetAgentSessionID(); got != "durable-thread" {
+		t.Fatalf("persisted thread=%q", got)
+	}
+	p.clearSent()
+	e.ReceiveMessage(p, &Message{SessionKey: key, Content: "retry", ReplyCtx: "retry"})
+	wait("retry reply", func() bool {
+		return strings.Contains(strings.Join(p.getSent(), "\n"), "recovered") && !e.sessions.GetOrCreateActive(key).Busy()
+	})
+	p.clearSent()
+	e.ReceiveMessage(p, &Message{SessionKey: key, Content: "/history", ReplyCtx: "history"})
+	wait("original context remains in history", func() bool {
+		return strings.Contains(strings.Join(p.getSent(), "\n"), "original alert context") && strings.Contains(strings.Join(p.getSent(), "\n"), "recovered")
+	})
 }

@@ -724,6 +724,12 @@ type AgentSessionCanceller interface {
 	CancelTurn() error
 }
 
+// AgentSessionStopCloser separates explicit user stop from normal cleanup,
+// which may need a longer grace period for completion hooks.
+type AgentSessionStopCloser interface {
+	CloseForStop() error
+}
+
 // CommandProvider is an optional interface for agents that expose custom slash
 // commands via local files (e.g. .claude/commands/*.md). The engine scans the
 // returned directories for *.md files and registers them as slash commands.

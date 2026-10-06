@@ -313,6 +313,20 @@
 - 生效方式：`restart`
 - 示例: `export CLAUDE_CONFIG_DIR=/path/to/claude-config`
 
+### `CODEX_CLI_PATH` — `codex`
+
+cmd 未设置时选择显式 Codex 可执行文件。cmd 优先；显式错误路径会失败。省略时先搜索 PATH，再搜索 macOS ChatGPT/Codex 当前及旧版桌面布局。
+
+- 来源：`environment`
+- 配置位置：`process environment`
+- 作用域：`agent` (`codex`)
+- 类型：`string`
+- 要求：`可选`
+- 默认值：`PATH, then macOS ChatGPT/Codex desktop CLI`
+- 默认值来源：`runtime`
+- 生效方式：`restart`
+- 示例: `export CODEX_CLI_PATH=/path/to/codex`
+
 ### `CODEX_HOME` — `codex`
 
 projects.agent.options.codex_home 未设置时选择 Codex Home。
@@ -1462,17 +1476,31 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 必填条件: `one of cmd, cli_path, or command must be set`
 - 示例: `cmd = "value"`
 
-### `projects.agent.options.cmd` — `antigravity, claudecode, codex, copilot, cursor, gemini, iflow, kimi, opencode, pi, qoder`
+### `projects.agent.options.cmd` — `antigravity, claudecode, copilot, cursor, gemini, iflow, kimi, opencode, pi, qoder`
 
 覆盖 Agent 命令，可同时包含全局参数。
 
 - 来源：`toml`
 - 配置位置：`[projects.agent.options] (inside one [[projects]])`
-- 作用域：`agent` (`antigravity, claudecode, codex, copilot, cursor, gemini, iflow, kimi, opencode, pi, qoder`)
+- 作用域：`agent` (`antigravity, claudecode, copilot, cursor, gemini, iflow, kimi, opencode, pi, qoder`)
 - 类型：`string`
 - 要求：`可选`
 - 默认值：`unset`
 - 默认值来源：`adapter`
+- 生效方式：`restart`
+- 示例: `cmd = "value"`
+
+### `projects.agent.options.cmd` — `codex`
+
+选择 Codex 可执行文件及可选全局参数。显式 cmd 优先于 CODEX_CLI_PATH；省略时先搜索 PATH，再搜索 macOS ChatGPT/Codex 当前或旧版内置 CLI。
+
+- 来源：`toml`
+- 配置位置：`[projects.agent.options] (inside one [[projects]])`
+- 作用域：`agent` (`codex`)
+- 类型：`string`
+- 要求：`可选`
+- 默认值：`CODEX_CLI_PATH, then PATH, then macOS desktop CLI`
+- 默认值来源：`runtime`
 - 生效方式：`restart`
 - 示例: `cmd = "value"`
 

@@ -21,6 +21,12 @@ func init() {
 	options = core.RefineConfigOption(options, "app_server_url", func(option *core.ConfigOption) {
 		option.PresetValues = []core.ConfigPresetValue{{Preset: "starter", Value: "stdio", Description: "Launch a local app-server subprocess.", DescriptionZH: "启动本地 app-server 子进程。"}}
 	})
+	options = core.RefineConfigOption(options, "cmd", func(option *core.ConfigOption) {
+		option.Default = "CODEX_CLI_PATH, then PATH, then macOS desktop CLI"
+		option.DefaultSource = core.ConfigDefaultRuntime
+		option.Description = "Select the Codex executable and optional global arguments. Explicit cmd takes precedence over CODEX_CLI_PATH. Omission discovers PATH then the current/legacy macOS ChatGPT or Codex desktop CLI."
+		option.DescriptionZH = "选择 Codex 可执行文件及可选全局参数。显式 cmd 优先于 CODEX_CLI_PATH；省略时先搜索 PATH，再搜索 macOS ChatGPT/Codex 当前或旧版内置 CLI。"
+	})
 	options = core.ConfigureOption(options, "reasoning_effort", "unset / adapter default", "low", "medium", "high", "xhigh", "max")
 	options = append(options, core.DescribeAgentOptions([]string{"provider"})...)
 	core.RegisterAgentConfigOptions("codex", options)

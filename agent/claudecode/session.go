@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,6 +32,7 @@ type claudeSession struct {
 	cmd             *exec.Cmd
 	stdin           io.WriteCloser
 	stdinMu         sync.Mutex
+	stdinCloseOnce  sync.Once
 	events          chan core.Event
 	sessionID       atomic.Value // stores string
 	permissionMode  atomic.Value // stores string
@@ -423,6 +425,8 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
+	// Descendants may inherit stderr after the direct CLI has exited.
+	cmd.WaitDelay = 3 * time.Second
 
 	if err := cmd.Start(); err != nil {
 		if promptFilePath != "" && !promptFileIsShared {
@@ -510,6 +514,11 @@ func (cs *claudeSession) startReadLoopWait(stdout io.ReadCloser) (<-chan error, 
 
 func (cs *claudeSession) finishReadLoop(waitErrCh <-chan error, stderrBuf *bytes.Buffer) {
 	err := <-waitErrCh
+	if errors.Is(err, exec.ErrWaitDelay) {
+		if killErr := processgroup.Kill(cs.cmd); killErr != nil {
+			slog.Warn("claudeSession: clean up inherited-pipe descendants", "error", killErr)
+		}
+	}
 
 	cs.alive.Store(false)
 	if err != nil {
@@ -692,6 +701,17 @@ func (cs *claudeSession) handleUser(raw map[string]any) {
 			continue
 		}
 		contentType, _ := item["type"].(string)
+		if contentType == "text" {
+			text, _ := item["text"].(string)
+			if strings.HasPrefix(text, "Stop hook feedback:") {
+				select {
+				case cs.events <- core.Event{Type: core.EventHookRejected}:
+				case <-cs.ctx.Done():
+					return
+				}
+			}
+			continue
+		}
 		if contentType == "tool_result" {
 			isError, _ := item["is_error"].(bool)
 			var result string
@@ -780,7 +800,7 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 	toolName, _ := request["tool_name"].(string)
 	input, _ := request["input"].(map[string]any)
 
-	if cs.autoApprove.Load() {
+	if cs.autoApprove.Load() && toolName != "AskUserQuestion" {
 		slog.Debug("claudeSession: auto-approving", "request_id", requestID, "tool", toolName)
 		_ = cs.RespondPermission(requestID, core.PermissionResult{
 			Behavior:     "allow",
@@ -788,7 +808,7 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 		})
 		return
 	}
-	if cs.dontAsk.Load() {
+	if cs.dontAsk.Load() && toolName != "AskUserQuestion" {
 		slog.Debug("claudeSession: auto-denying", "request_id", requestID, "tool", toolName)
 		_ = cs.RespondPermission(requestID, core.PermissionResult{
 			Behavior: "deny",
@@ -1041,6 +1061,22 @@ func (cs *claudeSession) Alive() bool {
 }
 
 func (cs *claudeSession) Close() error {
+	graceful := cs.gracefulStopTimeout
+	if graceful <= 0 {
+		graceful = 8 * time.Second
+	}
+	return cs.closeWithGrace(graceful)
+}
+
+func (cs *claudeSession) CloseForStop() error {
+	graceful := 5 * time.Second
+	if cs.gracefulStopTimeout > 0 && cs.gracefulStopTimeout < graceful {
+		graceful = cs.gracefulStopTimeout
+	}
+	return cs.closeWithGrace(graceful)
+}
+
+func (cs *claudeSession) closeWithGrace(graceful time.Duration) error {
 	// Best-effort cleanup of the --append-system-prompt-file temp file on
 	// every exit path. The file is small (~9KB) and OS temp cleanup also
 	// eventually claims it, but explicit removal keeps workdirs tidy.
@@ -1052,16 +1088,15 @@ func (cs *claudeSession) Close() error {
 
 	// Phase 1: Close stdin to signal EOF. Claude Code exits cleanly on
 	// stdin close, running Stop hooks (e.g. claude-mem session summary).
-	cs.stdinMu.Lock()
-	if err := cs.stdin.Close(); err != nil {
-		slog.Warn("claudeSession: close stdin", "error", err)
-	}
-	cs.stdinMu.Unlock()
-
-	graceful := cs.gracefulStopTimeout
-	if graceful <= 0 {
-		graceful = 8 * time.Second // legacy fallback
-	}
+	// The stdin pipe supports concurrent Close/Write. Taking stdinMu here
+	// would wait forever when Send is blocked on a CLI that stopped reading.
+	cs.stdinCloseOnce.Do(func() {
+		if cs.stdin != nil {
+			if err := cs.stdin.Close(); err != nil {
+				slog.Warn("claudeSession: close stdin", "error", err)
+			}
+		}
+	})
 
 	select {
 	case <-cs.done:
@@ -1091,12 +1126,32 @@ func (cs *claudeSession) Close() error {
 	// group-wide kill ensures grandchildren (Claude Code's MCP servers
 	// such as the Telegram bridge) are reaped along with the direct child;
 	// otherwise they can survive as orphans and spin at 100% CPU.
-	cs.cancel()
-	if err := processgroup.Kill(cs.cmd); err != nil {
-		slog.Warn("claudeSession: force kill", "error", err)
+	var killErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		killErr = processgroup.Kill(cs.cmd)
+		// Kill the tree before context cancellation can kill just its root.
+		if cs.cancel != nil {
+			cs.cancel()
+		}
+		if killErr == nil {
+			break
+		}
+		slog.Warn("claudeSession: force kill failed", "attempt", attempt+1, "error", killErr)
+		select {
+		case <-cs.done:
+			return nil
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
-	<-cs.done
-	return nil
+	select {
+	case <-cs.done:
+		return nil
+	case <-time.After(10 * time.Second):
+		if killErr != nil {
+			return fmt.Errorf("claudeSession: process did not exit after kill retries: %w", killErr)
+		}
+		return fmt.Errorf("claudeSession: process exit not confirmed after force kill")
+	}
 }
 
 // shellJoinArgs joins args into a single string, quoting any arg that

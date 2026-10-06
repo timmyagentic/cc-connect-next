@@ -168,9 +168,9 @@ func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files
 	args := cs.launchArgsWithTurnOptions(prompt, imagePaths, options)
 	cs.storeLaunchDiagnostic(options)
 
-	bin := cs.cmd
-	if bin == "" {
-		bin = "codex"
+	bin, err := resolveCodexExecutable(cs.cmd)
+	if err != nil {
+		return fmt.Errorf("codexSession: resolve CLI: %w", err)
 	}
 
 	slog.Debug("codexSession: launching", "resume", isResume, "args", core.RedactArgs(args))
@@ -690,8 +690,9 @@ func codexToolSuccess(status string, exitCode *int) bool {
 }
 
 func loadCodexRuntimeConfig(ctx context.Context, cliBin string, cliExtraArgs []string, workDir string, extraEnv []string) (string, string, error) {
-	if cliBin = strings.TrimSpace(cliBin); cliBin == "" {
-		cliBin = "codex"
+	cliBin, err := resolveCodexExecutable(strings.TrimSpace(cliBin))
+	if err != nil {
+		return "", "", fmt.Errorf("runtime config resolve CLI: %w", err)
 	}
 	// Same argv shape as the app-server session launch: cmd extras before the
 	// subcommand, so config/read reports the values the real process sees.

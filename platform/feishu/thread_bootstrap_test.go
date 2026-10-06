@@ -225,6 +225,7 @@ func TestDispatchMessageCompletesBootstrapOnlyAfterCoreDispatch(t *testing.T) {
 
 	p := &Platform{
 		platformName: "feishu",
+		domain:       srv.URL,
 		appID:        appID,
 		appSecret:    appSecret,
 		threadMode:   threadIsolationTopicsOnly,

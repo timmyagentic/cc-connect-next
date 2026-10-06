@@ -114,7 +114,7 @@ func TestLaunchdStatusUsesUserDomainWhenGUIDomainUnavailable(t *testing.T) {
 	}
 }
 
-func TestRestartPrefersGUIDomainWhenAvailable(t *testing.T) {
+func TestRestartKeepsLoadedUserDomainWhenGUIAvailable(t *testing.T) {
 	orig := runLaunchctl
 	t.Cleanup(func() { runLaunchctl = orig })
 
@@ -124,14 +124,6 @@ func TestRestartPrefersGUIDomainWhenAvailable(t *testing.T) {
 	if origHome != "" {
 		t.Cleanup(func() { _ = os.Setenv("HOME", origHome) })
 	}
-	plistPath := launchdPlistPath()
-	if err := os.MkdirAll(filepath.Dir(plistPath), 0755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	if err := os.WriteFile(plistPath, []byte("plist"), 0644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
 	guiDomain := launchdGUIDomain()
 	userDomain := launchdUserDomain()
 	guiTarget := launchdTarget(guiDomain)
@@ -155,19 +147,13 @@ func TestRestartPrefersGUIDomainWhenAvailable(t *testing.T) {
 			default:
 				return "", fmt.Errorf("unexpected print target %q", args[1])
 			}
-		case "bootout":
-			return "", nil
-		case "bootstrap":
-			if args[1] != guiDomain {
-				t.Fatalf("bootstrap domain = %q, want %q", args[1], guiDomain)
-			}
-			return "", nil
 		case "kickstart":
-			if args[len(args)-1] != guiTarget {
-				t.Fatalf("kickstart target = %q, want %q", args[len(args)-1], guiTarget)
+			if args[len(args)-1] != userTarget {
+				t.Fatalf("kickstart target = %q, want %q", args[len(args)-1], userTarget)
 			}
 			return "", nil
 		default:
+			t.Fatalf("unexpected launchctl call: %v", args)
 			return "", nil
 		}
 	}
@@ -177,11 +163,8 @@ func TestRestartPrefersGUIDomainWhenAvailable(t *testing.T) {
 		t.Fatalf("Restart() error = %v", err)
 	}
 
-	if !containsCall(calls, "bootstrap "+guiDomain+" "+plistPath) {
-		t.Fatalf("expected bootstrap to gui domain, calls = %#v", calls)
-	}
-	if !containsCall(calls, "kickstart -kp "+guiTarget) {
-		t.Fatalf("expected kickstart to gui target, calls = %#v", calls)
+	if !containsCall(calls, "kickstart -kp "+userTarget) {
+		t.Fatalf("expected kickstart of loaded user service, calls = %#v", calls)
 	}
 }
 
@@ -195,14 +178,6 @@ func TestRestartKeepsUserDomainWhenGUIDomainUnavailable(t *testing.T) {
 	if origHome != "" {
 		t.Cleanup(func() { _ = os.Setenv("HOME", origHome) })
 	}
-	plistPath := launchdPlistPath()
-	if err := os.MkdirAll(filepath.Dir(plistPath), 0755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	if err := os.WriteFile(plistPath, []byte("plist"), 0644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
 	guiDomain := launchdGUIDomain()
 	userDomain := launchdUserDomain()
 	userTarget := launchdTarget(userDomain)
@@ -216,7 +191,7 @@ func TestRestartKeepsUserDomainWhenGUIDomainUnavailable(t *testing.T) {
 		switch args[0] {
 		case "print":
 			switch args[1] {
-			case guiDomain:
+			case guiDomain, launchdTarget(guiDomain):
 				return "Bootstrap failed: 125: Domain does not support specified action", fmt.Errorf("exit status 125")
 			case userDomain:
 				return "subsystem", nil
@@ -225,19 +200,13 @@ func TestRestartKeepsUserDomainWhenGUIDomainUnavailable(t *testing.T) {
 			default:
 				return "", fmt.Errorf("unexpected print target %q", args[1])
 			}
-		case "bootout":
-			return "", nil
-		case "bootstrap":
-			if args[1] != userDomain {
-				t.Fatalf("bootstrap domain = %q, want %q", args[1], userDomain)
-			}
-			return "", nil
 		case "kickstart":
 			if args[len(args)-1] != userTarget {
 				t.Fatalf("kickstart target = %q, want %q", args[len(args)-1], userTarget)
 			}
 			return "", nil
 		default:
+			t.Fatalf("unexpected launchctl call: %v", args)
 			return "", nil
 		}
 	}
@@ -247,11 +216,39 @@ func TestRestartKeepsUserDomainWhenGUIDomainUnavailable(t *testing.T) {
 		t.Fatalf("Restart() error = %v", err)
 	}
 
-	if !containsCall(calls, "bootstrap "+userDomain+" "+plistPath) {
-		t.Fatalf("expected bootstrap to user domain, calls = %#v", calls)
-	}
 	if !containsCall(calls, "kickstart -kp "+userTarget) {
 		t.Fatalf("expected kickstart to user target, calls = %#v", calls)
+	}
+}
+
+func TestRestartBootstrapsUnloadedService(t *testing.T) {
+	orig := runLaunchctl
+	t.Cleanup(func() { runLaunchctl = orig })
+
+	guiDomain := launchdGUIDomain()
+	guiTarget := launchdTarget(guiDomain)
+	var calls []string
+	runLaunchctl = func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if args[0] == "print" && args[1] == guiDomain {
+			return "subsystem", nil
+		}
+		if args[0] == "print" {
+			return "Could not find service", fmt.Errorf("exit status 113")
+		}
+		if args[0] == "bootstrap" || args[0] == "kickstart" {
+			return "", nil
+		}
+		t.Fatalf("unexpected launchctl call: %v", args)
+		return "", nil
+	}
+
+	if err := (&launchdManager{}).Restart(); err != nil {
+		t.Fatalf("Restart() error = %v", err)
+	}
+	if !containsCall(calls, "bootstrap "+guiDomain+" "+launchdPlistPath()) ||
+		!containsCall(calls, "kickstart -kp "+guiTarget) {
+		t.Fatalf("expected bootstrap and kickstart, calls = %#v", calls)
 	}
 }
 

@@ -549,6 +549,9 @@ type Engine struct {
 	// Interactive agent session management
 	interactiveMu     sync.Mutex
 	interactiveStates map[string]*interactiveState // key = sessionKey
+	closingMu         sync.Mutex
+	closingSessions   map[string]*sessionCloseGroup
+	unsafeResume      map[string]bool
 
 	platformLifecycleMu sync.Mutex
 	platformReady       map[Platform]bool
@@ -3395,14 +3398,11 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgSessionClosingGraceful))
 	}
 
+	// Publish the replacement already locked, and retain the old lock until
+	// its process is closed. Incoming messages cannot race either boundary.
+	newSession := sessions.newSession(msg.SessionKey, "", true)
 	e.cleanupInteractiveState(interactiveKey)
 	session.UnlockWithoutUpdate()
-
-	newSession := sessions.NewSession(msg.SessionKey, "")
-	if !newSession.TryLock() {
-		slog.Error("failed to lock new session after idle auto-reset", "session_key", msg.SessionKey, "new_session", newSession.ID)
-		return nil
-	}
 
 	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgSessionAutoResetIdle, int(e.resetOnIdle/time.Minute)))
 	return newSession
@@ -4481,6 +4481,7 @@ func (e *Engine) getOrCreateWorkspaceAgent(workspace string) (Agent, *SessionMan
 
 	// Create per-workspace session manager
 	sessions := NewSessionManager(e.workspaceSessionFile(workspace))
+	sessions.InvalidateForAgent(agent.Name())
 
 	ws.agent = agent
 	ws.sessions = sessions
@@ -4552,7 +4553,18 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 // separately so optional title generation runs after interactiveMu is released.
 // The caller still initializes the title synchronously before the first turn.
 func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey string) (*interactiveState, AgentSession) {
-	e.interactiveMu.Lock()
+	for {
+		if !e.awaitSessionClose(sessionKey) {
+			e.markUnsafeResume(sessionKey)
+			return nil, nil
+		}
+		e.interactiveMu.Lock()
+		// A close may have registered between the wait and acquiring this lock.
+		if !e.sessionClosePending(sessionKey) {
+			break
+		}
+		e.interactiveMu.Unlock()
+	}
 	defer e.interactiveMu.Unlock()
 
 	state, ok := e.interactiveStates[sessionKey]
@@ -4583,7 +4595,7 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 		clearAgentTurnCredential(state, true)
 		// Close synchronously to prevent race condition where old agent
 		// continues outputting while new agent starts (issue #327).
-		e.closeAgentSessionWithTimeout(sessionKey, state.agentSession)
+		e.closeAgentSessionWithTimeout(sessionKey, state.agentSession, sessionCloseTarget{platform: state.platform, replyCtx: state.replyCtx})
 		delete(e.interactiveStates, sessionKey)
 	}
 
@@ -4692,6 +4704,13 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 			sessions.Save()
 			startSessionID = ""
 		}
+	}
+	unsafeResume := e.consumeUnsafeResume(sessionKey)
+	if startSessionID != "" && unsafeResume {
+		session.SetAgentSessionID("", agent.Name())
+		sessions.Save()
+		startSessionID = ""
+		e.send(p, replyCtx, e.i18n.T(MsgSessionResumeUnsafe))
 	}
 	isResume := startSessionID != ""
 	createdFresh := !isResume
@@ -4831,13 +4850,22 @@ func (e *Engine) cleanupInteractiveState(sessionKey string, expected ...*interac
 	// Capture the agent session and nil it out atomically to prevent a
 	// concurrent cleanup (without expected) from closing the same session.
 	var agentSession AgentSession
+	var target sessionCloseTarget
+	var finishClose func()
 	if ok && state != nil {
 		state.mu.Lock()
 		agentSession = state.agentSession
 		state.agentSession = nil
+		target = sessionCloseTarget{platform: state.platform, replyCtx: state.replyCtx}
+		if agentSession != nil {
+			finishClose = e.beginSessionClose(sessionKey)
+		}
 		state.mu.Unlock()
 	}
 	e.interactiveMu.Unlock()
+	if finishClose != nil {
+		defer finishClose()
+	}
 
 	// Notify senders of any queued messages that will never be processed.
 	if ok && state != nil {
@@ -4865,62 +4893,20 @@ func (e *Engine) cleanupInteractiveState(sessionKey string, expected ...*interac
 	// an empty map and reports "No execution in progress" while
 	// the agent session Close() is still blocking (up to 130s).
 	if agentSession != nil {
-		e.closeAgentSessionWithTimeout(sessionKey, agentSession)
+		e.closeAgentSessionRegistered(sessionKey, agentSession, target)
 	}
 
 	// Now delete the state from the map after the session is closed.
 	e.interactiveMu.Lock()
 	// Re-check that the state hasn't been replaced during the close
 	currentState, currentOk := e.interactiveStates[sessionKey]
-	if currentOk && len(expected) > 0 && expected[0] != nil && currentState != expected[0] {
+	if currentOk && currentState != state {
 		// Another turn has replaced the state during our close — don't delete it.
 		e.interactiveMu.Unlock()
 		return
 	}
 	delete(e.interactiveStates, sessionKey)
 	e.interactiveMu.Unlock()
-}
-
-func (e *Engine) closeAgentSessionAsync(sessionKey string, agentSession AgentSession) {
-	if agentSession == nil {
-		return
-	}
-	go e.closeAgentSessionWithTimeout(sessionKey, agentSession)
-}
-
-func (e *Engine) closeAgentSessionWithTimeout(sessionKey string, agentSession AgentSession) {
-	if agentSession == nil {
-		return
-	}
-
-	// Allow enough time for the agent's own graceful shutdown sequence:
-	// stdin close → Stop hooks (claude-mem summary etc.) → SIGTERM → SIGKILL.
-	// Claude Code's Stop hooks can take up to 120s (claude-mem uses a
-	// sonnet summarizer). The 130s budget covers the default 120s graceful
-	// phase + 5s SIGTERM + 5s buffer. The wait ends early if the process
-	// exits sooner — this is the ceiling, not the typical duration.
-	const closeTimeout = 130 * time.Second
-
-	slog.Debug("cleanupInteractiveState: closing agent session", "session", sessionKey)
-	closeStart := time.Now()
-
-	done := make(chan struct{})
-	go func() {
-		if err := agentSession.Close(); err != nil {
-			slog.Warn("agent session close failed", "session", sessionKey, "error", err)
-		}
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		if elapsed := time.Since(closeStart); elapsed >= slowAgentClose {
-			slog.Warn("slow agent session close", "elapsed", elapsed, "session", sessionKey)
-		}
-	case <-time.After(closeTimeout):
-		slog.Error("agent session close timed out, abandoning",
-			"timeout", closeTimeout, "session", sessionKey)
-	}
 }
 
 const defaultEventIdleTimeout = 2 * time.Hour
@@ -5517,7 +5503,15 @@ func (t *turnProcessor) persistAgentSessionID(id string) {
 		return
 	}
 	wasEmpty := t.session.GetAgentSessionID() == ""
-	t.session.SetAgentSessionID(id, t.engine.agent.Name())
+	agent := t.engine.agent
+	if t.state != nil {
+		t.state.mu.Lock()
+		if t.state.agent != nil {
+			agent = t.state.agent
+		}
+		t.state.mu.Unlock()
+	}
+	t.session.SetAgentSessionID(id, agent.Name())
 	if wasEmpty {
 		name := t.session.GetName()
 		if name != "" && name != "session" && name != "default" {
@@ -6346,6 +6340,25 @@ func (t *turnProcessor) run() {
 		}
 
 		switch event.Type {
+		case EventHookRejected:
+			// Keep tool progress, but discard every cache of the rejected draft.
+			textParts = nil
+			segmentStart = 0
+			silentHold = false
+			partialText = ""
+			legacyPermissionDeliveredPrefix = ""
+			cardAnswerText.Reset()
+			lastRichCardUpdate = time.Time{}
+			lastRichCardInput = ""
+			lastRichCardPreview = ""
+			partialPersisted = false
+			sp.discard()
+			sp = newStreamPreview(turnStreamPreview, p, replyCtx, e.ctx, workspaceRenderer)
+			if streamCard != nil && !streamCard.Failed() {
+				if err := streamCard.Update(e.ctx, buildCardContent(cardThinkingText, cardToolCalls, "")); err != nil {
+					slog.Debug("streaming card: clear rejected draft failed", "error", err)
+				}
+			}
 		case EventThinking:
 			if presentation.handleThinking() {
 				continue
@@ -7457,6 +7470,12 @@ func (failure *turnFailure) handle() {
 	cp.Finalize(ProgressCardStateFailed)
 	sp.discard()
 	discardStreamingCard()
+	state.mu.Lock()
+	agentSession := state.agentSession
+	state.mu.Unlock()
+	if agentSession != nil {
+		t.persistAgentSessionID(agentSession.CurrentSessionID())
+	}
 	state.mu.Lock()
 	state.eventsNeedResync = true
 	state.mu.Unlock()
@@ -12138,6 +12157,7 @@ func (e *Engine) stopInteractiveSessionWithOptions(sessionKey string, notifyQueu
 	pending := state.pending
 	state.pending = nil
 	agentSession := state.agentSession
+	closeTarget := sessionCloseTarget{platform: state.platform, replyCtx: state.replyCtx, userStop: true}
 	currentMessageID := state.currentMessageID
 	state.mu.Unlock()
 	if !notifyQueued {
@@ -12174,7 +12194,13 @@ func (e *Engine) stopInteractiveSessionWithOptions(sessionKey string, notifyQueu
 		if cancelErr != nil {
 			slog.Warn("agent session CancelTurn failed, falling back to Close",
 				"session_key", sessionKey, "error", cancelErr)
-			// Fall through to normal cleanup below.
+			// The cancellation path released the map lock above.
+			e.interactiveMu.Lock()
+			if e.interactiveStates[sessionKey] != state {
+				e.closeAgentSessionAsync(sessionKey, agentSession, closeTarget)
+				e.interactiveMu.Unlock()
+				return true
+			}
 			goto normalCleanup
 		}
 
@@ -12191,6 +12217,8 @@ func (e *Engine) stopInteractiveSessionWithOptions(sessionKey string, notifyQueu
 
 normalCleanup:
 	state.markStopped()
+	// Register before removing the state so a following message sees the fence.
+	e.closeAgentSessionAsync(sessionKey, agentSession, closeTarget)
 	delete(e.interactiveStates, sessionKey)
 	e.interactiveMu.Unlock()
 
@@ -12204,7 +12232,6 @@ normalCleanup:
 		state.pendingMessages = nil
 		state.mu.Unlock()
 	}
-	e.closeAgentSessionAsync(sessionKey, agentSession)
 
 	e.hooks.Emit(HookEvent{
 		Event:      HookEventSessionEnded,
@@ -13529,10 +13556,10 @@ func (e *Engine) sendAskQuestionPrompt(p Platform, replyCtx any, questions []Use
 					desc += " — " + opt.Description
 				}
 				answerData := fmt.Sprintf("askq:%d:%d", qIdx, i+1)
-				cb.ListItemBtnExtra(desc, opt.Label, "default", answerData, map[string]string{
-					"askq_label":    opt.Label,
-					"askq_question": q.Question,
-				})
+				cb.Markdown("**" + desc + "**")
+				cb.Buttons(CardButton{Text: opt.Label, Type: "primary", Value: answerData, Extra: map[string]string{
+					"askq_label": opt.Label, "askq_question": q.Question,
+				}})
 			}
 			cb.Note(e.i18n.T(MsgAskQuestionNote))
 		}
@@ -15411,20 +15438,22 @@ func (e *Engine) renderCronCard(sessionKey string, userID string) *Card {
 			desc += " [mute]"
 		}
 
-		human := CronExprToHuman(j.CronExpr, lang)
+		human := cronDisplaySchedule(j.CronExpr, lang)
+		loc := cronDisplayLocation(j.CronExpr)
 
 		var sb strings.Builder
 		fmt.Fprintf(&sb, "%s %s\n", status, desc)
 		sb.WriteString(e.i18n.Tf(MsgCronIDLabel, j.ID))
 		sb.WriteString(e.i18n.Tf(MsgCronScheduleLabel, human, j.CronExpr))
-		nextRun := e.cronScheduler.NextRun(j.ID)
+		nextRun := e.cronScheduler.NextRun(j.ID).In(loc)
 		if !nextRun.IsZero() {
-			fmtStr := cronTimeFormat(nextRun, now)
+			fmtStr := cronTimeFormat(nextRun, now.In(loc))
 			sb.WriteString(e.i18n.Tf(MsgCronNextRunLabel, nextRun.Format(fmtStr)))
 		}
 		if !j.LastRun.IsZero() {
-			fmtStr := cronTimeFormat(j.LastRun, now)
-			sb.WriteString(e.i18n.Tf(MsgCronLastRunLabel, j.LastRun.Format(fmtStr)))
+			lastRun := j.LastRun.In(loc)
+			fmtStr := cronTimeFormat(lastRun, now.In(loc))
+			sb.WriteString(e.i18n.Tf(MsgCronLastRunLabel, lastRun.Format(fmtStr)))
 			if j.LastError != "" {
 				sb.WriteString(e.i18n.Tf(MsgCronFailedSuffix, truncateStr(j.LastError, 40)))
 			}
@@ -15939,18 +15968,20 @@ func (e *Engine) cmdCronList(p Platform, msg *Message) {
 
 		fmt.Fprintf(&sb, "ID: %s\n", j.ID)
 
-		human := CronExprToHuman(j.CronExpr, lang)
+		human := cronDisplaySchedule(j.CronExpr, lang)
+		loc := cronDisplayLocation(j.CronExpr)
 		sb.WriteString(e.i18n.Tf(MsgCronScheduleLabel, human, j.CronExpr))
 
-		nextRun := e.cronScheduler.NextRun(j.ID)
+		nextRun := e.cronScheduler.NextRun(j.ID).In(loc)
 		if !nextRun.IsZero() {
-			fmtStr := cronTimeFormat(nextRun, now)
+			fmtStr := cronTimeFormat(nextRun, now.In(loc))
 			sb.WriteString(e.i18n.Tf(MsgCronNextRunLabel, nextRun.Format(fmtStr)))
 		}
 
 		if !j.LastRun.IsZero() {
-			fmtStr := cronTimeFormat(j.LastRun, now)
-			sb.WriteString(e.i18n.Tf(MsgCronLastRunLabel, j.LastRun.Format(fmtStr)))
+			lastRun := j.LastRun.In(loc)
+			fmtStr := cronTimeFormat(lastRun, now.In(loc))
+			sb.WriteString(e.i18n.Tf(MsgCronLastRunLabel, lastRun.Format(fmtStr)))
 			if j.LastError != "" {
 				fmt.Fprintf(&sb, " (failed: %s)", truncateStr(j.LastError, 40))
 			}

@@ -151,33 +151,27 @@ func (*launchdManager) Stop() error {
 }
 
 func (*launchdManager) Restart() error {
-	domain := preferredLaunchdDomain()
-	if loadedDomain, _, _, ok := loadedLaunchdTarget(); ok && domain != launchdGUIDomain() {
-		domain = loadedDomain
-	}
-	target := launchdTarget(domain)
-	bootoutLaunchdTargets()
-
-	plistPath := launchdPlistPath()
-
-	// launchd bootout is asynchronous; retry bootstrap with backoff
-	// to avoid "Bootstrap failed: 5" race condition.
-	var out string
-	var err error
-	for i := 0; i < 3; i++ {
-		if i > 0 {
-			time.Sleep(500 * time.Millisecond)
-		}
-		out, err = runLaunchctl("bootstrap", domain, plistPath)
-		if err == nil {
-			break
-		}
-	}
+	jobs, err := loadedLaunchdJobsStrict()
 	if err != nil {
-		return fmt.Errorf("restart: %s (%w)", out, err)
+		return err
 	}
-	if _, err := runLaunchctl("kickstart", "-kp", target); err != nil {
-		return fmt.Errorf("restart kickstart: %w", err)
+	if len(jobs) > 1 {
+		return fmt.Errorf("restart: multiple launchd service instances are loaded")
+	}
+	if len(jobs) == 1 {
+		target := jobs[0].target
+		// A single transaction also works when requested by a daemon child.
+		if out, err := runLaunchctl("kickstart", "-kp", target); err != nil {
+			return fmt.Errorf("restart kickstart: %s (%w)", out, err)
+		}
+		return nil
+	}
+	domain := preferredLaunchdDomain()
+	if out, err := runLaunchctl("bootstrap", domain, launchdPlistPath()); err != nil {
+		return fmt.Errorf("restart bootstrap: %s (%w)", out, err)
+	}
+	if out, err := runLaunchctl("kickstart", "-kp", launchdTarget(domain)); err != nil {
+		return fmt.Errorf("restart kickstart: %s (%w)", out, err)
 	}
 	return nil
 }

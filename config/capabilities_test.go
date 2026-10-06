@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/BurntSushi/toml"
+	_ "github.com/timmyagentic/cc-connect-next/agent/codex"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
@@ -106,7 +107,7 @@ func TestCapabilityCatalog_CoversOperationalEnvironmentOverrides(t *testing.T) {
 	for _, path := range []string{
 		"CC_LOG_FILE", "CC_LOG_MAX_SIZE", "CC_LOG_MAX_BACKUPS", "CC_MAX_ATTACHMENT_SIZE_MB",
 		"CC_DAEMON_NO_CAPTURE_SECRETS", "CC_NEXT_ALLOW_OFFICIAL_CONFLICT", "CC_DATA_DIR",
-		"CC_PROJECT", "CC_SESSION_KEY",
+		"CC_PROJECT", "CC_SESSION_KEY", "CODEX_CLI_PATH",
 	} {
 		option, ok := byPath[path]
 		if !ok {
@@ -121,6 +122,21 @@ func TestCapabilityCatalog_CoversOperationalEnvironmentOverrides(t *testing.T) {
 		option, ok := byPath[path]
 		if !ok || option.Source != core.ConfigSourceCLI || option.Placement != "command line" {
 			t.Errorf("CLI contract %s = %#v", path, option)
+		}
+	}
+}
+
+func TestCapabilityCatalog_CodexDesktopCLIIntent(t *testing.T) {
+	for _, query := range []string{"Codex CLI 路径", "ChatGPT 内置 CLI", "桌面版 Codex"} {
+		result := core.SearchConfigCatalog(CapabilityCatalog("v-test"), query)
+		found := false
+		for _, option := range result.Options {
+			if option.Path == "CODEX_CLI_PATH" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%q did not find the explicit CLI environment override", query)
 		}
 	}
 }
