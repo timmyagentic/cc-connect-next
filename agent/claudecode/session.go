@@ -626,24 +626,6 @@ func (cs *claudeSession) handleSystem(raw map[string]any) {
 	}
 }
 
-// parseClaudeUsage extracts the four token counts Claude reports per API call.
-// Missing fields default to zero.
-func parseClaudeUsage(usage map[string]any) (input, output, cacheCreation, cacheRead int) {
-	if v, ok := usage["input_tokens"].(float64); ok {
-		input = int(v)
-	}
-	if v, ok := usage["output_tokens"].(float64); ok {
-		output = int(v)
-	}
-	if v, ok := usage["cache_creation_input_tokens"].(float64); ok {
-		cacheCreation = int(v)
-	}
-	if v, ok := usage["cache_read_input_tokens"].(float64); ok {
-		cacheRead = int(v)
-	}
-	return
-}
-
 func (cs *claudeSession) handleAssistant(raw map[string]any) {
 	msg, ok := raw["message"].(map[string]any)
 	if !ok {
@@ -770,21 +752,11 @@ func (cs *claudeSession) handleResult(raw map[string]any) {
 		slog.Info("claudeSession: mid-turn compaction event; continuing turn", "subtype", resultSubtype(raw))
 	}
 
-	// Aggregated usage across all sub-calls in this turn powers EventResult
-	// token accounting and the engine's turn-complete logs.
-	var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int
-	if usage, ok := raw["usage"].(map[string]any); ok {
-		inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens = parseClaudeUsage(usage)
-	}
 	evt := core.Event{
-		Type:                     core.EventResult,
-		Content:                  content,
-		SessionID:                cs.CurrentSessionID(),
-		Done:                     !isCompaction,
-		InputTokens:              inputTokens,
-		OutputTokens:             outputTokens,
-		CacheCreationInputTokens: cacheCreationTokens,
-		CacheReadInputTokens:     cacheReadTokens,
+		Type:      core.EventResult,
+		Content:   content,
+		SessionID: cs.CurrentSessionID(),
+		Done:      !isCompaction,
 	}
 	select {
 	case cs.events <- evt:

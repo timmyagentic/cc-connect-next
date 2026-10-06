@@ -406,22 +406,17 @@ func (cs *copilotSession) handleSessionEvent(params json.RawMessage) {
 		}
 
 	case "assistant.message":
-		usage := copilotEventUsage(evt.Event.Data)
 		if len(evt.Event.Data) > 0 {
 			e := core.Event{
-				Type:         core.EventResult,
-				SessionID:    cs.CurrentSessionID(),
-				Done:         true,
-				OutputTokens: usage.outputTokens,
+				Type:      core.EventResult,
+				SessionID: cs.CurrentSessionID(),
+				Done:      true,
 			}
 			select {
 			case cs.events <- e:
 			case <-cs.ctx.Done():
 			}
 		}
-
-	case "assistant.usage":
-		slog.Debug("copilotSession: usage update has no session-level consumer")
 
 	case "permission.requested":
 		cs.handlePermissionRequestedEvent(evt.Event.Data)
@@ -435,7 +430,10 @@ func (cs *copilotSession) handleSessionEvent(params json.RawMessage) {
 	case "session.idle":
 		slog.Debug("copilotSession: session idle")
 
-	case "session.skills_loaded", "session.mcp_servers_loaded", "session.tools_updated", "session.usage_info", "session.title_changed":
+	case "assistant.usage", "session.usage_info":
+		return
+
+	case "session.skills_loaded", "session.mcp_servers_loaded", "session.tools_updated", "session.title_changed":
 		slog.Debug("copilotSession: capabilities updated", "type", eventType)
 
 	case "system.message":
@@ -507,49 +505,6 @@ func copilotEventText(raw json.RawMessage) string {
 		}
 	}
 	return ""
-}
-
-type copilotUsage struct {
-	inputTokens  int
-	outputTokens int
-}
-
-func copilotEventUsage(raw json.RawMessage) copilotUsage {
-	var data struct {
-		InputTokens      int `json:"inputTokens"`
-		OutputTokens     int `json:"outputTokens"`
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		Usage            struct {
-			InputTokens      int `json:"inputTokens"`
-			OutputTokens     int `json:"outputTokens"`
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(raw, &data); err != nil {
-		return copilotUsage{}
-	}
-	usage := copilotUsage{inputTokens: data.InputTokens, outputTokens: data.OutputTokens}
-	if usage.inputTokens == 0 {
-		usage.inputTokens = data.PromptTokens
-	}
-	if usage.outputTokens == 0 {
-		usage.outputTokens = data.CompletionTokens
-	}
-	if usage.inputTokens == 0 {
-		usage.inputTokens = data.Usage.InputTokens
-	}
-	if usage.inputTokens == 0 {
-		usage.inputTokens = data.Usage.PromptTokens
-	}
-	if usage.outputTokens == 0 {
-		usage.outputTokens = data.Usage.OutputTokens
-	}
-	if usage.outputTokens == 0 {
-		usage.outputTokens = data.Usage.CompletionTokens
-	}
-	return usage
 }
 
 func (cs *copilotSession) handlePermissionRequestedEvent(data json.RawMessage) {

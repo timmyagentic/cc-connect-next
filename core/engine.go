@@ -6401,8 +6401,6 @@ func (t *turnProcessor) run() {
 			if !event.Done {
 				slog.Debug("EventResult: non-terminal result event, continuing event loop",
 					"session", session.ID,
-					"input_tokens", event.InputTokens,
-					"output_tokens", event.OutputTokens,
 					"metadata", event.Metadata,
 				)
 				continue
@@ -6762,8 +6760,6 @@ func (completion *turnCompletion) commit(response preparedTurnResponse, triggerA
 		"tools", completion.toolCount,
 		"response_len", len(response.full),
 		"turn_duration", time.Since(completion.turnStart),
-		"input_tokens", completion.event.InputTokens,
-		"output_tokens", completion.event.OutputTokens,
 		"silent", response.isSilent,
 	)
 	if slog.Default().Enabled(e.ctx, slog.LevelDebug) {
