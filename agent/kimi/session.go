@@ -109,8 +109,14 @@ func (ks *kimiSession) Send(prompt string, images []core.ImageAttachment, files 
 		return fmt.Errorf("session is closed")
 	}
 
-	imageRefs := core.SaveImagesToDisk(ks.workDir, images)
-	fileRefs := core.SaveFilesToDisk(ks.workDir, files)
+	imageRefs, err := core.StageImagesToDisk(ks.workDir, images)
+	if err != nil {
+		return fmt.Errorf("stage images: %w", err)
+	}
+	fileRefs, err := core.StageFilesToDisk(ks.workDir, files)
+	if err != nil {
+		return err
+	}
 
 	fullPrompt := prompt
 	if len(imageRefs) > 0 {

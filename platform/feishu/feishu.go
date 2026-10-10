@@ -2117,8 +2117,13 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 	}
 	approvedQuotedFiles := p.filterQuotedFilesForUser(quoted.files, mentions, userID)
 	quotedFiles := p.downloadQuotedFiles(ctx, approvedQuotedFiles)
+	if missing := len(approvedQuotedFiles) - len(quotedFiles); missing > 0 {
+		for i := 0; i < missing; i++ {
+			quoted.text += "\n" + mediaUnavailable(core.MsgFileUnavailable)
+		}
+	}
 	dispatchToCore := func(msg *core.Message) {
-		if msg == nil {
+		if msg == nil || ctx.Err() != nil {
 			return
 		}
 		if msg.ExtraContent == "" {
@@ -2180,9 +2185,12 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			slog.Error(p.tag()+": failed to parse image content", "error", err)
 			return
 		}
-		imgData, mimeType, err := p.downloadImage(messageID, imgBody.ImageKey)
+		imgData, mimeType, err := p.downloadImageContext(ctx, messageID, imgBody.ImageKey)
 		if err != nil {
 			slog.Error(p.tag()+": download image failed", "error", err)
+			if ctx.Err() != nil {
+				return
+			}
 			if sendErr := p.Send(ctx, rctx, "⚠️ Image download failed (network error). Please resend."); sendErr != nil {
 				slog.Error(p.tag()+": failed to notify user about image download failure", "error", sendErr)
 			}
@@ -2195,6 +2203,9 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		// watermark (PR #1168) to drop the oldest image (issue #1395).
 		// We only coalesce plain image messages (no quoted context) because
 		// quoted images are usually a single image replying to a prior text.
+		if ctx.Err() != nil {
+			return
+		}
 		if parentID == "" && !rctx.bootstrapThread {
 			p.bufferImage(sessionKey, &imageBatchEntry{
 				sessionKey:   sessionKey,
@@ -2230,9 +2241,12 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			return
 		}
 		slog.Debug(p.tag()+": audio received", "user", userID, "file_key", audioBody.FileKey)
-		audioData, err := p.downloadResource(messageID, audioBody.FileKey, "file")
+		audioData, err := p.downloadResourceContext(ctx, messageID, audioBody.FileKey, "file")
 		if err != nil {
 			slog.Error(p.tag()+": download audio failed", "error", err)
+			if ctx.Err() != nil {
+				return
+			}
 			if sendErr := p.Send(ctx, rctx, "⚠️ Voice message download failed (network error). Please resend."); sendErr != nil {
 				slog.Error(p.tag()+": failed to notify user about audio download failure", "error", sendErr)
 			}
@@ -2253,20 +2267,8 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		})
 
 	case "post":
-		textParts, images := p.parsePostContent(messageID, content)
+		textParts, images, files := p.parseCurrentPost(ctx, messageID, content)
 		text := stripMentions(strings.Join(textParts, "\n"), mentions, p.getBotOpenID())
-		var files []core.FileAttachment
-		for _, file := range p.parsePostFiles(content) {
-			if file.FileKey == "" || file.IsFolder {
-				continue
-			}
-			data, err := p.downloadResourceContext(ctx, messageID, file.FileKey, "file")
-			if err != nil {
-				slog.Error(p.tag()+": download post file failed", "error", core.RedactToken(err.Error(), p.appSecret), "file_key", file.FileKey)
-				continue
-			}
-			files = append(files, core.FileAttachment{FileName: file.FileName, MimeType: detectMimeType(data), Data: data})
-		}
 		if text == "" && len(images) == 0 && len(files) == 0 && quoted.text == "" && len(quoted.images) == 0 && len(quotedFiles) == 0 {
 			return
 		}
@@ -2289,9 +2291,12 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			return
 		}
 		slog.Info(p.tag()+": file received", "user", userID, "file_key", fileBody.FileKey, "file_name", fileBody.FileName)
-		fileData, err := p.downloadResource(messageID, fileBody.FileKey, "file")
+		fileData, err := p.downloadResourceContext(ctx, messageID, fileBody.FileKey, "file")
 		if err != nil {
 			slog.Error(p.tag()+": download file failed", "error", err)
+			if ctx.Err() != nil {
+				return
+			}
 			if sendErr := p.Send(ctx, rctx, "⚠️ File download failed (network error). Please resend."); sendErr != nil {
 				slog.Error(p.tag()+": failed to notify user about file download failure", "error", sendErr)
 			}
@@ -2313,7 +2318,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		})
 
 	case "merge_forward":
-		text, images, files := p.parseMergeForward(messageID)
+		text, images, files := p.parseMergeForwardContext(ctx, messageID)
 		if text == "" && len(images) == 0 && len(files) == 0 {
 			slog.Warn(p.tag()+": merge_forward produced no content", "message_id", messageID)
 			return
@@ -2339,7 +2344,7 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			return
 		}
 		slog.Info(p.tag()+": sticker received", "user", userID, "file_key", stickerBody.FileKey)
-		imgData, mimeType, err := p.downloadImage(messageID, stickerBody.FileKey)
+		imgData, mimeType, err := p.downloadImageContext(ctx, messageID, stickerBody.FileKey)
 		if err != nil {
 			slog.Warn(p.tag()+": download sticker failed, falling back to placeholder", "error", err)
 			dispatchToCore(&core.Message{
@@ -2371,28 +2376,16 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 			slog.Error(p.tag()+": failed to parse media content", "error", err)
 			return
 		}
-		slog.Info(p.tag()+": media received", "user", userID, "file_key", mediaBody.FileKey, "file_name", mediaBody.FileName)
-		text := "[video"
-		if mediaBody.FileName != "" {
-			text += ": " + mediaBody.FileName
+		text, images, files := p.downloadCurrentVideo(ctx, messageID, mediaBody.FileKey, mediaBody.ImageKey, mediaBody.FileName)
+		if len(files) > 0 && mediaBody.Duration > 0 {
+			text += fmt.Sprintf(" (%ds)", mediaBody.Duration/1000)
 		}
-		if mediaBody.Duration > 0 {
-			text += fmt.Sprintf(", %ds", mediaBody.Duration/1000)
-		}
-		text += "]"
-		var images []core.ImageAttachment
-		if mediaBody.ImageKey != "" {
-			if thumbData, thumbMime, err := p.downloadImage(messageID, mediaBody.ImageKey); err == nil {
-				images = append(images, core.ImageAttachment{MimeType: thumbMime, Data: thumbData})
-			} else {
-				slog.Warn(p.tag()+": download media thumbnail failed", "error", err)
-			}
-		}
+
 		dispatchToCore(&core.Message{
 			SessionKey: sessionKey, Platform: p.platformName,
 			MessageID: messageID,
 			UserID:    userID, UserName: userName, ChatName: chatName,
-			Content: text, ExtraContent: quoted.text, Images: images, ReplyCtx: rctx,
+			Content: text, ExtraContent: quoted.text, Images: images, Files: files, ReplyCtx: rctx,
 			UserMessageTimeMs: createTimeMs,
 		})
 
@@ -3318,7 +3311,7 @@ func (p *Platform) fetchSingleMessage(ctx context.Context, messageID string) *ch
 			text = replaceMentions(textBody.Text, item.Mentions)
 		}
 	case "post":
-		textParts, postImages := p.parsePostContent(messageID, content)
+		textParts, postImages := p.parsePostContentContext(ctx, messageID, content)
 		text = replaceMentions(strings.Join(textParts, "\n"), item.Mentions)
 		images = postImages
 		if text == "" && len(images) > 0 {
@@ -3330,9 +3323,10 @@ func (p *Platform) fetchSingleMessage(ctx context.Context, messageID string) *ch
 			ImageKey string `json:"image_key"`
 		}
 		if err := json.Unmarshal([]byte(content), &imgBody); err == nil && imgBody.ImageKey != "" {
-			imgData, mimeType, err := p.downloadImage(messageID, imgBody.ImageKey)
+			imgData, mimeType, err := p.downloadImageContext(ctx, messageID, imgBody.ImageKey)
 			if err != nil {
-				slog.Error(p.tag()+": download quoted image failed", "error", err, "message_id", messageID, "key", imgBody.ImageKey)
+				slog.Warn(p.tag()+": download quoted image failed", "error", core.RedactToken(err.Error(), p.appSecret))
+				text = mediaUnavailable(core.MsgImageUnavailable)
 			} else {
 				images = append(images, core.ImageAttachment{MimeType: mimeType, Data: imgData})
 			}
@@ -3470,30 +3464,8 @@ func formatReplyChain(chain []chainMessage) string {
 
 // extractPostPlainText extracts plain text from a Lark post (rich text) JSON content.
 func extractPostPlainText(content string) string {
-	var post struct {
-		Content [][]struct {
-			Tag      string `json:"tag"`
-			Text     string `json:"text"`
-			Href     string `json:"href,omitempty"`
-			Language string `json:"language,omitempty"`
-			UserId   string `json:"user_id,omitempty"`
-			UserName string `json:"user_name,omitempty"`
-		} `json:"content"`
-		Title string `json:"title"`
-	}
-	// Post content may be wrapped in a locale key like {"zh_cn": {...}}.
-	// Try direct parse first, then try extracting from locale wrapper.
-	if err := json.Unmarshal([]byte(content), &post); err != nil || len(post.Content) == 0 {
-		var localeWrapper map[string]json.RawMessage
-		if err2 := json.Unmarshal([]byte(content), &localeWrapper); err2 == nil {
-			for _, v := range localeWrapper {
-				if err3 := json.Unmarshal(v, &post); err3 == nil && len(post.Content) > 0 {
-					break
-				}
-			}
-		}
-	}
-	if len(post.Content) == 0 {
+	post := decodePost(content)
+	if post == nil {
 		return ""
 	}
 	var parts []string
@@ -3527,6 +3499,8 @@ func extractPostPlainText(content string) string {
 				case elem.UserId != "":
 					line = append(line, "@user")
 				}
+			case "media":
+				line = append(line, "[video: attachment not provided from history]")
 			case "img":
 				line = append(line, "[image]")
 			case "code_block":
@@ -3539,6 +3513,9 @@ func extractPostPlainText(content string) string {
 		if len(line) > 0 {
 			parts = append(parts, strings.Join(line, ""))
 		}
+	}
+	for range post.Files {
+		parts = append(parts, "[file: attachment not provided from history]")
 	}
 	return strings.Join(parts, "\n")
 }
@@ -3812,22 +3789,22 @@ func extractCardListItems(itemsRaw json.RawMessage, parts *[]string) {
 // parseMergeForward fetches sub-messages of a merge_forward message via the
 // GET /open-apis/im/v1/messages/{message_id} API, then formats them into
 // readable text. Returns combined text, images, and files from the sub-messages.
-func (p *Platform) parseMergeForward(rootMessageID string) (string, []core.ImageAttachment, []core.FileAttachment) {
-	resp, err := p.client.Im.Message.Get(context.Background(),
+func (p *Platform) parseMergeForwardContext(ctx context.Context, rootMessageID string) (string, []core.ImageAttachment, []core.FileAttachment) {
+	resp, err := p.client.Im.Message.Get(ctx,
 		larkim.NewGetMessageReqBuilder().
 			MessageId(rootMessageID).
 			Build())
 	if err != nil {
 		slog.Error(p.tag()+": fetch merge_forward sub-messages failed", "error", err)
-		return "", nil, nil
+		return mediaUnavailable(core.MsgFileUnavailable), nil, nil
 	}
 	if !resp.Success() {
 		slog.Error(p.tag()+": fetch merge_forward sub-messages failed", "code", resp.Code, "msg", resp.Msg)
-		return "", nil, nil
+		return mediaUnavailable(core.MsgFileUnavailable), nil, nil
 	}
 	if resp.Data == nil || len(resp.Data.Items) == 0 {
 		slog.Warn(p.tag()+": merge_forward has no sub-messages", "message_id", rootMessageID)
-		return "", nil, nil
+		return mediaUnavailable(core.MsgFileUnavailable), nil, nil
 	}
 
 	items := resp.Data.Items
@@ -3864,7 +3841,7 @@ func (p *Platform) parseMergeForward(rootMessageID string) (string, []core.Image
 	var allFiles []core.FileAttachment
 	var sb strings.Builder
 	sb.WriteString("<forwarded_messages>\n")
-	p.formatMergeForwardTree(rootMessageID, childrenMap, nameMap, &sb, &allImages, &allFiles, 0)
+	p.formatMergeForwardTreeContext(ctx, rootMessageID, childrenMap, nameMap, &sb, &allImages, &allFiles, 0)
 	sb.WriteString("</forwarded_messages>")
 
 	return sb.String(), allImages, allFiles
@@ -3882,6 +3859,12 @@ func replaceMentions(text string, mentions []*larkim.Mention) string {
 
 // formatMergeForwardTree recursively formats the sub-message tree.
 func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[string][]*larkim.Message, nameMap map[string]string, sb *strings.Builder, images *[]core.ImageAttachment, files *[]core.FileAttachment, depth int) {
+	p.formatMergeForwardTreeContext(context.Background(), parentID, childrenMap, nameMap, sb, images, files, depth)
+}
+func (p *Platform) formatMergeForwardTreeContext(ctx context.Context, parentID string, childrenMap map[string][]*larkim.Message, nameMap map[string]string, sb *strings.Builder, images *[]core.ImageAttachment, files *[]core.FileAttachment, depth int) {
+	if ctx.Err() != nil {
+		return
+	}
 	if depth > 10 {
 		sb.WriteString(strings.Repeat("    ", depth) + "[nested forwarding truncated]\n")
 		return
@@ -3934,7 +3917,7 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 			}
 
 		case "post":
-			textParts, postImages := p.parsePostContent(msgID, content)
+			textParts, postImages := p.parsePostContentContext(ctx, msgID, content)
 			*images = append(*images, postImages...)
 			text := replaceMentions(strings.Join(textParts, "\n"), item.Mentions)
 			if text != "" {
@@ -3949,7 +3932,7 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 				ImageKey string `json:"image_key"`
 			}
 			if err := json.Unmarshal([]byte(content), &imgBody); err == nil && imgBody.ImageKey != "" {
-				imgData, mimeType, err := p.downloadImage(msgID, imgBody.ImageKey)
+				imgData, mimeType, err := p.downloadImageContext(ctx, msgID, imgBody.ImageKey)
 				if err != nil {
 					slog.Error(p.tag()+": download merge_forward image failed", "error", err)
 					fmt.Fprintf(sb, "%s[%s] %s: [image - download failed]\n", indent, ts, senderName)
@@ -3965,20 +3948,20 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 				FileName string `json:"file_name"`
 			}
 			if err := json.Unmarshal([]byte(content), &fileBody); err == nil && fileBody.FileKey != "" {
-				fileData, err := p.downloadResource(msgID, fileBody.FileKey, "file")
+				fileData, err := p.downloadResourceContext(ctx, msgID, fileBody.FileKey, "file")
 				if err != nil {
 					slog.Error(p.tag()+": download merge_forward file failed", "error", err)
 					fmt.Fprintf(sb, "%s[%s] %s: [file: %s - download failed]\n", indent, ts, senderName, fileBody.FileName)
 				} else {
 					mt := detectMimeType(fileData)
-					*files = append(*files, core.FileAttachment{MimeType: mt, Data: fileData, FileName: fileBody.FileName})
+					*files = append(*files, core.FileAttachment{MimeType: mt, Data: fileData, FileName: fileBody.FileName, MessageID: msgID})
 					fmt.Fprintf(sb, "%s[%s] %s: [file: %s]\n", indent, ts, senderName, fileBody.FileName)
 				}
 			}
 
 		case "merge_forward":
 			fmt.Fprintf(sb, "%s[%s] %s: [forwarded messages]\n", indent, ts, senderName)
-			p.formatMergeForwardTree(msgID, childrenMap, nameMap, sb, images, files, depth+1)
+			p.formatMergeForwardTreeContext(ctx, msgID, childrenMap, nameMap, sb, images, files, depth+1)
 
 		default:
 			fmt.Fprintf(sb, "%s[%s] %s: [%s message]\n", indent, ts, senderName, msgType)
@@ -4201,15 +4184,18 @@ func buildFeishuFileMessageContent(msgType, fileKey string) (string, error) {
 }
 
 func (p *Platform) downloadImage(messageID, imageKey string) ([]byte, string, error) {
-	data, err := p.downloadResourceBytes(context.Background(), messageID, imageKey, "image")
+	return p.downloadImageContext(context.Background(), messageID, imageKey)
+}
+func (p *Platform) downloadImageContext(ctx context.Context, messageID, imageKey string) ([]byte, string, error) {
+	data, err := p.downloadResourceBytes(ctx, messageID, imageKey, "image")
 	if err != nil {
 		return nil, "", err
 	}
-	return data, detectMimeType(data), nil
-}
-
-func (p *Platform) downloadResource(messageID, fileKey, resType string) ([]byte, error) {
-	return p.downloadResourceContext(context.Background(), messageID, fileKey, resType)
+	mimeType := detectMimeType(data)
+	if !strings.HasPrefix(mimeType, "image/") {
+		return nil, "", fmt.Errorf("%s: resource is not an image", p.tag())
+	}
+	return data, mimeType, nil
 }
 
 func (p *Platform) downloadResourceContext(ctx context.Context, messageID, fileKey, resType string) ([]byte, error) {
@@ -4217,21 +4203,7 @@ func (p *Platform) downloadResourceContext(ctx context.Context, messageID, fileK
 }
 
 func detectMimeType(data []byte) string {
-	if len(data) >= 8 {
-		if data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G' {
-			return "image/png"
-		}
-		if data[0] == 0xFF && data[1] == 0xD8 {
-			return "image/jpeg"
-		}
-		if string(data[:4]) == "GIF8" {
-			return "image/gif"
-		}
-		if string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
-			return "image/webp"
-		}
-	}
-	return "image/png"
+	return http.DetectContentType(data)
 }
 
 func buildReplyContentWithResolvedMention(content string, resolvedMention bool) (msgType string, body string) {
@@ -4580,9 +4552,10 @@ func (p *Platform) downloadQuotedFiles(ctx context.Context, metas []quotedFileMe
 			continue
 		}
 		files = append(files, core.FileAttachment{
-			MimeType: http.DetectContentType(data),
-			Data:     data,
-			FileName: meta.fileName,
+			MimeType:  http.DetectContentType(data),
+			Data:      data,
+			FileName:  meta.fileName,
+			MessageID: meta.messageID,
 		})
 	}
 	return files
@@ -6298,6 +6271,8 @@ func (p *Platform) SendVideo(ctx context.Context, rctx any, video []byte, format
 }
 
 type postElement struct {
+	FileKey  string `json:"file_key,omitempty"`
+	FileName string `json:"file_name,omitempty"`
 	Tag      string `json:"tag"`
 	Text     string `json:"text,omitempty"`
 	Language string `json:"language,omitempty"`
@@ -6317,14 +6292,6 @@ type postFile struct {
 	FileKey  string `json:"file_key"`
 	FileName string `json:"file_name"`
 	IsFolder bool   `json:"is_folder"`
-}
-
-func (p *Platform) parsePostFiles(raw string) []postFile {
-	post := decodePost(raw)
-	if post == nil {
-		return nil
-	}
-	return post.Files
 }
 
 func decodePost(raw string) *postLang {
@@ -6354,14 +6321,24 @@ func decodePost(raw string) *postLang {
 // 1. {"title":"...", "content":[[...]]}  (receive event)
 // 2. {"zh_cn":{"title":"...", "content":[[...]]}}  (some SDK versions)
 func (p *Platform) parsePostContent(messageID, raw string) ([]string, []core.ImageAttachment) {
+	return p.parsePostContentContext(context.Background(), messageID, raw)
+}
+func (p *Platform) parsePostContentContext(ctx context.Context, messageID, raw string) ([]string, []core.ImageAttachment) {
 	if post := decodePost(raw); post != nil {
-		return p.extractPostParts(messageID, post)
+		text, images, _ := p.extractPostPartsContext(ctx, messageID, post, false)
+		return text, images
 	}
-	slog.Error(p.tag()+": failed to parse post content", "raw", raw)
+	slog.Warn(p.tag() + ": failed to parse post content")
 	return nil, nil
 }
 
 func (p *Platform) extractPostParts(messageID string, post *postLang) ([]string, []core.ImageAttachment) {
+	text, images, _ := p.extractPostPartsContext(context.Background(), messageID, post, false)
+	return text, images
+}
+
+func (p *Platform) extractPostPartsContext(ctx context.Context, messageID string, post *postLang, current bool) ([]string, []core.ImageAttachment, []core.FileAttachment) {
+	var files []core.FileAttachment
 	var textParts []string
 	var images []core.ImageAttachment
 	if post.Title != "" {
@@ -6401,19 +6378,34 @@ func (p *Platform) extractPostParts(messageID string, post *postLang) ([]string,
 				case elem.UserId != "":
 					textParts = append(textParts, "@"+p.resolveUserName(elem.UserId))
 				}
-			case "img":
-				if elem.ImageKey != "" {
-					imgData, mimeType, err := p.downloadImage(messageID, elem.ImageKey)
-					if err != nil {
-						slog.Error(p.tag()+": download post image failed", "error", err, "key", elem.ImageKey)
-						continue
-					}
-					images = append(images, core.ImageAttachment{MimeType: mimeType, Data: imgData})
+			case "media":
+				if !current {
+					// Historical post media is a placeholder only. Do not bypass
+					// the separate quoted-file mention and uploader checks.
+					textParts = append(textParts, "[video]")
+					continue
 				}
+				text, thumbs, videos := p.downloadCurrentVideo(ctx, messageID, elem.FileKey, elem.ImageKey, elem.FileName)
+				textParts = append(textParts, text)
+				images = append(images, thumbs...)
+				files = append(files, videos...)
+			case "img":
+				data, mimeType, err := p.downloadImageContext(ctx, messageID, elem.ImageKey)
+				if err != nil {
+					slog.Warn(p.tag()+": download post image failed", "error", core.RedactToken(err.Error(), p.appSecret))
+					textParts = append(textParts, mediaUnavailable(core.MsgImageUnavailable))
+					continue
+				}
+				images = append(images, core.ImageAttachment{MimeType: mimeType, Data: data})
 			}
 		}
 	}
-	return textParts, images
+	if !current {
+		for range post.Files {
+			textParts = append(textParts, "[file: attachment not provided from history]")
+		}
+	}
+	return textParts, images, files
 }
 
 // onBotMenu handles bot custom menu click events. When a menu item's

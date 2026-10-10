@@ -72,14 +72,20 @@ func newTmuxSession(ctx context.Context, target, sessionID, promptPattern string
 	return s, nil
 }
 
-func (s *tmuxSession) Send(prompt string, _ []core.ImageAttachment, files []core.FileAttachment) error {
+func (s *tmuxSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
+	if len(images) > 0 {
+		return fmt.Errorf("image attachments are not supported by this agent")
+	}
 	if !s.alive.Load() {
 		return fmt.Errorf("tmux: session closed")
 	}
 
 	// Save attached files and append their paths to the prompt
 	if len(files) > 0 {
-		paths := core.SaveFilesToDisk(s.workDir, files)
+		paths, err := core.StageFilesToDisk(s.workDir, files)
+		if err != nil {
+			return err
+		}
 		if len(paths) > 0 {
 			prompt = prompt + "\n# files: " + strings.Join(paths, ", ")
 		}

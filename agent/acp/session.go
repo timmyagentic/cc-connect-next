@@ -595,10 +595,16 @@ func (s *acpSession) Send(prompt string, images []core.ImageAttachment, files []
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
 
-	filePaths := core.SaveFilesToDisk(s.workDir, files)
+	filePaths, err := core.StageFilesToDisk(s.workDir, files)
+	if err != nil {
+		return err
+	}
 	prompt = core.AppendFileRefs(prompt, filePaths)
 	if len(images) > 0 {
-		prompt = s.appendImageRefs(prompt, images)
+		prompt, err = s.appendImageRefs(prompt, images)
+		if err != nil {
+			return err
+		}
 	}
 
 	sid := s.currentACPSessionID()
@@ -631,15 +637,18 @@ func (s *acpSession) Send(prompt string, images []core.ImageAttachment, files []
 	return nil
 }
 
-func (s *acpSession) appendImageRefs(prompt string, images []core.ImageAttachment) string {
-	paths := core.SaveImagesToDisk(s.workDir, images)
+func (s *acpSession) appendImageRefs(prompt string, images []core.ImageAttachment) (string, error) {
+	paths, err := core.StageImagesToDisk(s.workDir, images)
+	if err != nil {
+		return "", fmt.Errorf("stage images: %w", err)
+	}
 	if len(paths) == 0 {
-		return prompt
+		return prompt, nil
 	}
 	if prompt == "" {
 		prompt = "User sent image(s)."
 	}
-	return prompt + "\n\n(Image files saved locally: " + strings.Join(paths, ", ") + ")"
+	return prompt + "\n\n(Image files saved locally: " + strings.Join(paths, ", ") + ")", nil
 }
 
 func (s *acpSession) RespondPermission(requestID string, result core.PermissionResult) error {

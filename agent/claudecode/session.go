@@ -904,7 +904,10 @@ func (cs *claudeSession) Send(prompt string, images []core.ImageAttachment, file
 	}
 
 	// Save files to disk so Claude Code can read them
-	filePaths := core.SaveFilesToDisk(cs.workDir, files)
+	filePaths, err := core.StageFilesToDisk(cs.workDir, files)
+	if err != nil {
+		return err
+	}
 
 	// Build text part: user prompt + file path references
 	textPart := prompt

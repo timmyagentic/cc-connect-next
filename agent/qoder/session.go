@@ -82,10 +82,13 @@ func newQoderSession(ctx context.Context, cmd string, extraArgs []string, workDi
 
 func (qs *qoderSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
 	if len(images) > 0 {
-		slog.Warn("qoderSession: images not supported, ignoring")
+		return fmt.Errorf("image attachments are not supported by this agent")
 	}
 	if len(files) > 0 {
-		filePaths := core.SaveFilesToDisk(qs.workDir, files)
+		filePaths, err := core.StageFilesToDisk(qs.workDir, files)
+		if err != nil {
+			return err
+		}
 		prompt = core.AppendFileRefs(prompt, filePaths)
 	}
 	if !qs.alive.Load() {

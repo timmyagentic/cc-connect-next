@@ -110,6 +110,16 @@ func SaveFilesToDisk(workDir string, files []FileAttachment) []string {
 	return paths
 }
 
+// StageFilesToDisk is the strict agent-input contract. A failed or partial
+// batch must not become a successful prompt with missing attachments.
+func StageFilesToDisk(workDir string, files []FileAttachment) ([]string, error) {
+	paths := SaveFilesToDisk(workDir, files)
+	if len(paths) != len(files) {
+		return nil, fmt.Errorf("stage files: saved %d of %d attachments", len(paths), len(files))
+	}
+	return paths, nil
+}
+
 // SaveFilesToDir saves files directly under dir using the same sanitization and
 // collision handling as SaveFilesToDisk. It is best-effort: failed items are
 // logged and omitted from the returned paths.

@@ -119,10 +119,13 @@ func newIFlowSession(ctx context.Context, cmd string, extraArgs []string, workDi
 
 func (s *iflowSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
 	if len(images) > 0 {
-		slog.Warn("iflowSession: images are not supported, ignoring")
+		return fmt.Errorf("image attachments are not supported by this agent")
 	}
 	if len(files) > 0 {
-		filePaths := core.SaveFilesToDisk(s.workDir, files)
+		filePaths, err := core.StageFilesToDisk(s.workDir, files)
+		if err != nil {
+			return err
+		}
 		prompt = core.AppendFileRefs(prompt, filePaths)
 	}
 	if !s.alive.Load() {

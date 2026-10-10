@@ -70,8 +70,14 @@ func (gs *geminiSession) Send(prompt string, images []core.ImageAttachment, file
 		return fmt.Errorf("session is closed")
 	}
 
-	imageRefs := core.SaveImagesToDisk(gs.workDir, images)
-	fileRefs := core.SaveFilesToDisk(gs.workDir, files)
+	imageRefs, err := core.StageImagesToDisk(gs.workDir, images)
+	if err != nil {
+		return fmt.Errorf("stage images: %w", err)
+	}
+	fileRefs, err := core.StageFilesToDisk(gs.workDir, files)
+	if err != nil {
+		return err
+	}
 
 	chatID := gs.CurrentSessionID()
 	isResume := chatID != ""

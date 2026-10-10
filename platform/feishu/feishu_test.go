@@ -1398,7 +1398,7 @@ func TestDispatchMessageCoalescesImageBatch(t *testing.T) {
 			// Per-image payload bytes so we can verify order preservation.
 			imageBytes := map[string][]byte{}
 			for i, k := range tc.imageKeys {
-				imageBytes[k] = []byte{0x89, 'P', 'N', 'G', byte(i + 1), '\r', '\n', 0x1a, '\n'}
+				imageBytes[k] = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', byte(i + 1)}
 			}
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1510,7 +1510,7 @@ func TestDispatchMessageSingleImageRegression(t *testing.T) {
 	const appSecret = "secret-single-img"
 	const imageKey = "img_single"
 
-	imageBytes := []byte{0x89, 'P', 'N', 'G', 'S', '\r', '\n', 0x1a, '\n'}
+	imageBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 'S'}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -1589,7 +1589,7 @@ func TestDispatchMessageQuotedImageNotBatched(t *testing.T) {
 	const parentMessageID = "om_parent_quoted"
 	const imageKey = "img_quoted"
 
-	imageData := []byte{0x89, 'P', 'N', 'G', 'Q', '\r', '\n', 0x1a, '\n'}
+	imageData := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 'Q'}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -1678,7 +1678,7 @@ func TestFlushImageBatchesStopsPendingTimers(t *testing.T) {
 	const appSecret = "secret-flush"
 	const imageKey = "img_flush"
 
-	imageBytes := []byte{0x89, 'P', 'N', 'G', 'F', '\r', '\n', 0x1a, '\n'}
+	imageBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 'F'}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -1871,7 +1871,7 @@ func TestFlushImageBatchForSession(t *testing.T) {
 	const appID = "cli_per_session"
 	const appSecret = "secret-per-session"
 
-	imageBytes := []byte{0x89, 'P', 'N', 'G', 'F', '\r', '\n', 0x1a, '\n'}
+	imageBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 'F'}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

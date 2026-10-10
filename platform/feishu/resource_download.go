@@ -24,8 +24,9 @@ const (
 var errResourceRangeUnsupported = errors.New("resource server does not support Range")
 
 type resourceChunk struct {
-	data  []byte
-	total int64 // zero means the server returned a complete 200 response
+	apiJSON bool // JSON without attachment disposition; inspect assembled body too
+	data    []byte
+	total   int64 // zero means the server returned a complete 200 response
 }
 
 // downloadResourceBytes adapts upstream #1746. Unlike the SDK file reader,
@@ -81,6 +82,11 @@ func (p *Platform) downloadResourceBytes(ctx context.Context, messageID, fileKey
 		buf.Write(chunk.data)
 		offset += int64(len(chunk.data))
 	}
+	if first.apiJSON {
+		if err := resourceEnvelopeError(buf.Bytes()); err != nil {
+			return nil, err
+		}
+	}
 	return buf.Bytes(), nil
 }
 
@@ -134,6 +140,17 @@ func requestResourceChunk(ctx context.Context, client *http.Client, endpoint, to
 	if resp.StatusCode == http.StatusPartialContent {
 		var gotStart, gotEnd int64
 		header := strings.TrimSpace(resp.Header.Get("Content-Range"))
+		// Only the initial one-byte probe may negotiate a plain GET. Never
+		// accept this nonconforming body, or retry a broken later chunk.
+		if ranged && start == 0 && end == 0 && expectedTotal == 0 && header == "" {
+			if resp.ContentLength > maxBytes {
+				return resourceChunk{}, false, errors.New("resource Content-Length exceeds download limit")
+			}
+			return resourceChunk{}, false, errResourceRangeUnsupported
+		}
+		if !ranged {
+			return resourceChunk{}, false, errors.New("resource plain GET returned partial content")
+		}
 		_, err := fmt.Sscanf(header, "bytes %d-%d/%d", &gotStart, &gotEnd, &total)
 		if err != nil || header != fmt.Sprintf("bytes %d-%d/%d", gotStart, gotEnd, total) || total <= 0 || gotStart != start || gotEnd < start || gotEnd >= total || gotEnd > end || expectedTotal > 0 && total != expectedTotal {
 			return resourceChunk{}, false, errors.New("resource Content-Range does not match requested range")
@@ -161,14 +178,23 @@ func requestResourceChunk(ctx context.Context, client *http.Client, endpoint, to
 	}
 	// Feishu can return an API error envelope with HTTP 200. Do not forward
 	// that envelope as if it were the user's attachment.
-	if resp.Header.Get("Content-Disposition") == "" && strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
-		var apiError struct {
-			Code int    `json:"code"`
-			Msg  string `json:"msg"`
-		}
-		if json.Unmarshal(data, &apiError) == nil && apiError.Code != 0 && apiError.Msg != "" {
-			return resourceChunk{}, false, fmt.Errorf("resource API code=%d", apiError.Code)
+	apiJSON := resp.Header.Get("Content-Disposition") == "" && strings.EqualFold(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]), "application/json")
+	if apiJSON {
+		if err := resourceEnvelopeError(data); err != nil {
+			return resourceChunk{}, false, err
 		}
 	}
-	return resourceChunk{data: data, total: total}, false, nil
+
+	return resourceChunk{data: data, total: total, apiJSON: apiJSON}, false, nil
+}
+
+func resourceEnvelopeError(data []byte) error {
+	var envelope struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if json.Unmarshal(data, &envelope) == nil && envelope.Code != 0 && envelope.Msg != "" {
+		return fmt.Errorf("resource API code=%d", envelope.Code)
+	}
+	return nil
 }

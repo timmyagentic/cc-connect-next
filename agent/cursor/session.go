@@ -77,10 +77,13 @@ func newCursorSession(ctx context.Context, cmd string, extraArgs []string, workD
 
 func (cs *cursorSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
 	if len(images) > 0 {
-		slog.Warn("cursorSession: images not yet supported in CLI mode, ignoring")
+		return fmt.Errorf("image attachments are not supported by this agent")
 	}
 	if len(files) > 0 {
-		filePaths := core.SaveFilesToDisk(cs.workDir, files)
+		filePaths, err := core.StageFilesToDisk(cs.workDir, files)
+		if err != nil {
+			return err
+		}
 		prompt = core.AppendFileRefs(prompt, filePaths)
 	}
 	if !cs.alive.Load() {

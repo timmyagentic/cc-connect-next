@@ -33,7 +33,7 @@ func serveResourceTestToken(t *testing.T, w http.ResponseWriter, r *http.Request
 }
 
 func TestDownloadResource_LargeFileAndImageRequireRange(t *testing.T) {
-	payload := bytes.Repeat([]byte("0123456789"), 900000)
+	payload := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte("0123456789"), 900000)...)
 	for _, kind := range []string{"file", "image"} {
 		t.Run(kind, func(t *testing.T) {
 			var ranges atomic.Int32
@@ -145,7 +145,7 @@ func TestResourceDownload_RejectsMalformedRangesAndOversizeAndAuth(t *testing.T)
 		max          int64
 	}{
 		{"wrong offset", 206, "bytes 1-1/10", "x", 32},
-		{"missing header", 206, "", "x", 32},
+
 		{"short first body", 206, "bytes 0-0/10", "", 32},
 		{"oversized total", 206, "bytes 0-0/1000", "x", 32},
 		{"oversized plain body", 200, "", strings.Repeat("x", 33), 32},

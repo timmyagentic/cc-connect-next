@@ -149,8 +149,11 @@ func (cs *codexSession) SendWithTurnOptions(prompt string, images []core.ImageAt
 
 func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files []core.FileAttachment, options *core.TurnOptions) error {
 	if len(files) > 0 {
-		filePaths := core.SaveFilesToDisk(cs.workDir, files)
-		prompt = core.AppendFileRefs(prompt, filePaths)
+		var err error
+		prompt, err = stageCodexFiles(cs.workDir, prompt, files)
+		if err != nil {
+			return err
+		}
 	}
 	if !cs.alive.Load() {
 		return fmt.Errorf("session is closed")

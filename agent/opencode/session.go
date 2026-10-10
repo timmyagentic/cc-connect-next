@@ -66,7 +66,10 @@ func newOpencodeSession(ctx context.Context, cmd string, extraArgs []string, wor
 
 func (s *opencodeSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
 	if len(files) > 0 {
-		filePaths := core.SaveFilesToDisk(s.workDir, files)
+		filePaths, err := core.StageFilesToDisk(s.workDir, files)
+		if err != nil {
+			return err
+		}
 		prompt = core.AppendFileRefs(prompt, filePaths)
 	}
 	prompt, imagePaths, err := s.stageImages(prompt, images)

@@ -88,8 +88,14 @@ func (as *antigravitySession) Send(prompt string, images []core.ImageAttachment,
 		}
 	}
 
-	imageRefs := core.SaveImagesToDisk(as.workDir, images)
-	fileRefs := core.SaveFilesToDisk(as.workDir, files)
+	imageRefs, err := core.StageImagesToDisk(as.workDir, images)
+	if err != nil {
+		return fmt.Errorf("stage images: %w", err)
+	}
+	fileRefs, err := core.StageFilesToDisk(as.workDir, files)
+	if err != nil {
+		return err
+	}
 
 	chatID := as.CurrentSessionID()
 	isResume := chatID != ""

@@ -490,8 +490,11 @@ func (s *appServerSession) send(prompt string, images []core.ImageAttachment, fi
 	}
 
 	if len(files) > 0 {
-		filePaths := core.SaveFilesToDisk(s.workDir, files)
-		prompt = core.AppendFileRefs(prompt, filePaths)
+		var err error
+		prompt, err = stageCodexFiles(s.workDir, prompt, files)
+		if err != nil {
+			return err
+		}
 	}
 
 	prompt, imagePaths, err := s.stageImages(prompt, images)
@@ -708,8 +711,11 @@ func (s *appServerSession) Steer(prompt string, images []core.ImageAttachment, f
 	}
 
 	if len(files) > 0 {
-		filePaths := core.SaveFilesToDisk(s.workDir, files)
-		prompt = core.AppendFileRefs(prompt, filePaths)
+		var err error
+		prompt, err = stageCodexFiles(s.workDir, prompt, files)
+		if err != nil {
+			return fmt.Errorf("%v: %w", err, core.ErrSteerRejected)
+		}
 	}
 
 	prompt, imagePaths, err := s.stageImages(prompt, images)

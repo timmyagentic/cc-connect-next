@@ -17,3 +17,13 @@ func stageCodexImages(workDir, prompt, source string, images []core.ImageAttachm
 	}
 	return prompt, paths, nil
 }
+
+// Do not launch a text-only turn after silently dropping a file. Successfully
+// written files remain available for retry; failed batches never reach Codex.
+func stageCodexFiles(workDir, prompt string, files []core.FileAttachment) (string, error) {
+	paths, err := core.StageFilesToDisk(workDir, files)
+	if err != nil {
+		return "", err
+	}
+	return core.AppendFileRefs(prompt, paths), nil
+}

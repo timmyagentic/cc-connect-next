@@ -90,6 +90,9 @@ func (s *piSession) Send(prompt string, images []core.ImageAttachment, files []c
 	if len(files) > 0 {
 		atFiles = append(atFiles, saveFilesToDisk(s.attachDir, files)...)
 	}
+	if len(atFiles) != len(images)+len(files) {
+		return fmt.Errorf("stage attachments: saved %d of %d", len(atFiles), len(images)+len(files))
+	}
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}

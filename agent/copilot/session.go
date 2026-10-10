@@ -625,7 +625,7 @@ func (cs *copilotSession) Send(prompt string, images []core.ImageAttachment, fil
 	if len(images) > 0 {
 		imgPaths, err := saveImagesToTempDir(cs.workDir, images)
 		if err != nil {
-			slog.Warn("copilotSession: failed to save images", "error", err)
+			return fmt.Errorf("stage images: %w", err)
 		} else {
 			prompt = core.AppendFileRefs(prompt, imgPaths)
 		}
@@ -633,7 +633,10 @@ func (cs *copilotSession) Send(prompt string, images []core.ImageAttachment, fil
 
 	// Handle files
 	if len(files) > 0 {
-		filePaths := core.SaveFilesToDisk(cs.workDir, files)
+		filePaths, err := core.StageFilesToDisk(cs.workDir, files)
+		if err != nil {
+			return err
+		}
 		prompt = core.AppendFileRefs(prompt, filePaths)
 	}
 

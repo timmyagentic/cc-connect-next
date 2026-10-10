@@ -179,6 +179,13 @@ func (i *I18n) SetLangAndSave(lang Language) error {
 type MsgKey string
 
 const (
+	MsgFolderUnsupported MsgKey = "folder_unsupported"
+	MsgImageUnavailable  MsgKey = "image_unavailable"
+	MsgFileUnavailable   MsgKey = "file_unavailable"
+	MsgVideoUnavailable  MsgKey = "video_unavailable"
+)
+
+const (
 	MsgStarting                  MsgKey = "starting"
 	MsgThinking                  MsgKey = "thinking"
 	MsgTool                      MsgKey = "tool"
@@ -758,6 +765,34 @@ const (
 )
 
 var messages = map[MsgKey]map[Language]string{
+	MsgFolderUnsupported: {
+		LangEnglish:            "[Folder attachment is not supported. Please send individual files.]",
+		LangChinese:            "[暂不支持文件夹附件，请发送单个文件。]",
+		LangTraditionalChinese: "[暫不支援資料夾附件，請傳送個別檔案。]",
+		LangJapanese:           "[フォルダー添付は未対応です。個別のファイルを送信してください。]",
+		LangSpanish:            "[No se admiten carpetas adjuntas. Envía archivos individuales.]",
+	},
+	MsgImageUnavailable: {
+		LangEnglish:            "[Image unavailable: download failed or resource missing. Please resend.]",
+		LangChinese:            "[图片不可用：下载失败或资源缺失，请重新发送。]",
+		LangTraditionalChinese: "[圖片不可用：下載失敗或資源缺失，請重新傳送。]",
+		LangJapanese:           "[画像を利用できません。ダウンロード失敗またはリソース欠落のため、再送してください。]",
+		LangSpanish:            "[Imagen no disponible: descarga fallida o recurso ausente. Vuelve a enviarla.]",
+	},
+	MsgFileUnavailable: {
+		LangEnglish:            "[File unavailable: download failed or resource missing. Please resend.]",
+		LangChinese:            "[文件不可用：下载失败或资源缺失，请重新发送。]",
+		LangTraditionalChinese: "[檔案不可用：下載失敗或資源缺失，請重新傳送。]",
+		LangJapanese:           "[ファイルを利用できません。ダウンロード失敗またはリソース欠落のため、再送してください。]",
+		LangSpanish:            "[Archivo no disponible: descarga fallida o recurso ausente. Vuelve a enviarlo.]",
+	},
+	MsgVideoUnavailable: {
+		LangEnglish:            "[Video unavailable: download failed or resource missing. A cover image is not the video. Please resend.]",
+		LangChinese:            "[视频不可用：下载失败或资源缺失，封面不等于视频，请重新发送。]",
+		LangTraditionalChinese: "[影片不可用：下載失敗或資源缺失，封面不等於影片，請重新傳送。]",
+		LangJapanese:           "[動画を利用できません。ダウンロード失敗またはリソース欠落です。表紙画像は動画ではありません。再送してください。]",
+		LangSpanish:            "[Vídeo no disponible: descarga fallida o recurso ausente. La portada no es el vídeo. Vuelve a enviarlo.]",
+	},
 	MsgStarting: {
 		LangEnglish:            "⏳ Processing...",
 		LangChinese:            "⏳ 处理中...",

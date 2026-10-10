@@ -188,3 +188,22 @@ func TestScopeFileAttachmentsUsesTriggerMessageWithoutMutatingInput(t *testing.T
 		t.Fatalf("input was mutated: %#v", input)
 	}
 }
+
+func TestStageFilesToDisk_RejectsPartialBatch(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, ".cc-connect-next", "attachments", "blocked")
+	if err := os.MkdirAll(filepath.Dir(blocker), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blocker, []byte("block"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := StageFilesToDisk(dir, []FileAttachment{{FileName: "same.txt", MessageID: "good", Data: []byte("good")}, {FileName: "same.txt", MessageID: "blocked", Data: []byte("bad")}})
+	if err == nil || len(paths) != 0 {
+		t.Fatalf("partial batch returned as usable: %v %v", paths, err)
+	}
+	data, readErr := os.ReadFile(filepath.Join(dir, ".cc-connect-next", "attachments", "good", "same.txt"))
+	if readErr != nil || string(data) != "good" {
+		t.Fatalf("successful file was corrupted: %q %v", data, readErr)
+	}
+}
