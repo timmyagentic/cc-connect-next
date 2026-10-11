@@ -7887,11 +7887,14 @@ func TestCmdDir_DisplaysCorrectIndices(t *testing.T) {
 }
 
 func TestCmdDir_ExpandsTilde(t *testing.T) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip("cannot determine home dir:", err)
+	// Test-scoped environment is restored by testing; never write to real home.
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir) // os.UserHomeDir on Windows
+	targetDir := filepath.Join(homeDir, "Documents")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-
 	p := &stubPlatformEngine{n: "plain"}
 	agent := &stubWorkDirAgent{workDir: homeDir}
 	e := NewEngine("test", agent, []Platform{p}, t.TempDir(), LangEnglish)
@@ -7903,15 +7906,10 @@ func TestCmdDir_ExpandsTilde(t *testing.T) {
 	}{
 		{"~", homeDir},
 		{"~/", homeDir},
-		{"~/Documents", filepath.Join(homeDir, "Documents")},
+		{"~/Documents", targetDir},
 	}
-
 	for _, tc := range tests {
 		agent.workDir = homeDir
-		// Ensure the target directory exists before switching
-		if err := os.MkdirAll(tc.wantDir, 0o755); err != nil {
-			t.Fatalf("MkdirAll %q: %v", tc.wantDir, err)
-		}
 		e.cmdDir(p, msg, []string{tc.input})
 		if agent.workDir != tc.wantDir {
 			t.Errorf("input %q: workDir = %q, want %q", tc.input, agent.workDir, tc.wantDir)
