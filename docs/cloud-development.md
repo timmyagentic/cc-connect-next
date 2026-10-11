@@ -5,6 +5,17 @@ Use a clean checkout at an explicit full commit SHA. The environment needs Go
 a C compiler for the race detector, git, curl, jq and tar. Install tools in the
 runner image; setup does not use sudo or change persistent tool configuration.
 
+If the runner's default PATH selects other tool versions, configure the optional
+non-secret `CLOUD_TOOLCHAIN_BIN` environment variable to **one absolute directory**
+containing executable `go`, `node`, `npm` and `pnpm` (symlinks are supported).
+The environment owner prepares that directory with preinstalled tools. Both
+entrypoints prepend it to PATH only in their own process and children, then
+apply the same strict version gates. An empty, relative, missing or incomplete
+directory fails immediately; colon-separated PATH lists are rejected. If unset,
+the inherited PATH is used. No shell profile, HOME or persistent PATH is changed,
+and no tool is installed by this selection step. A saved environment must retain
+this variable; activation in an earlier setup process alone does not persist.
+
 Setup / maintenance command (safe to rerun):
 
 ```sh
