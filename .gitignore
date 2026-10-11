@@ -166,3 +166,9 @@ credentials/
 
 .codex
 cc-connect-next-new
+
+# Reproducible secret-free development entrypoints and workspace-local caches
+!scripts/cloud/
+!scripts/cloud/**
+.cloud-cache/
+!scripts/cloud-contract.test.js

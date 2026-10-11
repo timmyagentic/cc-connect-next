@@ -236,6 +236,10 @@ func TestSystemdInstall_TightensExistingUnitFrom0644(t *testing.T) {
 	if err := os.WriteFile(unitPath, []byte("[Service]\nExecStart=/bin/true\n"), 0o644); err != nil {
 		t.Fatalf("seed legacy unit: %v", err)
 	}
+	// Model legacy permissions independently of the runner's umask.
+	if err := os.Chmod(unitPath, 0o644); err != nil {
+		t.Fatalf("chmod legacy unit: %v", err)
+	}
 	if info, _ := os.Stat(unitPath); info.Mode().Perm() != 0o644 {
 		t.Fatalf("precondition: seeded file mode = %o, want 0644", info.Mode().Perm())
 	}
