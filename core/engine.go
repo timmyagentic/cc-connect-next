@@ -6140,7 +6140,10 @@ func (t *turnProcessor) run() {
 				stopTyping = nil
 			}
 			e.notifyDroppedQueuedMessages(state, err)
-			if state.agentSession == nil || !state.agentSession.Alive() {
+			state.mu.Lock()
+			agentSession := state.agentSession
+			state.mu.Unlock()
+			if agentSession == nil || !agentSession.Alive() {
 				e.cleanupInteractiveState(sessionKey, state)
 			}
 			state.mu.Lock()
@@ -7521,7 +7524,11 @@ func (failure *turnFailure) handle() {
 	// Only drop queued messages if the agent session is dead.
 	// Some agents (e.g. Codex) emit EventError for per-turn failures
 	// while keeping the session alive for subsequent turns.
-	if state.agentSession == nil || !state.agentSession.Alive() {
+	// Error delivery may overlap cleanup; refresh the snapshot under the lock.
+	state.mu.Lock()
+	agentSession = state.agentSession
+	state.mu.Unlock()
+	if agentSession == nil || !agentSession.Alive() {
 		e.notifyDroppedQueuedMessages(state, event.Error)
 	}
 }
