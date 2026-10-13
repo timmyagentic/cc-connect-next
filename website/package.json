@@ -1,0 +1,17 @@
+{
+  "name": "cc-connect-next-website",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check public/app.js && npm test && wrangler deploy --dry-run --outdir .wrangler/dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.149.0"
+  }
+}

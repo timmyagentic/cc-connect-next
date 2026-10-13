@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CC Connect Next — 你的本地 Agent，随处连接</title>
+<meta name="description" content="通过飞书、Telegram、Slack 等聊天平台使用自己机器上的 Codex、Claude Code 等编程 Agent。">
+<meta property="og:title" content="CC Connect Next — 你的本地 Agent，随处连接">
+<meta property="og:description" content="通过飞书、Telegram、Slack 等聊天平台使用自己机器上的 Codex、Claude Code 等编程 Agent。">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" href="/icons/terminal-2.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/app.js">
+</script>
+<link rel="canonical" href="https://cc-connect-next.timmyagentic.com/">
+<meta property="og:url" content="https://cc-connect-next.timmyagentic.com/">
+</head>
+<body data-page="Home">
+<a class="skip" href="#main">
+<span data-i18n="skip">跳到正文</span>
+</a>
+<header class="site-header">
+<div class="container header-inner">
+<a class="brand" href="/">
+<img class="icon" src="/icons/terminal-2.svg" width="24" height="24" alt="" aria-hidden="true">
+<span>cc connect <strong>next</strong>
+</span>
+</a>
+<nav id="navigation" aria-label="Navigation">
+<a data-i18n="navHow" href="/#how">如何使用</a>
+<a data-i18n="navDocs" href="/docs">使用指南</a>
+<a href="https://github.com/timmyagentic/cc-connect-next">GitHub</a>
+</nav>
+<div class="languages" role="group" aria-label="Language">
+<button data-language="zh-CN" aria-pressed="true" aria-label="简体中文">中</button>
+<button data-language="en" aria-pressed="false" aria-label="English">EN</button>
+</div>
+<button class="menu-toggle" aria-label="Navigation" aria-expanded="false" aria-controls="navigation">
+<img class="icon" src="/icons/menu-2.svg" width="24" height="24" alt="" aria-hidden="true">
+</button>
+</div>
+</header>
+<main id="main">
+<section class="hero container">
+<p data-i18n="eyebrow" class="eyebrow">本地 AI 编程，随处接着聊</p>
+<h1>
+<span data-i18n="heroFirst">Agent 在电脑，</span>
+<br>
+<span data-i18n="heroSecond">你在任何地方。</span>
+</h1>
+<p data-i18n="heroBody" class="hero-description">在飞书、Telegram 或 Slack 里，继续和自己的编程 Agent 协作。
+代码与执行环境留在你的机器，消息把你们连起来。</p>
+<div class="install-command">
+<code id="install-command">npm install -g cc-connect-next</code>
+<button data-copy="install-command" aria-label="Copy install command">
+<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
+<span data-copy-label>
+<span data-i18n="copy">复制</span>
+</span>
+</button>
+</div>
+<div class="hero-links">
+<a data-i18n="start" class="text-link" href="/docs">安装与接入指南</a>
+<span data-i18n="platformNote">macOS · Linux · Windows · 开源</span>
+</div>
+</section>
+<section class="demo-section" aria-labelledby="demo-heading">
+<img class="landscape" src="/assets/soft-landscape.webp" width="1774" height="887" alt="" aria-hidden="true">
+<div class="container demo-container">
+<h2 data-i18n="demoHeading" id="demo-heading" class="sr-only">从一句话，到继续推进。</h2>
+<div class="demo-tabs" role="tablist" aria-label="Demo steps">
+<button id="tab-start" data-demo="start" role="tab" aria-controls="panel-start" aria-selected="true" tabindex="0">
+<span data-i18n="demoTabstart">发起任务</span>
+</button>
+<button id="tab-steer" data-demo="steer" role="tab" aria-controls="panel-steer" aria-selected="false" tabindex="-1">
+<span data-i18n="demoTabsteer">中途补充</span>
+</button>
+<button id="tab-result" data-demo="result" role="tab" aria-controls="panel-result" aria-selected="false" tabindex="-1">
+<span data-i18n="demoTabresult">查看结果</span>
+</button>
+</div>
+<div class="demo-window">
+<div class="demo-topbar">
+<img class="icon" src="/icons/message-circle.svg" width="24" height="24" alt="" aria-hidden="true">
+<span>cc connect next</span>
+<span data-i18n="demoLabel" class="demo-label">交互示例 · 不连接你的机器</span>
+</div>
+<div id="panel-start" role="tabpanel" aria-labelledby="tab-start" class="demo-panel" tabindex="0" >
+<div class="message user-message">
+<span data-i18n="userLabelstart" class="message-label">你</span>
+<p data-i18n="requeststart">看看登录页的表单报错，先定位原因。</p>
+</div>
+<div class="message agent-message">
+<span data-i18n="agentLabelstart" class="message-label">你的本地 Agent</span>
+<p data-i18n="startResponse">已收到。接下来读取表单代码，检查校验和错误提示。</p>
+<p data-i18n="startStatus" class="message-status">处理中 · 在本地工作区执行</p>
+</div>
+</div>
+<div id="panel-steer" role="tabpanel" aria-labelledby="tab-steer" class="demo-panel" tabindex="0" hidden>
+<div class="message user-message">
+<span data-i18n="userLabelsteer" class="message-label">你</span>
+<p data-i18n="requeststeer">看看登录页的表单报错，先定位原因。</p>
+</div>
+<div class="message user-message">
+<p data-i18n="directionsteer">补充：保留现有布局，只修输入校验。</p>
+</div>
+<div class="message agent-message">
+<span data-i18n="agentLabelsteer" class="message-label">你的本地 Agent</span>
+<p data-i18n="steerResponse">已把补充要求并入当前任务，保留布局，只调整校验逻辑。</p>
+<p data-i18n="steerStatus" class="message-status">示例：Codex 原生 steer · 其他后端可能排队</p>
+</div>
+</div>
+<div id="panel-result" role="tabpanel" aria-labelledby="tab-result" class="demo-panel" tabindex="0" hidden>
+<div class="message user-message">
+<span data-i18n="userLabelresult" class="message-label">你</span>
+<p data-i18n="requestresult">看看登录页的表单报错，先定位原因。</p>
+</div>
+<div class="message user-message">
+<p data-i18n="directionresult">补充：保留现有布局，只修输入校验。</p>
+</div>
+<div class="message agent-message">
+<span data-i18n="agentLabelresult" class="message-label">你的本地 Agent</span>
+<p data-i18n="resultResponse">已修复：空输入会显示提示，有效输入继续提交。原有布局保持不变。</p>
+<p data-i18n="resultStatus" class="message-status">示例结果 · 可继续追问、检查差异或安排下一步</p>
+</div>
+</div>
+</div>
+<p data-i18n="demoFoot" class="demo-foot">示例展示消息流转；实际能力取决于所选 Agent、平台和配置。</p>
+</div>
+</section>
+<section id="how" class="section container">
+<div class="section-intro">
+<p data-i18n="howEyebrow" class="eyebrow">熟悉的工具，新的连接方式</p>
+<h2 data-i18n="howTitle">从办公桌，到你手边。</h2>
+<p data-i18n="howBody">一个 Go 二进制，连接聊天平台与本地编程 Agent。</p>
+</div>
+<div class="steps">
+<article>
+<img class="icon" src="/icons/terminal-2.svg" width="24" height="24" alt="" aria-hidden="true">
+<span class="step-number">01</span>
+<h3 data-i18n="stepTitle01">Agent 跑在本地</h3>
+<p data-i18n="stepBody01">使用已经安装并登录的 Codex、Claude Code 等 CLI，在你的工作区执行。</p>
+</article>
+<article>
+<img class="icon" src="/icons/message-circle.svg" width="24" height="24" alt="" aria-hidden="true">
+<span class="step-number">02</span>
+<h3 data-i18n="stepTitle02">消息送到身边</h3>
+<p data-i18n="stepBody02">绑定飞书、Telegram、Slack 等平台，发消息、收进展，继续同一段协作。</p>
+</article>
+<article>
+<img class="icon" src="/icons/shield-check.svg" width="24" height="24" alt="" aria-hidden="true">
+<span class="step-number">03</span>
+<h3 data-i18n="stepTitle03">把权限握在手里</h3>
+<p data-i18n="stepBody03">按项目配置工作区与访问范围。能力和权限依所选 Agent 与平台而定。</p>
+</article>
+</div>
+</section>
+<section class="section feishu-section">
+<div class="container split">
+<div>
+<p data-i18n="feishuEyebrow" class="eyebrow">为飞书深入打磨</p>
+<h2 data-i18n="feishuTitle">消息背后，
+是完整的协作。</h2>
+<p data-i18n="feishuBody" class="section-description">流式回答、权限确认和话题隔离，让长任务也能在聊天里清楚推进。</p>
+<a data-i18n="feishuLink" class="text-link" href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/feishu.md">查看飞书接入指南</a>
+</div>
+<div class="feature-list">
+<article>
+<h3 data-i18n="cardsTitle">一个回答，持续更新</h3>
+<p data-i18n="cardsBody">用交互卡片呈现进度，支持的操作就在消息里完成。</p>
+</article>
+<article>
+<h3 data-i18n="topicsTitle">话题各自专注</h3>
+<p data-i18n="topicsBody">真实话题可以拥有独立会话与工作区绑定，减少上下文混在一起。</p>
+</article>
+<article>
+<h3 data-i18n="steerTitle">任务进行中，也能补充</h3>
+<p data-i18n="steerBody">Codex 原生 steer 可并入当前回合；其他 Agent 按实际能力回退排队。</p>
+</article>
+</div>
+</div>
+</section>
+<section class="section container integrations">
+<div class="section-intro">
+<h2 data-i18n="integrationTitle">用你熟悉的组合。</h2>
+<p data-i18n="integrationBody">先选 Agent，再选聊天平台。完整支持范围与限制见项目文档。</p>
+</div>
+<div class="integration-columns">
+<div>
+<h3 data-i18n="agentsLabel">本地编程 Agent</h3>
+<ul>
+<li>Codex</li>
+<li>Claude Code</li>
+<li>Cursor</li>
+<li>Gemini CLI</li>
+<li>OpenCode</li>
+<li>GitHub Copilot CLI</li>
+</ul>
+</div>
+<div>
+<h3 data-i18n="platformsLabel">聊天平台</h3>
+<ul>
+<li>飞书 / Lark</li>
+<li>Telegram</li>
+<li>Slack</li>
+<li>Discord</li>
+<li>钉钉</li>
+<li>Matrix</li>
+</ul>
+</div>
+</div>
+<a data-i18n="allIntegrations" class="text-link" href="https://github.com/timmyagentic/cc-connect-next#-支持的-agent-与平台">查看全部集成与能力</a>
+</section>
+<section class="section get-started">
+<div class="container">
+<div class="section-intro">
+<h2 data-i18n="startTitle">从这里，连起来。</h2>
+<p data-i18n="startBody">全新安装、接入飞书，或从官方 CC Connect 迁移。</p>
+</div>
+<div class="path-grid">
+<a class="path" href="/docs#install">
+<span class="step-number">01</span>
+<h3 data-i18n="pathTitleinstall">第一次使用</h3>
+<p data-i18n="pathBodyinstall">安装 CLI，配置 Agent，再运行 doctor 检查环境。</p>
+<img class="icon" src="/icons/arrow-up-right.svg" width="24" height="24" alt="" aria-hidden="true">
+</a>
+<a class="path" href="/docs#feishu">
+<span class="step-number">02</span>
+<h3 data-i18n="pathTitlefeishu">接入飞书</h3>
+<p data-i18n="pathBodyfeishu">交互式配置机器人与工作区，跟随指南授予所需权限。</p>
+<img class="icon" src="/icons/arrow-up-right.svg" width="24" height="24" alt="" aria-hidden="true">
+</a>
+<a class="path" href="/docs#migration">
+<span class="step-number">03</span>
+<h3 data-i18n="pathTitlemigration">从 CC Connect 迁移</h3>
+<p data-i18n="pathBodymigration">先用 dry-run 查看迁移计划，再按文档决定是否切换服务。</p>
+<img class="icon" src="/icons/arrow-up-right.svg" width="24" height="24" alt="" aria-hidden="true">
+</a>
+</div>
+</div>
+</section>
+<section class="section container faq">
+<div>
+<h2 data-i18n="faqTitle">还有几个常见问题。</h2>
+</div>
+<div class="faq-list">
+<details>
+<summary data-i18n="faqQlocal">官网会连接我的电脑吗？</summary>
+<p data-i18n="faqAlocal">不会。官网提供介绍、交互示例与安装说明。实际连接由你在自己机器上安装和配置的 CC Connect Next 完成。</p>
+</details>
+<details>
+<summary data-i18n="faqQpublic">需要公网 IP 吗？</summary>
+<p data-i18n="faqApublic">飞书使用 WebSocket 长连接，不需要公网 IP、域名或证书。其他平台的接入要求见对应指南。</p>
+</details>
+<details>
+<summary data-i18n="faqQprivacy">数据会发往哪里？</summary>
+<p data-i18n="faqAprivacy">执行环境在本地；消息经过所选聊天平台，Agent 请求会发往其配置的服务提供方。本地执行并不代表完全离线。</p>
+</details>
+<details>
+<summary data-i18n="faqQcost">CC Connect Next 免费吗？</summary>
+<p data-i18n="faqAcost">代码采用 MIT 许可。Agent 订阅、模型 API 与聊天平台可能产生各自的费用。</p>
+</details>
+</div>
+</section>
+<section class="section final-cta">
+<div class="container">
+<img class="icon" src="/icons/terminal-2.svg" width="24" height="24" alt="" aria-hidden="true">
+<h2 data-i18n="finalTitle">下一个想法，
+就在下一条消息里。</h2>
+<a data-i18n="finalCta" class="button primary" href="/docs">开始连接</a>
+</div>
+</section>
+</main>
+<footer class="site-footer">
+<div class="container footer-inner">
+<div>
+<a class="brand" href="/">cc connect <strong>next</strong>
+</a>
+<p data-i18n="footerTag">本地执行，随处连接。</p>
+</div>
+<nav aria-label="Footer">
+<a data-i18n="docsLink" href="/docs">文档</a>
+<a data-i18n="releases" href="https://github.com/timmyagentic/cc-connect-next/releases">更新日志</a>
+<a href="https://github.com/timmyagentic/cc-connect-next">GitHub</a>
+</nav>
+</div>
+<div class="container credit">
+<span data-i18n="credit">源自 CC Connect，保留上游历史与 MIT 许可。</span> <a href="https://github.com/timmyagentic/cc-connect-next/blob/main/NOTICE">NOTICE</a>
+</div>
+</footer>
+<p id="copy-status" class="sr-only" role="status">
+</p>
+</body>
+</html>
