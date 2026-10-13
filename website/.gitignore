@@ -2,3 +2,8 @@ node_modules/
 .wrangler/
 .dev.vars*
 .env*
+
+# Keep the standalone site's reproducible install and contract tests versioned.
+!package-lock.json
+!test/
+!test/**
