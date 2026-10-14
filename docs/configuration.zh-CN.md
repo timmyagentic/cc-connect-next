@@ -4235,6 +4235,52 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 生效方式：`restart`
 - 示例: `token_endpoint = "https://open-im.api.weibo.com/open/auth/ws_token"`
 
+### `projects.platforms.options.unread_reminder` — `feishu, lark`
+
+成功回复后发送独立完成通知；指定用户超过 unread_reminder_delay_mins（默认一小时）仍未读时私聊提醒一次。按项目和机器人持久化，已读查询失败不视为未读。
+
+- 来源：`toml`
+- 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`boolean`
+- 要求：`可选`
+- 默认值：`false`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 依赖: `non-empty unread_reminder_users`
+- 示例: `unread_reminder = false`
+
+### `projects.platforms.options.unread_reminder_delay_mins` — `feishu, lark`
+
+新完成通知发送成功后，等待这些分钟再检查是否需要私聊未读提醒。默认60分钟，后台每分钟检查。重启后对新通知生效，已有待提醒记录保留原到期时间；必须短于七天保留期。
+
+- 来源：`toml`
+- 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`integer`
+- 要求：`可选`
+- 默认值：`60`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 依赖: `unread_reminder = true`
+- 范围: `1` 到 `10079` `minutes`
+- 示例: `unread_reminder_delay_mins = 60`
+
+### `projects.platforms.options.unread_reminder_users` — `feishu, lark`
+
+允许接收未读私聊提醒的应用范围用户 open_id；只提醒完成回合的发起人。不支持通配符或隐式收件人。
+
+- 来源：`toml`
+- 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`string[]`
+- 要求：`可选`
+- 默认值：`empty`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 依赖: `unread_reminder = true`
+- 示例: `unread_reminder_users = ["value"]`
+
 ### `projects.platforms.options.user_id` — `matrix`
 
 设置或覆盖 Matrix 机器人用户 ID。

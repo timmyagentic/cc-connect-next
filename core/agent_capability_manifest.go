@@ -102,6 +102,10 @@ type RuntimeFeatureCapability struct {
 	DescriptionZH string                 `json:"description_zh"`
 	Availability  CapabilityAvailability `json:"availability"`
 	Fallback      CapabilityFallback     `json:"fallback"`
+	// Optional action contract for automatic operational capabilities.
+	Permission  CapabilityPermissionLevel `json:"permission,omitempty"`
+	ReadOnly    *bool                     `json:"read_only,omitempty"`
+	SideEffects []CapabilitySideEffect    `json:"side_effects,omitempty"`
 }
 
 type RuntimeAdapterCapabilities struct {

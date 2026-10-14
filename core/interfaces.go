@@ -31,6 +31,27 @@ type DirectUserSender interface {
 	SendDirectUser(ctx context.Context, userID, content string) error
 }
 
+// TurnCompletionNotice is emitted only after a successful, visible final answer.
+// Text and ReminderText are localized by the engine. Platform adapters own the
+// fresh completion message, read receipts, explicit recipients, and durable timer.
+type TurnCompletionNotice struct {
+	UserID           string
+	SessionKey       string
+	TriggerMessageID string
+	Summary          string
+	Text             string
+	ReminderText     string
+}
+
+// TurnCompletionNotifier optionally tracks unread completed answers. An adapter
+// must opt in, restrict recipients, and never infer a private destination from a
+// recent chat. Observations only cancel pending work; they must not send replies.
+type TurnCompletionNotifier interface {
+	NotifyTurnCompleted(ctx context.Context, replyCtx any, notice TurnCompletionNotice) error
+	UnreadRemindersEnabled() bool
+	ObserveReminderMessage(ctx context.Context, msg *Message) error
+}
+
 // DirectUserCardSender optionally preserves interactive-card actions on a
 // private user target. Engines always fall back to DirectUserSender text when
 // the card path is unavailable or fails.
