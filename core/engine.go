@@ -623,6 +623,7 @@ type interactiveState struct {
 	replyCtx                 any
 	currentMessageID         string
 	currentUserID            string
+	currentReplyUserID       string // owner of the visible trigger; legacy /ps can change authorization without moving the reply
 	currentSessionKey        string
 	lastRecallProbeMessageID string
 	lastRecallProbeAt        time.Time
@@ -3058,6 +3059,7 @@ func (e *Engine) rejectBannedContent(p Platform, msg *Message, content string) b
 }
 
 func (e *Engine) handleMessage(p Platform, msg *Message) {
+	e.observeUnreadReminderMessage(p, msg)
 	if msg.Recalled {
 		e.handleMessageRecall(p, msg)
 		return
@@ -4252,6 +4254,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.platform = p
 	state.replyCtx = msg.ReplyCtx
 	state.currentMessageID = msg.MessageID
+	state.currentReplyUserID = msg.UserID
 	state.currentTurnUserMessageTimeMs = msg.UserMessageTimeMs
 	state.mu.Unlock()
 	e.activateAgentTurnCredential(state, msg.UserID, msg.SessionKey)
@@ -5970,6 +5973,7 @@ func (t *turnProcessor) run() {
 			state.platform = h.platform
 			state.replyCtx = h.replyCtx
 			state.currentMessageID = h.messageID
+			state.currentReplyUserID = h.userID
 			state.fromVoice = h.fromVoice
 			state.currentUserID = h.userID
 			state.currentTurnUserMessageTimeMs = h.userMessageTimeMs
@@ -6713,6 +6717,7 @@ func (completion *turnCompletion) handle() bool {
 		e.completeFeedbackTurn(state, response.base)
 	}
 	completion.commit(response, triggerAutoCompress, tokenEstimate)
+	completion.notifyUnreadReminder(response)
 	return !completion.runAutoCompress(triggerAutoCompress)
 }
 
@@ -7008,6 +7013,7 @@ func (queue *turnQueue) handle() {
 		state.platform = queued.platform
 		state.replyCtx = queued.replyCtx
 		state.currentMessageID = queued.messageID
+		state.currentReplyUserID = queued.userID
 		state.fromVoice = queued.fromVoice
 		state.currentUserID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
@@ -8608,6 +8614,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.platform = queued.platform
 		state.replyCtx = queued.replyCtx
 		state.currentMessageID = queued.messageID
+		state.currentReplyUserID = queued.userID
 		state.fromVoice = queued.fromVoice
 		state.currentUserID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs

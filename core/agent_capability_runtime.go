@@ -441,6 +441,25 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		result.Capabilities = append(result.Capabilities, feature(item.id, item.description, item.zh, availability, CapabilityFallback{Mode: item.fallbackMode, Description: item.fallback, DescriptionZH: item.fallbackZH}))
 	}
 
+	notifier, canRemind := platform.(TurnCompletionNotifier)
+	reminderAvailability := platformAvailability(canRemind)
+	if canRemind && state == CapabilityAvailable {
+		if !notifier.UnreadRemindersEnabled() {
+			reminderAvailability = unavailable("Unread reminders are disabled; enable unread_reminder and configure explicit unread_reminder_users.", "未读提醒未启用；需启用 unread_reminder 并配置明确的 unread_reminder_users。")
+		} else {
+			reminderAvailability = conditional("Enabled for explicitly configured recipients after successful visible user turns; requires existing message-read and private-send access.", "已为明确配置的接收人启用，仅在用户回合成功投递可见答复后触发；依赖已有消息已读查询和私聊发送权限。")
+		}
+	}
+	reminder := feature("unread_completion_reminder",
+		"Send a fresh completion notice after a successful answer, persist a configurable waiting period (default one hour), query the recipient's read status, and send at most one private reminder. Continuation in the original topic cancels it. Works independently of the agent backend.",
+		"成功回答后发送新的完成通知，持久保存可配置的等待时长（默认一小时），查询接收人的已读状态，最多私聊提醒一次；在原话题继续回复会取消提醒，与 Agent 后端无关。",
+		reminderAvailability, CapabilityFallback{Mode: "skip", Description: "Keep the delivered answer; failed read queries never count as unread, and uncertain reminder sends are not resent.", DescriptionZH: "保留已投递回答；已读查询失败不视为未读，发送结果不确定的提醒不重发。"})
+	readOnly := false
+	reminder.Permission = CapabilityPermissionConditional
+	reminder.ReadOnly = &readOnly
+	reminder.SideEffects = expandSideEffects([]string{"persistent_state", "scheduled_state", "network", "external_message"})
+	result.Capabilities = append(result.Capabilities, reminder)
+
 	proactiveAvailability := platformAvailability(reconstruct)
 	_, hasValidator := platform.(PersistentProactiveTargetValidator)
 	_, requiresSnapshot := platform.(PersistentReplyTargetRequirer)

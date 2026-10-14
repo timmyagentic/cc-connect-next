@@ -1114,6 +1114,8 @@ app_secret = "your-feishu-app-secret"
 # Requires group_reply_all=false, empty group_reply_all_chats, require_mention=true,
 # and respond_to_at_everyone_and_here=false. No attachment downloads or extra permissions.
 # 需关闭全部免 @ 回复选项；不自动下载附件、不申请新权限。忙时按独立回合排队。
+# unread_reminder_delay_mins = 60    # When unread_reminder is enabled: wait 1-10079 minutes; pending deadlines survive config changes.
+#                                   # 启用未读提醒时的等待分钟数，默认60；已有待提醒记录保留原到期时间。
 # share_session_in_channel = true   # Feishu/Lark default: share ordinary group sessions; false opts out
 #                                   # 设为 true 时，群聊内所有用户共享同一个 Agent 会话
 # thread_isolation = "topics_only" # runtime default, including omitted old configs; off opts out; legacy true = topic_per_message
