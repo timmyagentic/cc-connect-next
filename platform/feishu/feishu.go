@@ -141,10 +141,7 @@ func validatePlatformOptions(name string) core.OptionsValidator {
 				return fmt.Errorf("%s: image_batch_window_ms must be >= 0, got %d", name, milliseconds)
 			}
 		}
-		if _, _, err := parseUnreadReminderOptions(opts); err != nil {
-			return fmt.Errorf("%s: %w", name, err)
-		}
-		if _, err := parseUnreadReminderDelay(opts); err != nil {
+		if _, _, err := parseCompletionNotificationOptions(opts); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 		if _, err := parseGroupContextConfig(opts); err != nil {
@@ -329,7 +326,7 @@ func parseThreadIsolationMode(raw any) (threadIsolationMode, error) {
 }
 
 type Platform struct {
-	reminders                  *reminderQueue
+	completionNotifications    *completionNotifications
 	groupContext               groupContextConfig
 	mu                         sync.RWMutex
 	platformName               string
@@ -676,7 +673,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		imageBatch:                 make(map[string]*imageBatchEntry),
 		imageBatchWindow:           imageBatchWindow,
 	}
-	if err := base.configureUnreadReminders(opts); err != nil {
+	if err := base.configureCompletionNotifications(opts); err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	if !useInteractiveCard {
@@ -877,12 +874,12 @@ func (p *Platform) KeepPreviewOnFinish() bool {
 }
 
 func (p *Platform) Start(handler core.MessageHandler) (startErr error) {
-	if err := p.startUnreadReminders(); err != nil {
+	if err := p.startCompletionNotifications(); err != nil {
 		return err
 	}
 	defer func() {
 		if startErr != nil {
-			p.stopUnreadReminders()
+			p.stopCompletionNotifications()
 		}
 	}()
 	p.mu.Lock()
@@ -1875,9 +1872,6 @@ func (p *Platform) onMessageRecalled(_ context.Context, event *larkim.P2MessageR
 	}
 
 	p.markMessageRecalled(messageID)
-	if err := p.ObserveReminderMessage(context.Background(), &core.Message{MessageID: messageID, Recalled: true}); err != nil {
-		slog.Warn("feishu: cannot persist recalled reminder cancellation")
-	}
 	slog.Info(p.tag()+": message recalled",
 		"message_id", messageID,
 		"chat_id", chatID,
@@ -2006,11 +2000,6 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	// Pre-compute sessionKey so the @bot filter below can consult the active
 	// thread set; sessionKey is also used downstream for dispatch.
 	sessionKey := p.makeSessionKey(msg, chatID, userID)
-	if stringValue(sender.SenderType) == "user" && core.AllowList(p.allowFrom, userID) && core.AllowList(p.allowChat, chatID) {
-		if err := p.ObserveReminderMessage(ctx, &core.Message{UserID: userID, SessionKey: sessionKey, MessageID: messageID, UserMessageTimeMs: createTimeMs, ReplyCtx: replyContext{chatID: chatID, threadID: stringValue(msg.ThreadId)}}); err != nil {
-			slog.Warn("feishu: cannot persist reminder cancellation")
-		}
-	}
 
 	if !p.shouldDispatchGroupMessage(msg, msgType, chatID, sessionKey, groupReplyAllForChat) {
 		return nil
@@ -6108,7 +6097,7 @@ func (p *Platform) updateCardEntity(ctx context.Context, h *feishuPreviewHandle,
 }
 
 func (p *Platform) Stop() error {
-	p.stopUnreadReminders()
+	p.stopCompletionNotifications()
 	p.stopBotIdentityRecovery()
 	if p.isWSPrimary {
 		p.markConnectionUnavailable(fmt.Errorf("%s stopped", p.tag()))

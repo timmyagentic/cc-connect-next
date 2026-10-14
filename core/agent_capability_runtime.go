@@ -441,24 +441,24 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		result.Capabilities = append(result.Capabilities, feature(item.id, item.description, item.zh, availability, CapabilityFallback{Mode: item.fallbackMode, Description: item.fallback, DescriptionZH: item.fallbackZH}))
 	}
 
-	notifier, canRemind := platform.(TurnCompletionNotifier)
-	reminderAvailability := platformAvailability(canRemind)
-	if canRemind && state == CapabilityAvailable {
-		if !notifier.UnreadRemindersEnabled() {
-			reminderAvailability = unavailable("Unread reminders are disabled; enable unread_reminder and configure explicit unread_reminder_users.", "未读提醒未启用；需启用 unread_reminder 并配置明确的 unread_reminder_users。")
+	notifier, canNotify := platform.(TurnCompletionNotifier)
+	notificationAvailability := platformAvailability(canNotify)
+	if canNotify && state == CapabilityAvailable {
+		if !notifier.CompletionNotificationsEnabled() {
+			notificationAvailability = unavailable("Private completion notifications are disabled; enable completion_notify and configure explicit completion_notify_users.", "私聊完成通知未启用；需启用 completion_notify 并配置明确的 completion_notify_users。")
 		} else {
-			reminderAvailability = conditional("Enabled for explicitly configured recipients after successful visible user turns; requires existing message-read and private-send access.", "已为明确配置的接收人启用，仅在用户回合成功投递可见答复后触发；依赖已有消息已读查询和私聊发送权限。")
+			notificationAvailability = conditional("Enabled for explicitly configured turn owners after successful visible answers; sends with the same bot identity and requires private-send access.", "已为明确配置的回合发起人启用，成功投递可见答复后由同一机器人立即私聊通知；依赖私聊发送权限。")
 		}
 	}
-	reminder := feature("unread_completion_reminder",
-		"Send a fresh completion notice after a successful answer, persist a configurable waiting period (default one hour), query the recipient's read status, and send at most one private reminder. Continuation in the original topic cancels it. Works independently of the agent backend.",
-		"成功回答后发送新的完成通知，持久保存可配置的等待时长（默认一小时），查询接收人的已读状态，最多私聊提醒一次；在原话题继续回复会取消提醒，与 Agent 后端无关。",
-		reminderAvailability, CapabilityFallback{Mode: "skip", Description: "Keep the delivered answer; failed read queries never count as unread, and uncertain reminder sends are not resent.", DescriptionZH: "保留已投递回答；已读查询失败不视为未读，发送结果不确定的提醒不重发。"})
+	notification := feature("completion_notification",
+		"Immediately send the turn owner one private completion notification with a link to the original conversation. No extra topic message, read-status query, waiting period or later reminder. Works independently of the agent backend.",
+		"任务答复成功送达后立即私聊发起人一次，附原对话链接；不在原话题追加通知，不查询已读，不等待或延迟提醒，与 Agent 后端无关。",
+		notificationAvailability, CapabilityFallback{Mode: "skip", Description: "Keep the delivered answer; use the known conversation link if message lookup fails, and do not replay uncertain private sends.", DescriptionZH: "保留已投递回答；消息查询失败时使用已知对话链接，私聊发送结果不确定时不重发。"})
 	readOnly := false
-	reminder.Permission = CapabilityPermissionConditional
-	reminder.ReadOnly = &readOnly
-	reminder.SideEffects = expandSideEffects([]string{"persistent_state", "scheduled_state", "network", "external_message"})
-	result.Capabilities = append(result.Capabilities, reminder)
+	notification.Permission = CapabilityPermissionConditional
+	notification.ReadOnly = &readOnly
+	notification.SideEffects = expandSideEffects([]string{"persistent_state", "network", "external_message"})
+	result.Capabilities = append(result.Capabilities, notification)
 
 	proactiveAvailability := platformAvailability(reconstruct)
 	_, hasValidator := platform.(PersistentProactiveTargetValidator)
