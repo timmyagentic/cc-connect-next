@@ -3220,3 +3220,57 @@ func TestCUJ_B6_LateSessionIDSurvivesFailureRetryAndHistory(t *testing.T) {
 		return strings.Contains(strings.Join(p.getSent(), "\n"), "original alert context") && strings.Contains(strings.Join(p.getSent(), "\n"), "recovered")
 	})
 }
+
+// CUJ-J3: complete work, continue its topic, then deliberately finish silently.
+// Both supported backends pass through exactly the same capability boundary.
+func TestCUJ_J3_UnreadCompletionAcrossAgentBackends(t *testing.T) {
+	for _, backend := range []string{"codex", "claudecode"} {
+		t.Run(backend, func(t *testing.T) {
+			p := newUnreadReminderPlatform()
+			a := &unreadReminderNamedAgent{cujAgent: &cujAgent{}, label: backend}
+			e := NewEngine("reminder-project", a, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
+			t.Cleanup(func() { _ = e.Stop() })
+			env := &cujEnv{t: t, engine: e, plat: p.stubPlatformEngine, agent: a.cujAgent}
+			send := func(id, content string) {
+				e.ReceiveMessage(p, &Message{Platform: "test", SessionKey: "test:topic", UserID: "owner", UserName: "owner", MessageID: id, Content: content, ReplyCtx: "topic-context"})
+			}
+			send("request-1", "finish the first task")
+			env.waitFor("first answer and fresh completion", 2*time.Second, func() bool { return len(p.getSent()) >= 2 })
+			notices, observed := p.snapshot()
+			if len(notices) != 1 || len(observed) != 1 || p.getSent()[1] != notices[0].Text {
+				t.Fatalf("first task completion not visible: notices=%v observed=%v sent=%v", notices, observed, p.getSent())
+			}
+			a.mu.Lock()
+			agentSession := a.sessions[0]
+			a.mu.Unlock()
+			agentSession.mu.Lock()
+			agentSession.reply = "the continuation is finished"
+			agentSession.mu.Unlock()
+			send("request-2", "continue the same task")
+			env.waitFor("continued answer and fresh completion", 2*time.Second, func() bool { return len(p.getSent()) >= 4 })
+			notices, observed = p.snapshot()
+			if len(observed) != 2 || observed[1].MessageID != "request-2" || observed[1].SessionKey != "test:topic" {
+				t.Fatalf("continuation did not reach unread cancellation boundary: %v", observed)
+			}
+			if len(notices) != 2 || notices[1].TriggerMessageID != "request-2" || notices[1].UserID != "owner" {
+				t.Fatalf("continuation notification lost current trigger or recipient: %v", notices)
+			}
+			sent := p.getSent()
+			if !strings.Contains(sent[2], "the continuation is finished") || sent[3] != notices[1].Text {
+				t.Fatalf("completion notice appeared before continued answer: %v", sent)
+			}
+			agentSession.mu.Lock()
+			agentSession.reply = "NO_REPLY"
+			agentSession.mu.Unlock()
+			send("request-3", "save this without replying")
+			env.waitFor("silent turn committed", 2*time.Second, func() bool {
+				history := e.sessions.GetOrCreateActive("test:topic").GetHistory(0)
+				return len(history) >= 6 && history[len(history)-1].Content == "NO_REPLY"
+			})
+			notices, observed = p.snapshot()
+			if len(p.getSent()) != 4 || len(notices) != 2 || len(observed) != 3 {
+				t.Fatalf("silent action unexpectedly notified: sent=%v notices=%v observations=%d", p.getSent(), notices, len(observed))
+			}
+		})
+	}
+}
