@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>安装与接入 — CC Connect Next</title>
+<meta name="description" content="安装 CC Connect Next，连接飞书，检查环境，安全评估迁移。">
+<meta property="og:title" content="安装与接入 — CC Connect Next">
+<meta property="og:description" content="安装 CC Connect Next，连接飞书，检查环境，安全评估迁移。">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" href="/icons/terminal-2.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/app.js">
+</script>
+<link rel="canonical" href="https://cc-connect-next.timmyagentic.com/docs">
+<meta property="og:url" content="https://cc-connect-next.timmyagentic.com/docs">
+</head>
+<body data-page="Docs">
+<header class="site-header">
+<div class="container header-inner">
+<a class="brand" href="/">
+<img class="icon" src="/icons/terminal-2.svg" width="24" height="24" alt="" aria-hidden="true">
+<span>cc connect <strong>next</strong>
+</span>
+</a>
+<nav id="navigation" aria-label="Navigation">
+<a data-i18n="navHow" href="/#how">如何使用</a>
+<a data-i18n="navDocs" href="/docs">使用指南</a>
+<a href="https://github.com/timmyagentic/cc-connect-next">GitHub</a>
+</nav>
+<div class="languages" role="group" aria-label="Language">
+<button data-language="zh-CN" aria-pressed="true" aria-label="简体中文">中</button>
+<button data-language="en" aria-pressed="false" aria-label="English">EN</button>
+</div>
+<button class="menu-toggle" aria-label="Navigation" aria-expanded="false" aria-controls="navigation">
+<img class="icon" src="/icons/menu-2.svg" width="24" height="24" alt="" aria-hidden="true">
+</button>
+</div>
+</header>
+<main class="container docs" id="main">
+<p data-i18n="docsEyebrow" class="eyebrow">使用指南</p>
+<h1 data-i18n="docsTitle">把你的 Agent 连起来。</h1>
+<p data-i18n="docsIntro" class="lede">准备好已安装并登录的编程 Agent，再选择一条适合你的路径。以下命令在你的终端执行。</p>
+<section id="install">
+<span class="step-number">01</span>
+<h2 data-i18n="docsHeadinginstall">全新安装</h2>
+<p data-i18n="docsBodyinstall">先安装，再创建配置并替换 REPLACE 占位值。doctor 检查配置与依赖，不建立平台连接。</p>
+<div class="code-block">
+<pre id="code-install">
+<code>npm install -g cc-connect-next
+cc-connect-next
+cc-connect-next doctor</code>
+</pre>
+<button data-copy="code-install" aria-label="Copy commands">
+<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
+<span data-copy-label>
+<span data-i18n="docsCopyinstall">复制命令</span>
+</span>
+</button>
+</div>
+<a data-i18n="docsReadinstall" class="text-link" href="https://github.com/timmyagentic/cc-connect-next/blob/main/INSTALL.md">阅读完整指南</a>
+</section>
+<section id="feishu">
+<span class="step-number">02</span>
+<h2 data-i18n="docsHeadingfeishu">接入飞书</h2>
+<p data-i18n="docsBodyfeishu">交互式配置飞书机器人与工作区，可选择绑定官方 lark-cli。配置完成后运行 doctor，再启动服务。</p>
+<div class="code-block">
+<pre id="code-feishu">
+<code>cc-connect-next feishu setup
+cc-connect-next doctor
+cc-connect-next</code>
+</pre>
+<button data-copy="code-feishu" aria-label="Copy commands">
+<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
+<span data-copy-label>
+<span data-i18n="docsCopyfeishu">复制命令</span>
+</span>
+</button>
+</div>
+<a data-i18n="docsReadfeishu" class="text-link" href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/feishu.md">阅读完整指南</a>
+</section>
+<section id="migration">
+<span class="step-number">03</span>
+<h2 data-i18n="docsHeadingmigration">先评估迁移，再切换服务</h2>
+<p data-i18n="docsBodymigration">dry-run 只报告计划。实际 migrate --switch 会切换服务运行与自启动状态；先阅读安装文档中的备份、兼容性和回滚说明。</p>
+<div class="code-block">
+<pre id="code-migration">
+<code>cc-connect-next migrate --dry-run</code>
+</pre>
+<button data-copy="code-migration" aria-label="Copy commands">
+<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
+<span data-copy-label>
+<span data-i18n="docsCopymigration">复制命令</span>
+</span>
+</button>
+</div>
+<a data-i18n="docsReadmigration" class="text-link" href="https://github.com/timmyagentic/cc-connect-next/blob/main/INSTALL.md#3-create-or-migrate-configuration">阅读完整指南</a>
+</section>
+<section>
+<h2 data-i18n="nextTitle">接着了解</h2>
+<div class="docs-links">
+<a href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/usage.zh-CN.md">
+<span data-i18n="usage">聊天命令与日常使用</span>
+</a>
+<a href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/configuration.zh-CN.md">
+<span data-i18n="config">完整配置参考</span>
+</a>
+<a href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/agent-capability-manifest.zh-CN.md">
+<span data-i18n="manifest">Agent 能力与权限</span>
+</a>
+<a href="https://github.com/timmyagentic/cc-connect-next/issues">
+<span data-i18n="issues">问题反馈</span>
+</a>
+</div>
+</section>
+</main>
+<footer class="site-footer">
+<div class="container footer-inner">
+<div>
+<a class="brand" href="/">cc connect <strong>next</strong>
+</a>
+<p data-i18n="footerTag">本地执行，随处连接。</p>
+</div>
+<nav aria-label="Footer">
+<a data-i18n="docsLink" href="/docs">文档</a>
+<a data-i18n="releases" href="https://github.com/timmyagentic/cc-connect-next/releases">更新日志</a>
+<a href="https://github.com/timmyagentic/cc-connect-next">GitHub</a>
+</nav>
+</div>
+<div class="container credit">
+<span data-i18n="credit">源自 CC Connect，保留上游历史与 MIT 许可。</span> <a href="https://github.com/timmyagentic/cc-connect-next/blob/main/NOTICE">NOTICE</a>
+</div>
+</footer>
+<p id="copy-status" class="sr-only" role="status">
+</p>
+</body>
+</html>

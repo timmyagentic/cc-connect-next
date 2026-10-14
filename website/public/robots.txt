@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://cc-connect-next.timmyagentic.com/sitemap.xml
