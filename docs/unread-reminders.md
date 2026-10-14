@@ -7,7 +7,7 @@
 ### 行为
 
 1. 用户回合成功，且最终答复已成功送达后，在原会话/话题额外发送一条短完成通知。即使此前看过流式过程卡片，这条新通知仍有独立的已读状态。
-2. 从新通知成功发送时计时，一小时后查询该用户是否已读。后台每分钟检查一次，因此正常情况下在一小时至一小时一分钟之间处理到期记录；断网、积压或机器休眠会延后。
+2. 从新通知成功发送时计时，等待 `unread_reminder_delay_mins` 分钟后查询该用户是否已读，默认 60 分钟。后台每分钟检查一次，实际提醒可能比配置时长稍晚；断网、积压或机器休眠会进一步延后。这是一次性提醒前的等待时长，不是重复提醒频率。
 3. 未读时由**同一个机器人**向回合发起人的私聊发送一次提醒，带摘要和原会话入口。同一检查批次最多聚合 20 条，避免每条单独发送。
 4. 已读、在原话题继续发消息、或原触发消息/完成通知被撤回时，取消待提醒。其他人或其他话题的回复不会取消。继续回复的判断限于机器人实际收到的消息事件。
 
@@ -21,17 +21,23 @@
 # Codex 项目的飞书机器人
 unread_reminder = true
 unread_reminder_users = ["ou_your_id_in_codex_bot_app"]
+unread_reminder_delay_mins = 60 # 可省略；例如改为 30 表示等待半小时
 ```
 
 ```toml
 # Claude Code 项目的飞书机器人
 unread_reminder = true
 unread_reminder_users = ["ou_your_id_in_claude_bot_app"]
+unread_reminder_delay_mins = 60
 ```
 
 这两个片段分别属于两个项目的已有选项表，不要粘贴到同一张表。修改后重启 daemon。`open_id` 属于应用范围：即使是同一个人，在两个机器人应用里的 ID 也可能不同。使用各应用已有的正确 ID，不要互相复制，不支持 `*`。
 
+等待时长接受 1–10079 的整数分钟值，必须短于七天的记录保留与已读查询窗口；字符串、非整数、零、负数和超范围值会被拒绝。重启后，新完成通知使用新时长，已经持久化的待提醒记录保留原到期时间。
+
 机器人依赖已有的消息已读查询、消息读取和私聊发送权限；不新增用户 OAuth 流程或事件订阅。权限/API 错误不代表未读：检查失败会有限退避重试，最终停止该条提醒并记录日志。
+
+每批最多用 30 秒检查到期记录，随后为已确认未读的条目单独保留最多 15 秒发送时间。后续慢查询不会耗尽前面条目的发送时间；因前面查询占用时间而未查完的后续记录留待下一轮，不消耗 API 错误重试次数；首条查询独占完整时限后仍超时，则按查询故障退避，避免一直阻塞后续记录。停止或取消仍会阻止后续发送。
 
 ### 持久化与限制
 
@@ -47,7 +53,11 @@ unread_reminder_users = ["ou_your_id_in_claude_bot_app"]
 
 This opt-in feature uses the shared Engine completion path, including Codex and Claude Code. Add `unread_reminder = true` and an explicit `unread_reminder_users = ["ou_user_in_this_app"]` list to **each existing** `[projects.platforms.options]` table and restart the daemon. User open IDs are app-scoped; configure each bot separately. The omitted default is disabled.
 
-After a successful, visible final answer, the same bot posts a short, fresh completion notice in the original conversation/topic. This avoids treating a previously read streaming progress card as proof that the final answer was seen. After one hour, a minute-based worker checks the recipient's read status and sends at most one private reminder with a summary and conversation link. Due items for the same recipient are grouped in batches of up to 20. Network outages, backlog, or sleep may delay delivery.
+After a successful, visible final answer, the same bot posts a short, fresh completion notice in the original conversation/topic. This avoids treating a previously read streaming progress card as proof that the final answer was seen. After `unread_reminder_delay_mins` minutes (default `60`), a minute-based worker checks the recipient's read status and sends at most one private reminder with a summary and conversation link. This configures the initial waiting period, not a recurring reminder interval. Due items for the same recipient are grouped in batches of up to 20. Network outages, backlog, or sleep may delay delivery.
+
+Set `unread_reminder_delay_mins = 30` for a half-hour wait, or omit it for one hour. Accepted values are integer minutes from 1 to 10079, shorter than the seven-day retention/read-query window. Invalid types, fractions, zero, negative and out-of-range values are rejected. Restart to apply a new value to future completion notices; already-persisted pending deadlines do not move.
+
+Each batch allows up to 30 seconds for queries and then a separate 15 seconds to send validated unread candidates. A slow later query cannot consume their send budget. Later queries interrupted after earlier queries consumed part of their budget remain pending without spending an API-failure retry. A first query that exhausts the entire budget uses normal failure backoff so later records can progress. Parent cancellation and platform shutdown still prevent sends.
 
 Only explicitly configured turn initiators are eligible, still subject to existing sender/chat restrictions. Reading the notice, continuing in the original topic (when the bot receives that event), or recalling the trigger/notice cancels the pending reminder. Other users/topics cannot cancel it. Silent, failed, canceled, unsuccessfully delivered, and nonterminal turns do not schedule reminders. Reminders do not recursively schedule more reminders or invoke the agent.
 

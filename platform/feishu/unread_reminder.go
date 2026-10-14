@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,8 +22,12 @@ import (
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
-const reminderDelay = time.Hour
 const reminderRetention = 7 * 24 * time.Hour
+const defaultUnreadReminderDelayMins = 60
+const minUnreadReminderDelayMins = 1
+const maxUnreadReminderDelayMins = int(reminderRetention/time.Minute) - 1
+const reminderQueryTimeout = 30 * time.Second
+const reminderSendTimeout = 15 * time.Second
 const maxReminderRecords = 1000
 const maxReminderBatch = 20
 
@@ -53,6 +58,7 @@ type reminderQueue struct {
 	records map[string]unreadReminder
 	path    string
 	users   map[string]struct{}
+	delay   time.Duration
 	now     func() time.Time
 	save    func(string, []byte) error
 	cancel  context.CancelFunc
@@ -105,8 +111,32 @@ func reminderID(parts ...string) string {
 	return hex.EncodeToString(sum[:16])
 }
 
+func parseUnreadReminderDelay(opts map[string]any) (time.Duration, error) {
+	minutes := float64(defaultUnreadReminderDelayMins)
+	if raw, exists := opts["unread_reminder_delay_mins"]; exists {
+		switch value := raw.(type) {
+		case int:
+			minutes = float64(value)
+		case int64:
+			minutes = float64(value)
+		case float64:
+			minutes = value // JSON-originated integral config values
+		default:
+			return 0, fmt.Errorf("unread_reminder_delay_mins must be an integer")
+		}
+	}
+	if math.IsNaN(minutes) || math.IsInf(minutes, 0) || minutes != math.Trunc(minutes) || minutes < minUnreadReminderDelayMins || minutes > float64(maxUnreadReminderDelayMins) {
+		return 0, fmt.Errorf("unread_reminder_delay_mins must be an integer between %d and %d", minUnreadReminderDelayMins, maxUnreadReminderDelayMins)
+	}
+	return time.Duration(minutes) * time.Minute, nil
+}
+
 func (p *Platform) configureUnreadReminders(opts map[string]any) error {
 	enabled, users, err := parseUnreadReminderOptions(opts)
+	if err != nil {
+		return err
+	}
+	delay, err := parseUnreadReminderDelay(opts)
 	if err != nil {
 		return err
 	}
@@ -118,7 +148,7 @@ func (p *Platform) configureUnreadReminders(opts map[string]any) error {
 	if dir == "" || project == "" {
 		return fmt.Errorf("unread_reminder requires injected cc_data_dir and cc_project")
 	}
-	p.reminders = &reminderQueue{records: map[string]unreadReminder{}, users: users, now: time.Now, save: saveReminderFile,
+	p.reminders = &reminderQueue{records: map[string]unreadReminder{}, users: users, delay: delay, now: time.Now, save: saveReminderFile,
 		path: filepath.Join(dir, "feishu-unread-reminders", reminderID(project, p.platformName, p.appID, p.domain)+".json")}
 	return nil
 }
@@ -132,7 +162,7 @@ func saveReminderFile(path string, data []byte) error {
 		return err
 	}
 	name := f.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	if err = f.Chmod(0600); err == nil {
 		_, err = f.Write(data)
 	}
@@ -153,7 +183,7 @@ func saveReminderFile(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer d.Close()
+	defer func() { _ = d.Close() }()
 	return d.Sync()
 }
 
@@ -192,7 +222,7 @@ func (p *Platform) startUnreadReminders() error {
 		for id, r := range q.records {
 			if id != r.ID || id != reminderID(r.UserID, r.SessionKey, r.TriggerID) || r.ChatID == "" || r.Created.IsZero() ||
 				(r.State != "creating" && r.State != "pending" && r.State != "done") ||
-				(r.State == "pending" && (r.MessageID == "" || r.Due.Before(r.Created.Add(reminderDelay)))) {
+				(r.State == "pending" && (r.MessageID == "" || r.Due.Before(r.Created.Add(minUnreadReminderDelayMins*time.Minute)))) {
 				return fmt.Errorf("feishu: invalid reminder record")
 			}
 		}
@@ -305,7 +335,7 @@ func (p *Platform) NotifyTurnCompleted(ctx context.Context, replyCtx any, notice
 		return nil
 	} // continuation/recall won the race
 	r.MessageID = messageID
-	r.Due = q.now().Add(reminderDelay)
+	r.Due = q.now().Add(q.delay)
 	r.Next = r.Due
 	r.State = "pending"
 	q.records[id] = r
@@ -367,8 +397,10 @@ func (p *Platform) processUnreadReminders(parent context.Context) {
 	}
 	q.runMu.Lock()
 	defer q.runMu.Unlock()
-	ctx, cancel := context.WithTimeout(parent, 45*time.Second)
-	defer cancel()
+	// Reserve a separate send budget so a slow later query cannot strand the
+	// unread candidates already checked. Both phases still obey shutdown.
+	queryCtx, cancelQuery := context.WithTimeout(parent, reminderQueryTimeout)
+	defer cancelQuery()
 	q.mu.Lock()
 	if q.fault != nil || q.stopped {
 		q.mu.Unlock()
@@ -402,11 +434,21 @@ func (p *Platform) processUnreadReminders(parent context.Context) {
 		due = due[:maxReminderBatch]
 	}
 	batches := map[string][]unreadReminder{}
-	for _, r := range due {
-		if ctx.Err() != nil {
+	for index, r := range due {
+		if queryCtx.Err() != nil {
 			break
 		}
-		read, err := p.reminderResolved(ctx, &r)
+		read, err := p.reminderResolved(queryCtx, &r)
+		if parent.Err() != nil || (queryCtx.Err() != nil && index > 0) {
+			// A later record did not receive a complete query budget. Leave
+			// it pending without spending an API-failure retry. The first
+			// record has the full budget, so its own timeout uses backoff
+			// below instead of indefinitely blocking every later record.
+			break
+		}
+		if queryCtx.Err() != nil {
+			err = queryCtx.Err()
+		}
 		q.mu.Lock()
 		current, exists := q.records[r.ID]
 		if !exists || current.State != "pending" || q.fault != nil || q.stopped {
@@ -434,8 +476,11 @@ func (p *Platform) processUnreadReminders(parent context.Context) {
 		}
 		q.mu.Unlock()
 	}
+	cancelQuery()
+	sendCtx, cancelSend := context.WithTimeout(parent, reminderSendTimeout)
+	defer cancelSend()
 	for user, records := range batches {
-		p.sendReminderBatch(ctx, user, records)
+		p.sendReminderBatch(sendCtx, user, records)
 	}
 }
 
