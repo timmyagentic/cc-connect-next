@@ -370,6 +370,7 @@ func TestWriteConfigCapabilities_CommonNaturalLanguageIntentsReachExactOptions(t
 		{query: "飞书只允许我使用", path: "projects.platforms.options.allow_from"},
 		{query: "一小时未读提醒", path: "projects.platforms.options.unread_reminder"},
 		{query: "unread reminder users", path: "projects.platforms.options.unread_reminder_users"},
+		{query: "未读提醒等待时长", path: "projects.platforms.options.unread_reminder_delay_mins"},
 		{query: "企业微信 websocket 模式需要什么凭证", path: "projects.platforms.options.bot_id"},
 		{query: "钉钉工作通知 Agent ID", path: "projects.platforms.options.agent_id"},
 		{query: "多工作区和 work_dir 冲突", path: "projects.base_dir"},

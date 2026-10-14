@@ -451,8 +451,8 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		}
 	}
 	reminder := feature("unread_completion_reminder",
-		"Send a fresh completion notice after a successful answer, persist a one-hour timer, query the recipient's read status, and send at most one private reminder. Continuation in the original topic cancels it. Works independently of the agent backend.",
-		"成功回答后发送新的完成通知，持久保存一小时计时，查询接收人的已读状态，最多私聊提醒一次；在原话题继续回复会取消提醒，与 Agent 后端无关。",
+		"Send a fresh completion notice after a successful answer, persist a configurable waiting period (default one hour), query the recipient's read status, and send at most one private reminder. Continuation in the original topic cancels it. Works independently of the agent backend.",
+		"成功回答后发送新的完成通知，持久保存可配置的等待时长（默认一小时），查询接收人的已读状态，最多私聊提醒一次；在原话题继续回复会取消提醒，与 Agent 后端无关。",
 		reminderAvailability, CapabilityFallback{Mode: "skip", Description: "Keep the delivered answer; failed read queries never count as unread, and uncertain reminder sends are not resent.", DescriptionZH: "保留已投递回答；已读查询失败不视为未读，发送结果不确定的提醒不重发。"})
 	readOnly := false
 	reminder.Permission = CapabilityPermissionConditional

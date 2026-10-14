@@ -19,7 +19,7 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 		"group_context", "group_context_max_messages", "group_context_window_minutes", "group_context_max_chars",
 		"image_batch_window_ms", "mention_map", "peer_bots", "port", "progress_style", "reaction_emoji",
 		"reply_to_trigger", "require_mention", "resolve_mentions", "respond_to_at_everyone_and_here",
-		"share_session_in_channel", "thread_isolation", "unread_reminder", "unread_reminder_users",
+		"share_session_in_channel", "thread_isolation", "unread_reminder", "unread_reminder_users", "unread_reminder_delay_mins",
 	})
 	for i := range options {
 		option := &options[i]
@@ -28,10 +28,20 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 			option.Type = "boolean"
 			option.Default = "false"
 			option.Requires = []string{"non-empty unread_reminder_users"}
-			option.Description = "Send a fresh completion notice after successful answers; privately remind configured recipients once if unread after one hour. State persists per project and bot; failed read queries never count as unread."
-			option.DescriptionZH = "成功回复后发送独立完成通知；指定用户一小时未读时私聊提醒一次。按项目和机器人持久化，已读查询失败不视为未读。"
+			option.Description = "Send a fresh completion notice after successful answers; privately remind configured recipients once if unread after unread_reminder_delay_mins (default one hour). State persists per project and bot; failed read queries never count as unread."
+			option.DescriptionZH = "成功回复后发送独立完成通知；指定用户超过 unread_reminder_delay_mins（默认一小时）仍未读时私聊提醒一次。按项目和机器人持久化，已读查询失败不视为未读。"
 			option.Keywords = []string{"unread reminder", "completion reminder", "未读提醒", "一小时", "完成通知"}
 			option.Example = "unread_reminder = true"
+		case "unread_reminder_delay_mins":
+			option.Type = "integer"
+			option.Default = strconv.Itoa(defaultUnreadReminderDelayMins)
+			option.Unit = "minutes"
+			minimum, maximum := float64(minUnreadReminderDelayMins), float64(maxUnreadReminderDelayMins)
+			option.Minimum, option.Maximum = &minimum, &maximum
+			option.Requires = []string{"unread_reminder = true"}
+			option.Description = "Wait this many minutes after a fresh completion notice before checking for a private unread reminder. Defaults to 60; the worker checks once per minute. Restart to apply to new notices; existing pending deadlines stay unchanged. Must be shorter than the seven-day retention window."
+			option.DescriptionZH = "新完成通知发送成功后，等待这些分钟再检查是否需要私聊未读提醒。默认60分钟，后台每分钟检查。重启后对新通知生效，已有待提醒记录保留原到期时间；必须短于七天保留期。"
+			option.Keywords = []string{"unread reminder delay", "reminder interval", "未读提醒间隔", "未读提醒等待时长", "提醒分钟"}
 		case "unread_reminder_users":
 			option.Type = "string[]"
 			option.Default = "empty"
@@ -186,6 +196,7 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 		}
 	}
 	options = core.ConfigureOptionExample(options, "group_reply_all_chats", `group_reply_all_chats = "oc_chat_a,oc_chat_b"`)
+	options = core.ConfigureOptionExample(options, "unread_reminder_delay_mins", "unread_reminder_delay_mins = 60")
 	options = core.ConfigureOptionExample(options, "mention_map", `mention_map = { Reviewer-Bot = "ou_bot_open_id" }`)
 	options = core.ConfigureOptionExample(options, "peer_bots", `peer_bots = { cli_peer_app_id = "Reviewer-Bot" }`)
 	options = core.ConfigureOptionExample(options, "group_context", "group_context = true")

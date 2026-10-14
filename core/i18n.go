@@ -3920,11 +3920,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "✅ Completado: %s",
 	},
 	MsgUnreadReminder: {
-		LangEnglish:            "You have completed replies whose completion notices remain unread after an hour. Open the original conversation to continue:",
-		LangChinese:            "有已完成的回复，其完成通知超过一小时仍未读。点击回到原会话查看并继续推进：",
-		LangTraditionalChinese: "有已完成的回覆，其完成通知超過一小時仍未讀。點擊回到原對話查看並繼續推進：",
-		LangJapanese:           "完了通知が1時間以上未読の返信があります。元の会話を開いて確認し、続きを進めてください：",
-		LangSpanish:            "Hay respuestas completadas cuyos avisos siguen sin leerse después de una hora. Abre la conversación original para continuar:",
+		LangEnglish:            "You have completed replies whose completion notices remain unread. Open the original conversation to continue:",
+		LangChinese:            "有已完成的回复，其完成通知仍未读。点击回到原会话查看并继续推进：",
+		LangTraditionalChinese: "有已完成的回覆，其完成通知仍未讀。點擊回到原對話查看並繼續推進：",
+		LangJapanese:           "完了通知が未読の返信があります。元の会話を開いて確認し、続きを進めてください：",
+		LangSpanish:            "Hay respuestas completadas cuyos avisos siguen sin leerse. Abre la conversación original para continuar:",
 	},
 	MsgUpdateNoticeAvailable: {
 		LangEnglish:            "📦 cc-connect-next %s is available on the %s channel (you are on %s). Reply “update” to review the exact release plan before installing.",

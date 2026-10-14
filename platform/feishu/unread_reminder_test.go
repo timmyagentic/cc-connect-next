@@ -33,12 +33,18 @@ type reminderFixture struct {
 	replyBodies, privateBodies                        []map[string]any
 }
 
-func newReminderFixture(t *testing.T) *reminderFixture {
+func newReminderFixture(t *testing.T, overrides ...map[string]any) *reminderFixture {
 	t.Helper()
 	f := &reminderFixture{t: t, now: time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC)}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
-	raw, err := New(map[string]any{"app_id": "cli_" + t.Name(), "app_secret": "test", "domain": srv.URL, "enable_feishu_card": false, "unread_reminder": true, "unread_reminder_users": []string{"ou_owner"}, "cc_data_dir": t.TempDir(), "cc_project": "project"})
+	opts := map[string]any{"app_id": "cli_" + t.Name(), "app_secret": "test", "domain": srv.URL, "enable_feishu_card": false, "unread_reminder": true, "unread_reminder_users": []string{"ou_owner"}, "cc_data_dir": t.TempDir(), "cc_project": "project"}
+	for _, override := range overrides {
+		for key, value := range override {
+			opts[key] = value
+		}
+	}
+	raw, err := New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}

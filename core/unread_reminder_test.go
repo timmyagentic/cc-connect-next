@@ -143,7 +143,7 @@ func TestUnreadReminder_OnlySuccessfulVisibleTerminalAnswers(t *testing.T) {
 func TestUnreadReminder_NonTerminalResultDoesNotCreateNotice(t *testing.T) {
 	p := newUnreadReminderPlatform()
 	e := NewEngine("project", &stubAgent{}, []Platform{p}, "", LangEnglish)
-	defer e.Stop()
+	defer func() { _ = e.Stop() }()
 	key := "test:recipient"
 	session := e.sessions.GetOrCreateActive(key)
 	agentSession := newControllableSession("compacting")
@@ -173,7 +173,7 @@ func TestUnreadReminder_RichCardCompletionGetsFreshNotification(t *testing.T) {
 	r := &unreadReminderRecorder{enabled: true, base: &rich.stubPlatformEngine}
 	p := &unreadReminderRichPlatform{stubRichCardSilentPlatform: rich, unreadReminderRecorder: r}
 	e := NewEngine("project", &stubAgent{}, []Platform{p}, "", LangEnglish)
-	defer e.Stop()
+	defer func() { _ = e.Stop() }()
 	e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: "rich"})
 	e.SetStreamPreviewCfg(StreamPreviewCfg{Enabled: true, IntervalMs: 0, MinDeltaChars: 1})
 	key := "test:recipient"
@@ -208,7 +208,7 @@ func TestUnreadReminder_QueuedTurnTargetsItsOwnUserAndTrigger(t *testing.T) {
 	p := newUnreadReminderPlatform()
 	agentSession := newQueuingSession("queued-reminders")
 	e := NewEngine("project", &controllableAgent{nextSession: agentSession}, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
-	defer e.Stop()
+	defer func() { _ = e.Stop() }()
 	env := &cujEnv{t: t, engine: e, plat: p.stubPlatformEngine}
 	send := func(user, id string) {
 		e.ReceiveMessage(p, &Message{Platform: "test", SessionKey: "test:shared-topic", UserID: user, UserName: user, MessageID: id, Content: "do work " + id, ReplyCtx: "reply-" + id})
@@ -280,7 +280,7 @@ func TestUnreadReminder_SupplementRecipientFollowsAnswerPresentation(t *testing.
 				agentSession = steered
 			}
 			e := NewEngine("project", &controllableAgent{nextSession: agentSession}, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
-			defer e.Stop()
+			defer func() { _ = e.Stop() }()
 			env := &cujEnv{t: t, engine: e, plat: p.stubPlatformEngine}
 			const key = "test:shared-topic"
 			send := func(user, id, content string) {

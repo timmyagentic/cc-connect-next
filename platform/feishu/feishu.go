@@ -144,6 +144,9 @@ func validatePlatformOptions(name string) core.OptionsValidator {
 		if _, _, err := parseUnreadReminderOptions(opts); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
+		if _, err := parseUnreadReminderDelay(opts); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
 		if _, err := parseGroupContextConfig(opts); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
 		}
