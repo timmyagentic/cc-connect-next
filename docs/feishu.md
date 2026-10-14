@@ -2,6 +2,8 @@
 
 本文档介绍如何将 **cc-connect-next** 接入飞书，让你可以通过飞书机器人远程调用 Claude Code。
 
+完成通知与一小时未读私聊提醒（Codex / Claude 通用）：见[未读提醒配置](unread-reminders.md)。
+
 ## 前置要求
 
 - 飞书账号（个人或企业均可）

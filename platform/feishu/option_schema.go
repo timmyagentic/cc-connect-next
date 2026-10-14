@@ -14,16 +14,31 @@ func init() {
 
 func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 	options := core.DescribePlatformOptions([]string{
-		"allow_chat", "allow_from", "app_id", "app_secret", "callback_path", "domain", "done_emoji",
+		"allow_chat", "allow_from", "app_id", "app_secret", "callback_path", "cc_data_dir", "cc_project", "domain", "done_emoji",
 		"enable_feishu_card", "encrypt_key", "group_only", "group_reply_all", "group_reply_all_chats",
 		"group_context", "group_context_max_messages", "group_context_window_minutes", "group_context_max_chars",
 		"image_batch_window_ms", "mention_map", "peer_bots", "port", "progress_style", "reaction_emoji",
 		"reply_to_trigger", "require_mention", "resolve_mentions", "respond_to_at_everyone_and_here",
-		"share_session_in_channel", "thread_isolation",
+		"share_session_in_channel", "thread_isolation", "unread_reminder", "unread_reminder_users",
 	})
 	for i := range options {
 		option := &options[i]
 		switch option.Key {
+		case "unread_reminder":
+			option.Type = "boolean"
+			option.Default = "false"
+			option.Requires = []string{"non-empty unread_reminder_users"}
+			option.Description = "Send a fresh completion notice after successful answers; privately remind configured recipients once if unread after one hour. State persists per project and bot; failed read queries never count as unread."
+			option.DescriptionZH = "成功回复后发送独立完成通知；指定用户一小时未读时私聊提醒一次。按项目和机器人持久化，已读查询失败不视为未读。"
+			option.Keywords = []string{"unread reminder", "completion reminder", "未读提醒", "一小时", "完成通知"}
+			option.Example = "unread_reminder = true"
+		case "unread_reminder_users":
+			option.Type = "string[]"
+			option.Default = "empty"
+			option.Requires = []string{"unread_reminder = true"}
+			option.Description = "Explicit app-scoped user open_ids eligible for private unread reminders. Only the user who triggered the completed turn is notified. No wildcard or implicit recipients."
+			option.DescriptionZH = "允许接收未读私聊提醒的应用范围用户 open_id；只提醒完成回合的发起人。不支持通配符或隐式收件人。"
+			option.Example = `unread_reminder_users = ["ou_your_open_id"]`
 		case "allow_chat":
 			option.Default = "empty"
 			option.Description = "Restrict access to a comma-separated list of Feishu/Lark chat IDs; empty or '*' allows every chat."

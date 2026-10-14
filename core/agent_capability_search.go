@@ -286,6 +286,9 @@ func renderRuntimeCapabilities(b *strings.Builder, adapters []RuntimeAdapterCapa
 				localized(zh, capability.Description, capability.DescriptionZH),
 				map[bool]string{true: "退化", false: "fallback"}[zh], capability.Fallback.Mode,
 				localized(zh, capability.Fallback.Description, capability.Fallback.DescriptionZH))
+			if capability.ReadOnly != nil {
+				renderActionContract(b, capability.Permission, *capability.ReadOnly, capability.SideEffects, capability.Fallback, capability.Availability, nil, zh)
+			}
 		}
 	}
 }

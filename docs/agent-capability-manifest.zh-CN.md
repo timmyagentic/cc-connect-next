@@ -122,3 +122,5 @@ Manifest 只返回能力元数据，明确不返回：
 - Bridge `capabilities_snapshot_v1`：旧命令投影由 Manifest 命令契约生成；协议 v1 尚未直接内嵌完整 Skills/配置对象
 
 配置项的完整逐项参考仍由同一个配置契约生成，见[配置能力参考](configuration.zh-CN.md)。
+
+平台自动动作也可带有 `permission`、`read_only` 和 `side_effects`。例如 `unread_completion_reminder` 会明确报告未启用或条件可用，不暴露配置中的收件人 ID；其[配置与投递契约](unread-reminders.md)包含持久状态、已读查询和私聊消息副作用。

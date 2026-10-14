@@ -4235,6 +4235,36 @@ Override the endpoint used to obtain Weibo access tokens.
 - Takes effect: `restart`
 - Example: `token_endpoint = "https://open-im.api.weibo.com/open/auth/ws_token"`
 
+### `projects.platforms.options.unread_reminder` — `feishu, lark`
+
+Send a fresh completion notice after successful answers; privately remind configured recipients once if unread after one hour. State persists per project and bot; failed read queries never count as unread.
+
+- Source: `toml`
+- Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
+- Scope: `platform` (`feishu, lark`)
+- Type: `boolean`
+- Requirement: `optional`
+- Default: `false`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Requires: `non-empty unread_reminder_users`
+- Example: `unread_reminder = false`
+
+### `projects.platforms.options.unread_reminder_users` — `feishu, lark`
+
+Explicit app-scoped user open_ids eligible for private unread reminders. Only the user who triggered the completed turn is notified. No wildcard or implicit recipients.
+
+- Source: `toml`
+- Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
+- Scope: `platform` (`feishu, lark`)
+- Type: `string[]`
+- Requirement: `optional`
+- Default: `empty`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Requires: `unread_reminder = true`
+- Example: `unread_reminder_users = ["value"]`
+
 ### `projects.platforms.options.user_id` — `matrix`
 
 Set or override the Matrix bot user ID.

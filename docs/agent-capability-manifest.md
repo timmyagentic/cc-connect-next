@@ -143,3 +143,5 @@ Dynamic descriptions and runtime errors receive aggressive credential, long-blob
 - Bridge `capabilities_snapshot_v1`: its legacy command projection is derived from Manifest command contracts; protocol v1 does not embed the full Skill/configuration object
 
 The exhaustive generated configuration reference remains available at [configuration.md](configuration.md).
+
+Automatic platform actions can also carry `permission`, `read_only`, and `side_effects`. For example, `unread_completion_reminder` reports disabled or conditional availability without exposing configured recipient IDs; its [configuration and delivery contract](unread-reminders.md) includes durable state, read queries and private message effects.
