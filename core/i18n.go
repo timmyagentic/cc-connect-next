@@ -611,8 +611,8 @@ const (
 	MsgSteerOutcomeUnknown     MsgKey = "steer_outcome_unknown"
 	MsgSteerMergedCompleted    MsgKey = "steer_merged_completed"
 
-	MsgUnreadCompletion MsgKey = "unread_completion"
-	MsgUnreadReminder   MsgKey = "unread_reminder"
+	MsgCompletionNotification     MsgKey = "completion_notification"
+	MsgCompletionOpenConversation MsgKey = "completion_open_conversation"
 
 	// Proactive update notice (daemon-side)
 	MsgUpdateNoticeAvailable MsgKey = "update_notice_available"
@@ -3912,19 +3912,19 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese:           "↪️ 追加内容は受け付けられましたが、タスクがちょうど完了しました。上の回答をご覧ください。",
 		LangSpanish:            "↪️ Tu añadido fue aceptado justo cuando la tarea terminó; consulta la respuesta anterior.",
 	},
-	MsgUnreadCompletion: {
+	MsgCompletionNotification: {
 		LangEnglish:            "✅ Completed: %s",
 		LangChinese:            "✅ 已完成：%s",
 		LangTraditionalChinese: "✅ 已完成：%s",
 		LangJapanese:           "✅ 完了しました：%s",
 		LangSpanish:            "✅ Completado: %s",
 	},
-	MsgUnreadReminder: {
-		LangEnglish:            "You have completed replies whose completion notices remain unread. Open the original conversation to continue:",
-		LangChinese:            "有已完成的回复，其完成通知仍未读。点击回到原会话查看并继续推进：",
-		LangTraditionalChinese: "有已完成的回覆，其完成通知仍未讀。點擊回到原對話查看並繼續推進：",
-		LangJapanese:           "完了通知が未読の返信があります。元の会話を開いて確認し、続きを進めてください：",
-		LangSpanish:            "Hay respuestas completadas cuyos avisos siguen sin leerse. Abre la conversación original para continuar:",
+	MsgCompletionOpenConversation: {
+		LangEnglish:            "Open the original conversation:",
+		LangChinese:            "点击回到原对话：",
+		LangTraditionalChinese: "點擊回到原對話：",
+		LangJapanese:           "元の会話を開く：",
+		LangSpanish:            "Abre la conversación original:",
 	},
 	MsgUpdateNoticeAvailable: {
 		LangEnglish:            "📦 cc-connect-next %s is available on the %s channel (you are on %s). Reply “update” to review the exact release plan before installing.",

@@ -32,24 +32,22 @@ type DirectUserSender interface {
 }
 
 // TurnCompletionNotice is emitted only after a successful, visible final answer.
-// Text and ReminderText are localized by the engine. Platform adapters own the
-// fresh completion message, read receipts, explicit recipients, and durable timer.
+// The adapter privately notifies the explicit turn owner using its bot identity
+// and adds a link to the original conversation without posting there again.
 type TurnCompletionNotice struct {
 	UserID           string
 	SessionKey       string
 	TriggerMessageID string
 	Summary          string
 	Text             string
-	ReminderText     string
+	LinkLabel        string
 }
 
-// TurnCompletionNotifier optionally tracks unread completed answers. An adapter
-// must opt in, restrict recipients, and never infer a private destination from a
-// recent chat. Observations only cancel pending work; they must not send replies.
+// TurnCompletionNotifier is an opt-in immediate private notification capability.
+// Adapters restrict recipients and suppress duplicate/uncertain attempts.
 type TurnCompletionNotifier interface {
 	NotifyTurnCompleted(ctx context.Context, replyCtx any, notice TurnCompletionNotice) error
-	UnreadRemindersEnabled() bool
-	ObserveReminderMessage(ctx context.Context, msg *Message) error
+	CompletionNotificationsEnabled() bool
 }
 
 // DirectUserCardSender optionally preserves interactive-card actions on a
