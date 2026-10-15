@@ -12,26 +12,20 @@ import (
 )
 
 // Only the outbound platform boundary is mocked: its completion method models
-// the extra, fresh message (never an edit of an already-read progress card).
-type unreadReminderRecorder struct {
+// the private notification; original replies and direct messages stay separate.
+type completionNotificationRecorder struct {
 	mu              sync.Mutex
 	enabled         bool
 	err             error
 	notices         []TurnCompletionNotice
-	observed        []Message
+	private         []TurnCompletionNotice
 	repliesAtNotice [][]string
 	replyContexts   []any
 	base            *stubPlatformEngine
 }
 
-func (r *unreadReminderRecorder) UnreadRemindersEnabled() bool { return r.enabled }
-func (r *unreadReminderRecorder) ObserveReminderMessage(_ context.Context, msg *Message) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.observed = append(r.observed, *msg)
-	return nil
-}
-func (r *unreadReminderRecorder) NotifyTurnCompleted(ctx context.Context, replyCtx any, notice TurnCompletionNotice) error {
+func (r *completionNotificationRecorder) CompletionNotificationsEnabled() bool { return r.enabled }
+func (r *completionNotificationRecorder) NotifyTurnCompleted(ctx context.Context, replyCtx any, notice TurnCompletionNotice) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.notices = append(r.notices, notice)
@@ -40,42 +34,43 @@ func (r *unreadReminderRecorder) NotifyTurnCompleted(ctx context.Context, replyC
 	if r.err != nil {
 		return r.err
 	}
-	return r.base.Reply(ctx, replyCtx, notice.Text)
+	r.private = append(r.private, notice)
+	return nil
 }
-func (r *unreadReminderRecorder) snapshot() ([]TurnCompletionNotice, []Message) {
+func (r *completionNotificationRecorder) snapshot() ([]TurnCompletionNotice, []TurnCompletionNotice) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]TurnCompletionNotice(nil), r.notices...), append([]Message(nil), r.observed...)
+	return append([]TurnCompletionNotice(nil), r.notices...), append([]TurnCompletionNotice(nil), r.private...)
 }
 
-type unreadReminderPlatform struct {
+type completionNotificationPlatform struct {
 	*stubPlatformEngine
-	*unreadReminderRecorder
+	*completionNotificationRecorder
 	failDelivery bool
 }
 
-func newUnreadReminderPlatform() *unreadReminderPlatform {
+func newCompletionNotificationPlatform() *completionNotificationPlatform {
 	base := &stubPlatformEngine{n: "test"}
-	return &unreadReminderPlatform{stubPlatformEngine: base, unreadReminderRecorder: &unreadReminderRecorder{enabled: true, base: base}}
+	return &completionNotificationPlatform{stubPlatformEngine: base, completionNotificationRecorder: &completionNotificationRecorder{enabled: true, base: base}}
 }
-func (p *unreadReminderPlatform) Reply(ctx context.Context, replyCtx any, text string) error {
+func (p *completionNotificationPlatform) Reply(ctx context.Context, replyCtx any, text string) error {
 	if p.failDelivery {
 		return errors.New("platform unavailable")
 	}
 	return p.stubPlatformEngine.Reply(ctx, replyCtx, text)
 }
-func (p *unreadReminderPlatform) Send(ctx context.Context, replyCtx any, text string) error {
+func (p *completionNotificationPlatform) Send(ctx context.Context, replyCtx any, text string) error {
 	return p.Reply(ctx, replyCtx, text)
 }
 
-type unreadReminderNamedAgent struct {
+type completionNotificationNamedAgent struct {
 	*cujAgent
 	label string
 }
 
-func (a *unreadReminderNamedAgent) Name() string { return a.label }
+func (a *completionNotificationNamedAgent) Name() string { return a.label }
 
-func TestUnreadReminder_OnlySuccessfulVisibleTerminalAnswers(t *testing.T) {
+func TestCompletionNotification_OnlySuccessfulVisibleTerminalAnswers(t *testing.T) {
 	for _, tc := range []struct {
 		name                     string
 		event                    Event
@@ -94,7 +89,7 @@ func TestUnreadReminder_OnlySuccessfulVisibleTerminalAnswers(t *testing.T) {
 		{name: "notice failure preserves answer", event: Event{Type: EventResult, Content: "finished answer", Done: true}, enabled: true, noticeError: errors.New("notice persistence unavailable"), wantNotices: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := newUnreadReminderPlatform()
+			p := newCompletionNotificationPlatform()
 			p.enabled, p.failDelivery, p.err = tc.enabled, tc.failed, tc.noticeError
 			e := NewEngine("project", &stubAgent{}, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
 			t.Cleanup(func() { _ = e.Stop() })
@@ -123,7 +118,7 @@ func TestUnreadReminder_OnlySuccessfulVisibleTerminalAnswers(t *testing.T) {
 			if n.UserID != "recipient" || n.SessionKey != key || n.TriggerMessageID != "trigger-message" {
 				t.Fatalf("wrong completion destination: %+v", n)
 			}
-			if !strings.Contains(n.Summary, "finished answer") || !strings.Contains(n.Summary, "project") || !strings.Contains(n.Summary, "original conversation") || n.ReminderText == "" {
+			if !strings.Contains(n.Summary, "finished answer") || !strings.Contains(n.Summary, "project") || !strings.Contains(n.Summary, "original conversation") || n.LinkLabel == "" {
 				t.Fatalf("incomplete completion text: %+v", n)
 			}
 			if got := p.repliesAtNotice[0]; len(got) != 1 || !strings.Contains(got[0], "finished answer") {
@@ -140,8 +135,8 @@ func TestUnreadReminder_OnlySuccessfulVisibleTerminalAnswers(t *testing.T) {
 	}
 }
 
-func TestUnreadReminder_NonTerminalResultDoesNotCreateNotice(t *testing.T) {
-	p := newUnreadReminderPlatform()
+func TestCompletionNotification_NonTerminalResultDoesNotCreateNotice(t *testing.T) {
+	p := newCompletionNotificationPlatform()
 	e := NewEngine("project", &stubAgent{}, []Platform{p}, "", LangEnglish)
 	defer func() { _ = e.Stop() }()
 	key := "test:recipient"
@@ -161,17 +156,17 @@ func TestUnreadReminder_NonTerminalResultDoesNotCreateNotice(t *testing.T) {
 	}
 }
 
-type unreadReminderRichPlatform struct {
+type completionNotificationRichPlatform struct {
 	*stubRichCardSilentPlatform
-	*unreadReminderRecorder
+	*completionNotificationRecorder
 }
 
-func (p *unreadReminderRichPlatform) RichCardAnsweringDwell() time.Duration { return 0 }
+func (p *completionNotificationRichPlatform) RichCardAnsweringDwell() time.Duration { return 0 }
 
-func TestUnreadReminder_RichCardCompletionGetsFreshNotification(t *testing.T) {
+func TestCompletionNotification_RichCardCompletionOnlySendsPrivately(t *testing.T) {
 	rich := &stubRichCardSilentPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}
-	r := &unreadReminderRecorder{enabled: true, base: &rich.stubPlatformEngine}
-	p := &unreadReminderRichPlatform{stubRichCardSilentPlatform: rich, unreadReminderRecorder: r}
+	r := &completionNotificationRecorder{enabled: true, base: &rich.stubPlatformEngine}
+	p := &completionNotificationRichPlatform{stubRichCardSilentPlatform: rich, completionNotificationRecorder: r}
 	e := NewEngine("project", &stubAgent{}, []Platform{p}, "", LangEnglish)
 	defer func() { _ = e.Stop() }()
 	e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: "rich"})
@@ -192,20 +187,24 @@ func TestUnreadReminder_RichCardCompletionGetsFreshNotification(t *testing.T) {
 	if len(notices) != 1 {
 		t.Fatalf("existing rich card suppressed fresh completion notification: %v", notices)
 	}
-	if sent := p.getSent(); len(sent) != 1 || sent[0] != notices[0].Text {
-		t.Fatalf("expected a distinct fresh completion message: %v", sent)
+	if sent := p.getSent(); len(sent) != 0 {
+		t.Fatalf("completion added a message to the original topic: %v", sent)
+	}
+	_, private := r.snapshot()
+	if len(private) != 1 || private[0].UserID != "recipient" {
+		t.Fatalf("private completion not delivered to turn owner: %v", private)
 	}
 }
 
-func TestUnreadReminderSummary_BoundedUnicodeAndWhitespace(t *testing.T) {
-	got := unreadReminderSummary("项目\n一", strings.Repeat("中文\t", 200))
+func TestCompletionSummary_BoundedUnicodeAndWhitespace(t *testing.T) {
+	got := completionSummary("项目\n一", strings.Repeat("中文\t", 200))
 	if !utf8.ValidString(got) || len([]rune(got)) != 160 || !strings.HasSuffix(got, "…") || strings.ContainsAny(got, "\n\t") {
 		t.Fatalf("invalid bounded summary: %q", got)
 	}
 }
 
-func TestUnreadReminder_QueuedTurnTargetsItsOwnUserAndTrigger(t *testing.T) {
-	p := newUnreadReminderPlatform()
+func TestCompletionNotification_QueuedTurnTargetsItsOwnUserAndTrigger(t *testing.T) {
+	p := newCompletionNotificationPlatform()
 	agentSession := newQueuingSession("queued-reminders")
 	e := NewEngine("project", &controllableAgent{nextSession: agentSession}, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
 	defer func() { _ = e.Stop() }()
@@ -236,15 +235,15 @@ func TestUnreadReminder_QueuedTurnTargetsItsOwnUserAndTrigger(t *testing.T) {
 	}
 }
 
-func TestUnreadReminder_ManifestExposesOptInAndSideEffects(t *testing.T) {
+func TestCompletionNotification_ManifestExposesOptInAndSideEffects(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
-		p := newUnreadReminderPlatform()
+		p := newCompletionNotificationPlatform()
 		p.enabled = enabled
 		e := NewEngine("project", &stubAgent{}, []Platform{p}, "", LangEnglish)
 		e.OnPlatformReady(p)
 		manifest := e.QueryAgentCapabilityManifest("", "", false)
 		adapter := findRuntimeAdapter(t, manifest.Runtime, "platform", "test")
-		reminder := findRuntimeFeature(t, adapter.Capabilities, "unread_completion_reminder")
+		reminder := findRuntimeFeature(t, adapter.Capabilities, "completion_notification")
 		expected := CapabilityUnavailable
 		if enabled {
 			expected = CapabilityConditional
@@ -255,6 +254,11 @@ func TestUnreadReminder_ManifestExposesOptInAndSideEffects(t *testing.T) {
 		if reminder.ReadOnly == nil || *reminder.ReadOnly || reminder.Permission != CapabilityPermissionConditional || len(reminder.SideEffects) == 0 {
 			t.Fatalf("reminder writes missing from manifest: %+v", reminder)
 		}
+		for _, effect := range reminder.SideEffects {
+			if effect.Kind == "scheduled_state" {
+				t.Fatalf("completion must not schedule later reminders: %+v", reminder)
+			}
+		}
 		if reminder.Fallback.Mode != "skip" {
 			t.Fatalf("reminder failure must preserve the answer: %+v", reminder.Fallback)
 		}
@@ -264,14 +268,14 @@ func TestUnreadReminder_ManifestExposesOptInAndSideEffects(t *testing.T) {
 
 // A legacy /ps changes the authority for agent actions but does not move the
 // visible answer. A native steer explicitly adopts the new sender's presentation.
-func TestUnreadReminder_SupplementRecipientFollowsAnswerPresentation(t *testing.T) {
+func TestCompletionNotification_SupplementRecipientFollowsAnswerPresentation(t *testing.T) {
 	for _, nativeSteer := range []bool{false, true} {
 		name := "legacy_ps_keeps_original_recipient"
 		if nativeSteer {
 			name = "native_steer_adopts_latest_recipient"
 		}
 		t.Run(name, func(t *testing.T) {
-			p := newUnreadReminderPlatform()
+			p := newCompletionNotificationPlatform()
 			queued := newQueuingSession("supplement-reminders")
 			var agentSession AgentSession = queued
 			if nativeSteer {

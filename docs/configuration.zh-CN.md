@@ -3404,6 +3404,36 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 敏感信息：是；优先使用环境变量占位符。
 - 示例: `client_secret = "${CLIENT_SECRET}"`
 
+### `projects.platforms.options.completion_notify` — `feishu, lark`
+
+成功投递可见答复后，由同一机器人立即私聊配置名单中的回合发起人一次，附原对话链接。不在原话题追加通知，不查询已读或延迟发送。
+
+- 来源：`toml`
+- 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`boolean`
+- 要求：`可选`
+- 默认值：`false`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 依赖: `non-empty completion_notify_users (or legacy unread_reminder_users)`
+- 示例: `completion_notify = true`
+
+### `projects.platforms.options.completion_notify_users` — `feishu, lark`
+
+允许接收私聊完成通知的应用范围用户 open_id；只通知完成回合的发起人，由同一机器人发送。不支持通配符或隐式收件人。
+
+- 来源：`toml`
+- 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`string[]`
+- 要求：`可选`
+- 默认值：`empty`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 依赖: `completion_notify = true (or legacy unread_reminder = true)`
+- 示例: `completion_notify_users = ["ou_your_open_id"]`
+
 ### `projects.platforms.options.corp_id` — `wecom`
 
 标识企业微信企业。
@@ -4237,7 +4267,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.unread_reminder` — `feishu, lark`
 
-成功回复后发送独立完成通知；指定用户超过 unread_reminder_delay_mins（默认一小时）仍未读时私聊提醒一次。按项目和机器人持久化，已读查询失败不视为未读。
+completion_notify 的废弃兼容别名，仅在新选项未设置时生效。现改为立即私聊完成通知，不再查询已读或等待。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -4247,28 +4277,29 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 默认值：`false`
 - 默认值来源：`builtin`
 - 生效方式：`restart`
-- 依赖: `non-empty unread_reminder_users`
-- 示例: `unread_reminder = false`
+- 依赖: `non-empty completion_notify_users (or legacy unread_reminder_users)`
+- 状态：已废弃，仅保留兼容。
+- 示例: `unread_reminder = true`
 
 ### `projects.platforms.options.unread_reminder_delay_mins` — `feishu, lark`
 
-新完成通知发送成功后，等待这些分钟再检查是否需要私聊未读提醒。默认60分钟，后台每分钟检查。重启后对新通知生效，已有待提醒记录保留原到期时间；必须短于七天保留期。
+已废弃并忽略，请删除。旧 beta 的合法值仍可解析，但完成通知改为立即私聊，不再查询已读或延迟提醒。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
 - 作用域：`platform` (`feishu, lark`)
 - 类型：`integer`
 - 要求：`可选`
-- 默认值：`60`
+- 默认值：`ignored`
 - 默认值来源：`builtin`
 - 生效方式：`restart`
-- 依赖: `unread_reminder = true`
 - 范围: `1` 到 `10079` `minutes`
+- 状态：已废弃，仅保留兼容。
 - 示例: `unread_reminder_delay_mins = 60`
 
 ### `projects.platforms.options.unread_reminder_users` — `feishu, lark`
 
-允许接收未读私聊提醒的应用范围用户 open_id；只提醒完成回合的发起人。不支持通配符或隐式收件人。
+completion_notify_users 的废弃兼容别名，仅在新选项未设置时生效。ID 仍限定于当前机器人应用。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -4278,8 +4309,9 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 默认值：`empty`
 - 默认值来源：`builtin`
 - 生效方式：`restart`
-- 依赖: `unread_reminder = true`
-- 示例: `unread_reminder_users = ["value"]`
+- 依赖: `completion_notify = true (or legacy unread_reminder = true)`
+- 状态：已废弃，仅保留兼容。
+- 示例: `unread_reminder_users = ["ou_your_open_id"]`
 
 ### `projects.platforms.options.user_id` — `matrix`
 
