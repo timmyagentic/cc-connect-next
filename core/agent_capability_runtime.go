@@ -43,7 +43,7 @@ var agentToolDefinitions = []agentToolDefinition{
 		description: "Send generated attachments, native media, TTS, or an explicit side-channel message to the current chat.", zh: "向当前聊天发送生成附件、原生媒体、TTS 或明确的旁路消息。", probe: "send",
 		parameters: []CapabilityParameter{
 			capabilityParam("message", "string", false, "Optional visible text; ordinary Agent replies must not use this tool.", "可选可见文本；普通 Agent 回复不得使用此工具。"),
-			{Name: "image", Type: "absolute-path", Repeatable: true, Description: "Generated image path.", DescriptionZH: "生成图片路径。"},
+			{Name: "image", Type: "absolute-path", Repeatable: true, Description: "Local image path. Repeat --image in one call for a gallery on platforms with image_batches; otherwise images are sent individually. Local Markdown image paths are not uploads.", DescriptionZH: "本地图片路径。同一次调用重复 --image，支持 image_batches 的平台会发送图集，否则逐张发送。Markdown 本地图片路径不会自动上传。"},
 			{Name: "file", Type: "absolute-path", Repeatable: true, Description: "Generated file path.", DescriptionZH: "生成文件路径。"},
 			{Name: "audio", Type: "absolute-path", Repeatable: true, Description: "Audio rendered natively when supported.", DescriptionZH: "支持时以原生方式渲染的音频。"},
 			{Name: "video", Type: "absolute-path", Repeatable: true, Description: "Video rendered natively when supported.", DescriptionZH: "支持时以原生方式渲染的视频。"},
@@ -388,6 +388,8 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	_, streamingCards := platform.(StreamingCardPlatform)
 	_, buttons := platform.(InlineButtonSender)
 	_, images := platform.(ImageSender)
+	batchSender, hasBatchSender := platform.(ImageBatchSender)
+	imageBatches := images && hasBatchSender && batchSender.ImageBatchSize() > 1
 	_, files := platform.(FileSender)
 	_, audio := platform.(AudioSender)
 	_, video := platform.(VideoSender)
@@ -417,6 +419,7 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		{"streaming_cards", "Aggregate a turn into one updatable streaming card.", "把整个回合聚合到一张可更新流式卡片。", "messages", "Use ordinary progress and final messages.", "使用普通进度消息和最终消息。", streamingCards},
 		{"buttons", "Send interactive buttons.", "发送交互按钮。", "text", "Send textual instructions without buttons.", "发送不含按钮的文本说明。", buttons},
 		{"images", "Upload and send images.", "上传并发送图片。", "reject", "Return an unsupported attachment error.", "返回不支持附件的错误。", images},
+		{"image_batches", "Group multiple images into gallery messages; the adapter splits them into bounded batches.", "将多张图片合并为图集消息，适配器按容量分批。", "individual-images", "Send images individually when grouping is unavailable; never fall back after a partially delivered batch request.", "不支持图集时逐张发送；部分批次已送达后不自动改为逐张重发。", imageBatches},
 		{"files", "Upload and send files.", "上传并发送文件。", "reject", "Return an unsupported attachment error.", "返回不支持附件的错误。", files},
 		{"audio", "Send native audio/voice messages.", "发送原生音频/语音消息。", "file", "Use file delivery when FileSender is available.", "FileSender 可用时退化为文件投递。", audio},
 		{"video", "Send native inline video messages.", "发送原生内联视频消息。", "file", "Use file delivery when FileSender is available.", "FileSender 可用时退化为文件投递。", video},

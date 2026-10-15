@@ -367,7 +367,7 @@ Options:
       --cwd <path>         Start a new session in this working directory
       --work-dir <path>    Alias for --cwd
       --tts <text>         Synthesize text and send it as a voice/audio message
-      --image <path>       Send an image attachment (repeatable)
+      --image <path>       Send images (repeatable; grouped into galleries where supported)
       --file <path>        Send a file attachment (repeatable)
       --audio <path>       Send an audio attachment (repeatable)
       --video <path>       Send a video attachment (repeatable)

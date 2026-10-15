@@ -4863,14 +4863,16 @@ func (p *Platform) createMessageWithID(ctx context.Context, chatID, msgType, con
 }
 
 func (p *Platform) createMessageToReceiveID(ctx context.Context, receiveID, receiveIDType, msgType, content, op string) (string, error) {
-	req := larkim.NewCreateMessageReqBuilder().
-		ReceiveIdType(receiveIDType).
-		Body(larkim.NewCreateMessageReqBodyBuilder().
-			ReceiveId(receiveID).
-			MsgType(msgType).
-			Content(content).
-			Build()).
-		Build()
+	return p.createMessageToReceiveIDWithUUID(ctx, receiveID, receiveIDType, msgType, content, op, "")
+}
+
+func (p *Platform) createMessageToReceiveIDWithUUID(ctx context.Context, receiveID, receiveIDType, msgType, content, op, uuid string) (string, error) {
+	body := larkim.NewCreateMessageReqBodyBuilder().ReceiveId(receiveID).MsgType(msgType).Content(content)
+	if uuid != "" {
+		body.Uuid(uuid)
+	}
+	req := larkim.NewCreateMessageReqBuilder().ReceiveIdType(receiveIDType).Body(body.Build()).Build()
+
 	var resp *larkim.CreateMessageResp
 	if err := p.withTransientRetry(ctx, op, func() error {
 		return p.withFreshTenantAccessTokenRetry(ctx, op, func(client *lark.Client, options ...larkcore.RequestOptionFunc) error {
