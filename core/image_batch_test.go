@@ -23,7 +23,7 @@ func (p *galleryTestPlatform) SendImageBatch(_ context.Context, ctx any, images 
 	}
 	p.groups = append(p.groups, append([]ImageAttachment(nil), images...))
 	p.contexts = append(p.contexts, ctx)
-	return p.stubPlatformEngine.Send(context.Background(), ctx, fmt.Sprintf("gallery:%d", len(images)))
+	return p.Send(context.Background(), ctx, fmt.Sprintf("gallery:%d", len(images)))
 }
 func galleryTestImages(n int) []ImageAttachment {
 	images := make([]ImageAttachment, n)
