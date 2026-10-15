@@ -36,13 +36,19 @@ func TestImageGallery_OriginalsInOneCardAndRouting(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					defer f.Close()
+					t.Cleanup(func() {
+						if err := f.Close(); err != nil {
+							t.Error(err)
+						}
+					})
 					b, _ := io.ReadAll(f)
 					if string(b) != fmt.Sprintf("original-%d", uploads) {
 						t.Errorf("original changed: %q", b)
 					}
 					uploads++
-					fmt.Fprintf(w, `{"code":0,"data":{"image_key":"img_%d"}}`, uploads)
+					if _, err := fmt.Fprintf(w, `{"code":0,"data":{"image_key":"img_%d"}}`, uploads); err != nil {
+						t.Error(err)
+					}
 					return
 				}
 				sends++
@@ -54,11 +60,18 @@ func TestImageGallery_OriginalsInOneCardAndRouting(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 					t.Error(err)
 				}
-				json.Unmarshal(raw["content"], &body.Content)
-				json.Unmarshal(raw["msg_type"], &body.MsgType)
-				json.Unmarshal(raw["receive_id"], &body.ReceiveID)
-				json.Unmarshal(raw["uuid"], &body.UUID)
-				json.Unmarshal(raw["reply_in_thread"], &body.ReplyInThread)
+				decode := func(key string, dst any) {
+					if value, exists := raw[key]; exists {
+						if err := json.Unmarshal(value, dst); err != nil {
+							t.Errorf("decode %s: %v", key, err)
+						}
+					}
+				}
+				decode("content", &body.Content)
+				decode("msg_type", &body.MsgType)
+				decode("receive_id", &body.ReceiveID)
+				decode("uuid", &body.UUID)
+				decode("reply_in_thread", &body.ReplyInThread)
 				wantPath := "/open-apis/im/v1/messages"
 				if tc.reply || tc.thread {
 					wantPath = "/open-apis/im/v1/messages/om_trigger/reply"
@@ -92,7 +105,9 @@ func TestImageGallery_OriginalsInOneCardAndRouting(t *testing.T) {
 						t.Error("gallery order changed")
 					}
 				}
-				fmt.Fprint(w, `{"code":0,"data":{"message_id":"om_gallery"}}`)
+				if _, err := fmt.Fprint(w, `{"code":0,"data":{"message_id":"om_gallery"}}`); err != nil {
+					t.Error(err)
+				}
 			}))
 			defer server.Close()
 			p := resourceTestPlatform(server)
@@ -127,14 +142,20 @@ func TestImageGallery_FailedUploadNeverPublishesPartialCard(t *testing.T) {
 		if strings.HasSuffix(r.URL.Path, "/images") {
 			uploads++
 			if uploads == 2 {
-				fmt.Fprint(w, `{"code":999,"msg":"rejected"}`)
+				if _, err := fmt.Fprint(w, `{"code":999,"msg":"rejected"}`); err != nil {
+					t.Error(err)
+				}
 				return
 			}
-			fmt.Fprint(w, `{"code":0,"data":{"image_key":"img_ok"}}`)
+			if _, err := fmt.Fprint(w, `{"code":0,"data":{"image_key":"img_ok"}}`); err != nil {
+				t.Error(err)
+			}
 			return
 		}
 		sends++
-		fmt.Fprint(w, `{"code":0}`)
+		if _, err := fmt.Fprint(w, `{"code":0}`); err != nil {
+			t.Error(err)
+		}
 	}))
 	defer server.Close()
 	p := resourceTestPlatform(server)
@@ -157,12 +178,16 @@ func TestImageGallery_RetryReusesUUIDWithoutReuploading(t *testing.T) {
 				if strings.HasSuffix(r.URL.Path, "/images") {
 					uploads++
 					w.Header().Set("Content-Type", "application/json")
-					fmt.Fprint(w, `{"code":0,"data":{"image_key":"img_ok"}}`)
+					if _, err := fmt.Fprint(w, `{"code":0,"data":{"image_key":"img_ok"}}`); err != nil {
+						t.Error(err)
+					}
 					return
 				}
 				attempts++
 				var body map[string]any
-				json.NewDecoder(r.Body).Decode(&body)
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+				}
 				got, _ := body["uuid"].(string)
 				if got == "" {
 					t.Error("missing idempotency key")
@@ -175,14 +200,18 @@ func TestImageGallery_RetryReusesUUIDWithoutReuploading(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					conn.Close()
+					if err := conn.Close(); err != nil {
+						t.Error(err)
+					}
 					return
 				}
 				if uuid != got {
 					t.Error("retry generated a different message UUID")
 				}
 				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprint(w, `{"code":0,"data":{"message_id":"om_same"}}`)
+				if _, err := fmt.Fprint(w, `{"code":0,"data":{"message_id":"om_same"}}`); err != nil {
+					t.Error(err)
+				}
 			}))
 			defer server.Close()
 			p := resourceTestPlatform(server)
