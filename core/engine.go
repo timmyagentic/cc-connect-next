@@ -13091,13 +13091,8 @@ func (e *Engine) SendToSessionWithOptions(sessionKey, message string, images []I
 			target.state.mu.Unlock()
 		}
 	}
-	for _, img := range images {
-		if err := e.waitOutgoing(p); err != nil {
-			return err
-		}
-		if err := imageSender.SendImage(e.ctx, replyCtx, img); err != nil {
-			return err
-		}
+	if err := e.sendImages(p, replyCtx, imageSender, images); err != nil {
+		return err
 	}
 	for _, file := range files {
 		if err := e.waitOutgoing(p); err != nil {
@@ -13182,13 +13177,8 @@ func (e *Engine) SendToSessionInWorkDir(sessionKey, message string, images []Ima
 			target.state.mu.Unlock()
 		}
 	}
-	for _, img := range images {
-		if err := e.waitOutgoing(target.platform); err != nil {
-			return err
-		}
-		if err := imageSender.SendImage(e.ctx, target.replyCtx, img); err != nil {
-			return err
-		}
+	if err := e.sendImages(target.platform, target.replyCtx, imageSender, images); err != nil {
+		return err
 	}
 	for _, file := range files {
 		if err := e.waitOutgoing(target.platform); err != nil {

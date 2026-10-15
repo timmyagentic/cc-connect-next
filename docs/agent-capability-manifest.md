@@ -145,3 +145,28 @@ Dynamic descriptions and runtime errors receive aggressive credential, long-blob
 The exhaustive generated configuration reference remains available at [configuration.md](configuration.md).
 
 Automatic platform actions can also carry `permission`, `read_only`, and `side_effects`. For example, `completion_notification` reports disabled or conditional availability without exposing configured recipient IDs; its [configuration and delivery contract](completion-notifications.md) includes durable deduplication receipts and immediate private messages from the bot, with no read-status polling or scheduled reminders.
+
+## Image galleries
+
+Pass all selected local images in **one** `cc-connect-next send` invocation by
+repeating `--image`. The `image_batches` runtime capability reports whether
+that platform groups them. Feishu/Lark sends two or more images as Card 2.0
+`img_combination` galleries: two columns, at most five originals per message,
+in input order. Ten images produce two messages. A single image still uses a
+native image message; the final gallery may contain fewer than five images.
+No compositing or cropping is performed on the uploaded originals.
+
+This is enabled by default when `enable_feishu_card` is enabled. Setting that
+existing option to false, or using a platform without `image_batches`, retains
+individual image messages. `attachment_send`, size limits, outgoing rate limits,
+workspace routing and topic/reply boundaries still apply. This does not change
+the remote Markdown image resolver: local Markdown paths are not uploads.
+
+Each group uploads all its images before publishing one card. A failed upload
+publishes no partial card. Transient message retries reuse one Feishu UUID for
+that group without replaying earlier successful groups. On terminal failure,
+the send command returns an error with the confirmed image count; subsequent
+groups and files are not sent. A fresh CLI invocation is a new delivery: inspect
+the failed group before retrying only the unconfirmed remainder, since a lost
+response can leave remote acceptance uncertain. There is no persistent,
+cross-invocation resend queue.
