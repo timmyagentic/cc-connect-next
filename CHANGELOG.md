@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## v0.3.2-beta.2 (2026-10-15)
+
+See `changelogs/v0.3.2-beta.2.md` for bilingual highlights and upgrade notes.
+
+- Send one immediate private completion notification from the same Feishu/Lark bot
+  to the explicitly configured owner of each successful turn, with a short summary
+  and link to the original conversation. Do not add a topic notice, query read status,
+  or schedule later reminders. Existing unread-reminder keys remain compatible aliases;
+  their old delay is ignored, and historical pending records are not replayed.
+- Batch local Feishu/Lark images into two-column Card 2.0 galleries of up to five
+  originals per message, retaining source order, attachment and rate limits, topic
+  routing, and a stable retry ID per gallery. Keep single images on the native path.
+
 ## v0.3.1-beta.2 (2026-10-07)
 
 Adapt 14 upstream correctness fixes to Next's session, privacy, and single-card
