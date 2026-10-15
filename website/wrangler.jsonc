@@ -11,7 +11,7 @@
   },
   "routes": [
     {
-      "pattern": "cc-connect-next.timmyagentic.com",
+      "pattern": "cc-connect-next.timmyagentic.si",
       "custom_domain": true
     }
   ]
