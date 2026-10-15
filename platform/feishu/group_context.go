@@ -102,7 +102,11 @@ func (p *Platform) RuntimeCapabilityAvailability(_ string, target any) map[strin
 	} else if target != nil && !p.MessageContextEnabled(target) {
 		availability = core.CapabilityAvailability{State: core.CapabilityUnavailable, Reason: "This target is not a verified group mention.", ReasonZH: "当前目标不是已核验的群内 @ 消息。"}
 	}
-	return map[string]core.CapabilityAvailability{"recent_conversation_context": availability}
+	batches := core.CapabilityAvailability{State: core.CapabilityAvailable, Reason: "Multiple images are sent as two-column Card 2.0 galleries, up to five originals per message; single images stay native.", ReasonZH: "多张图片按每批最多 5 张原图发送双列 Card 2.0 图集；单张保持原生图片消息。"}
+	if !p.useInteractiveCard {
+		batches = core.CapabilityAvailability{State: core.CapabilityUnavailable, Reason: "enable_feishu_card is false; images are sent individually.", ReasonZH: "enable_feishu_card 为 false，图片逐张发送。"}
+	}
+	return map[string]core.CapabilityAvailability{"recent_conversation_context": availability, "image_batches": batches}
 }
 
 func (p *Platform) LoadMessageContext(ctx context.Context, target any) (result core.MessageContext, readErr error) {
