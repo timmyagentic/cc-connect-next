@@ -3404,6 +3404,36 @@ Authenticate the DingTalk application client.
 - Sensitive: yes; prefer an environment-variable placeholder.
 - Example: `client_secret = "${CLIENT_SECRET}"`
 
+### `projects.platforms.options.completion_notify` — `feishu, lark`
+
+Immediately send one private completion notification from the same bot to the configured turn owner after a successful visible answer, with a link to the original conversation. No topic notice, read-status check or delay.
+
+- Source: `toml`
+- Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
+- Scope: `platform` (`feishu, lark`)
+- Type: `boolean`
+- Requirement: `optional`
+- Default: `false`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Requires: `non-empty completion_notify_users (or legacy unread_reminder_users)`
+- Example: `completion_notify = true`
+
+### `projects.platforms.options.completion_notify_users` — `feishu, lark`
+
+Explicit app-scoped user open_ids eligible for private completion notifications. Notify only the owner of the completed turn, using the same bot; no wildcard or implicit recipient.
+
+- Source: `toml`
+- Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
+- Scope: `platform` (`feishu, lark`)
+- Type: `string[]`
+- Requirement: `optional`
+- Default: `empty`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Requires: `completion_notify = true (or legacy unread_reminder = true)`
+- Example: `completion_notify_users = ["ou_your_open_id"]`
+
 ### `projects.platforms.options.corp_id` — `wecom`
 
 Identify the WeCom enterprise.
@@ -4237,7 +4267,7 @@ Override the endpoint used to obtain Weibo access tokens.
 
 ### `projects.platforms.options.unread_reminder` — `feishu, lark`
 
-Send a fresh completion notice after successful answers; privately remind configured recipients once if unread after unread_reminder_delay_mins (default one hour). State persists per project and bot; failed read queries never count as unread.
+Deprecated alias for completion_notify, used only when completion_notify is absent. Now sends immediate private completion notifications, with no unread checks or delay.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -4247,28 +4277,29 @@ Send a fresh completion notice after successful answers; privately remind config
 - Default: `false`
 - Default source: `builtin`
 - Takes effect: `restart`
-- Requires: `non-empty unread_reminder_users`
-- Example: `unread_reminder = false`
+- Requires: `non-empty completion_notify_users (or legacy unread_reminder_users)`
+- Status: deprecated compatibility option.
+- Example: `unread_reminder = true`
 
 ### `projects.platforms.options.unread_reminder_delay_mins` — `feishu, lark`
 
-Wait this many minutes after a fresh completion notice before checking for a private unread reminder. Defaults to 60; the worker checks once per minute. Restart to apply to new notices; existing pending deadlines stay unchanged. Must be shorter than the seven-day retention window.
+Deprecated and ignored; remove this option. Valid old beta values remain accepted, but completion notifications are sent immediately with no read-status queries or delayed reminders.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
 - Scope: `platform` (`feishu, lark`)
 - Type: `integer`
 - Requirement: `optional`
-- Default: `60`
+- Default: `ignored`
 - Default source: `builtin`
 - Takes effect: `restart`
-- Requires: `unread_reminder = true`
 - Range: `1` to `10079` `minutes`
+- Status: deprecated compatibility option.
 - Example: `unread_reminder_delay_mins = 60`
 
 ### `projects.platforms.options.unread_reminder_users` — `feishu, lark`
 
-Explicit app-scoped user open_ids eligible for private unread reminders. Only the user who triggered the completed turn is notified. No wildcard or implicit recipients.
+Deprecated alias for completion_notify_users, used only when completion_notify_users is absent. IDs remain scoped to this bot app.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -4278,8 +4309,9 @@ Explicit app-scoped user open_ids eligible for private unread reminders. Only th
 - Default: `empty`
 - Default source: `builtin`
 - Takes effect: `restart`
-- Requires: `unread_reminder = true`
-- Example: `unread_reminder_users = ["value"]`
+- Requires: `completion_notify = true (or legacy unread_reminder = true)`
+- Status: deprecated compatibility option.
+- Example: `unread_reminder_users = ["ou_your_open_id"]`
 
 ### `projects.platforms.options.user_id` — `matrix`
 
