@@ -144,4 +144,4 @@ Dynamic descriptions and runtime errors receive aggressive credential, long-blob
 
 The exhaustive generated configuration reference remains available at [configuration.md](configuration.md).
 
-Automatic platform actions can also carry `permission`, `read_only`, and `side_effects`. For example, `unread_completion_reminder` reports disabled or conditional availability without exposing configured recipient IDs; its [configuration and delivery contract](unread-reminders.md) includes durable state, read queries and private message effects.
+Automatic platform actions can also carry `permission`, `read_only`, and `side_effects`. For example, `completion_notification` reports disabled or conditional availability without exposing configured recipient IDs; its [configuration and delivery contract](completion-notifications.md) includes durable deduplication receipts and immediate private messages from the bot, with no read-status polling or scheduled reminders.

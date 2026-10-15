@@ -3222,23 +3222,22 @@ func TestCUJ_B6_LateSessionIDSurvivesFailureRetryAndHistory(t *testing.T) {
 }
 
 // CUJ-J3: complete work, continue its topic, then deliberately finish silently.
-// Both supported backends pass through exactly the same capability boundary.
-func TestCUJ_J3_UnreadCompletionAcrossAgentBackends(t *testing.T) {
+// Original answers and private completion messages are distinct user surfaces.
+func TestCUJ_J3_PrivateCompletionAcrossAgentBackends(t *testing.T) {
 	for _, backend := range []string{"codex", "claudecode"} {
 		t.Run(backend, func(t *testing.T) {
-			p := newUnreadReminderPlatform()
-			a := &unreadReminderNamedAgent{cujAgent: &cujAgent{}, label: backend}
-			e := NewEngine("reminder-project", a, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
+			p := newCompletionNotificationPlatform()
+			a := &completionNotificationNamedAgent{cujAgent: &cujAgent{}, label: backend}
+			e := NewEngine("completion-project", a, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
 			t.Cleanup(func() { _ = e.Stop() })
 			env := &cujEnv{t: t, engine: e, plat: p.stubPlatformEngine, agent: a.cujAgent}
 			send := func(id, content string) {
 				e.ReceiveMessage(p, &Message{Platform: "test", SessionKey: "test:topic", UserID: "owner", UserName: "owner", MessageID: id, Content: content, ReplyCtx: "topic-context"})
 			}
 			send("request-1", "finish the first task")
-			env.waitFor("first answer and fresh completion", 2*time.Second, func() bool { return len(p.getSent()) >= 2 })
-			notices, observed := p.snapshot()
-			if len(notices) != 1 || len(observed) != 1 || p.getSent()[1] != notices[0].Text {
-				t.Fatalf("first task completion not visible: notices=%v observed=%v sent=%v", notices, observed, p.getSent())
+			env.waitFor("first private completion", 2*time.Second, func() bool { _, private := p.snapshot(); return len(private) == 1 })
+			if len(p.getSent()) != 1 {
+				t.Fatalf("extra message in original topic: %v", p.getSent())
 			}
 			a.mu.Lock()
 			agentSession := a.sessions[0]
@@ -3247,17 +3246,13 @@ func TestCUJ_J3_UnreadCompletionAcrossAgentBackends(t *testing.T) {
 			agentSession.reply = "the continuation is finished"
 			agentSession.mu.Unlock()
 			send("request-2", "continue the same task")
-			env.waitFor("continued answer and fresh completion", 2*time.Second, func() bool { return len(p.getSent()) >= 4 })
-			notices, observed = p.snapshot()
-			if len(observed) != 2 || observed[1].MessageID != "request-2" || observed[1].SessionKey != "test:topic" {
-				t.Fatalf("continuation did not reach unread cancellation boundary: %v", observed)
+			env.waitFor("second private completion", 2*time.Second, func() bool { _, private := p.snapshot(); return len(private) == 2 })
+			_, private := p.snapshot()
+			if private[0].UserID != "owner" || private[0].TriggerMessageID != "request-1" || private[1].UserID != "owner" || private[1].TriggerMessageID != "request-2" {
+				t.Fatalf("private completion lost its turn destination: %v", private)
 			}
-			if len(notices) != 2 || notices[1].TriggerMessageID != "request-2" || notices[1].UserID != "owner" {
-				t.Fatalf("continuation notification lost current trigger or recipient: %v", notices)
-			}
-			sent := p.getSent()
-			if !strings.Contains(sent[2], "the continuation is finished") || sent[3] != notices[1].Text {
-				t.Fatalf("completion notice appeared before continued answer: %v", sent)
+			if sent := p.getSent(); len(sent) != 2 || !strings.Contains(sent[1], "the continuation is finished") {
+				t.Fatalf("unexpected original-topic messages: %v", sent)
 			}
 			agentSession.mu.Lock()
 			agentSession.reply = "NO_REPLY"
@@ -3267,9 +3262,9 @@ func TestCUJ_J3_UnreadCompletionAcrossAgentBackends(t *testing.T) {
 				history := e.sessions.GetOrCreateActive("test:topic").GetHistory(0)
 				return len(history) >= 6 && history[len(history)-1].Content == "NO_REPLY"
 			})
-			notices, observed = p.snapshot()
-			if len(p.getSent()) != 4 || len(notices) != 2 || len(observed) != 3 {
-				t.Fatalf("silent action unexpectedly notified: sent=%v notices=%v observations=%d", p.getSent(), notices, len(observed))
+			notices, private := p.snapshot()
+			if len(p.getSent()) != 2 || len(notices) != 2 || len(private) != 2 {
+				t.Fatalf("silent action unexpectedly notified: sent=%v private=%v", p.getSent(), private)
 			}
 		})
 	}
