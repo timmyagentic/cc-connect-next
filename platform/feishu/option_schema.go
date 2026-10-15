@@ -19,36 +19,45 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 		"group_context", "group_context_max_messages", "group_context_window_minutes", "group_context_max_chars",
 		"image_batch_window_ms", "mention_map", "peer_bots", "port", "progress_style", "reaction_emoji",
 		"reply_to_trigger", "require_mention", "resolve_mentions", "respond_to_at_everyone_and_here",
-		"share_session_in_channel", "thread_isolation", "unread_reminder", "unread_reminder_users", "unread_reminder_delay_mins",
+		"share_session_in_channel", "thread_isolation", "completion_notify", "completion_notify_users", "unread_reminder", "unread_reminder_users", "unread_reminder_delay_mins",
 	})
 	for i := range options {
 		option := &options[i]
 		switch option.Key {
-		case "unread_reminder":
+		case "completion_notify", "unread_reminder":
 			option.Type = "boolean"
 			option.Default = "false"
-			option.Requires = []string{"non-empty unread_reminder_users"}
-			option.Description = "Send a fresh completion notice after successful answers; privately remind configured recipients once if unread after unread_reminder_delay_mins (default one hour). State persists per project and bot; failed read queries never count as unread."
-			option.DescriptionZH = "成功回复后发送独立完成通知；指定用户超过 unread_reminder_delay_mins（默认一小时）仍未读时私聊提醒一次。按项目和机器人持久化，已读查询失败不视为未读。"
-			option.Keywords = []string{"unread reminder", "completion reminder", "未读提醒", "一小时", "完成通知"}
-			option.Example = "unread_reminder = true"
-		case "unread_reminder_delay_mins":
-			option.Type = "integer"
-			option.Default = strconv.Itoa(defaultUnreadReminderDelayMins)
-			option.Unit = "minutes"
-			minimum, maximum := float64(minUnreadReminderDelayMins), float64(maxUnreadReminderDelayMins)
-			option.Minimum, option.Maximum = &minimum, &maximum
-			option.Requires = []string{"unread_reminder = true"}
-			option.Description = "Wait this many minutes after a fresh completion notice before checking for a private unread reminder. Defaults to 60; the worker checks once per minute. Restart to apply to new notices; existing pending deadlines stay unchanged. Must be shorter than the seven-day retention window."
-			option.DescriptionZH = "新完成通知发送成功后，等待这些分钟再检查是否需要私聊未读提醒。默认60分钟，后台每分钟检查。重启后对新通知生效，已有待提醒记录保留原到期时间；必须短于七天保留期。"
-			option.Keywords = []string{"unread reminder delay", "reminder interval", "未读提醒间隔", "未读提醒等待时长", "提醒分钟"}
-		case "unread_reminder_users":
+			option.Requires = []string{"non-empty completion_notify_users (or legacy unread_reminder_users)"}
+			option.Description = "Immediately send one private completion notification from the same bot to the configured turn owner after a successful visible answer, with a link to the original conversation. No topic notice, read-status check or delay."
+			option.DescriptionZH = "成功投递可见答复后，由同一机器人立即私聊配置名单中的回合发起人一次，附原对话链接。不在原话题追加通知，不查询已读或延迟发送。"
+			option.Keywords = []string{"private completion notification", "bot direct message", "完成通知私聊", "机器人完成通知"}
+			if option.Key == "unread_reminder" {
+				option.Deprecated = true
+				option.Description = "Deprecated alias for completion_notify, used only when completion_notify is absent. Now sends immediate private completion notifications, with no unread checks or delay."
+				option.DescriptionZH = "completion_notify 的废弃兼容别名，仅在新选项未设置时生效。现改为立即私聊完成通知，不再查询已读或等待。"
+			}
+		case "completion_notify_users", "unread_reminder_users":
 			option.Type = "string[]"
 			option.Default = "empty"
-			option.Requires = []string{"unread_reminder = true"}
-			option.Description = "Explicit app-scoped user open_ids eligible for private unread reminders. Only the user who triggered the completed turn is notified. No wildcard or implicit recipients."
-			option.DescriptionZH = "允许接收未读私聊提醒的应用范围用户 open_id；只提醒完成回合的发起人。不支持通配符或隐式收件人。"
-			option.Example = `unread_reminder_users = ["ou_your_open_id"]`
+			option.Requires = []string{"completion_notify = true (or legacy unread_reminder = true)"}
+			option.Description = "Explicit app-scoped user open_ids eligible for private completion notifications. Notify only the owner of the completed turn, using the same bot; no wildcard or implicit recipient."
+			option.DescriptionZH = "允许接收私聊完成通知的应用范围用户 open_id；只通知完成回合的发起人，由同一机器人发送。不支持通配符或隐式收件人。"
+			option.Keywords = []string{"completion notification users", "完成通知接收人"}
+			if option.Key == "unread_reminder_users" {
+				option.Deprecated = true
+				option.Description = "Deprecated alias for completion_notify_users, used only when completion_notify_users is absent. IDs remain scoped to this bot app."
+				option.DescriptionZH = "completion_notify_users 的废弃兼容别名，仅在新选项未设置时生效。ID 仍限定于当前机器人应用。"
+			}
+		case "unread_reminder_delay_mins":
+			option.Type = "integer"
+			option.Default = "ignored"
+			option.Unit = "minutes"
+			minimum, maximum := float64(1), float64(10079)
+			option.Minimum, option.Maximum = &minimum, &maximum
+			option.Deprecated = true
+			option.Description = "Deprecated and ignored; remove this option. Valid old beta values remain accepted, but completion notifications are sent immediately with no read-status queries or delayed reminders."
+			option.DescriptionZH = "已废弃并忽略，请删除。旧 beta 的合法值仍可解析，但完成通知改为立即私聊，不再查询已读或延迟提醒。"
+			option.Keywords = []string{"unread reminder delay", "未读提醒等待时长", "迁移完成通知"}
 		case "allow_chat":
 			option.Default = "empty"
 			option.Description = "Restrict access to a comma-separated list of Feishu/Lark chat IDs; empty or '*' allows every chat."
@@ -196,6 +205,10 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 		}
 	}
 	options = core.ConfigureOptionExample(options, "group_reply_all_chats", `group_reply_all_chats = "oc_chat_a,oc_chat_b"`)
+	options = core.ConfigureOptionExample(options, "completion_notify", "completion_notify = true")
+	options = core.ConfigureOptionExample(options, "completion_notify_users", `completion_notify_users = ["ou_your_open_id"]`)
+	options = core.ConfigureOptionExample(options, "unread_reminder", "unread_reminder = true")
+	options = core.ConfigureOptionExample(options, "unread_reminder_users", `unread_reminder_users = ["ou_your_open_id"]`)
 	options = core.ConfigureOptionExample(options, "unread_reminder_delay_mins", "unread_reminder_delay_mins = 60")
 	options = core.ConfigureOptionExample(options, "mention_map", `mention_map = { Reviewer-Bot = "ou_bot_open_id" }`)
 	options = core.ConfigureOptionExample(options, "peer_bots", `peer_bots = { cli_peer_app_id = "Reviewer-Bot" }`)

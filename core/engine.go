@@ -3059,7 +3059,6 @@ func (e *Engine) rejectBannedContent(p Platform, msg *Message, content string) b
 }
 
 func (e *Engine) handleMessage(p Platform, msg *Message) {
-	e.observeUnreadReminderMessage(p, msg)
 	if msg.Recalled {
 		e.handleMessageRecall(p, msg)
 		return
@@ -6717,7 +6716,7 @@ func (completion *turnCompletion) handle() bool {
 		e.completeFeedbackTurn(state, response.base)
 	}
 	completion.commit(response, triggerAutoCompress, tokenEstimate)
-	completion.notifyUnreadReminder(response)
+	completion.notifyCompletion(response)
 	return !completion.runAutoCompress(triggerAutoCompress)
 }
 
