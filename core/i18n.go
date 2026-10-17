@@ -528,9 +528,13 @@ const (
 	MsgConfigKeyNotFound MsgKey = "config_key_not_found"
 	MsgConfigReloaded    MsgKey = "config_reloaded"
 
-	MsgDoctorRunning MsgKey = "doctor_running"
-	MsgDoctorTitle   MsgKey = "doctor_title"
-	MsgDoctorSummary MsgKey = "doctor_summary"
+	MsgDoctorRunning           MsgKey = "doctor_running"
+	MsgDoctorProcessName       MsgKey = "doctor_process_name"
+	MsgDoctorPrivacyName       MsgKey = "doctor_privacy_name"
+	MsgDoctorProcessIncomplete MsgKey = "doctor_process_incomplete"
+	MsgDoctorPrivacyUnknown    MsgKey = "doctor_privacy_unknown"
+	MsgDoctorTitle             MsgKey = "doctor_title"
+	MsgDoctorSummary           MsgKey = "doctor_summary"
 
 	MsgRestarting        MsgKey = "restarting"
 	MsgRestartSuccess    MsgKey = "restart_success"
@@ -3378,6 +3382,35 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese:           "🏥 診断を実行中...",
 		LangSpanish:            "🏥 Ejecutando diagnósticos...",
 	},
+	MsgDoctorProcessName: {
+		LangEnglish:            "macOS process identity (diagnostic process first)",
+		LangChinese:            "macOS 进程身份（首项为诊断进程）",
+		LangTraditionalChinese: "macOS 程序身分（首項為診斷程序）",
+		LangJapanese:           "macOS プロセス識別情報（診断プロセスが先頭）",
+		LangSpanish:            "Identidad de procesos macOS (primero el proceso de diagnóstico)",
+	},
+	MsgDoctorPrivacyName: {
+		LangEnglish:            "macOS privacy permissions",
+		LangChinese:            "macOS 隐私权限",
+		LangTraditionalChinese: "macOS 隱私權限",
+		LangJapanese:           "macOS プライバシー権限",
+		LangSpanish:            "Permisos de privacidad de macOS",
+	},
+	MsgDoctorProcessIncomplete: {
+		LangEnglish:            "unknown: process ancestry is incomplete (unavailable, exited, timed out, or depth limit). No permission conclusion can be drawn.",
+		LangChinese:            "未知：进程祖先信息不完整（不可读取、已退出、超时或达到深度限制）。不能据此判断权限。",
+		LangTraditionalChinese: "未知：程序祖先資訊不完整（無法讀取、已退出、逾時或達到深度限制）。不能據此判斷權限。",
+		LangJapanese:           "不明：祖先プロセス情報が不完全です（取得不可、終了、タイムアウト、深さ制限）。権限は判定できません。",
+		LangSpanish:            "Desconocido: la ascendencia está incompleta (no disponible, finalizada, tiempo agotado o límite de profundidad). No permite determinar permisos.",
+	},
+	MsgDoctorPrivacyUnknown: {
+		LangEnglish:            "Screen Recording: unknown (not probed). Accessibility: unknown (not probed). Apple Events: unknown (not probed; target application matters). Process ancestry identifies this diagnostic invocation, not the TCC-responsible application or all Agent/tool processes. A terminal result does not establish daemon or Agent permissions. No permission request, TCC database read, or reset was performed; do not repeat authorization or restart solely from this report.",
+		LangChinese:            "屏幕录制：未知（未探测）。辅助功能：未知（未探测）。Apple Events：未知（未探测，且取决于目标应用）。祖先进程只说明本次诊断的执行链，不代表 TCC 权限归属应用或所有 Agent/工具进程。终端结果不能证明 daemon 或 Agent 权限。未请求权限、读取 TCC 数据库或重置权限；请勿仅凭此报告重复授权或重启。",
+		LangTraditionalChinese: "螢幕錄製：未知（未探測）。輔助使用：未知（未探測）。Apple Events：未知（未探測，且取決於目標應用程式）。祖先程序僅說明本次診斷的執行鏈，不代表 TCC 權限歸屬應用程式或所有 Agent/工具程序。終端結果不能證明 daemon 或 Agent 權限。未請求權限、讀取 TCC 資料庫或重設權限；請勿僅憑此報告重複授權或重新啟動。",
+		LangJapanese:           "画面収録：不明（未検査）。アクセシビリティ：不明（未検査）。Apple Events：不明（未検査、対象アプリにも依存）。祖先プロセスは今回の診断の実行経路であり、TCC の責任アプリや全 Agent・ツールの一覧ではありません。端末の結果から daemon や Agent の権限は判断できません。権限要求、TCC データベース読み取り、リセットは行っていません。この報告だけを理由に再認証や再起動を繰り返さないでください。",
+		LangSpanish:            "Grabación de pantalla: desconocido (sin sondeo). Accesibilidad: desconocido (sin sondeo). Apple Events: desconocido (sin sondeo; depende de la aplicación destino). Los ancestros identifican esta ejecución, no la aplicación responsable ante TCC ni todos los procesos Agent/herramientas. Un resultado de terminal no demuestra permisos del daemon o Agent. No se solicitaron ni restablecieron permisos ni se leyó la base TCC; no repita autorizaciones o reinicios solo por este informe.",
+	},
+
 	MsgDoctorTitle: {
 		LangEnglish:            "🏥 **System Diagnostic Report**\n\n",
 		LangChinese:            "🏥 **系统诊断报告**\n\n",

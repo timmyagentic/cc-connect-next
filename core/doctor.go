@@ -34,10 +34,11 @@ func (s DoctorStatus) Icon() string {
 }
 
 type DoctorCheckResult struct {
-	Name    string
-	Status  DoctorStatus
-	Detail  string
-	Latency time.Duration
+	Name      string
+	Status    DoctorStatus
+	Detail    string
+	DetailKey MsgKey // Optional localized explanation appended to metadata.
+	Latency   time.Duration
 }
 
 // DoctorCheckOptions carries deployment paths that generic system checks
@@ -96,6 +97,7 @@ func runDoctorChecks(ctx context.Context, agent Agent, platformResults []DoctorC
 	results = append(results, checkAgentAuth(ctx, agent)...)
 	results = append(results, platformResults...)
 	results = append(results, checkSystem(ctx)...)
+	results = append(results, checkDoctorProcess(ctx)...)
 	results = append(results, checkDependencies()...)
 	results = append(results, checkNetwork(ctx)...)
 	results = append(results, checkDataDirectory(dataDir))
@@ -141,7 +143,7 @@ func checkAgentBinary(ctx context.Context, agent Agent) []DoctorCheckResult {
 		if len(ver) > 80 {
 			ver = ver[:80]
 		}
-		detail = ver
+		detail = path + "\n   " + ver
 	}
 	return []DoctorCheckResult{{
 		Name:   fmt.Sprintf("Agent CLI (%s)", bin),
@@ -487,6 +489,12 @@ var checkNameJa = map[string]string{
 }
 
 func localizeCheckName(name string, lang Language) string {
+	if name == "macOS Process Identity" {
+		return NewI18n(lang).T(MsgDoctorProcessName)
+	}
+	if name == "macOS Privacy Permissions" {
+		return NewI18n(lang).T(MsgDoctorPrivacyName)
+	}
 	switch lang {
 	case LangChinese, LangTraditionalChinese:
 		// Translate known names; parametric names (e.g. "Agent CLI (claude)") need prefix matching
@@ -542,7 +550,14 @@ func FormatDoctorResults(results []DoctorCheckResult, i18n *I18n) string {
 		if r.Latency > 0 {
 			latStr = fmt.Sprintf(" (%s)", r.Latency.Round(time.Millisecond))
 		}
-		fmt.Fprintf(&sb, "%s %s%s\n   %s\n\n", r.Status.Icon(), displayName, latStr, r.Detail)
+		detail := r.Detail
+		if r.DetailKey != "" {
+			if detail != "" {
+				detail += "\n   "
+			}
+			detail += i18n.T(r.DetailKey)
+		}
+		fmt.Fprintf(&sb, "%s %s%s\n   %s\n\n", r.Status.Icon(), displayName, latStr, detail)
 	}
 
 	sb.WriteString(i18n.Tf(MsgDoctorSummary, passCount, warnCount, failCount))

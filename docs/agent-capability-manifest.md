@@ -170,3 +170,23 @@ groups and files are not sent. A fresh CLI invocation is a new delivery: inspect
 the failed group before retrying only the unconfirmed remainder, since a lost
 response can leave remote acceptance uncertain. There is no persistent,
 cross-invocation resend queue.
+
+## macOS doctor identity and privacy scope
+
+`cc-connect-next doctor` and in-chat `/doctor` keep the resolved Agent CLI path
+alongside its version. On macOS they also list the diagnostic process first,
+then up to seven ancestors, with PID, PPID, and executable name/path. This uses
+`ps` executable metadata only, never process arguments or environment variables.
+Inspection is bounded to two seconds; missing processes, timeouts, cycles and
+the depth limit are reported as incomplete rather than healthy ancestry.
+
+The CLI describes its own process chain; in-chat doctor runs in the service.
+Neither inventories every Agent/tool process nor identifies the application
+macOS treats as responsible for TCC. Screen Recording, Accessibility and Apple
+Events are explicitly **unknown (not probed)**; Apple Events also depends on the
+target application. The warning is not evidence of denied access. No TCC database
+is read, no authorization prompt or application is opened, and no permission is
+reset. Do not repeat authorization or restart solely on this report. No new
+configuration or native build dependency is required; other operating systems
+keep their existing checks. Remove private executable paths before sharing a
+report publicly.
