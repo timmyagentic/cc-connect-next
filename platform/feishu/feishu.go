@@ -4829,7 +4829,7 @@ func (p *Platform) replyMessageWithBody(ctx context.Context, messageID string, b
 				return fmt.Errorf("%s: reply api call: %w", p.tag(), err)
 			}
 			if !resp.Success() {
-				return fmt.Errorf("%s: reply failed code=%d msg=%s", p.tag(), resp.Code, resp.Msg)
+				return p.messageDeliveryError("reply", resp.Code, resp.Msg)
 			}
 			return nil
 		})
@@ -4871,7 +4871,7 @@ func (p *Platform) createMessageToReceiveIDWithUUID(ctx context.Context, receive
 				return fmt.Errorf("%s: %s api call: %w", p.tag(), op, err)
 			}
 			if !resp.Success() {
-				return fmt.Errorf("%s: %s failed code=%d msg=%s", p.tag(), op, resp.Code, resp.Msg)
+				return p.messageDeliveryError(op, resp.Code, resp.Msg)
 			}
 			return nil
 		})
@@ -4882,6 +4882,16 @@ func (p *Platform) createMessageToReceiveIDWithUUID(ctx context.Context, receive
 		return "", nil
 	}
 	return *resp.Data.MessageId, nil
+}
+
+// messageDeliveryError preserves API diagnostics and marks only definitively
+// rejected destinations. Other API failures retain existing retry behavior.
+func (p *Platform) messageDeliveryError(operation string, code int, message string) error {
+	err := fmt.Errorf("%s: %s failed code=%d msg=%s", p.tag(), operation, code, message)
+	if code == 230002 { // Bot is not in the destination chat.
+		return fmt.Errorf("%w: %w", core.ErrDeliveryPermanent, err)
+	}
+	return err
 }
 
 func (p *Platform) withFreshTenantAccessTokenRetry(ctx context.Context, operation string, fn feishuRequestFunc) error {
