@@ -415,6 +415,8 @@ type Platform struct {
 	// core/engine's create_time watermark (PR #1168), so only N-1 images were
 	// ever delivered to the agent (issue #1395).
 	imageBatchMu     sync.Mutex
+	inboundOrderMu   sync.Mutex
+	inboundOrderTail map[string]chan struct{}
 	imageBatch       map[string]*imageBatchEntry
 	imageBatchWindow time.Duration // quiet period before flushing a batch; 0 means use defaultImageBatchWindow
 }
@@ -478,17 +480,18 @@ func coerceMilliseconds(v any) (int64, error) {
 // callback so an in-flight (or stale) timer can detect that its entry has
 // been superseded and exit without dispatching.
 type imageBatchEntry struct {
-	sessionKey   string
-	userID       string
-	userName     string
-	chatName     string
-	rctx         replyContext
-	quoted       quotedMessage
-	images       []core.ImageAttachment
-	messageIDs   []string
-	createTimeMs int64
-	parentID     string
-	timer        *time.Timer
+	sessionKey      string
+	userID          string
+	userName        string
+	chatName        string
+	rctx            replyContext
+	quoted          quotedMessage
+	images          []core.ImageAttachment
+	messageIDs      []string
+	createTimeMs    int64
+	parentID        string
+	timer           *time.Timer
+	timerGeneration uint64 // guarded by imageBatchMu; invalidates already-queued callbacks
 }
 
 var _ core.RelayGroupVisibilityTarget = (*Platform)(nil)
@@ -1704,9 +1707,9 @@ func (p *Platform) populateWorkspaceChannelKeys(msg *core.Message) {
 // of quiet time. A context mismatch (different parentID or userID) flushes the
 // existing batch immediately before the new one starts.
 //
-// The timer callback captures the entry pointer; flushImageBatchByRef verifies
-// the entry hasn't been superseded before dispatching, so a stale timer firing
-// after a replace or Stop will be a safe no-op.
+// The timer callback captures the entry pointer and timer generation. A reset
+// must invalidate callbacks already queued behind a download, even when the
+// batch entry itself is reused. Replaced or flushed entries are also no-ops.
 func (p *Platform) bufferImage(sessionKey string, entry *imageBatchEntry) {
 	p.imageBatchMu.Lock()
 	if p.imageBatch == nil {
@@ -1739,14 +1742,18 @@ func (p *Platform) bufferImage(sessionKey string, entry *imageBatchEntry) {
 			existing.createTimeMs = entry.createTimeMs
 		}
 		ref := existing
+		ref.timerGeneration++
+		generation := ref.timerGeneration
 		existing.timer = time.AfterFunc(p.batchWindow(), func() {
-			p.flushImageBatchByRef(sessionKey, ref)
+			p.enqueueInboundDispatch(sessionKey, func() { p.flushImageBatchByRef(sessionKey, ref, generation) })
 		})
 	} else {
 		// Start a fresh batch with its own timer.
 		ref := entry
+		ref.timerGeneration++
+		generation := ref.timerGeneration
 		entry.timer = time.AfterFunc(p.batchWindow(), func() {
-			p.flushImageBatchByRef(sessionKey, ref)
+			p.enqueueInboundDispatch(sessionKey, func() { p.flushImageBatchByRef(sessionKey, ref, generation) })
 		})
 		p.imageBatch[sessionKey] = entry
 	}
@@ -1758,13 +1765,14 @@ func (p *Platform) bufferImage(sessionKey string, entry *imageBatchEntry) {
 	}
 }
 
-// flushImageBatchByRef dispatches the batch iff the map still points at the
-// same entry pointer (i.e. the timer wasn't superseded). Called by the
-// AfterFunc timer callback.
-func (p *Platform) flushImageBatchByRef(sessionKey string, ref *imageBatchEntry) {
+// flushImageBatchByRef dispatches only if both the batch identity and the
+// timer generation are current. Stop cannot retract an AfterFunc callback
+// that has already joined the inbound FIFO, so pointer identity alone is not
+// sufficient after resetting the timer on the same batch.
+func (p *Platform) flushImageBatchByRef(sessionKey string, ref *imageBatchEntry, generation uint64) {
 	p.imageBatchMu.Lock()
 	current, ok := p.imageBatch[sessionKey]
-	if !ok || current != ref {
+	if !ok || current != ref || current.timerGeneration != generation {
 		p.imageBatchMu.Unlock()
 		return
 	}
@@ -2054,19 +2062,28 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	// Mark this thread as bot-engaged so subsequent attachment-only messages
 	// can pass through. The first accepted mention in a pre-existing topic also
 	// bootstraps the isolated agent session from the root message once.
-	if !rctx.contextEligible {
-		rctx.bootstrapThread, rctx.bootstrapQueued, rctx.bootstrapWait, rctx.bootstrapDone =
-			p.prepareThreadBootstrapDispatch(sessionKey)
+	if !rctx.contextEligible && p.threadIsolationEnabled() && isThreadSessionKey(sessionKey) {
+		p.activeThreadSessions.Store(sessionKey, time.Now())
 	}
-	if (rctx.bootstrapThread || rctx.bootstrapQueued) && parentID == "" {
-		parentID = stringValue(msg.RootId)
-	}
+	rootID := stringValue(msg.RootId)
 
 	// Dispatch message handling asynchronously so the SDK event loop is not
 	// blocked by IO-heavy operations (image/audio download, handler HTTP calls).
 	// The dedup and old-message checks above remain synchronous to guarantee
 	// correctness before spawning the goroutine.
-	go p.dispatchMessage(ctx, msgType, content, mentions, messageID, sessionKey, userID, chatID, rctx, parentID, createTimeMs)
+	p.enqueueInboundDispatch(sessionKey, func() {
+		// Reserve bootstrap in the same order as inbound dispatch. Reserving
+		// before enqueue can invert two concurrent events and create a cycle:
+		// the first queued dispatch waits for a bootstrap queued behind it.
+		if !rctx.contextEligible {
+			rctx.bootstrapThread, rctx.bootstrapQueued, rctx.bootstrapWait, rctx.bootstrapDone =
+				p.prepareThreadBootstrapDispatch(sessionKey)
+		}
+		if (rctx.bootstrapThread || rctx.bootstrapQueued) && parentID == "" {
+			parentID = rootID
+		}
+		p.dispatchMessage(ctx, msgType, content, mentions, messageID, sessionKey, userID, chatID, rctx, parentID, createTimeMs)
+	})
 
 	return nil
 }
