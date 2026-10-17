@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -324,5 +325,52 @@ func TestRestartNotify_PanicInSendRecovered(t *testing.T) {
 	// A panicking stub must never record a successful send.
 	if got := plat.sentTexts(); len(got) != 0 {
 		t.Fatalf("a panicking stub should never record a successful send, got %v", got)
+	}
+}
+
+func TestRestartNotify_PermanentDeliveryFailureIsNotRetried(t *testing.T) {
+	plat := &restartNotifyStub{name: "stub", failFirstN: 10, failNextError: fmt.Errorf("send rejected: %w", ErrDeliveryPermanent)}
+	engine := NewEngine("test", &stubAgent{}, []Platform{plat}, "", LangEnglish)
+	plat.markReady(t, engine)
+	err := engine.dispatchRestartNotify(&RestartRequest{Platform: "stub", SessionKey: "session-1"})
+	if !errors.Is(err, ErrDeliveryPermanent) {
+		t.Fatalf("error = %v", err)
+	}
+	if got := atomic.LoadInt32(&plat.failFirstN); got != 9 {
+		t.Fatalf("remaining failures = %d; want 9 (one send)", got)
+	}
+}
+
+func TestRestartNotify_CanceledBackoffDoesNotRetry(t *testing.T) {
+	plat := &restartNotifyStub{name: "stub", failFirstN: 10}
+	engine := NewEngine("test", &stubAgent{}, []Platform{plat}, "", LangEnglish)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	engine.ctx = ctx
+	plat.markReady(t, engine)
+	done := make(chan error, 1)
+	go func() {
+		done <- engine.dispatchRestartNotify(&RestartRequest{Platform: "stub", SessionKey: "session-1"})
+	}()
+	deadline := time.After(time.Second)
+	for atomic.LoadInt32(&plat.failFirstN) == 10 {
+		select {
+		case <-deadline:
+			t.Fatal("initial send did not occur")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want canceled", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("restart notification ignored cancellation during backoff")
+	}
+	if got := atomic.LoadInt32(&plat.failFirstN); got != 9 {
+		t.Fatalf("remaining failures = %d; want 9 (one send)", got)
 	}
 }
