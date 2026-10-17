@@ -511,9 +511,11 @@ const (
 	MsgCommandsDeleted      MsgKey = "commands_deleted"
 	MsgCommandsNotFound     MsgKey = "commands_not_found"
 
-	MsgCommandExecTimeout MsgKey = "command_exec_timeout"
-	MsgCommandExecError   MsgKey = "command_exec_error"
-	MsgCommandExecSuccess MsgKey = "command_exec_success"
+	MsgScheduledShellCanceled MsgKey = "scheduled_shell_canceled"
+	MsgScheduledShellTimeout  MsgKey = "scheduled_shell_timeout"
+	MsgCommandExecTimeout     MsgKey = "command_exec_timeout"
+	MsgCommandExecError       MsgKey = "command_exec_error"
+	MsgCommandExecSuccess     MsgKey = "command_exec_success"
 
 	MsgSkillsTitle            MsgKey = "skills_title"
 	MsgSkillsEmpty            MsgKey = "skills_empty"
@@ -3251,6 +3253,20 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ Exec 命令 `/%s` 已新增。\n命令: %s",
 		LangJapanese:           "✅ Exec コマンド `/%s` を追加しました。\nコマンド: %s",
 		LangSpanish:            "✅ Comando exec `/%s` agregado.\nComando: %s",
+	},
+	MsgScheduledShellCanceled: {
+		LangEnglish:            "canceled",
+		LangChinese:            "已取消",
+		LangTraditionalChinese: "已取消",
+		LangJapanese:           "キャンセル済み",
+		LangSpanish:            "cancelado",
+	},
+	MsgScheduledShellTimeout: {
+		LangEnglish:            "timeout",
+		LangChinese:            "超时",
+		LangTraditionalChinese: "逾時",
+		LangJapanese:           "タイムアウト",
+		LangSpanish:            "tiempo agotado",
 	},
 	MsgCommandExecTimeout: {
 		LangEnglish:            "⏱️ Command `/%s` timed out (60s limit).",
