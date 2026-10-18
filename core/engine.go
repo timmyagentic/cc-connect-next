@@ -2273,18 +2273,13 @@ func (e *Engine) executeScheduledShell(p Platform, replyCtx any, spec scheduledS
 	// Wait briefly to see if the command finishes quickly
 	select {
 	case <-doneCh:
+		if ctx.Err() != nil {
+			return e.finishInterruptedScheduledShell(p, replyCtx, ctx.Err(), cmdLabel, &mu, &buf, false, nil)
+		}
 		return e.finishScheduledShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, false, nil)
 	case <-ctx.Done():
 		killAndWait(shellCmd, doneCh)
-		mu.Lock()
-		output := buf.String()
-		mu.Unlock()
-		msg := fmt.Sprintf("⏰ ⚠️ timeout: `%s`", cmdLabel)
-		if output != "" {
-			msg = fmt.Sprintf("⏰ ⚠️ timeout: `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-		}
-		e.send(p, replyCtx, msg)
-		return fmt.Errorf("shell command timed out")
+		return e.finishInterruptedScheduledShell(p, replyCtx, ctx.Err(), cmdLabel, &mu, &buf, false, nil)
 	case <-time.After(quickFinishTimeout):
 		// Still running — fall through to progress mode
 	}
@@ -2340,23 +2335,14 @@ func (e *Engine) executeScheduledShell(p Platform, replyCtx any, spec scheduledS
 	select {
 	case <-doneCh:
 		close(updateDone)
+		if ctx.Err() != nil {
+			return e.finishInterruptedScheduledShell(p, replyCtx, ctx.Err(), cmdLabel, &mu, &buf, useUpdate, previewHandle)
+		}
 		return e.finishScheduledShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, useUpdate, previewHandle)
 	case <-ctx.Done():
 		close(updateDone)
 		killAndWait(shellCmd, doneCh)
-		mu.Lock()
-		output := buf.String()
-		mu.Unlock()
-		msg := fmt.Sprintf("⏰ ⚠️ timeout: `%s`", cmdLabel)
-		if output != "" {
-			msg = fmt.Sprintf("⏰ ⚠️ timeout: `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-		}
-		if useUpdate {
-			_ = updaterFor(p).UpdateMessage(e.ctx, previewHandle, msg)
-		} else {
-			e.send(p, replyCtx, msg)
-		}
-		return fmt.Errorf("shell command timed out")
+		return e.finishInterruptedScheduledShell(p, replyCtx, ctx.Err(), cmdLabel, &mu, &buf, useUpdate, previewHandle)
 	}
 }
 
@@ -2393,14 +2379,14 @@ func (e *Engine) finishScheduledShell(p Platform, replyCtx any, cmd *exec.Cmd, m
 	if useUpdate && previewHandle != nil {
 		_ = updaterFor(p).UpdateMessage(e.ctx, previewHandle, finalMsg)
 		if !exitOK {
-			return fmt.Errorf("shell: exit code %d", cmd.ProcessState.ExitCode())
+			return scheduledShellFailure(cmd.ProcessState.ExitCode(), output)
 		}
 		return nil
 	}
 
 	e.send(p, replyCtx, finalMsg)
 	if !exitOK {
-		return fmt.Errorf("shell: exit code %d", cmd.ProcessState.ExitCode())
+		return scheduledShellFailure(cmd.ProcessState.ExitCode(), output)
 	}
 	return nil
 }
