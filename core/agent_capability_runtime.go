@@ -91,7 +91,7 @@ var agentToolDefinitions = []agentToolDefinition{
 	},
 	{
 		id: "doctor", invocation: "cc-connect-next doctor [--project <name>]",
-		description: "Run side-effect-free configuration, dependency, Agent CLI, and platform preflight checks.", zh: "执行无副作用的配置、依赖、Agent CLI 与平台预检。", readOnly: true,
+		description: "Run read-only configuration, dependency, Agent CLI, and platform preflight checks. On macOS, report diagnostic process ancestry and explicitly unprobed privacy permissions; this does not verify daemon or Agent TCC access.", zh: "执行只读的配置、依赖、Agent CLI 与平台预检。在 macOS 上展示诊断进程祖先，并明确隐私权限未探测；不能证明 daemon 或 Agent 的 TCC 权限。", readOnly: true,
 		parameters: []CapabilityParameter{capabilityParam("project", "string", false, "Optional project filter.", "可选项目过滤。")},
 	},
 	{
