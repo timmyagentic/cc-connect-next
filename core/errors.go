@@ -5,6 +5,12 @@ import (
 	"fmt"
 )
 
+// ErrDeliveryPermanent marks a rejected platform delivery that cannot succeed
+// by retrying the same request without an external change (for example, the
+// bot is no longer a member of the destination chat). Unknown errors remain
+// eligible for the caller's bounded retry policy.
+var ErrDeliveryPermanent = errors.New("platform delivery permanently rejected")
+
 // ErrUsageLimit marks an agent error caused by an exhausted provider usage
 // allowance. The underlying error remains available for logs, while callers
 // can render a safe, user-facing quota message without exposing it.
