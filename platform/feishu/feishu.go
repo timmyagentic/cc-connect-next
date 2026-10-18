@@ -2118,6 +2118,10 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		}
 	}()
 
+	if ctx.Err() != nil {
+		return
+	}
+
 	if p.isMessageRecalled(messageID) {
 		slog.Debug(p.tag()+": recalled message ignored in async dispatch", "message_id", messageID)
 		return
@@ -2126,9 +2130,9 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 	// Resolve user and chat names asynchronously so SDK dispatcher is not blocked.
 	userName := ""
 	if userID != "" {
-		userName = p.resolveUserName(userID)
+		userName = p.resolveUserNameContext(ctx, userID)
 	}
-	chatName := p.resolveChatName(chatID)
+	chatName := p.resolveChatNameContext(ctx, chatID)
 
 	// If this message is a reply to another message, fetch the quoted content
 	// and prepend it so the agent has full context.
@@ -2426,15 +2430,23 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 	}
 }
 
+const nameLookupTimeout = 2 * time.Second
+
 // resolveUserName fetches a user's display name via the Contact API, with caching.
 func (p *Platform) resolveUserName(openID string) string {
+	return p.resolveUserNameContext(context.Background(), openID)
+}
+
+func (p *Platform) resolveUserNameContext(ctx context.Context, openID string) string {
 	if !isValidFeishuLookupID(openID) {
 		return openID
 	}
 	if cached, ok := p.userNameCache.Load(openID); ok {
 		return cached.(string)
 	}
-	resp, err := p.client.Contact.User.Get(context.Background(),
+	ctx, cancel := context.WithTimeout(ctx, nameLookupTimeout)
+	defer cancel()
+	resp, err := p.client.Contact.User.Get(ctx,
 		larkcontact.NewGetUserReqBuilder().
 			UserId(openID).
 			UserIdType("open_id").
@@ -2498,13 +2510,19 @@ func (p *Platform) resolveUserNames(openIDs []string) map[string]string {
 
 // resolveChatName fetches a chat/group name via the IM API, with caching.
 func (p *Platform) resolveChatName(chatID string) string {
+	return p.resolveChatNameContext(context.Background(), chatID)
+}
+
+func (p *Platform) resolveChatNameContext(ctx context.Context, chatID string) string {
 	if chatID == "" {
 		return ""
 	}
 	if cached, ok := p.chatNameCache.Load(chatID); ok {
 		return cached.(string)
 	}
-	resp, err := p.client.Im.Chat.Get(context.Background(),
+	ctx, cancel := context.WithTimeout(ctx, nameLookupTimeout)
+	defer cancel()
+	resp, err := p.client.Im.Chat.Get(ctx,
 		larkim.NewGetChatReqBuilder().ChatId(chatID).Build())
 	if err != nil {
 		slog.Debug(p.tag()+": resolve chat name failed", "chat_id", chatID, "error", err)
