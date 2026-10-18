@@ -253,7 +253,7 @@ func (e *Engine) runPendingRestartNotify(req *RestartRequest, firedCh chan struc
 	}
 
 	if err := e.dispatchRestartNotify(req); err != nil {
-		slog.Warn("restart notify: dispatch failed after retries",
+		slog.Warn("restart notify: dispatch failed",
 			"platform", req.Platform, "session", req.SessionKey, "error", err)
 	}
 	e.clearPendingRestart(req)
@@ -325,8 +325,9 @@ func (e *Engine) clearPendingRestart(req *RestartRequest) {
 }
 
 // dispatchRestartNotify sends the notify to the target platform with up
-// to 3 attempts (initial + 2 retries) on transient failure. The
-// platform must already be ready when this is called.
+// to 3 attempts (initial + 2 retries). Explicit permanent delivery failures
+// and cancellation stop immediately; unclassified errors retain bounded
+// retries for platform compatibility. The platform must already be ready.
 func (e *Engine) dispatchRestartNotify(req *RestartRequest) error {
 	p := e.lookupReadyPlatform(req.Platform)
 	if p == nil {
@@ -345,7 +346,16 @@ func (e *Engine) dispatchRestartNotify(req *RestartRequest) error {
 	var lastErr error
 	for attempt, wait := range backoffs {
 		if wait > 0 {
-			time.Sleep(wait)
+			timer := time.NewTimer(wait)
+			select {
+			case <-e.ctx.Done():
+				timer.Stop()
+				return e.ctx.Err()
+			case <-timer.C:
+			}
+		}
+		if err := e.ctx.Err(); err != nil {
+			return err
 		}
 		if err := e.waitOutgoing(p); err != nil {
 			lastErr = fmt.Errorf("wait outgoing: %w", err)
@@ -355,7 +365,12 @@ func (e *Engine) dispatchRestartNotify(req *RestartRequest) error {
 		}
 		if err := p.Send(e.ctx, rctx, text); err != nil {
 			lastErr = err
-			slog.Warn("restart notify: send failed, will retry",
+			if errors.Is(err, ErrDeliveryPermanent) || e.ctx.Err() != nil {
+				slog.Warn("restart notify: send failed, not retrying",
+					"platform", req.Platform, "session", req.SessionKey, "attempt", attempt+1, "error", err)
+				return err
+			}
+			slog.Warn("restart notify: send failed",
 				"platform", req.Platform, "session", req.SessionKey,
 				"attempt", attempt+1, "max_attempts", len(backoffs), "error", err)
 			continue
@@ -2273,18 +2288,13 @@ func (e *Engine) executeScheduledShell(p Platform, replyCtx any, spec scheduledS
 	// Wait briefly to see if the command finishes quickly
 	select {
 	case <-doneCh:
+		if ctx.Err() != nil {
+			return e.finishInterruptedScheduledShell(p, replyCtx, ctx.Err(), cmdLabel, &mu, &buf, false, nil)
+		}
 		return e.finishScheduledShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, false, nil)
 	case <-ctx.Done():
 		killAndWait(shellCmd, doneCh)
-		mu.Lock()
-		output := buf.String()
-		mu.Unlock()
-		msg := fmt.Sprintf("⏰ ⚠️ timeout: `%s`", cmdLabel)
-		if output != "" {
-			msg = fmt.Sprintf("⏰ ⚠️ timeout: `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-		}
-		e.send(p, replyCtx, msg)
-		return fmt.Errorf("shell command timed out")
+		return e.finishInterruptedScheduledShell(p, replyCtx, ctx.Err(), cmdLabel, &mu, &buf, false, nil)
 	case <-time.After(quickFinishTimeout):
 		// Still running — fall through to progress mode
 	}
@@ -2340,23 +2350,14 @@ func (e *Engine) executeScheduledShell(p Platform, replyCtx any, spec scheduledS
 	select {
 	case <-doneCh:
 		close(updateDone)
+		if ctx.Err() != nil {
+			return e.finishInterruptedScheduledShell(p, replyCtx, ctx.Err(), cmdLabel, &mu, &buf, useUpdate, previewHandle)
+		}
 		return e.finishScheduledShell(p, replyCtx, shellCmd, &mu, &buf, cmdLabel, useUpdate, previewHandle)
 	case <-ctx.Done():
 		close(updateDone)
 		killAndWait(shellCmd, doneCh)
-		mu.Lock()
-		output := buf.String()
-		mu.Unlock()
-		msg := fmt.Sprintf("⏰ ⚠️ timeout: `%s`", cmdLabel)
-		if output != "" {
-			msg = fmt.Sprintf("⏰ ⚠️ timeout: `%s`\n\n%s", cmdLabel, truncateStr(output, 3000))
-		}
-		if useUpdate {
-			_ = updaterFor(p).UpdateMessage(e.ctx, previewHandle, msg)
-		} else {
-			e.send(p, replyCtx, msg)
-		}
-		return fmt.Errorf("shell command timed out")
+		return e.finishInterruptedScheduledShell(p, replyCtx, ctx.Err(), cmdLabel, &mu, &buf, useUpdate, previewHandle)
 	}
 }
 
@@ -2393,14 +2394,14 @@ func (e *Engine) finishScheduledShell(p Platform, replyCtx any, cmd *exec.Cmd, m
 	if useUpdate && previewHandle != nil {
 		_ = updaterFor(p).UpdateMessage(e.ctx, previewHandle, finalMsg)
 		if !exitOK {
-			return fmt.Errorf("shell: exit code %d", cmd.ProcessState.ExitCode())
+			return scheduledShellFailure(cmd.ProcessState.ExitCode(), output)
 		}
 		return nil
 	}
 
 	e.send(p, replyCtx, finalMsg)
 	if !exitOK {
-		return fmt.Errorf("shell: exit code %d", cmd.ProcessState.ExitCode())
+		return scheduledShellFailure(cmd.ProcessState.ExitCode(), output)
 	}
 	return nil
 }
