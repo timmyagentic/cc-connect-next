@@ -993,6 +993,8 @@ Notes:
 
 Shell job failures retain the exit code and a redacted output tail (up to 2,048 Unicode characters) in `last_error` and scheduler logs, including for muted jobs. Cancellation is distinguished from a deadline timeout. This does not retry shell commands or change the existing busy-session policy; muted jobs still send no chat output.
 
+If output contains credential-bearing command-line flags, the entire output is omitted from diagnostics because shell traces can contain multiline or concatenated secret values. The exit code or cancellation cause is still retained.
+
 Create scheduled tasks that run automatically.
 
 ### Chat Commands

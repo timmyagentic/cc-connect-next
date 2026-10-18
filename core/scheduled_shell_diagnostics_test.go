@@ -141,3 +141,20 @@ func TestScheduledShellFailurePersistsDiagnosticWithoutUnmuting(t *testing.T) {
 		})
 	}
 }
+
+func TestScheduledShellDiagnosticSuppressesCredentialArguments(t *testing.T) {
+	for _, output := range []string{
+		"+ deploy --password synthetic-short-pass\nconnection refused",
+		"+ deploy --api-key 'synthetic short value'\nconnection refused",
+		"+ deploy '--client-secret' 'synthetic\nmultiline value'\nconnection refused",
+		"+ deploy --access_token=synthetic-short-pass\nconnection refused",
+		"+ deploy -k synthetic-short-pass\nconnection refused",
+	} {
+		if got := scheduledShellDiagnostic(output); got != "[REDACTED-SHELL-OUTPUT]" {
+			t.Errorf("credential-bearing command output was not suppressed")
+		}
+	}
+	if got := scheduledShellDiagnostic("dial tcp: connection refused"); got != "dial tcp: connection refused" {
+		t.Errorf("ordinary diagnostics lost: %q", got)
+	}
+}
