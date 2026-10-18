@@ -346,6 +346,9 @@ func TestReplyDoesNotRetryOnNonTransientAPIError(t *testing.T) {
 	if !strings.Contains(err.Error(), "send too fast") {
 		t.Fatalf("Reply() error = %v, want rate limited error", err)
 	}
+	if errors.Is(err, core.ErrDeliveryPermanent) {
+		t.Fatalf("rate limit must remain eligible for outer retry: %v", err)
+	}
 	// Should only make 1 attempt (no retry on API-level errors)
 	if got := replyCalls.Load(); got != 1 {
 		t.Fatalf("replyCalls = %d, want 1 (no retry)", got)
@@ -579,5 +582,40 @@ func TestWithTransientRetry_BackoffTiming(t *testing.T) {
 	}
 	if elapsed > 10*time.Second {
 		t.Fatalf("elapsed = %v, backoff took unreasonably long", elapsed)
+	}
+}
+
+// A bot removed from the destination chat must not be retried by the
+// engine's outer notification retry loop after the SDK returns the failure.
+func TestSend_BotOutsideChatMarksPermanentDeliveryFailure(t *testing.T) {
+	for _, reply := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reply=%v", reply), func(t *testing.T) {
+			var calls atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if strings.Contains(r.URL.Path, "tenant_access_token") {
+					writeJSON(t, w, map[string]any{"code": 0, "expire": 7200, "tenant_access_token": "test-token"})
+					return
+				}
+				calls.Add(1)
+				writeJSON(t, w, map[string]any{"code": 230002, "msg": "Bot is NOT in the chat"})
+			}))
+			defer srv.Close()
+			p := &Platform{platformName: "feishu", client: lark.NewClient("test-permanent", "test-secret", lark.WithEnableTokenCache(false), lark.WithOpenBaseUrl(srv.URL), lark.WithHttpClient(srv.Client()))}
+			rc := replyContext{chatID: "oc_test"}
+			if reply {
+				rc.messageID = "om_test"
+			}
+			err := p.Send(context.Background(), rc, "restart complete")
+			if !errors.Is(err, core.ErrDeliveryPermanent) {
+				t.Fatalf("error = %v; want permanent delivery failure", err)
+			}
+			if !strings.Contains(err.Error(), "230002") {
+				t.Fatalf("lost platform diagnostic: %v", err)
+			}
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("API calls = %d, want 1", got)
+			}
+		})
 	}
 }
