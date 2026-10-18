@@ -171,6 +171,10 @@ thread_isolation = "topics_only" # 全局默认：仅隔离真实飞书话题
 > `done_emoji` 省略时默认使用 `"Done"`；agent 每次完成回复时会先移除 "OnIt"（如果有），再添加完成表情。在 quiet 模式下尤其有用，因为飞书卡片原地更新不触发推送。设为 `"none"` 可单独关闭；`reaction_emoji = "none"` 也会关闭隐式完成表情，除非又显式设置了 `done_emoji`。
 > `image_batch_window_ms` 控制连续多张图片合并成一条 agent 消息的等待窗口（默认 500ms）。飞书手机端一次连发多张图时，每张图是独立事件；cc-connect-next 会在窗口内将它们合并成一条多图消息再分发给 agent。如果你的网络/设备发送间隔超过 500ms 且仍被拆成多轮回复（每张图独立处理），可调高到 800–1200ms；如果以单图为主、希望响应更快，可适当调低。设为 `0` 时回退到默认 500ms。
 
+同一会话通过过滤的消息按本机接收顺序处理附件下载与分发，后来的文字会等待前面的图片下载并冲刷图片批次，避免图片被误判为旧消息。不同会话仍可并发处理；这不会等待 Agent 完成上一轮，也不会关闭已有的重复消息或历史消息过滤。平台本身乱序投递的历史消息不在此排序保证内。 用户名与群名查询各有两秒超时，并遵循入站消息取消；失败时退回原始 ID，避免元数据查询一直阻塞会话。
+
+Accepted messages in one session preserve local arrival order through attachment download and dispatch. Later text waits for earlier image downloads and flushes their batch; other sessions remain independent. This does not wait for the Agent's turn to finish or disable duplicate/stale-message filtering. It does not reorder historical events delivered out of order by the platform.
+
 ---
 
 ### 被 @ 时补读近期讨论（可选）
