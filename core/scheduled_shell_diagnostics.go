@@ -5,16 +5,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 )
 
 const scheduledShellDiagnosticLimit = 2048
 
+// Shell traces are not reliably parseable as argv: quoted credentials can span
+// lines and concatenate quoted/unquoted fragments. Suppress the entire output
+// when a credential flag is present instead of risking a surviving suffix.
+var scheduledShellCredentialFlag = regexp.MustCompile(`(?i)(?:^|[\s"'` + "`" + `])(?:--(?:[a-z0-9]+[_-])*(?:api[_-]?key|apikey|token|secret|password|passwd|credential[s]?|authorization|cookie|private[_-]?key)|-k)(?:$|[\s="'` + "`" + `])`)
+
 // Redact before taking the tail: truncating first could cut off the key that
 // identifies a credential. Preserve the end, where commands usually explain
 // their failure, without persisting unlimited process output in LastError.
 func scheduledShellDiagnostic(output string) string {
+	if scheduledShellCredentialFlag.MatchString(output) {
+		return "[REDACTED-SHELL-OUTPUT]"
+	}
 	output = strings.TrimSpace(redactFeedbackText(output))
 	runes := []rune(output)
 	if len(runes) > scheduledShellDiagnosticLimit {
