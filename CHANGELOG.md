@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## v0.3.2 (2026-10-20)
+
+Stable release from the latest main, promoting v0.3.2-beta.3 without additional
+runtime changes. See `changelogs/v0.3.2.md` for bilingual highlights and upgrade
+notes from v0.3.1.
+
+- Add opt-in immediate Feishu/Lark private completion notifications from the
+  same bot, with a summary and original conversation link. Old unread-reminder
+  keys remain aliases; delays and historical pending reminders are not replayed.
+- Send ordered local image galleries with up to five originals per Card 2.0
+  message, retaining upload atomicity, stable retry IDs, topic routing and limits.
+- Improve macOS doctor process/CLI diagnostics while explicitly marking privacy
+  permissions as unprobed.
+- Retain redacted scheduled-shell failure diagnostics, stop retrying permanent
+  Feishu restart-notice failures, and interrupt retry waits on cancellation.
+- Preserve Feishu inbound order across attachment downloads and bound cancellable
+  user/chat metadata lookups without serializing unrelated conversations.
+- Refresh the bilingual product website and setup guides, and migrate product
+  links to timmyagentic.si.
+
 ## v0.3.2-beta.2 (2026-10-15)
 
 See `changelogs/v0.3.2-beta.2.md` for bilingual highlights and upgrade notes.
