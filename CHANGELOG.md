@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+
+- Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
+
 ## v0.3.2 (2026-10-20)
 
 Stable release from the latest main, promoting v0.3.2-beta.3 without additional
