@@ -552,9 +552,9 @@ type AgentSession interface {
 	Close() error
 }
 
-// TurnOptions are fully resolved settings for one new agent turn. The empty
-// AnswerProfile means the project's ordinary default; named profiles are
-// one-shot overrides and must not mutate the Agent's persistent configuration.
+// TurnOptions are fully resolved settings for one new agent turn. Named
+// profiles and explicit task models are one-shot overrides and must not
+// mutate the Agent's persistent configuration.
 type TurnOptions struct {
 	AnswerProfile   AnswerProfileName
 	Model           string
@@ -567,6 +567,13 @@ type TurnOptions struct {
 // keep the existing Send behavior.
 type TurnOptionsSession interface {
 	SendWithTurnOptions(prompt string, images []ImageAttachment, files []FileAttachment, options TurnOptions) error
+}
+
+// PerTurnModelSupporter advertises model overrides before a session exists.
+// A session must still implement TurnOptionsSession when the override is sent.
+// Support never authorizes changing the Agent's persistent model or provider.
+type PerTurnModelSupporter interface {
+	SupportsPerTurnModel() bool
 }
 
 // ServiceTierProvider exposes the Agent's ordinary service-tier default so the
@@ -598,6 +605,13 @@ type ServiceTierCatalog interface {
 // the speed or restoring defaults after a profiled turn.
 type TurnDefaultsProvider interface {
 	DefaultTurnOptions() TurnOptions
+}
+
+// TurnDefaultsValidator resolves and validates restorable startup defaults.
+// Backends whose omitted model means "keep the previous turn's model" must
+// resolve a concrete default before accepting a one-turn task override.
+type TurnDefaultsValidator interface {
+	ValidateTurnDefaults() error
 }
 
 // SteerableSession is an optional capability for agent sessions that can

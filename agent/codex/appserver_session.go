@@ -210,9 +210,11 @@ type appServerSession struct {
 	titleMu             sync.Mutex
 	explicitTitleRev    uint64
 
-	runtimeMu   sync.RWMutex
-	turnOptions *core.TurnOptions
-	diagnostics appServerDiagnostics
+	runtimeMu       sync.RWMutex
+	turnOptions     *core.TurnOptions
+	defaultModel    *string // Project/native default, independent of a resumed thread's last turn.
+	defaultModelErr error   // Blocks explicit per-turn options, never the legacy Send path.
+	diagnostics     appServerDiagnostics
 }
 
 const (
@@ -287,6 +289,11 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 	if err := s.initialize(); err != nil {
 		_ = s.Close()
 		return nil, err
+	}
+	if err := s.captureDefaultModel(p.resumeID); err != nil {
+		// Existing sessions without per-turn model selection still resume and
+		// send exactly as before. Explicit overrides must fail closed below.
+		slog.Warn("codex app-server native default unavailable; per-turn options disabled")
 	}
 
 	if err := s.ensureThread(p.resumeID); err != nil {
@@ -436,6 +443,40 @@ func (s *appServerSession) ensureThread(resumeID string) error {
 	return nil
 }
 
+// A resumed thread can report the previous one-shot model. Read the native
+// configuration before resume so that a later default turn cannot inherit it.
+// config/read is the same inference-free RPC used by loadCodexRuntimeConfig.
+func (s *appServerSession) captureDefaultModel(resumeID string) error {
+	model := strings.TrimSpace(s.model)
+	if model == "" && (resumeID == "" || resumeID == core.ContinueSession) {
+		return nil // A new thread's response establishes its native default.
+	}
+	if model == "" {
+		// Never let a failed lookup expose the resumed task model as a default.
+		s.defaultModel = &model
+		var response struct {
+			Config struct {
+				Model string `json:"model"`
+			} `json:"config"`
+		}
+		if err := s.request("config/read", map[string]any{"includeLayers": false}, &response); err != nil {
+			s.defaultModelErr = fmt.Errorf("codex app-server read default model before resume: %w", err)
+			return s.defaultModelErr
+		}
+		model = strings.TrimSpace(response.Config.Model)
+		if model == "" {
+			var err error
+			model, err = codexCatalogDefaultModel(s.request)
+			if err != nil {
+				s.defaultModelErr = err
+				return err
+			}
+		}
+	}
+	s.defaultModel = &model
+	return nil
+}
+
 func (s *appServerSession) threadRequestParams() map[string]any {
 	params := map[string]any{
 		"experimentalRawEvents":  false,
@@ -481,7 +522,26 @@ func (s *appServerSession) Send(prompt string, images []core.ImageAttachment, fi
 }
 
 func (s *appServerSession) SendWithTurnOptions(prompt string, images []core.ImageAttachment, files []core.FileAttachment, options core.TurnOptions) error {
+	if err := s.ValidateTurnDefaults(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(options.Model) == "" {
+		options.Model = s.DefaultTurnOptions().Model
+	}
 	return s.send(prompt, images, files, &options)
+}
+
+func (s *appServerSession) ValidateTurnDefaults() error {
+	s.runtimeMu.RLock()
+	defaultErr := s.defaultModelErr
+	s.runtimeMu.RUnlock()
+	if defaultErr != nil {
+		return fmt.Errorf("codex app-server per-turn options unavailable: %w", defaultErr)
+	}
+	if strings.TrimSpace(s.DefaultTurnOptions().Model) == "" {
+		return fmt.Errorf("codex app-server per-turn options unavailable: native default model is unresolved")
+	}
+	return nil
 }
 
 func (s *appServerSession) send(prompt string, images []core.ImageAttachment, files []core.FileAttachment, options *core.TurnOptions) error {
@@ -1222,7 +1282,11 @@ func (s *appServerSession) applyThreadServiceTier(tier *string) {
 func (s *appServerSession) DefaultTurnOptions() core.TurnOptions {
 	s.runtimeMu.RLock()
 	defer s.runtimeMu.RUnlock()
-	return core.TurnOptions{Model: s.model, ReasoningEffort: s.effort, ServiceTier: s.serviceTier}
+	model := s.model
+	if s.defaultModel != nil {
+		model = *s.defaultModel
+	}
+	return core.TurnOptions{Model: model, ReasoningEffort: s.effort, ServiceTier: s.serviceTier}
 }
 
 func (s *appServerSession) GetReasoningEffort() string {

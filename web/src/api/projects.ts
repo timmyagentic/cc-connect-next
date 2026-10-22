@@ -85,6 +85,7 @@ export interface AgentCapabilityManifest {
   read_only: boolean;
   commands: ManifestCommandCapability[];
   skills: ManifestSkillCapability[];
+  runtime?: { kind: string; capabilities: { id: string; availability: CapabilityAvailability }[] }[];
 }
 
 export const listAgentTypes = () => api.get<{ agents: string[]; platforms: string[] }>('/agents');
@@ -96,6 +97,8 @@ export const getProjectCapabilities = (name: string, sessionKey?: string) =>
     sections: 'commands,skills',
     ...(sessionKey ? { session_key: sessionKey } : {}),
   });
+export const getProjectRuntimeCapabilities = (name: string) =>
+  api.get<AgentCapabilityManifest>(`/projects/${name}/capabilities`, { sections: 'runtime' });
 export const updateProject = (name: string, body: ProjectSettingsUpdate) => api.patch(`/projects/${name}`, body);
 
 export const addPlatformToProject = (projectName: string, body: {

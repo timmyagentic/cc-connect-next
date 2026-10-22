@@ -31,7 +31,7 @@
 - 🪶 **同一个机器人，开箱即用的官方 lark-cli** —— 新装与迁移可直接安装官方 `lark-cli`，复用 Next 已验证的飞书机器人，创建或复用隔离 profile，并把它设为默认 bot profile；旧 profile、用户 OAuth 与密钥边界完整保留。
 - 🔔 **自我维护的安装** —— `cc-connect-next update [stable|beta]` 显式选择通道，`stable` 保持默认；独立二进制使用 immutable Plan、同 Release checksum、双版本探针、锁、备份与回滚。daemon 按 `update_channel` 对每个新版本只提醒一次；点击【查看并更新】或回复「更新」先展示精确通道、Release 类型与产物，再确认安装，不会批准 A 却安装 B。
 - 🤖 **14 种 Agent × 15 个平台** —— 单进程承载多个项目，每个项目把一个代码目录绑定到独立的 Agent 与平台，各自拥有权限、provider、模型与展示配置。
-- 🌍 **生产级配套** —— `doctor` 诊断、launchd/systemd/Windows daemon、Web 管理台（Beta）、定时任务与 webhook、机器人间 relay、语音输入/输出（STT/TTS）、多工作区路由，五语言 i18n（en、zh、zh-TW、ja、es）。
+- 🌍 **生产级配套** —— `doctor` 诊断、launchd/systemd/Windows daemon、Web 管理台（Beta）、定时任务（Prompt 可独立指定模型，保持项目默认值）与 webhook、机器人间 relay、语音输入/输出（STT/TTS）、多工作区路由，五语言 i18n（en、zh、zh-TW、ja、es）。
 
 - **一次触发即可提交的聊天反馈。** 遇到 bug 或缺失能力时，明确执行 `/feedback <描述>` 或点击 Feedback 动作，会立即提交 Foundation 完整脱敏 Draft；它只加入最近相邻、字段化、有界且脱敏的用户/Agent 诊断上下文，不展示预览、不要求二次确认。自动错误/能力缺口提示在用户点击前始终零请求，提交后的卡片只显示成功或失败，不附 Issue 链接。Manifest 声明的 Agent CLI 仍通过活动回合 HMAC 与一次性 approval token 提交同一类 Draft，不依赖飞书 `send_as_user`；身份/schema 不匹配和重放始终零请求。作者侧 Relay 固定目标仓库并渲染 Issue，无需 GitHub 账号。
 

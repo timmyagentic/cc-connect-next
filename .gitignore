@@ -86,6 +86,7 @@ scripts/*
 !scripts/release-channel-policy.js
 !scripts/release-policy.test.js
 !scripts/web-cron-session-targets.test.js
+!scripts/web-cron-model.test.js
 tmp/
 temp/
 *.tmp

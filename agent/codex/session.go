@@ -144,7 +144,20 @@ func (cs *codexSession) Send(prompt string, images []core.ImageAttachment, files
 }
 
 func (cs *codexSession) SendWithTurnOptions(prompt string, images []core.ImageAttachment, files []core.FileAttachment, options core.TurnOptions) error {
+	if err := cs.ValidateTurnDefaults(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(options.Model) == "" {
+		options.Model = cs.DefaultTurnOptions().Model
+	}
 	return cs.send(prompt, images, files, &options)
+}
+
+func (cs *codexSession) ValidateTurnDefaults() error {
+	if strings.TrimSpace(cs.DefaultTurnOptions().Model) == "" {
+		return fmt.Errorf("codex exec per-turn options unavailable: native default model is unresolved")
+	}
+	return nil
 }
 
 func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files []core.FileAttachment, options *core.TurnOptions) error {
@@ -759,7 +772,18 @@ func loadCodexRuntimeConfig(ctx context.Context, cliBin string, cliExtraArgs []s
 		return "", "", err
 	}
 
-	return strings.TrimSpace(resp.Config.Model), normalizeRuntimeReasoningEffort(stringValue(resp.Config.ModelReasoningEffort)), nil
+	model := strings.TrimSpace(resp.Config.Model)
+	if model == "" {
+		var err error
+		model, err = codexCatalogDefaultModel(func(method string, params any, out any) error {
+			nextID++
+			return rpcRequestOverIO(stdin, reader, nextID, method, params, out)
+		})
+		if err != nil {
+			return "", "", err
+		}
+	}
+	return model, normalizeRuntimeReasoningEffort(stringValue(resp.Config.ModelReasoningEffort)), nil
 }
 
 func rpcRequestOverIO(stdin io.Writer, reader *bufio.Reader, id int64, method string, params any, out any) error {

@@ -1017,12 +1017,22 @@ Example:
 ```bash
 cc-connect-next cron add --cron "0 6 * * *" --prompt "Summarize GitHub trending" --desc "Daily Trending"
 cc-connect-next cron list
-cc-connect-next cron edit <job-id> <field> <value>   # e.g. cron_expr, prompt, enabled, mute, timeout_mins
+cc-connect-next cron edit <job-id> <field> <value>   # e.g. cron_expr, prompt, model, enabled, mute, timeout_mins
 cc-connect-next cron exec <job-id>
 cc-connect-next cron del <job-id>
 ```
 
 Optional: `--session-mode new-per-run` starts a fresh agent session on each run (default is `reuse`, same as before). `--timeout-mins N` sets how long the scheduler waits per run (`0` = no limit; omit = 30 minutes).
+
+Prompt jobs optionally accept `--model <model-id>` to select a model for that job:
+
+```bash
+cc-connect-next cron add --cron "0 6 * * *" --prompt "Summarize GitHub trending" --model "model-id"
+cc-connect-next cron edit <job-id> model "model-id"
+cc-connect-next cron edit <job-id> model ""  # Restore inheritance
+```
+
+Both Codex `exec` and `app_server` backends support this setting. Omitting it preserves existing project/Agent model inheritance. An explicit model applies to the job's turn; ordinary chat and other jobs keep their defaults. It never switches providers or changes Project/Agent defaults. `--exec` and a non-empty `--model` are mutually exclusive. Agents without per-turn model support reject an explicit model during configuration and execution instead of silently ignoring it. The model ID must be usable through the current provider; the Agent/provider validates the actual ID at execution time. The Web cron editor exposes the same field, and job listings show the model or inheritance. Clear the field to restore inheritance.
 
 Persisted cron jobs and one-shot timers require a durable messaging target.
 Browser-connected Web/Bridge chat sessions are intentionally rejected because
