@@ -1925,6 +1925,39 @@ func TestCUJ_E1_CronFiresLinkedToSchedulerTest(t *testing.T) {
 	t.Log("CUJ-E1: real-time firing covered by core/cron_test.go scheduler tests (uses cron.New()). Engine-level wiring covered by CUJ-E2.")
 }
 
+// A user can run a model-pinned cron between ordinary messages. Both ordinary
+// replies still identify the Project default, while the cron identifies its
+// selected model. Drive the scheduler through /cron exec, as an IM user does.
+func TestCUJ_E7_CronTaskModelDoesNotChangeOrdinaryChat(t *testing.T) {
+	a := &cronModelAgent{model: "project-A"}
+	e, p := newCronModelEngine(t, a, "")
+	store, err := NewCronStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewCronScheduler(store)
+	scheduler.RegisterEngine("test", e)
+	e.SetCronScheduler(scheduler)
+	job := cronModelJob("cuj-pinned", "task-B")
+	if err := store.Add(job); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, step := range []struct{ input, reply string }{
+		{"ordinary-before", "model=project-A ordinary-before"},
+		{"/cron exec cuj-pinned", "model=task-B cuj-pinned"},
+		{"ordinary-after", "model=project-A ordinary-after"},
+	} {
+		e.ReceiveMessage(p, answerProfileMessage(step.input, step.input))
+		waitAnswerProfileCUJ(t, step.reply, func() bool {
+			return slices.Contains(p.getSent(), step.reply) && !e.sessions.GetOrCreateActive("test:user").Busy()
+		})
+	}
+	if got := strings.Join(p.getSent(), "\n"); strings.Contains(got, "model=task-B ordinary-") {
+		t.Fatalf("scheduled model leaked into ordinary visible replies: %q", got)
+	}
+}
+
 // CUJ-E3 · Cron jobs survive restart (store → reload → ListByProject).
 func TestCUJ_E3_CronSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()

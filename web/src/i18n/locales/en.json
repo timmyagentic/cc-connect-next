@@ -127,7 +127,12 @@
     "sessionNotSchedulableHint": "Browser-connected Web sessions cannot receive persistent scheduled delivery. Choose a durable messaging session.",
     "taskType": "Task type",
     "mode": "Permission mode",
-    "modeDefault": "Use project default"
+    "modeDefault": "Use project default",
+    "model": "Model",
+    "modelInherit": "Inherit project / Agent model",
+    "modelHint": "Prompt jobs only. Leave empty to inherit; clearing an override restores inheritance. The Agent must support per-turn model selection. This changes neither the provider nor project defaults.",
+    "modelPromptOnly": "Model overrides are only available for prompt jobs.",
+    "modelUnsupported": "This Agent does not support task model overrides. Leave the model empty to inherit."
   },
   "heartbeat": {
     "title": "Heartbeat",

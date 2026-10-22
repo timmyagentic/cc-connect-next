@@ -26,6 +26,7 @@ type CronJob struct {
 	SessionKey  string    `json:"session_key"`
 	CronExpr    string    `json:"cron_expr"`
 	Prompt      string    `json:"prompt"`
+	Model       string    `json:"model,omitempty"`    // per-run prompt model; empty = inherit project/session defaults
 	Exec        string    `json:"exec,omitempty"`     // shell command; mutually exclusive with Prompt
 	WorkDir     string    `json:"work_dir,omitempty"` // working directory for exec; empty = agent work_dir
 	Description string    `json:"description"`
@@ -87,6 +88,9 @@ func NormalizeCronSessionMode(s string) string {
 }
 
 func validateCronJob(j *CronJob) error {
+	if err := validateCronModel(j); err != nil {
+		return err
+	}
 	// SessionKey anchors the cron execution to a platform (ExecuteCronJob
 	// derives platformName from the prefix before ":"). Without it the job
 	// is persisted but fails at fire-time with the unhelpful
@@ -109,6 +113,13 @@ func validateCronJob(j *CronJob) error {
 	}
 	if j.TimeoutMins != nil && *j.TimeoutMins < 0 {
 		return fmt.Errorf("timeout_mins must be >= 0")
+	}
+	return nil
+}
+
+func validateCronModel(j *CronJob) error {
+	if strings.TrimSpace(j.Model) != "" && (j.IsShellJob() || strings.TrimSpace(j.Prompt) == "") {
+		return fmt.Errorf("model is only supported for prompt jobs")
 	}
 	return nil
 }
@@ -278,28 +289,75 @@ func (s *CronStore) Get(id string) *CronJob {
 	return nil
 }
 
-// Update modifies a specific field of a cron job. Returns false if job not found.
-// readOnlyFields contains fields that cannot be modified: id, created_at.
-func (s *CronStore) Update(id string, field string, value any) bool {
-	readOnlyFields := map[string]bool{"id": true, "created_at": true, "last_run": true, "last_error": true}
-	if readOnlyFields[field] {
-		return false
-	}
-
+// Snapshot freezes a run's configuration under the store lock. Later edits apply
+// to subsequent runs, including edits to pointer-valued settings.
+func (s *CronStore) Snapshot(id string) *CronJob {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, j := range s.jobs {
-		if j.ID == id {
-			if err := updateJobField(j, field, value); err != nil {
-				return false
-			}
-			if saveErr := s.save(); saveErr != nil {
-				slog.Warn("cron: failed to save after update", "error", saveErr)
-			}
-			return true
+	for _, job := range s.jobs {
+		if job.ID == id {
+			return cloneCronJob(job)
 		}
 	}
-	return false
+	return nil
+}
+
+func cloneCronJob(job *CronJob) *CronJob {
+	copy := *job
+	if job.Silent != nil {
+		value := *job.Silent
+		copy.Silent = &value
+	}
+	if job.TimeoutMins != nil {
+		value := *job.TimeoutMins
+		copy.TimeoutMins = &value
+	}
+	return &copy
+}
+
+// Update modifies one field, retaining the legacy boolean store API.
+func (s *CronStore) Update(id string, field string, value any) bool {
+	_, err := s.updateFields(id, map[string]any{field: value}, nil)
+	return err == nil
+}
+
+// updateFields validates and commits a complete edit under one lock. In
+// particular, clearing model while converting a prompt job to exec is atomic.
+func (s *CronStore) updateFields(id string, updates map[string]any, validate func(*CronJob) error) (*CronJob, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, job := range s.jobs {
+		if job.ID != id {
+			continue
+		}
+		candidate := cloneCronJob(job)
+		for field, value := range updates {
+			switch field {
+			case "id", "created_at", "last_run", "last_error":
+				return nil, fmt.Errorf("field %q is read-only", field)
+			}
+			if err := updateJobField(candidate, field, value); err != nil {
+				return nil, err
+			}
+		}
+		if err := validateCronModel(candidate); err != nil {
+			return nil, err
+		}
+		if validate != nil {
+			if err := validate(candidate); err != nil {
+				return nil, err
+			}
+		}
+		// Publish a new value instead of rewriting fields on pointers already
+		// handed to readers (including the immutable ID used by CLI callers).
+		s.jobs[index] = candidate
+		if err := s.save(); err != nil {
+			s.jobs[index] = job
+			return nil, fmt.Errorf("save cron edit: %w", err)
+		}
+		return cloneCronJob(candidate), nil
+	}
+	return nil, fmt.Errorf("job %q not found", id)
 }
 
 // updateJobField sets a field on a CronJob by reflection. Returns error for unknown fields.
@@ -323,6 +381,11 @@ func updateJobField(job *CronJob, field string, value any) error {
 	case "prompt":
 		if v, ok := value.(string); ok {
 			job.Prompt = v
+			return nil
+		}
+	case "model":
+		if v, ok := value.(string); ok {
+			job.Model = strings.TrimSpace(v)
 			return nil
 		}
 	case "exec":
@@ -415,6 +478,7 @@ type CronScheduler struct {
 	cron               *cron.Cron
 	engines            map[string]*Engine // project name → engine
 	mu                 sync.RWMutex
+	editMu             sync.Mutex              // serialize multi-field edits with rescheduling
 	entries            map[string]cron.EntryID // job ID → cron entry
 	defaultSilent      bool                    // global default for suppressing cron start notifications
 	defaultSessionMode string                  // global default session mode; "" = reuse, "new_per_run" = fresh session each run
@@ -483,10 +547,14 @@ func (cs *CronScheduler) AddJob(job *CronJob) error {
 		return err
 	}
 	job.SessionMode = NormalizeCronSessionMode(job.SessionMode)
+	job.Model = strings.TrimSpace(job.Model)
 	if _, err := cron.ParseStandard(job.CronExpr); err != nil {
 		return fmt.Errorf("invalid cron expression %q: %w", job.CronExpr, err)
 	}
 	if err := cs.validatePersistentTarget(job.Project, job.SessionKey); err != nil {
+		return err
+	}
+	if err := cs.validateModelSupport(job); err != nil {
 		return err
 	}
 	if err := cs.store.Add(job); err != nil {
@@ -499,6 +567,8 @@ func (cs *CronScheduler) AddJob(job *CronJob) error {
 }
 
 func (cs *CronScheduler) RemoveJob(id string) bool {
+	cs.editMu.Lock()
+	defer cs.editMu.Unlock()
 	cs.mu.Lock()
 	if entryID, ok := cs.entries[id]; ok {
 		cs.cron.Remove(entryID)
@@ -509,17 +579,22 @@ func (cs *CronScheduler) RemoveJob(id string) bool {
 }
 
 func (cs *CronScheduler) EnableJob(id string) error {
-	job := cs.store.Get(id)
+	cs.editMu.Lock()
+	defer cs.editMu.Unlock()
+	job := cs.store.Snapshot(id)
 	if job == nil {
 		return fmt.Errorf("job %q not found", id)
 	}
 	if err := cs.validatePersistentTarget(job.Project, job.SessionKey); err != nil {
 		return err
 	}
+	if err := cs.validateModelSupport(job); err != nil {
+		return err
+	}
 	if !cs.store.SetEnabled(id, true) {
 		return fmt.Errorf("job %q not found", id)
 	}
-	job = cs.store.Get(id)
+	job = cs.store.Snapshot(id)
 	if job != nil {
 		return cs.scheduleJob(job)
 	}
@@ -527,6 +602,8 @@ func (cs *CronScheduler) EnableJob(id string) error {
 }
 
 func (cs *CronScheduler) DisableJob(id string) error {
+	cs.editMu.Lock()
+	defer cs.editMu.Unlock()
 	if !cs.store.SetEnabled(id, false) {
 		return fmt.Errorf("job %q not found", id)
 	}
@@ -539,95 +616,70 @@ func (cs *CronScheduler) DisableJob(id string) error {
 	return nil
 }
 
-// UpdateJob modifies a field of a cron job and reschedules if necessary.
-// Returns error if job not found, field is read-only, or value is invalid.
+// UpdateJob modifies one job field; edits affect the next run's snapshot.
 func (cs *CronScheduler) UpdateJob(id string, field string, value any) error {
-	job := cs.store.Get(id)
-	if job == nil {
-		return fmt.Errorf("job %q not found", id)
-	}
+	return cs.UpdateJobFields(id, map[string]any{field: value})
+}
 
-	// Validate cron expression if updating cron_expr
-	if field == "cron_expr" {
-		expr, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("cron_expr must be a string")
-		}
-		if _, err := cron.ParseStandard(expr); err != nil {
-			return fmt.Errorf("invalid cron expression %q: %w", expr, err)
-		}
-	}
+// UpdateJobFields applies an API edit atomically, including model/exec changes.
+func (cs *CronScheduler) UpdateJobFields(id string, updates map[string]any) error {
+	cs.editMu.Lock()
+	defer cs.editMu.Unlock()
 
-	// Validate mode if updating mode field
-	if field == "mode" {
-		if v, ok := value.(string); ok && v != "" {
-			switch v {
-			case "default", "bypassPermissions", "acceptEdits", "plan", "auto", "dontAsk":
-			default:
-				return fmt.Errorf("invalid mode %q (want default, bypassPermissions, acceptEdits, plan, auto, or dontAsk)", v)
+	job, err := cs.store.updateFields(id, updates, func(candidate *CronJob) error {
+		for field := range updates {
+			switch field {
+			case "cron_expr":
+				if _, err := cron.ParseStandard(candidate.CronExpr); err != nil {
+					return fmt.Errorf("invalid cron expression %q: %w", candidate.CronExpr, err)
+				}
+			case "mode":
+				switch candidate.Mode {
+				case "", "default", "bypassPermissions", "acceptEdits", "plan", "auto", "dontAsk":
+				default:
+					return fmt.Errorf("invalid mode %q (want default, bypassPermissions, acceptEdits, plan, auto, or dontAsk)", candidate.Mode)
+				}
+			case "session_mode":
+				mode := NormalizeCronSessionMode(candidate.SessionMode)
+				if mode != "" && mode != "new_per_run" {
+					return fmt.Errorf("invalid session_mode %q (want reuse, new_per_run, or new-per-run)", candidate.SessionMode)
+				}
 			}
 		}
-	}
-
-	// Validate session_mode if updating session_mode field
-	if field == "session_mode" {
-		if v, ok := value.(string); ok && v != "" {
-			mode := NormalizeCronSessionMode(v)
-			if mode != "" && mode != "new_per_run" {
-				return fmt.Errorf("invalid session_mode %q (want reuse, new_per_run, or new-per-run)", v)
+		_, projectChanged := updates["project"]
+		_, targetChanged := updates["session_key"]
+		if candidate.Enabled || projectChanged || targetChanged {
+			if err := cs.validatePersistentTarget(candidate.Project, candidate.SessionKey); err != nil {
+				return err
 			}
 		}
-	}
-
-	// Validate enabled type up-front. Without this, a non-bool value (e.g. a
-	// JSON string "true" from a misbehaving API client) reaches updateJobField
-	// only after we've already removed the cron entry below, and store.Update
-	// then fails on the type mismatch — leaving the job marked Enabled in the
-	// store but never firing again until the daemon restarts.
-	if field == "enabled" {
-		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("enabled must be a boolean")
+		_, modelChanged := updates["model"]
+		_, enabledChanged := updates["enabled"]
+		if modelChanged || projectChanged || (enabledChanged && candidate.Enabled) {
+			return cs.validateModelSupport(candidate)
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
-	candidate := *job
-	if err := updateJobField(&candidate, field, value); err != nil {
-		return fmt.Errorf("invalid %s: %w", field, err)
-	}
-	if candidate.Enabled || field == "project" || field == "session_key" {
-		if err := cs.validatePersistentTarget(candidate.Project, candidate.SessionKey); err != nil {
-			return err
-		}
-	}
-
-	// Check if reschedule is needed
-	needsReschedule := field == "cron_expr" || field == "enabled"
-
-	if needsReschedule {
-		// Remove current schedule
-		cs.mu.Lock()
-		if entryID, ok := cs.entries[id]; ok {
-			cs.cron.Remove(entryID)
-			delete(cs.entries, id)
-		}
-		cs.mu.Unlock()
-	}
-
-	// Update the field
-	if !cs.store.Update(id, field, value) {
-		return fmt.Errorf("failed to update field %q (may be read-only or invalid type)", field)
-	}
-
-	// Reschedule if needed
-	if needsReschedule {
-		updatedJob := cs.store.Get(id)
-		if updatedJob != nil && updatedJob.Enabled {
-			if err := cs.scheduleJob(updatedJob); err != nil {
+	_, scheduleChanged := updates["cron_expr"]
+	_, enabledChanged := updates["enabled"]
+	if scheduleChanged || enabledChanged {
+		if job.Enabled {
+			if err := cs.scheduleJob(job); err != nil {
 				return fmt.Errorf("reschedule failed: %w", err)
 			}
+		} else {
+			cs.mu.Lock()
+			if entryID, ok := cs.entries[id]; ok {
+				cs.cron.Remove(entryID)
+				delete(cs.entries, id)
+			}
+			cs.mu.Unlock()
 		}
 	}
-
 	return nil
 }
 
@@ -672,7 +724,7 @@ func (cs *CronScheduler) scheduleJob(job *CronJob) error {
 }
 
 func (cs *CronScheduler) executeJob(jobID string) {
-	job := cs.store.Get(jobID)
+	job := cs.store.Snapshot(jobID)
 	if job == nil {
 		return
 	}
@@ -682,7 +734,7 @@ func (cs *CronScheduler) executeJob(jobID string) {
 // RunJobNow triggers a persisted cron job immediately in the background.
 // Disabled jobs are allowed to run manually; only scheduled executions enforce Enabled.
 func (cs *CronScheduler) RunJobNow(id string) error {
-	job := cs.store.Get(id)
+	job := cs.store.Snapshot(id)
 	if job == nil {
 		return fmt.Errorf("%w: %q", ErrCronJobNotFound, id)
 	}
@@ -692,11 +744,13 @@ func (cs *CronScheduler) RunJobNow(id string) error {
 	if !ok {
 		return fmt.Errorf("%w: %q", ErrCronProjectNotFound, job.Project)
 	}
+	if err := cs.validateModelSupport(job); err != nil {
+		return err
+	}
 	if err := engine.ValidatePersistentProactiveTarget(job.SessionKey); err != nil {
 		return err
 	}
-	snapshot := *job
-	go cs.runJob(&snapshot, true)
+	go cs.runJob(job, true)
 	return nil
 }
 
@@ -759,6 +813,23 @@ func (cs *CronScheduler) validatePersistentTarget(project, sessionKey string) er
 		return nil
 	}
 	return engine.ValidatePersistentProactiveTarget(sessionKey)
+}
+
+func (cs *CronScheduler) validateModelSupport(job *CronJob) error {
+	if strings.TrimSpace(job.Model) == "" {
+		return nil
+	}
+	cs.mu.RLock()
+	engine := cs.engines[job.Project]
+	cs.mu.RUnlock()
+	// Offline projects are checked when an engine is available at execution.
+	if engine == nil {
+		return nil
+	}
+	if support, ok := engine.agent.(PerTurnModelSupporter); !ok || !support.SupportsPerTurnModel() {
+		return fmt.Errorf("project %q: %w", job.Project, ErrModelOverrideUnsupported)
+	}
+	return nil
 }
 
 // mutePlatform wraps a Platform and discards all outgoing messages.

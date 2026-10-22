@@ -205,6 +205,7 @@ const (
 	MsgProfileUsage              MsgKey = "answer_profile_usage"
 	MsgProfileNotConfigured      MsgKey = "answer_profile_not_configured"
 	MsgProfileNotSupported       MsgKey = "answer_profile_not_supported"
+	MsgTaskModelNotSupported     MsgKey = "task_model_not_supported"
 	MsgNoToolsAllowed            MsgKey = "no_tools_allowed"
 	MsgCurrentTools              MsgKey = "current_tools"
 	MsgCurrentSession            MsgKey = "current_session"
@@ -1100,6 +1101,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "目前 Agent 會話不支援單則訊息回答檔位。",
 		LangJapanese:           "現在のエージェントセッションは単発の回答プロファイルをサポートしていません。",
 		LangSpanish:            "La sesión actual del agente no admite perfiles de respuesta de un solo turno.",
+	},
+	MsgTaskModelNotSupported: {
+		LangEnglish:            "The current agent session does not support a task-specific model. The task was not sent.",
+		LangChinese:            "当前 Agent 会话不支持任务级模型，任务未发送。",
+		LangTraditionalChinese: "目前 Agent 會話不支援任務級模型，任務未傳送。",
+		LangJapanese:           "現在のエージェントセッションはタスク単位のモデル指定をサポートしていません。タスクは送信されませんでした。",
+		LangSpanish:            "La sesión actual del agente no admite un modelo por tarea. La tarea no se ha enviado.",
 	},
 	MsgSessionRestarting: {
 		LangEnglish:            "🔄 Session process exited, restarting...",

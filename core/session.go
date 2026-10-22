@@ -32,11 +32,14 @@ type Session struct {
 	ActiveProvider string `json:"active_provider,omitempty"`
 	// Empty inherits Agent defaults. A choice is scoped to this conversation,
 	// survives bridge restarts, and is captured only when a new turn starts.
-	ServiceTier     string           `json:"service_tier,omitempty"`
-	ContextReceipts *ContextReceipts `json:"context_receipts,omitempty"`
-	History         []HistoryEntry   `json:"history"`
-	CreatedAt       time.Time        `json:"created_at"`
-	UpdatedAt       time.Time        `json:"updated_at"`
+	ServiceTier string `json:"service_tier,omitempty"`
+	// Once a task overrides a model, later turns must explicitly restore their
+	// defaults even after an idle restart or daemon restart resumes this session.
+	RequiresTurnDefaults bool             `json:"requires_turn_defaults,omitempty"`
+	ContextReceipts      *ContextReceipts `json:"context_receipts,omitempty"`
+	History              []HistoryEntry   `json:"history"`
+	CreatedAt            time.Time        `json:"created_at"`
+	UpdatedAt            time.Time        `json:"updated_at"`
 	// LastUserActivity records when a real user message was last received.
 	// Unlike UpdatedAt (bumped by every session.Unlock including heartbeats and
 	// unsolicited agent output), this field is only updated when the engine
@@ -802,6 +805,34 @@ func (sm *SessionManager) SetServiceTier(s *Session, tier string) error {
 		s.ExplicitActivatedAt = previousActivation
 		s.mu.Unlock()
 		return fmt.Errorf("save session speed: %w", err)
+	}
+	return nil
+}
+
+func (s *Session) TurnDefaultsRequired() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.RequiresTurnDefaults
+}
+
+// RequireTurnDefaults persists the recovery marker before an override can be
+// sent. A failed save rejects the turn, so a crash cannot leave an unmarked
+// backend conversation whose last model came from a scheduled task.
+func (sm *SessionManager) RequireTurnDefaults(s *Session) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	s.mu.Lock()
+	if s.RequiresTurnDefaults {
+		s.mu.Unlock()
+		return nil
+	}
+	s.RequiresTurnDefaults = true
+	s.mu.Unlock()
+	if err := sm.saveLocked(); err != nil {
+		s.mu.Lock()
+		s.RequiresTurnDefaults = false
+		s.mu.Unlock()
+		return fmt.Errorf("save task model recovery marker: %w", err)
 	}
 	return nil
 }

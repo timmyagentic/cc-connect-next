@@ -6,9 +6,10 @@ import {
 } from 'lucide-react';
 import { Button, Badge, Modal, Input, Textarea, EmptyState } from '@/components/ui';
 import { listCronJobs, createCronJob, updateCronJob, deleteCronJob, triggerCronJob, type CronJob } from '@/api/cron';
-import { listProjects, type ProjectSummary } from '@/api/projects';
+import { listProjects, getProjectRuntimeCapabilities, type ProjectSummary } from '@/api/projects';
 import { listSessions } from '@/api/sessions';
 import { buildScheduledSessionTargets, type ScheduledSessionTarget } from './sessionTargets.js';
+import { cronModelFields, cronModelAvailability } from './modelFields.js';
 import { formatTime, cn } from '@/lib/utils';
 
 const MODE_OPTIONS = ['bypassPermissions', 'acceptEdits', 'auto', 'plan', 'dontAsk'] as const;
@@ -168,12 +169,13 @@ interface JobForm {
   silent: boolean;
   enabled: boolean;
   mode: string;
+  model: string;
   _type: 'prompt' | 'exec';
 }
 
 const emptyForm: JobForm = {
   project: '', session_key: '', cron_expr: '', prompt: '', exec: '',
-  description: '', silent: false, enabled: true, mode: '', _type: 'prompt',
+  description: '', silent: false, enabled: true, mode: '', model: '', _type: 'prompt',
 };
 
 /* ── Main page ── */
@@ -190,7 +192,19 @@ export default function CronList() {
   const [triggeringId, setTriggeringId] = useState<string | null>(null);
   const [sessionTargets, setSessionTargets] = useState<ScheduledSessionTarget[]>([]);
 
+  const [modelAvailability, setModelAvailability] = useState<string>();
   const isEdit = !!editJob;
+  const modelUnsupported = form._type === 'prompt' && !!form.model.trim() && modelAvailability === 'unavailable';
+
+  useEffect(() => {
+    setModelAvailability(undefined);
+    if (!form.project) return;
+    let cancelled = false;
+    getProjectRuntimeCapabilities(form.project).then(manifest => {
+      if (!cancelled) setModelAvailability(cronModelAvailability(manifest));
+    }).catch(() => { /* Save-time validation remains authoritative when discovery fails. */ });
+    return () => { cancelled = true; };
+  }, [form.project]);
 
   const projectOptions = useMemo(
     () => projects.map(p => ({ value: p.name, label: p.name })),
@@ -243,18 +257,21 @@ export default function CronList() {
       silent: !!job.silent,
       enabled: job.enabled,
       mode: job.mode || '',
+      model: job.model || '',
       _type: job.exec ? 'exec' : 'prompt',
     });
     setShowForm(true);
   };
 
   const handleSave = async () => {
+    if (modelUnsupported) return;
     setSaving(true);
     const activePrompt = form._type === 'prompt' ? form.prompt : '';
     const activeExec   = form._type === 'exec'   ? form.exec   : '';
     try {
+      const modelFields = cronModelFields(form._type, form.model, editJob || undefined);
       if (isEdit && editJob) {
-        const updates: Record<string, any> = {};
+        const updates: Record<string, any> = { ...modelFields };
         if (form.cron_expr !== editJob.cron_expr) updates.cron_expr = form.cron_expr;
         if (form.description !== editJob.description) updates.description = form.description;
         if (activePrompt !== editJob.prompt) updates.prompt = activePrompt;
@@ -270,6 +287,8 @@ export default function CronList() {
       } else {
         const body: any = { ...form, prompt: activePrompt, exec: activeExec };
         delete body._type;
+        delete body.model;
+        Object.assign(body, modelFields);
         if (!body.prompt) delete body.prompt;
         if (!body.exec) delete body.exec;
         await createCronJob(body);
@@ -277,7 +296,7 @@ export default function CronList() {
       setShowForm(false);
       fetchData();
     } catch (e: any) {
-      alert(e.message);
+      alert(e.message === 'cron.modelPromptOnly' ? t('cron.modelPromptOnly') : e.message);
     } finally {
       setSaving(false);
     }
@@ -366,6 +385,12 @@ export default function CronList() {
                   <span className="font-medium w-12 shrink-0 text-gray-400">{t('cron.project')}</span>
                   <span className="truncate">{job.project}</span>
                 </div>
+                {job.prompt && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium w-12 shrink-0 text-gray-400">{t('cron.model')}</span>
+                    <span className="break-all">{job.model || t('cron.modelInherit')}</span>
+                  </div>
+                )}
                 {job.prompt && (
                   <div className="flex items-start gap-1.5">
                     <span className="font-medium w-12 shrink-0 text-gray-400">{t('cron.prompt')}</span>
@@ -481,7 +506,7 @@ export default function CronList() {
               </button>
               <button
                 type="button"
-                onClick={() => setForm({ ...form, _type: 'exec' as const })}
+                onClick={() => setForm({ ...form, _type: 'exec' as const, model: '' })}
                 className={cn(
                   'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all',
                   form._type === 'exec'
@@ -509,6 +534,19 @@ export default function CronList() {
               onChange={e => setForm({ ...form, exec: e.target.value })}
               placeholder="npm run report"
             />
+          )}
+
+          {form._type === 'prompt' && (
+            <div>
+              <Input
+                label={t('cron.model')}
+                value={form.model}
+                onChange={e => setForm({ ...form, model: e.target.value })}
+                placeholder={t('cron.modelInherit')}
+              />
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{t('cron.modelHint')}</p>
+              {modelAvailability === 'unavailable' && <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">{t('cron.modelUnsupported')}</p>}
+            </div>
           )}
 
           <Select
@@ -543,7 +581,7 @@ export default function CronList() {
 
           <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.06]">
             <Button variant="secondary" onClick={() => setShowForm(false)}>{t('common.cancel')}</Button>
-            <Button onClick={handleSave} loading={saving}>
+            <Button onClick={handleSave} loading={saving} disabled={modelUnsupported}>
               {isEdit ? t('common.save') : t('cron.add')}
             </Button>
           </div>

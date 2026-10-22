@@ -36,6 +36,8 @@ type AnswerProfiles struct {
 
 var ErrTurnOptionsUnsupported = errors.New("agent session does not support one-shot answer profiles")
 
+var ErrModelOverrideUnsupported = errors.New("agent session does not support per-turn model overrides")
+
 // SetAnswerProfiles configures the two named one-shot profiles. It is expected
 // to run during engine bootstrap before messages are accepted.
 func (e *Engine) SetAnswerProfiles(profiles AnswerProfiles) {
@@ -133,23 +135,80 @@ func (e *Engine) applyTurnOverrides(options TurnOptions, profile AnswerProfileNa
 }
 
 func (e *Engine) sendAgentTurn(agent Agent, session AgentSession, prompt string, images []ImageAttachment, files []FileAttachment, profile AnswerProfileName, serviceTier ...string) error {
+	overrides := agentTurnOverrides{profile: profile}
+	if len(serviceTier) > 0 {
+		overrides.serviceTier = serviceTier[0]
+	}
+	return e.sendAgentTurnWithOverrides(agent, session, prompt, images, files, overrides)
+}
+
+// agentTurnOverrides travels with one admitted turn. restoreDefaults is kept
+// for sessions that have used a task model so subsequent ordinary turns reset
+// backend defaults explicitly, including empty/default-valued options.
+type agentTurnOverrides struct {
+	profile         AnswerProfileName
+	model           string
+	serviceTier     string
+	restoreDefaults bool
+}
+
+func prepareAgentTurnOverrides(sessions *SessionManager, session *Session, backend AgentSession, profile AnswerProfileName, model, serviceTier string) (agentTurnOverrides, error) {
+	model = strings.TrimSpace(model)
+	if model != "" {
+		if _, ok := backend.(TurnOptionsSession); !ok {
+			return agentTurnOverrides{}, ErrModelOverrideUnsupported
+		}
+		if validator, ok := backend.(TurnDefaultsValidator); ok {
+			if err := validator.ValidateTurnDefaults(); err != nil {
+				return agentTurnOverrides{}, fmt.Errorf("prepare task model defaults: %w", err)
+			}
+		}
+		if err := sessions.RequireTurnDefaults(session); err != nil {
+			return agentTurnOverrides{}, err
+		}
+	}
+	return agentTurnOverrides{
+		profile: profile, model: model, serviceTier: serviceTier,
+		restoreDefaults: session.TurnDefaultsRequired(),
+	}, nil
+}
+
+func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, prompt string, images []ImageAttachment, files []FileAttachment, overrides agentTurnOverrides) error {
+	profile := overrides.profile
+	model := strings.TrimSpace(overrides.model)
+	serviceTier := overrides.serviceTier
 	sender, supportsOptions := session.(TurnOptionsSession)
+	if model != "" && !supportsOptions {
+		return ErrModelOverrideUnsupported
+	}
 	catalog, supportsSpeed := serviceTierCatalog(agent, session)
 	// A saved preference may outlive a change to an agent/backend without
 	// speed controls. It must not prevent ordinary chat on that backend.
 	if !supportsOptions || !supportsSpeed {
-		serviceTier = nil
+		serviceTier = ""
 	}
-	hasSpeed := len(serviceTier) > 0 && serviceTier[0] != ""
-	if !hasSpeed && profile == "" && (!e.answerProfilesConfigured() || !supportsOptions) {
+	hasSpeed := serviceTier != ""
+	needsOptions := model != "" || profile != "" ||
+		supportsOptions && (overrides.restoreDefaults || hasSpeed || e.answerProfilesConfigured())
+	if !needsOptions {
 		return session.Send(prompt, images, files)
 	}
 	if !supportsOptions {
 		return ErrTurnOptionsUnsupported
 	}
-	options, err := e.applyTurnOverrides(turnDefaults(agent, session), profile, serviceTier...)
+	if overrides.restoreDefaults {
+		if validator, ok := session.(TurnDefaultsValidator); ok {
+			if err := validator.ValidateTurnDefaults(); err != nil {
+				return fmt.Errorf("restore task model defaults: %w", err)
+			}
+		}
+	}
+	options, err := e.applyTurnOverrides(turnDefaults(agent, session), profile, serviceTier)
 	if err != nil {
 		return err
+	}
+	if model != "" {
+		options.Model = model
 	}
 	// A model/provider may have changed since the preference was saved. Never
 	// silently send an unsupported persistent choice to a different backend.
@@ -169,7 +228,9 @@ func (e *Engine) sendAgentTurn(agent Agent, session AgentSession, prompt string,
 			}
 		}
 	}
-	if profile != "" {
+	if model != "" {
+		slog.Info("using task model for one turn", "project", e.name, "model", options.Model)
+	} else if profile != "" {
 		slog.Info("using one-shot answer profile",
 			"project", e.name,
 			"profile", profile,

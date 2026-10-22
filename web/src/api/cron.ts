@@ -14,6 +14,7 @@ export interface CronJob {
   mute: boolean;
   session_mode: string;
   mode: string;
+  model?: string;
   timeout_mins: number | null;
   created_at: string;
   last_run: string;
