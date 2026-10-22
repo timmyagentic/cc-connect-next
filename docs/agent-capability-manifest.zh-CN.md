@@ -89,6 +89,12 @@ Manifest 会保留不支持的运行态能力条目，而不是静默删除。�
 
 Manifest 不把“命令存在”误写成“当前一定能执行”：模型、Provider、TTS、多工作区、Cron/Timer、Relay、Web、活动回合等都会检查对应运行态接口或组件。
 
+## Cron 任务模型
+
+`cron` Agent CLI 工具契约包含可选 `model` 参数：仅 Prompt 任务可设置，省略继承，`cron edit <job-id> model ""` 恢复继承。注册/编辑写入任务持久状态；执行产生 Agent 回合及网络请求，但不切换 Provider、不修改项目或 Agent 默认模型。Shell 任务和不支持的 Agent 会拒绝显式模型，不能自动退回默认模型。
+
+Agent 运行态条目 `per_turn_model` 通过 `PerTurnModelSupporter` 探测，不依赖 Agent 名称；缺失接口或返回 false 时仍保留为 `unavailable` 并说明拒绝原因。声明支持后，实际执行仍检查会话的 `TurnOptionsSession`；已有 `turn_options` 会话条目展示该能力。无活动会话不等于支持或不支持：会话条目保持 `conditional`，Agent 声明供创建任务前检查。当前 Codex `exec` 与 `app_server` 支持该契约。具体模型 ID 的可用性仍由当前 Agent/Provider 执行时决定，Manifest 不承诺模型目录或凭证有效性。
+
 ## 近期讨论背景
 
 可选 Platform 能力 `recent_conversation_context` 在已核验的用户回合前，使用已有平台权限只读补全有界、不可信的讨论。引用记录不执行命令、不授予工具权限。可用性区分配置未启用、目标不适用以及仍需已有历史访问权限的条件状态；不支持的适配器保留条目和仅使用当前请求的降级说明。读取失败/截断会明确提示。

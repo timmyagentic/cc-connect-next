@@ -127,7 +127,12 @@
     "sessionNotSchedulableHint": "Las sesiones Web conectadas al navegador no admiten entrega programada persistente. Elige una sesión de mensajería con entrega duradera.",
     "taskType": "Tipo de tarea",
     "mode": "Modo de permisos",
-    "modeDefault": "Usar predeterminado del proyecto"
+    "modeDefault": "Usar predeterminado del proyecto",
+    "model": "Modelo",
+    "modelInherit": "Heredar modelo del proyecto / Agent",
+    "modelHint": "Solo tareas Prompt. Deje vacío para heredar; borrar el valor restaura la herencia. El Agent debe admitir modelos por turno. No cambia el proveedor ni los valores predeterminados del proyecto.",
+    "modelPromptOnly": "Solo las tareas Prompt admiten un modelo específico.",
+    "modelUnsupported": "Este Agent no admite modelos por tarea. Deje el campo vacío para heredar."
   },
   "heartbeat": {
     "title": "Latido",

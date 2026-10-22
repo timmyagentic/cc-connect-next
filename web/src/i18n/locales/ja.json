@@ -127,7 +127,12 @@
     "sessionNotSchedulableHint": "ブラウザー接続型の Web セッションは永続的なスケジュール配信を受信できません。永続的に配信できるメッセージセッションを選択してください。",
     "taskType": "タスク種別",
     "mode": "権限モード",
-    "modeDefault": "プロジェクトのデフォルトを使用"
+    "modeDefault": "プロジェクトのデフォルトを使用",
+    "model": "モデル",
+    "modelInherit": "プロジェクト / Agent のモデルを継承",
+    "modelHint": "Prompt タスクのみ。空欄で継承し、設定済みの値を消すと継承に戻ります。Agent はターン単位のモデル指定に対応している必要があります。Provider やプロジェクトの既定値は変更しません。",
+    "modelPromptOnly": "モデル指定は Prompt タスクでのみ使用できます。",
+    "modelUnsupported": "この Agent はタスク単位のモデル指定に対応していません。空欄にして継承してください。"
   },
   "heartbeat": {
     "title": "ハートビート",

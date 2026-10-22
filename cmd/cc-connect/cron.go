@@ -57,7 +57,7 @@ func closeCronResponseBody(body io.Closer) {
 }
 
 func runCronAdd(args []string) {
-	var project, sessionKey, cronExpr, prompt, execCmd, desc, dataDir, sessionMode string
+	var project, sessionKey, cronExpr, prompt, execCmd, desc, dataDir, sessionMode, model string
 	var timeoutMins *int
 	var silent bool
 
@@ -84,6 +84,13 @@ func runCronAdd(args []string) {
 				i++
 				prompt = args[i]
 			}
+		case "--model":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				fmt.Fprintln(os.Stderr, "Error: --model requires a model ID")
+				os.Exit(1)
+			}
+			i++
+			model = strings.TrimSpace(args[i])
 		case "--exec":
 			if i+1 < len(args) {
 				i++
@@ -151,6 +158,10 @@ func runCronAdd(args []string) {
 		fmt.Fprintln(os.Stderr, "Error: --prompt and --exec are mutually exclusive")
 		os.Exit(1)
 	}
+	if model != "" && execCmd != "" {
+		fmt.Fprintln(os.Stderr, "Error: --model is only supported with --prompt")
+		os.Exit(1)
+	}
 
 	sockPath := resolveSocketPath(dataDir)
 	if _, err := os.Stat(sockPath); os.IsNotExist(err) {
@@ -165,6 +176,9 @@ func runCronAdd(args []string) {
 		"prompt":      prompt,
 		"exec":        execCmd,
 		"description": desc,
+	}
+	if model != "" {
+		body["model"] = model
 	}
 	if silent {
 		body["silent"] = true
@@ -201,7 +215,15 @@ func runCronAdd(args []string) {
 		fmt.Printf("Command: %s\n", result["exec"])
 	} else {
 		fmt.Printf("Prompt: %s\n", result["prompt"])
+		fmt.Printf("Model: %s\n", cronModelDisplay(result))
 	}
+}
+
+func cronModelDisplay(job map[string]any) string {
+	if model, ok := job["model"].(string); ok && strings.TrimSpace(model) != "" {
+		return model
+	}
+	return "inherit project default"
 }
 
 func runCronList(args []string) {
@@ -291,6 +313,9 @@ func runCronList(args []string) {
 			}
 		}
 		fmt.Printf("  %s %s  %s  %s\n", enabled, id, expr, display)
+		if execCmd == "" {
+			fmt.Printf("    Model: %s\n", cronModelDisplay(j))
+		}
 	}
 }
 
@@ -451,6 +476,9 @@ func runCronInfo(args []string) {
 			os.Exit(1)
 		}
 		val, ok := result[field]
+		if !ok && field == "model" {
+			val, ok = "", true // omitted model means inherit, including legacy jobs
+		}
 		if !ok {
 			fmt.Fprintf(os.Stderr, "Error: field '%s' not found\n", field)
 			fmt.Fprintln(os.Stderr, "Available fields:")
@@ -482,6 +510,7 @@ func runCronEdit(args []string) {
 	var dataDir string
 	var id, field string
 	var valueStr string
+	var valueSet bool
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -498,8 +527,9 @@ func runCronEdit(args []string) {
 				id = args[i]
 			} else if field == "" {
 				field = args[i]
-			} else if valueStr == "" {
+			} else if !valueSet {
 				valueStr = args[i]
+				valueSet = true
 			}
 		}
 	}
@@ -514,7 +544,7 @@ func runCronEdit(args []string) {
 		fmt.Fprintln(os.Stderr, "Run 'cc-connect-next cron edit --help' for usage.")
 		os.Exit(1)
 	}
-	if valueStr == "" {
+	if !valueSet || (valueStr == "" && field != "model") {
 		fmt.Fprintln(os.Stderr, "Error: value is required")
 		fmt.Fprintln(os.Stderr, "Run 'cc-connect-next cron edit --help' for usage.")
 		os.Exit(1)
@@ -583,7 +613,7 @@ func parseCronEditValue(field, valueStr string) (any, error) {
 		return v, nil
 	default:
 		// String fields: project, session_key, cron_expr, prompt, exec,
-		// work_dir, description, session_mode, mode
+		// work_dir, description, session_mode, mode, model (empty = inherit)
 		return valueStr, nil
 	}
 }
@@ -624,6 +654,7 @@ Options:
   -s, --session-key <key>    Target session (auto-detected from CC_SESSION_KEY env)
   -c, --cron <expr>          Cron expression, e.g. "0 6 * * *"
       --prompt <text>        Task prompt (runs through agent)
+      --model <id>           Prompt-only model for each run; omitted = inherit project default
       --exec <command>       Shell command (runs directly, mutually exclusive with --prompt)
       --desc <text>          Short description
       --session-mode <mode>  reuse (default) or new-per-run — fresh agent session each run
@@ -636,6 +667,7 @@ Examples:
   cc-connect-next cron add --cron "0 6 * * *" --prompt "Collect GitHub trending data" --desc "Daily Trending"
   cc-connect-next cron add --cron "*/30 * * * *" --exec "df -h" --desc "Disk usage check"
   cc-connect-next cron add --cron "0 9 * * *" --prompt "Daily standup reminder" --silent
+  cc-connect-next cron add --cron "0 9 * * *" --prompt "Daily report" --model gpt-5.4
   cc-connect-next cron add 0 6 * * * Collect GitHub trending data and send me a summary`)
 }
 
@@ -663,6 +695,7 @@ Editable Fields (string):
   session_key   Target session key
   cron_expr     Cron expression, e.g. "0 6 * * *"
   prompt        Task prompt (runs through agent)
+  model         Prompt-only model ID; "" restores inheritance (Codex exec/app_server)
   exec          Shell command (runs directly)
   work_dir      Working directory for exec
   description   Short description
@@ -688,5 +721,7 @@ Examples:
   cc-connect-next cron edit abc123 enabled false
   cc-connect-next cron edit abc123 description "Daily standup reminder"
   cc-connect-next cron edit abc123 timeout_mins 60
-  cc-connect-next cron edit abc123 mute true`)
+  cc-connect-next cron edit abc123 mute true
+  cc-connect-next cron edit abc123 model gpt-5.4
+  cc-connect-next cron edit abc123 model ""`)
 }

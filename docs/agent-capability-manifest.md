@@ -85,6 +85,12 @@ Agent command files may publish only an explicit frontmatter `description`. Thei
 
 Existence is not presented as executable availability: model/provider switching, TTS, multi-workspace, schedulers, Relay, Web setup, and in-flight-turn operations probe their corresponding runtime interfaces or components.
 
+## Cron task models
+
+The `cron` Agent CLI tool contract includes optional `model`: prompt jobs only, omitted means inherit, and `cron edit <job-id> model ""` restores inheritance. Creating/editing writes persistent job state; execution starts an Agent turn and network requests without switching providers or changing project/Agent model defaults. Shell jobs and unsupported Agents reject explicit models rather than silently reverting to a default.
+
+The Agent runtime entry `per_turn_model` probes `PerTurnModelSupporter` instead of matching Agent names. Missing or false support remains visible as `unavailable` with its rejection reason. Declared support is followed by a concrete `TurnOptionsSession` check during execution; the existing session `turn_options` entry exposes that interface. Without an active session, the session entry stays `conditional`, while the Agent declaration permits configuration-time checks. Both Codex `exec` and `app_server` implement this contract. Actual model ID availability remains an execution-time Agent/provider decision; the Manifest does not certify model catalogs or credentials.
+
 ## Recent conversation background
 
 The optional Platform capability `recent_conversation_context` reads bounded,

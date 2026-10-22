@@ -1562,6 +1562,7 @@ func (m *ManagementServer) handleCron(w http.ResponseWriter, r *http.Request) {
 			SessionKey:  req.SessionKey,
 			CronExpr:    req.CronExpr,
 			Prompt:      req.Prompt,
+			Model:       req.Model,
 			Exec:        req.Exec,
 			WorkDir:     req.WorkDir,
 			Description: req.Description,
@@ -1627,11 +1628,9 @@ func (m *ManagementServer) handleCronByID(w http.ResponseWriter, r *http.Request
 			mgmtError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 			return
 		}
-		for field, value := range updates {
-			if err := m.cronScheduler.UpdateJob(id, field, value); err != nil {
-				mgmtError(w, http.StatusBadRequest, fmt.Sprintf("update %s: %s", field, err.Error()))
-				return
-			}
+		if err := m.cronScheduler.UpdateJobFields(id, updates); err != nil {
+			mgmtError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 		job := m.cronScheduler.Store().Get(id)
 		if job == nil {

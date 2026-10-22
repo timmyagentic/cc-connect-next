@@ -622,6 +622,7 @@ type queuedMessage struct {
 	msgSessionKey     string // session key for extracting chat ID
 	channelKey        string // platform-provided channel identifier (preferred over sessionKey extraction)
 	answerProfile     AnswerProfileName
+	modelOverride     string
 	userMessageTimeMs int64 // Feishu create_time ms (optional); see Message.UserMessageTimeMs
 }
 
@@ -693,6 +694,7 @@ type interactiveState struct {
 	// turn. Empty means project defaults. turn/steer cannot change turn options,
 	// so a busy message that would cross this boundary must start a queued turn.
 	activeAnswerProfile AnswerProfileName
+	activeModelOverride string // task model of the in-flight turn; never inherited by queued input
 	activeServiceTier   string // session override captured at turn admission
 
 	// Steer presentation handoff (issue #27). When a busy-session message is
@@ -1956,6 +1958,7 @@ type scheduledJobSpec struct {
 	id              string
 	sessionKey      string
 	prompt          string
+	model           string
 	workDir         string
 	description     string
 	mode            string
@@ -1965,6 +1968,29 @@ type scheduledJobSpec struct {
 	requireResponse bool
 	runTitle        string
 	shell           scheduledShellSpec
+}
+
+// scheduledTurnResult belongs to one scheduled turn, not its reused session or
+// the ordinary messages drained after it. Only the synchronous turn processor
+// writes it; the scheduler reads it after that processor returns.
+type scheduledTurnResult struct {
+	completed bool
+	err       error
+}
+
+func (r *scheduledTurnResult) complete(err error) {
+	if r == nil || r.completed {
+		return
+	}
+	r.completed = true
+	r.err = err
+}
+
+func (r *scheduledTurnResult) result() error {
+	if !r.completed {
+		return errors.New("scheduled agent turn ended without a terminal result")
+	}
+	return r.err
 }
 
 // ExecuteCronJob runs a recurring job through the shared scheduled-message
@@ -1983,6 +2009,7 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 		id:              job.ID,
 		sessionKey:      job.SessionKey,
 		prompt:          job.Prompt,
+		model:           strings.TrimSpace(job.Model),
 		workDir:         job.WorkDir,
 		description:     job.Description,
 		mode:            job.Mode,
@@ -2108,13 +2135,17 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 	}
 
 	msg := &Message{
-		SessionKey:   sessionKey,
-		Platform:     platformName,
-		UserID:       spec.kind,
-		UserName:     spec.kind,
-		Content:      content,
-		ReplyCtx:     replyCtx,
-		ModeOverride: spec.mode,
+		SessionKey:    sessionKey,
+		Platform:      platformName,
+		UserID:        spec.kind,
+		UserName:      spec.kind,
+		Content:       content,
+		ReplyCtx:      replyCtx,
+		ModeOverride:  spec.mode,
+		ModelOverride: spec.model,
+	}
+	if spec.model != "" {
+		msg.scheduledResult = &scheduledTurnResult{}
 	}
 
 	agent := e.agent
@@ -2170,6 +2201,11 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, interactiveKey, workspaceDir, ccSessionKey)
 	if spec.newSession {
 		e.cleanupInteractiveState(interactiveKey)
+	}
+	if msg.scheduledResult != nil {
+		if err := msg.scheduledResult.result(); err != nil {
+			return fmt.Errorf("%s job %q using model %q: %w", spec.kind, spec.id, spec.model, err)
+		}
 	}
 	if spec.requireResponse && !spec.mute && session.HistoryLen() < previousHistoryLen+2 {
 		return fmt.Errorf("%s job %q produced an empty response", spec.kind, spec.id)
@@ -3422,7 +3458,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	// turn/steer cannot carry model, reasoning-effort, or service-tier
 	// overrides. A profiled message must remain a distinct queued turn or the
 	// user would be told a profile was applied when it was not.
-	if msg.AnswerProfile != "" || hasMessageContext(p, msg.ReplyCtx) {
+	if msg.AnswerProfile != "" || msg.ModelOverride != "" || hasMessageContext(p, msg.ReplyCtx) {
 		// Background reads need an ordered turn and a successful completion receipt.
 		return false
 	}
@@ -3446,7 +3482,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		state.mu.Unlock()
 		return false
 	}
-	if state.activeAnswerProfile != "" || state.activeServiceTier != sessions.ServiceTier(session) {
+	if state.activeAnswerProfile != "" || state.activeModelOverride != "" || state.activeServiceTier != sessions.ServiceTier(session) {
 		state.mu.Unlock()
 		return false
 	}
@@ -3668,6 +3704,12 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 			return true
 		}
 	}
+	if msg.ModelOverride != "" && state.agentSession != nil {
+		if _, ok := state.agentSession.(TurnOptionsSession); !ok {
+			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgTaskModelNotSupported, msg.Content))
+			return true
+		}
+	}
 
 	// Only queue metadata — do NOT send to agent stdin yet.
 	// The agent CLI may treat a mid-turn stdin message as part of the
@@ -3699,6 +3741,7 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		msgSessionKey:     msg.SessionKey,
 		channelKey:        msg.ChannelKey,
 		answerProfile:     msg.AnswerProfile,
+		modelOverride:     msg.ModelOverride,
 		userMessageTimeMs: msg.UserMessageTimeMs,
 	})
 	if session != nil {
@@ -4215,6 +4258,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	}()
 
 	if e.ctx.Err() != nil {
+		msg.scheduledResult.complete(e.ctx.Err())
 		return
 	}
 
@@ -4267,6 +4311,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 		if cause == nil {
 			cause = errors.New("agent session did not start")
 		}
+		msg.scheduledResult.complete(cause)
 		e.recordFeedbackFailure(state, "agent_start", cause)
 		if errors.Is(state.startError, ErrAuthenticationRequired) {
 			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRichCardAuthRequiredBody, msg.Content))
@@ -4279,6 +4324,14 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 		if _, ok := state.agentSession.(TurnOptionsSession); !ok {
 			e.recordFeedbackFailure(state, "profile_unsupported", errors.New("agent session does not support answer profiles"))
 			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgProfileNotSupported, msg.Content))
+			return
+		}
+	}
+	if msg.ModelOverride != "" {
+		if _, ok := state.agentSession.(TurnOptionsSession); !ok {
+			msg.scheduledResult.complete(ErrModelOverrideUnsupported)
+			e.recordFeedbackFailure(state, "model_override_unsupported", ErrModelOverrideUnsupported)
+			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgTaskModelNotSupported, msg.Content))
 			return
 		}
 	}
@@ -4337,6 +4390,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.fromVoice = msg.FromVoice
 	state.sideText = ""
 	state.activeAnswerProfile = msg.AnswerProfile
+	state.activeModelOverride = msg.ModelOverride
 	speedTier := sessions.ServiceTier(session)
 	state.activeServiceTier = speedTier
 	as := state.agentSession // capture under lock to avoid race with cleanup
@@ -4358,10 +4412,15 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			sendDone <- fmt.Errorf("agent session became nil")
 			return
 		}
-		sendDone <- e.sendAgentTurn(agent, as, promptContent, msg.Images, scopeFileAttachments(msg.Files, msg.MessageID), msg.AnswerProfile, speedTier)
+		overrides, err := prepareAgentTurnOverrides(sessions, session, as, msg.AnswerProfile, msg.ModelOverride, speedTier)
+		if err != nil {
+			sendDone <- err
+			return
+		}
+		sendDone <- e.sendAgentTurnWithOverrides(agent, as, promptContent, msg.Images, scopeFileAttachments(msg.Files, msg.MessageID), overrides)
 	}()
 
-	e.processInteractiveEvents(state, session, sessions, interactiveKey, msg.MessageID, turnStart, stopTyping, sendDone, msg.ReplyCtx)
+	e.processInteractiveEvents(state, session, sessions, interactiveKey, msg.MessageID, turnStart, stopTyping, sendDone, msg.ReplyCtx, msg.scheduledResult)
 	if elapsed := time.Since(sendStart); elapsed >= slowAgentSend {
 		slog.Warn("slow agent send", "elapsed", elapsed, "session", msg.SessionKey, "content_len", len(msg.Content))
 	}
@@ -5301,16 +5360,17 @@ func richCardFailureBody(copy RichCardCopy, phase, partial string) string {
 }
 
 type turnProcessor struct {
-	engine       *Engine
-	state        *interactiveState
-	session      *Session
-	sessions     *SessionManager
-	sessionKey   string
-	msgID        string
-	turnStart    time.Time
-	stopTypingFn func()
-	sendDone     <-chan error
-	replyCtx     any
+	engine          *Engine
+	state           *interactiveState
+	session         *Session
+	sessions        *SessionManager
+	sessionKey      string
+	msgID           string
+	turnStart       time.Time
+	stopTypingFn    func()
+	sendDone        <-chan error
+	replyCtx        any
+	scheduledResult *scheduledTurnResult
 }
 
 type turnTerminalReason uint8
@@ -5524,7 +5584,7 @@ func (t *turnProcessor) persistAgentSessionID(id string) {
 	t.sessions.Save()
 }
 
-func (e *Engine) processInteractiveEvents(state *interactiveState, session *Session, sessions *SessionManager, sessionKey string, msgID string, turnStart time.Time, stopTypingFn func(), sendDone <-chan error, replyCtx any) {
+func (e *Engine) processInteractiveEvents(state *interactiveState, session *Session, sessions *SessionManager, sessionKey string, msgID string, turnStart time.Time, stopTypingFn func(), sendDone <-chan error, replyCtx any, scheduledResult ...*scheduledTurnResult) {
 	processor := &turnProcessor{
 		engine:       e,
 		state:        state,
@@ -5536,6 +5596,9 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 		stopTypingFn: stopTypingFn,
 		sendDone:     sendDone,
 		replyCtx:     replyCtx,
+	}
+	if len(scheduledResult) > 0 {
+		processor.scheduledResult = scheduledResult[0]
 	}
 	processor.run()
 }
@@ -5552,8 +5615,14 @@ func (t *turnProcessor) run() {
 	sendDone := t.sendDone
 	replyCtx := t.replyCtx
 	defer func() {
+		if e.ctx.Err() != nil {
+			t.scheduledResult.complete(e.ctx.Err())
+		} else if state.isStopped() || state.shouldDiscardTurn(msgID) {
+			t.scheduledResult.complete(context.Canceled)
+		}
 		state.mu.Lock()
 		state.activeAnswerProfile = ""
+		state.activeModelOverride = ""
 		state.mu.Unlock()
 	}()
 
@@ -6118,8 +6187,12 @@ func (t *turnProcessor) run() {
 			}
 			return ""
 		},
-		onSilent: discardSilentTurn,
+		onSilent: func() {
+			t.scheduledResult.complete(context.Canceled)
+			discardSilentTurn()
+		},
 		onStop: func() {
+			t.scheduledResult.complete(context.Canceled)
 			if state.shouldDiscardTurn(msgID) {
 				discardSilentTurn()
 				return
@@ -6135,6 +6208,7 @@ func (t *turnProcessor) run() {
 		},
 		onHandoff: applySteerHandoffs,
 		onSendError: func(err error) {
+			t.scheduledResult.complete(err)
 			e.recordFeedbackFailure(state, "prompt_send", err)
 			slog.Error("failed to send prompt", "error", err, "session_key", sessionKey)
 			sp.discard()
@@ -6170,6 +6244,7 @@ func (t *turnProcessor) run() {
 			}
 		},
 		onEngineDone: func() {
+			t.scheduledResult.complete(e.ctx.Err())
 			if state.shouldDiscardTurn(msgID) {
 				discardSilentTurn()
 				return
@@ -6425,6 +6500,10 @@ func (t *turnProcessor) run() {
 				)
 				continue
 			}
+			if err := t.waitForScheduledSend(&pendingSend, stopCh, silentCancelCh); err != nil {
+				reader.onSendError(err)
+				return
+			}
 			// Adopt any steer handoff that raced turn completion, then close
 			// the adoption window: a steer accepted after this point resolves
 			// against the completed turn (the initiator patches its own
@@ -6549,6 +6628,11 @@ func (t *turnProcessor) run() {
 			}
 			return
 		case EventError:
+			failureErr := event.Error
+			if failureErr == nil {
+				failureErr = errors.New("agent reported an error")
+			}
+			t.scheduledResult.complete(failureErr)
 			failure := turnFailure{
 				processor:                   t,
 				event:                       event,
@@ -6626,6 +6710,25 @@ type turnCompletion struct {
 	footerDurationCopy              ReplyFooterDurationCopy
 	msgID                           string
 	isSilent                        bool
+}
+
+// Some adapters emit their terminal event before Send returns. A scheduled
+// receipt cannot report success until both boundaries have succeeded.
+func (t *turnProcessor) waitForScheduledSend(pending *<-chan error, stop, silentCancel <-chan struct{}) error {
+	if t.scheduledResult == nil || *pending == nil {
+		return nil
+	}
+	select {
+	case err := <-*pending:
+		*pending = nil
+		return err
+	case <-stop:
+		return context.Canceled
+	case <-silentCancel:
+		return context.Canceled
+	case <-t.engine.ctx.Done():
+		return t.engine.ctx.Err()
+	}
 }
 
 func (completion *turnCompletion) handle() bool {
@@ -6717,6 +6820,10 @@ func (completion *turnCompletion) handle() bool {
 		e.completeFeedbackTurn(state, response.base)
 	}
 	completion.commit(response, triggerAutoCompress, tokenEstimate)
+	t.scheduledResult.complete(completion.event.Error)
+	// A reused session can immediately drain ordinary queued messages. Their
+	// outcome must never replace the scheduled turn's receipt.
+	t.scheduledResult = nil
 	completion.notifyCompletion(response)
 	return !completion.runAutoCompress(triggerAutoCompress)
 }
@@ -7018,6 +7125,7 @@ func (queue *turnQueue) handle() {
 		state.currentUserID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
+		state.activeModelOverride = queued.modelOverride
 		speedTier := sessions.ServiceTier(session)
 		state.activeServiceTier = speedTier
 		// Re-open the steer adoption window for the queued turn.
@@ -7067,7 +7175,12 @@ func (queue *turnQueue) handle() {
 				nextSend <- fmt.Errorf("agent session became nil")
 				return
 			}
-			nextSend <- e.sendAgentTurn(turnAgent, as, queuedPrompt, queued.images, queued.files, queued.answerProfile, speedTier)
+			overrides, err := prepareAgentTurnOverrides(sessions, session, as, queued.answerProfile, queued.modelOverride, speedTier)
+			if err != nil {
+				nextSend <- err
+				return
+			}
+			nextSend <- e.sendAgentTurnWithOverrides(turnAgent, as, queuedPrompt, queued.images, queued.files, overrides)
 		}()
 		pendingSend = nextSend
 
@@ -7212,6 +7325,7 @@ type turnTerminalHandler struct {
 
 func (terminal *turnTerminalHandler) handleIdleTimeout() {
 	t := terminal.processor
+	t.scheduledResult.complete(fmt.Errorf("agent event idle timeout: %w", context.DeadlineExceeded))
 	e := t.engine
 	state := t.state
 	e.recordFeedbackFailure(state, "idle_timeout", fmt.Errorf("agent session idle timeout: no events for %v, session killed", e.eventIdleTimeout))
@@ -7250,6 +7364,7 @@ func (terminal *turnTerminalHandler) handleIdleTimeout() {
 
 func (terminal *turnTerminalHandler) handleDeadline() {
 	t := terminal.processor
+	t.scheduledResult.complete(fmt.Errorf("agent turn deadline exceeded: %w", context.DeadlineExceeded))
 	e := t.engine
 	state := t.state
 	e.recordFeedbackFailure(state, "turn_deadline", fmt.Errorf("agent turn exceeded max_turn_time (%v), stopped", e.maxTurnTime))
@@ -7324,6 +7439,7 @@ graceLoop:
 
 func (terminal *turnTerminalHandler) handleChannelClosed() {
 	t := terminal.processor
+	t.scheduledResult.complete(errors.New("agent event channel closed before a terminal result"))
 	e := t.engine
 	state := t.state
 	e.recordFeedbackFailure(state, "event_channel_closed", errors.New("agent event channel closed before a terminal result"))
@@ -8619,6 +8735,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.currentUserID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
+		state.activeModelOverride = queued.modelOverride
 		speedTier := sessions.ServiceTier(session)
 		state.activeServiceTier = speedTier
 		state.mu.Unlock()
@@ -8660,7 +8777,12 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 				sendDone <- fmt.Errorf("agent session became nil")
 				return
 			}
-			sendDone <- e.sendAgentTurn(turnAgent, as, prompt, queued.images, queued.files, queued.answerProfile, speedTier)
+			overrides, err := prepareAgentTurnOverrides(sessions, session, as, queued.answerProfile, queued.modelOverride, speedTier)
+			if err != nil {
+				sendDone <- err
+				return
+			}
+			sendDone <- e.sendAgentTurnWithOverrides(turnAgent, as, prompt, queued.images, queued.files, overrides)
 		}()
 
 		var stopTyping func()
@@ -12337,12 +12459,14 @@ func (e *Engine) runCompress(state *interactiveState, session *Session, sessions
 	speedTier := sessions.ServiceTier(session)
 	state.activeServiceTier = speedTier
 	state.activeAnswerProfile = ""
+	state.activeModelOverride = ""
 	state.mu.Unlock()
 	state.steerMu.Unlock()
 	if turnAgent == nil {
 		turnAgent = e.agent
 	}
-	if err := e.sendAgentTurn(turnAgent, agentSession, cmd, nil, nil, "", speedTier); err != nil {
+	overrides := agentTurnOverrides{serviceTier: speedTier, restoreDefaults: session.TurnDefaultsRequired()}
+	if err := e.sendAgentTurnWithOverrides(turnAgent, agentSession, cmd, nil, nil, overrides); err != nil {
 		if !auto {
 			e.reply(p, replyCtx, e.agentErrorText(state, err))
 		}
@@ -17849,7 +17973,8 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 
 	saveRelaySessionID(agentSession.CurrentSessionID(), false)
 
-	if err := e.sendAgentTurn(agent, agentSession, message, nil, nil, "", sessions.ServiceTier(session)); err != nil {
+	overrides := agentTurnOverrides{serviceTier: sessions.ServiceTier(session), restoreDefaults: session.TurnDefaultsRequired()}
+	if err := e.sendAgentTurnWithOverrides(agent, agentSession, message, nil, nil, overrides); err != nil {
 		closeRelayAgentSession(agentSession, relaySessionKey)
 		return "", fmt.Errorf("send relay message: %w", err)
 	}
