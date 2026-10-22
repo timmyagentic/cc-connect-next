@@ -331,11 +331,13 @@ type Message struct {
 	// When both keys are present, multi-workspace routing copies the legacy
 	// default into the current scope without deleting or overwriting either.
 	LegacyChannelKey string
-	ReplyCtx         any               // platform-specific context needed for replying
-	IsDirect         bool              // true only when the platform verified a private one-to-one user conversation
-	FromVoice        bool              // true if message originated from voice transcription
-	ModeOverride     string            // if set, temporarily override agent permission mode for this message
-	AnswerProfile    AnswerProfileName // optional one-shot answer profile for this message
+	ReplyCtx         any                  // platform-specific context needed for replying
+	IsDirect         bool                 // true only when the platform verified a private one-to-one user conversation
+	FromVoice        bool                 // true if message originated from voice transcription
+	ModeOverride     string               // if set, temporarily override agent permission mode for this message
+	AnswerProfile    AnswerProfileName    // optional one-shot answer profile for this message
+	ModelOverride    string               // optional model for this turn only; never changes Agent defaults
+	scheduledResult  *scheduledTurnResult // completion receipt for a model-pinned scheduled turn
 	// IsCardAction marks a command synthesized from an interactive-card click.
 	// Result-producing commands can use the original ReplyCtx to update that
 	// exact card instead of sending an additional chat message.

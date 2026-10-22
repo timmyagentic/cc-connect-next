@@ -13,7 +13,7 @@ var (
 	_ core.ServiceTierProvider = (*Agent)(nil)
 )
 
-func TestAppServerTurnStartParamsUseOneShotOptionsAndClearBlankDefaults(t *testing.T) {
+func TestAppServerTurnStartParamsSerializeNullableOptions(t *testing.T) {
 	session := &appServerSession{model: "balanced-model", effort: "medium", serviceTier: "default", mode: "suggest"}
 	input := []map[string]any{{"type": "text", "text": "hello"}}
 
@@ -29,11 +29,13 @@ func TestAppServerTurnStartParamsUseOneShotOptionsAndClearBlankDefaults(t *testi
 	}
 
 	defaultsWithoutExplicitValues := core.TurnOptions{}
+	// This checks serialization only. In Codex, model:null keeps the current
+	// model; SendWithTurnOptions must resolve and send a concrete default.
 	params = session.turnStartParams("thread-1", input, &defaultsWithoutExplicitValues)
 	for _, key := range []string{"model", "effort", "serviceTier"} {
 		value, ok := params[key]
 		if !ok || value != nil {
-			t.Fatalf("default reset %s = %#v (present=%v), want explicit null", key, value, ok)
+			t.Fatalf("nullable option %s = %#v (present=%v), want explicit null", key, value, ok)
 		}
 	}
 }

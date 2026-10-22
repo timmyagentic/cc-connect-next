@@ -909,12 +909,22 @@ Shell 任务失败时，`last_error` 和调度日志会保留退出码及脱敏�
 ```bash
 cc-connect-next cron add --cron "0 6 * * *" --prompt "总结 GitHub trending" --desc "每日趋势"
 cc-connect-next cron list
-cc-connect-next cron edit <job-id> <field> <value>   # 可改 cron_expr / prompt / enabled / mute / timeout_mins 等
+cc-connect-next cron edit <job-id> <field> <value>   # 可改 cron_expr / prompt / model / enabled / mute / timeout_mins 等
 cc-connect-next cron exec <job-id>
 cc-connect-next cron del <job-id>
 ```
 
 可选：`--session-mode new-per-run` 每次触发使用新的 agent 会话（默认 `reuse` 与旧行为一致）。`--timeout-mins N` 设置单次调度最长等待分钟数（`0` 表示不限制；省略为 30 分钟）。
+
+Prompt 任务可选 `--model <模型 ID>`，为该任务指定模型：
+
+```bash
+cc-connect-next cron add --cron "0 6 * * *" --prompt "总结 GitHub trending" --model "model-id"
+cc-connect-next cron edit <job-id> model "model-id"
+cc-connect-next cron edit <job-id> model ""  # 恢复继承
+```
+
+当前支持 Codex 的 `exec` 和 `app_server` 后端。不填写时保留原来的项目/Agent 模型继承行为；显式模型仅作用于该任务的回合，正常聊天和其他任务的默认模型不变。不会切换 Provider 或修改 Project/Agent 默认设置。`--exec` 与非空 `--model` 互斥；不支持逐回合模型选择的 Agent 会明确拒绝设置和执行，不会静默忽略。模型 ID 必须可由当前 Provider 使用，具体有效性由 Agent/Provider 执行时校验。Web 定时任务编辑器支持同一字段，并在列表显示指定模型或继承状态；清空字段恢复继承。
 
 持久 Cron 和一次性 Timer 必须使用可持久主动投递的消息目标。浏览器连接型
 Web/Bridge 聊天会话会被明确拒绝，因为关闭标签页或浏览器后 adapter 即会消失。

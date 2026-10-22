@@ -678,12 +678,14 @@ func TestMgmt_CronExecByID(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(platform.getSent()) >= 2 {
+		_, completed, _ := cronJobRunStatus(store, job.ID)
+		if len(platform.getSent()) >= 2 && completed {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(platform.getSent()) < 2 {
+	_, completed, _ := cronJobRunStatus(store, job.ID)
+	if len(platform.getSent()) < 2 || !completed {
 		t.Fatalf("timed out waiting for triggered cron exec, sent=%v", platform.getSent())
 	}
 
@@ -709,7 +711,10 @@ func TestMgmt_CronExecByID(t *testing.T) {
 
 	deadline = time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(platform.getSent()) >= 4 {
+		// Delivery precedes MarkRun. Wait for its persisted receipt before
+		// TempDir cleanup can race the asynchronous scheduler write.
+		_, completed, _ := cronJobRunStatus(store, aliasJob.ID)
+		if len(platform.getSent()) >= 4 && completed {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

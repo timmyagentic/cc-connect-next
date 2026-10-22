@@ -59,10 +59,12 @@ var agentToolDefinitions = []agentToolDefinition{
 			capabilityParam("action", "string", true, "Recurring-job operation.", "周期任务操作。", "add", "list", "info", "edit", "exec", "del"),
 			capabilityParam("cron", "cron-expression", false, "Five-field schedule for add/edit.", "add/edit 使用的五段 Cron 表达式。"),
 			capabilityParam("prompt", "string", false, "Agent request executed on schedule; mutually exclusive with exec.", "按计划执行的 Agent 请求；与 exec 互斥。"),
+			capabilityParam("model", "string", false, "Optional model for prompt jobs only. Requires the active Agent's per_turn_model capability. Omit to inherit; edit model to an empty string to restore inheritance. Does not switch provider or change project/Agent defaults.", "仅用于 Prompt 任务的可选模型。要求当前 Agent 具备 per_turn_model 能力。省略时继承；edit model 为空串恢复继承。不切换 Provider，不修改项目/Agent 默认值。"),
 			capabilityParam("exec", "string", false, "Shell command executed on schedule; mutually exclusive with prompt.", "按计划执行的 Shell 命令；与 prompt 互斥。"),
 			capabilityParam("job-id", "string", false, "Existing job identifier for info/edit/exec/del.", "info/edit/exec/del 使用的现有任务 ID。"),
 		},
-		effects: []string{"scheduled_state", "persistent_state", "agent_turn", "shell_execution", "external_message", "network"}, fallback: defaultRejectFallback(),
+		effects:  []string{"scheduled_state", "persistent_state", "agent_turn", "shell_execution", "external_message", "network"},
+		fallback: CapabilityFallback{Mode: "reject", Description: "Explicit models on shell jobs or unsupported Agents are rejected. An omitted model inherits existing behavior; no automatic provider switch or replacement model is selected.", DescriptionZH: "Shell 任务或不支持的 Agent 设置显式模型时拒绝。省略模型继承现有行为；不会自动切换 Provider 或选择替代模型。"},
 	},
 	{
 		id: "timer", invocation: "cc-connect-next timer <add|list|info|del> [options]",
@@ -240,6 +242,21 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 	}
 	result.Capabilities = append(result.Capabilities, feature("cc_connect_instructions", "Receive cc-connect-next tool and delivery instructions.", "接收 cc-connect-next 工具和投递指令。", promptAvailability, defaultRejectFallback()))
 
+	perTurnModel := false
+	if supporter, ok := e.agent.(PerTurnModelSupporter); ok {
+		perTurnModel = supporter.SupportsPerTurnModel()
+	}
+	modelAvailability := interfaceAvailability(perTurnModel,
+		"The active Agent declares per-turn model selection; the concrete session is checked when a task runs.", "当前 Agent 声明支持逐回合指定模型；执行任务时仍检查具体会话能力。",
+		"The active Agent does not declare per-turn model selection; explicit cron models are rejected.", "当前 Agent 未声明支持逐回合指定模型；Cron 显式模型会被拒绝。")
+	modelCapability := feature("per_turn_model", "Use a task model without changing provider or project/Agent defaults.", "为任务使用指定模型，不修改 Provider 或项目/Agent 默认值。", modelAvailability,
+		CapabilityFallback{Mode: "reject", Description: "Omit the model to inherit. An explicit unsupported model is never silently replaced or used to switch providers.", DescriptionZH: "省略模型时继承；不支持的显式模型绝不静默替换，也不用于切换 Provider。"})
+	modelCapability.Permission = CapabilityPermissionLocalAgent
+	modelReadOnly := false
+	modelCapability.ReadOnly = &modelReadOnly
+	modelCapability.SideEffects = expandSideEffects([]string{"agent_turn", "network"})
+	result.Capabilities = append(result.Capabilities, modelCapability)
+
 	type agentProbe struct {
 		id, description, zh, fallback, fallbackZH string
 		ok                                        bool
@@ -310,7 +327,7 @@ type sessionRuntimeCapabilitySpec struct {
 
 var sessionRuntimeCapabilitySpecs = []sessionRuntimeCapabilitySpec{
 	{id: "feedback_diagnostics", description: "Capture cached turn and transport diagnostics without probing the backend.", zh: "读取缓存的回合和传输诊断，不额外探测后端。", unboundDescription: "Capture cached feedback diagnostics.", unboundZH: "读取缓存的反馈诊断。", fallback: "Reports include host observations and mark unsupported backend fields as unavailable.", fallbackZH: "报告保留宿主观测，并标记后端不支持的字段。", supported: func(session AgentSession) bool { _, ok := session.(AgentDiagnosticProvider); return ok }},
-	{id: "turn_options", description: "Apply model, reasoning, service tier, or answer profile to one turn.", zh: "为单个回合应用模型、推理强度、服务等级或回答档位。", unboundDescription: "Apply runtime settings to one turn.", unboundZH: "为单个回合应用运行时设置。", fallback: "Use persistent Agent defaults.", fallbackZH: "使用 Agent 持久默认值。", supported: func(session AgentSession) bool { _, ok := session.(TurnOptionsSession); return ok }},
+	{id: "turn_options", description: "Apply model, reasoning, service tier, or answer profile to one turn.", zh: "为单个回合应用模型、推理强度、服务等级或回答档位。", unboundDescription: "Apply runtime settings to one turn.", unboundZH: "为单个回合应用运行时设置。", fallback: "Use persistent Agent defaults when no override is requested; explicit unsupported cron models are rejected.", fallbackZH: "未请求覆盖时使用 Agent 持久默认值；不支持的 Cron 显式模型会被拒绝。", supported: func(session AgentSession) bool { _, ok := session.(TurnOptionsSession); return ok }},
 	{id: "steer", description: "Append input to the active turn.", zh: "把输入并入当前回合。", unboundDescription: "Append input to the active turn.", unboundZH: "把输入并入当前回合。", fallback: "Use FIFO for ordinary busy messages; /ps rejects when it cannot safely supplement.", fallbackZH: "普通忙时消息使用 FIFO；/ps 无法安全补充时会拒绝。", supported: func(session AgentSession) bool { _, ok := session.(SteerableSession); return ok }},
 	{id: "context_usage", description: "Report live context-window usage.", zh: "报告实时上下文窗口用量。", unboundDescription: "Report live context-window usage.", unboundZH: "报告实时上下文窗口用量。", fallback: "No live context percentage is shown.", fallbackZH: "不显示实时上下文百分比。", unavailableReason: "Session context usage is intentionally unavailable because no production tool or API reads a session-level value.", unavailableReasonZH: "会话上下文用量已明确不可用，因为当前没有生产工具或 API 读取会话级数值。"},
 	{id: "user_stop_close", description: "Close promptly on user stop while preserving completion-hook grace during normal cleanup.", zh: "用户停止时尽快关闭，正常清理时保留完成 Hook 的等待时间。", unboundDescription: "Use a separate close budget for user stop.", unboundZH: "对用户停止使用独立关闭时限。", fallback: "Use the adapter normal close policy within the host teardown limit.", fallbackZH: "在宿主关闭时限内使用适配器的正常关闭策略。", supported: func(session AgentSession) bool { _, ok := session.(AgentSessionStopCloser); return ok }},

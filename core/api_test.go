@@ -518,7 +518,8 @@ func TestHandleCronExec_TriggersJob(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(platform.getSent()) >= 2 {
+		_, completed, _ := cronJobRunStatus(store, job.ID)
+		if len(platform.getSent()) >= 2 && completed {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -573,7 +574,8 @@ func TestHandleCronExec_RunAliasRouteTriggersJob(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(platform.getSent()) >= 2 {
+		_, completed, _ := cronJobRunStatus(store, job.ID)
+		if len(platform.getSent()) >= 2 && completed {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

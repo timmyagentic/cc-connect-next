@@ -610,6 +610,7 @@ type CronAddRequest struct {
 	SessionKey  string `json:"session_key"`
 	CronExpr    string `json:"cron_expr"`
 	Prompt      string `json:"prompt"`
+	Model       string `json:"model,omitempty"`
 	Exec        string `json:"exec"`
 	WorkDir     string `json:"work_dir"`
 	Description string `json:"description"`
@@ -688,6 +689,7 @@ func (s *APIServer) handleCronAdd(w http.ResponseWriter, r *http.Request) {
 		SessionKey:  sessionKey,
 		CronExpr:    req.CronExpr,
 		Prompt:      req.Prompt,
+		Model:       req.Model,
 		Exec:        req.Exec,
 		WorkDir:     req.WorkDir,
 		Description: req.Description,
