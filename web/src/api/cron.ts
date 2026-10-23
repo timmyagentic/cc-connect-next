@@ -1,4 +1,5 @@
 import api from './client';
+import type { AgentCapabilityManifest } from './projects';
 
 export interface CronJob {
   id: string;
@@ -15,11 +16,19 @@ export interface CronJob {
   session_mode: string;
   mode: string;
   model?: string;
+  reasoning_effort?: string;
   timeout_mins: number | null;
   created_at: string;
   last_run: string;
   last_error: string;
 }
+
+export type CronCapabilities = Pick<AgentCapabilityManifest, 'runtime'> & {
+  tools?: { id: string; parameters?: { name: string; allowed_values?: string[] }[] }[];
+};
+
+export const getCronCapabilities = (project: string) =>
+  api.get<CronCapabilities>(`/projects/${project}/capabilities`, { sections: 'runtime,tools' });
 
 export const listCronJobs = (project?: string) =>
   api.get<{ jobs: CronJob[] }>('/cron', project ? { project } : undefined);

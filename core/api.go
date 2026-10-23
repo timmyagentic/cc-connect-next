@@ -606,18 +606,19 @@ func (s *APIServer) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 // CronAddRequest is the JSON body for POST /cron/add.
 type CronAddRequest struct {
-	Project     string `json:"project"`
-	SessionKey  string `json:"session_key"`
-	CronExpr    string `json:"cron_expr"`
-	Prompt      string `json:"prompt"`
-	Model       string `json:"model,omitempty"`
-	Exec        string `json:"exec"`
-	WorkDir     string `json:"work_dir"`
-	Description string `json:"description"`
-	Silent      *bool  `json:"silent,omitempty"`
-	SessionMode string `json:"session_mode,omitempty"`
-	Mode        string `json:"mode,omitempty"`
-	TimeoutMins *int   `json:"timeout_mins,omitempty"`
+	Project         string `json:"project"`
+	SessionKey      string `json:"session_key"`
+	CronExpr        string `json:"cron_expr"`
+	Prompt          string `json:"prompt"`
+	Model           string `json:"model,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	Exec            string `json:"exec"`
+	WorkDir         string `json:"work_dir"`
+	Description     string `json:"description"`
+	Silent          *bool  `json:"silent,omitempty"`
+	SessionMode     string `json:"session_mode,omitempty"`
+	Mode            string `json:"mode,omitempty"`
+	TimeoutMins     *int   `json:"timeout_mins,omitempty"`
 }
 
 func (s *APIServer) handleCronAdd(w http.ResponseWriter, r *http.Request) {
@@ -684,20 +685,21 @@ func (s *APIServer) handleCronAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job := &CronJob{
-		ID:          GenerateCronID(),
-		Project:     project,
-		SessionKey:  sessionKey,
-		CronExpr:    req.CronExpr,
-		Prompt:      req.Prompt,
-		Model:       req.Model,
-		Exec:        req.Exec,
-		WorkDir:     req.WorkDir,
-		Description: req.Description,
-		Enabled:     true,
-		Silent:      req.Silent,
-		SessionMode: NormalizeCronSessionMode(req.SessionMode),
-		Mode:        req.Mode,
-		TimeoutMins: req.TimeoutMins,
+		ID:              GenerateCronID(),
+		Project:         project,
+		SessionKey:      sessionKey,
+		CronExpr:        req.CronExpr,
+		Prompt:          req.Prompt,
+		Model:           req.Model,
+		ReasoningEffort: req.ReasoningEffort,
+		Exec:            req.Exec,
+		WorkDir:         req.WorkDir,
+		Description:     req.Description,
+		Enabled:         true,
+		Silent:          req.Silent,
+		SessionMode:     NormalizeCronSessionMode(req.SessionMode),
+		Mode:            req.Mode,
+		TimeoutMins:     req.TimeoutMins,
 	}
 	job.CreatedAt = time.Now()
 

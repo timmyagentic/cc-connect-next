@@ -60,11 +60,12 @@ var agentToolDefinitions = []agentToolDefinition{
 			capabilityParam("cron", "cron-expression", false, "Five-field schedule for add/edit.", "add/edit 使用的五段 Cron 表达式。"),
 			capabilityParam("prompt", "string", false, "Agent request executed on schedule; mutually exclusive with exec.", "按计划执行的 Agent 请求；与 exec 互斥。"),
 			capabilityParam("model", "string", false, "Optional model for prompt jobs only. Requires the active Agent's per_turn_model capability. Omit to inherit; edit model to an empty string to restore inheritance. Does not switch provider or change project/Agent defaults.", "仅用于 Prompt 任务的可选模型。要求当前 Agent 具备 per_turn_model 能力。省略时继承；edit model 为空串恢复继承。不切换 Provider，不修改项目/Agent 默认值。"),
+			capabilityParam("reasoning_effort", "string", false, "Optional reasoning effort for prompt jobs only: add --reasoning-effort <value> or edit reasoning_effort <value>. Requires per_turn_reasoning_effort. Can be set without model; supported values and Agent support are validated by the server. Omit to inherit; edit reasoning_effort to an empty string to restore inheritance. Does not change project/Agent defaults.", "仅用于 Prompt 任务的可选推理强度：add --reasoning-effort <value> 或 edit reasoning_effort <value>。要求 per_turn_reasoning_effort 能力。可独立于 model 设置；有效值与 Agent 支持由服务端校验。省略时继承；edit reasoning_effort 为空串恢复继承。不修改项目/Agent 默认值。"),
 			capabilityParam("exec", "string", false, "Shell command executed on schedule; mutually exclusive with prompt.", "按计划执行的 Shell 命令；与 prompt 互斥。"),
 			capabilityParam("job-id", "string", false, "Existing job identifier for info/edit/exec/del.", "info/edit/exec/del 使用的现有任务 ID。"),
 		},
 		effects:  []string{"scheduled_state", "persistent_state", "agent_turn", "shell_execution", "external_message", "network"},
-		fallback: CapabilityFallback{Mode: "reject", Description: "Explicit models on shell jobs or unsupported Agents are rejected. An omitted model inherits existing behavior; no automatic provider switch or replacement model is selected.", DescriptionZH: "Shell 任务或不支持的 Agent 设置显式模型时拒绝。省略模型继承现有行为；不会自动切换 Provider 或选择替代模型。"},
+		fallback: CapabilityFallback{Mode: "reject", Description: "Explicit models or reasoning efforts on shell jobs or unsupported Agents are rejected; invalid reasoning efforts are rejected by the server. Omitted overrides inherit existing behavior; no automatic provider switch or replacement model or effort is selected.", DescriptionZH: "Shell 任务或不支持的 Agent 设置显式模型或推理强度时拒绝；无效推理强度由服务端拒绝。省略的覆盖值继承现有行为；不会自动切换 Provider 或选择替代模型或推理强度。"},
 	},
 	{
 		id: "timer", invocation: "cc-connect-next timer <add|list|info|del> [options]",
@@ -146,9 +147,21 @@ func (e *Engine) agentToolCapabilities(snapshot capabilitySnapshot) []AgentToolC
 		if fallback.Mode == "" {
 			fallback = defaultRejectFallback()
 		}
+		parameters := append([]CapabilityParameter(nil), definition.parameters...)
+		if definition.id == "cron" {
+			if supporter, ok := e.agent.(PerTurnReasoningEffortSupporter); ok && supporter.SupportsPerTurnReasoningEffort() {
+				if switcher, ok := e.agent.(ReasoningEffortSwitcher); ok {
+					for i := range parameters {
+						if parameters[i].Name == "reasoning_effort" {
+							parameters[i].AllowedValues = append([]string(nil), switcher.AvailableReasoningEfforts()...)
+						}
+					}
+				}
+			}
+		}
 		result = append(result, AgentToolCapability{
 			ID: definition.id, Invocation: definition.invocation, Description: definition.description, DescriptionZH: definition.zh,
-			Parameters: append([]CapabilityParameter(nil), definition.parameters...), Permission: permission,
+			Parameters: parameters, Permission: permission,
 			ReadOnly: definition.readOnly, SideEffects: expandSideEffects(definition.effects), Fallback: fallback, Availability: availability,
 		})
 	}
@@ -256,6 +269,23 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 	modelCapability.ReadOnly = &modelReadOnly
 	modelCapability.SideEffects = expandSideEffects([]string{"agent_turn", "network"})
 	result.Capabilities = append(result.Capabilities, modelCapability)
+
+	perTurnReasoning := false
+	if supporter, ok := e.agent.(PerTurnReasoningEffortSupporter); ok {
+		if switcher, ok := e.agent.(ReasoningEffortSwitcher); ok {
+			perTurnReasoning = supporter.SupportsPerTurnReasoningEffort() && len(switcher.AvailableReasoningEfforts()) > 0
+		}
+	}
+	reasoningAvailability := interfaceAvailability(perTurnReasoning,
+		"The active Agent declares per-turn reasoning effort selection and a non-empty effort catalog; the concrete session is checked when a task runs.", "当前 Agent 声明支持逐回合指定推理强度并提供非空强度目录；执行任务时仍检查具体会话能力。",
+		"The active Agent must declare per-turn reasoning effort support and provide a non-empty catalog through ReasoningEffortSwitcher; explicit cron reasoning efforts are rejected without both.", "当前 Agent 必须声明逐回合推理强度支持并通过 ReasoningEffortSwitcher 提供非空目录；缺少任一条件都会拒绝 Cron 显式推理强度。")
+	reasoningCapability := feature("per_turn_reasoning_effort", "Use a task reasoning effort independently of its model without changing project/Agent defaults.", "为任务独立指定推理强度，无需指定模型，不修改项目/Agent 默认值。", reasoningAvailability,
+		CapabilityFallback{Mode: "reject", Description: "Omit the reasoning effort to inherit. Unsupported efforts are rejected, never silently replaced; supported values are exposed on the cron tool parameter when the Agent declares them.", DescriptionZH: "省略推理强度时继承；不支持的强度会被拒绝，绝不静默替换。Agent 声明的有效值通过 cron 工具参数提供。"})
+	reasoningCapability.Permission = CapabilityPermissionLocalAgent
+	reasoningReadOnly := false
+	reasoningCapability.ReadOnly = &reasoningReadOnly
+	reasoningCapability.SideEffects = expandSideEffects([]string{"agent_turn", "network"})
+	result.Capabilities = append(result.Capabilities, reasoningCapability)
 
 	type agentProbe struct {
 		id, description, zh, fallback, fallbackZH string

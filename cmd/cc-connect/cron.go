@@ -57,7 +57,7 @@ func closeCronResponseBody(body io.Closer) {
 }
 
 func runCronAdd(args []string) {
-	var project, sessionKey, cronExpr, prompt, execCmd, desc, dataDir, sessionMode, model string
+	var project, sessionKey, cronExpr, prompt, execCmd, desc, dataDir, sessionMode, model, reasoningEffort string
 	var timeoutMins *int
 	var silent bool
 
@@ -91,6 +91,13 @@ func runCronAdd(args []string) {
 			}
 			i++
 			model = strings.TrimSpace(args[i])
+		case "--reasoning-effort":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				fmt.Fprintln(os.Stderr, "Error: --reasoning-effort requires a value")
+				os.Exit(1)
+			}
+			i++
+			reasoningEffort = strings.TrimSpace(args[i])
 		case "--exec":
 			if i+1 < len(args) {
 				i++
@@ -162,6 +169,10 @@ func runCronAdd(args []string) {
 		fmt.Fprintln(os.Stderr, "Error: --model is only supported with --prompt")
 		os.Exit(1)
 	}
+	if reasoningEffort != "" && execCmd != "" {
+		fmt.Fprintln(os.Stderr, "Error: --reasoning-effort is only supported with --prompt")
+		os.Exit(1)
+	}
 
 	sockPath := resolveSocketPath(dataDir)
 	if _, err := os.Stat(sockPath); os.IsNotExist(err) {
@@ -179,6 +190,9 @@ func runCronAdd(args []string) {
 	}
 	if model != "" {
 		body["model"] = model
+	}
+	if reasoningEffort != "" {
+		body["reasoning_effort"] = reasoningEffort
 	}
 	if silent {
 		body["silent"] = true
@@ -216,12 +230,20 @@ func runCronAdd(args []string) {
 	} else {
 		fmt.Printf("Prompt: %s\n", result["prompt"])
 		fmt.Printf("Model: %s\n", cronModelDisplay(result))
+		fmt.Printf("Reasoning effort: %s\n", cronReasoningEffortDisplay(result))
 	}
 }
 
 func cronModelDisplay(job map[string]any) string {
 	if model, ok := job["model"].(string); ok && strings.TrimSpace(model) != "" {
 		return model
+	}
+	return "inherit project default"
+}
+
+func cronReasoningEffortDisplay(job map[string]any) string {
+	if effort, ok := job["reasoning_effort"].(string); ok && strings.TrimSpace(effort) != "" {
+		return effort
 	}
 	return "inherit project default"
 }
@@ -315,6 +337,7 @@ func runCronList(args []string) {
 		fmt.Printf("  %s %s  %s  %s\n", enabled, id, expr, display)
 		if execCmd == "" {
 			fmt.Printf("    Model: %s\n", cronModelDisplay(j))
+			fmt.Printf("    Reasoning effort: %s\n", cronReasoningEffortDisplay(j))
 		}
 	}
 }
@@ -475,6 +498,10 @@ func runCronInfo(args []string) {
 			fmt.Fprintf(os.Stderr, "Error: invalid JSON response: %v\n", err)
 			os.Exit(1)
 		}
+		if field == "reasoning_effort" {
+			fmt.Println(cronReasoningEffortDisplay(result))
+			return
+		}
 		val, ok := result[field]
 		if !ok && field == "model" {
 			val, ok = "", true // omitted model means inherit, including legacy jobs
@@ -544,7 +571,7 @@ func runCronEdit(args []string) {
 		fmt.Fprintln(os.Stderr, "Run 'cc-connect-next cron edit --help' for usage.")
 		os.Exit(1)
 	}
-	if !valueSet || (valueStr == "" && field != "model") {
+	if !valueSet || (valueStr == "" && field != "model" && field != "reasoning_effort") {
 		fmt.Fprintln(os.Stderr, "Error: value is required")
 		fmt.Fprintln(os.Stderr, "Run 'cc-connect-next cron edit --help' for usage.")
 		os.Exit(1)
@@ -613,7 +640,7 @@ func parseCronEditValue(field, valueStr string) (any, error) {
 		return v, nil
 	default:
 		// String fields: project, session_key, cron_expr, prompt, exec,
-		// work_dir, description, session_mode, mode, model (empty = inherit)
+		// work_dir, description, session_mode, mode, model, reasoning_effort (empty = inherit)
 		return valueStr, nil
 	}
 }
@@ -655,6 +682,8 @@ Options:
   -c, --cron <expr>          Cron expression, e.g. "0 6 * * *"
       --prompt <text>        Task prompt (runs through agent)
       --model <id>           Prompt-only model for each run; omitted = inherit project default
+      --reasoning-effort <value>  Prompt-only effort; omitted = inherit project default
+                                Model optional; supported values validated by server
       --exec <command>       Shell command (runs directly, mutually exclusive with --prompt)
       --desc <text>          Short description
       --session-mode <mode>  reuse (default) or new-per-run — fresh agent session each run
@@ -668,6 +697,7 @@ Examples:
   cc-connect-next cron add --cron "*/30 * * * *" --exec "df -h" --desc "Disk usage check"
   cc-connect-next cron add --cron "0 9 * * *" --prompt "Daily standup reminder" --silent
   cc-connect-next cron add --cron "0 9 * * *" --prompt "Daily report" --model gpt-5.4
+  cc-connect-next cron add --cron "0 9 * * *" --prompt "Daily report" --reasoning-effort <value>
   cc-connect-next cron add 0 6 * * * Collect GitHub trending data and send me a summary`)
 }
 
@@ -696,6 +726,8 @@ Editable Fields (string):
   cron_expr     Cron expression, e.g. "0 6 * * *"
   prompt        Task prompt (runs through agent)
   model         Prompt-only model ID; "" restores inheritance (Codex exec/app_server)
+  reasoning_effort  Prompt-only effort; "" restores inheritance; model optional
+                    Supported values are validated by the server
   exec          Shell command (runs directly)
   work_dir      Working directory for exec
   description   Short description
@@ -723,5 +755,7 @@ Examples:
   cc-connect-next cron edit abc123 timeout_mins 60
   cc-connect-next cron edit abc123 mute true
   cc-connect-next cron edit abc123 model gpt-5.4
-  cc-connect-next cron edit abc123 model ""`)
+  cc-connect-next cron edit abc123 model ""
+  cc-connect-next cron edit abc123 reasoning_effort <value>
+  cc-connect-next cron edit abc123 reasoning_effort ""`)
 }

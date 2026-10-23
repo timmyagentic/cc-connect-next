@@ -926,6 +926,19 @@ cc-connect-next cron edit <job-id> model ""  # 恢复继承
 
 当前支持 Codex 的 `exec` 和 `app_server` 后端。不填写时保留原来的项目/Agent 模型继承行为；显式模型仅作用于该任务的回合，正常聊天和其他任务的默认模型不变。不会切换 Provider 或修改 Project/Agent 默认设置。`--exec` 与非空 `--model` 互斥；不支持逐回合模型选择的 Agent 会明确拒绝设置和执行，不会静默忽略。模型 ID 必须可由当前 Provider 使用，具体有效性由 Agent/Provider 执行时校验。Web 定时任务编辑器支持同一字段，并在列表显示指定模型或继承状态；清空字段恢复继承。
 
+Prompt 任务也可通过 `--reasoning-effort <value>` 指定推理强度，无需同时设置 `--model`：
+
+```bash
+cc-connect-next cron add --cron "0 6 * * *" --prompt "总结 GitHub trending" --reasoning-effort "<supported-value>"
+cc-connect-next cron edit <job-id> reasoning_effort "<supported-value>"
+cc-connect-next cron edit <job-id> reasoning_effort ""  # 恢复继承
+cc-connect-next cron info <job-id> reasoning_effort
+```
+
+将 `<supported-value>` 替换为当前 Agent 支持的强度。有效值与 Agent 支持由服务端校验，通用 CLI 不维护特定 Agent 的取值列表。非空推理强度仅适用于 Prompt 任务，与 `--exec` 互斥。省略或清空时继承项目/Agent 默认值，不修改默认设置或其他任务。`cron list` 和单字段查询 `cron info <job-id> reasoning_effort` 显示指定强度或 `inherit project default`，旧任务也可正常显示继承。完整 `cron info <job-id>` 仍返回 JSON，可选字符串字段 `reasoning_effort` 为空或缺失表示继承。
+
+Web 定时任务编辑器提供同一 Prompt 专属强度字段。能力元数据提供有效值时显示包含继承选项的下拉框，否则使用由服务端校验的文本输入；列表显示指定强度或继承状态。将 Prompt 任务切换为 Shell 时，模型、推理强度和任务类型在同一次更新中修改；编辑其他字段时保留未变更的旧覆盖值。
+
 持久 Cron 和一次性 Timer 必须使用可持久主动投递的消息目标。浏览器连接型
 Web/Bridge 聊天会话会被明确拒绝，因为关闭标签页或浏览器后 adapter 即会消失。
 在 Web 定时任务编辑器中，请选择飞书、Telegram 或 Discord 等持久平台会话。
