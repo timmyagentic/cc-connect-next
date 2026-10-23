@@ -1280,7 +1280,7 @@ func (e *Engine) buildCapabilityPrompt(state *interactiveState, content string) 
 	if sent {
 		return content
 	}
-	return e.capabilityBrief + "\n\n" + content
+	return e.capabilityBrief + e.localStateBrief() + "\n\n" + content
 }
 
 // SetAttachmentSendEnabled controls whether side-channel image/file delivery is allowed.

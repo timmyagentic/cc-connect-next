@@ -78,7 +78,7 @@ jobs:
           go test -bench=. -benchmem -tags=performance ./tests/performance/...
 
   build-assets:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     needs: validate
     steps:
       - uses: actions/checkout@v7
@@ -107,12 +107,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build and verify six release archives
+      - name: Verify macOS signature rejection and keychain cleanup
+        run: node --test scripts/macos-signing.test.js
+
+      - name: Build, sign, and verify six release archives
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGN_IDENTITY: Developer ID Application
         run: |
           set -euo pipefail
           node scripts/check-release-version.js "${GITHUB_REF_NAME}"
-          make release-all
-          node scripts/check-release-assets.js dist
+          bash scripts/with-macos-signing-keychain.sh make release-all
+          node scripts/check-release-assets.js dist --require-macos-signatures
 
       - name: Upload verified release archives
         uses: actions/upload-artifact@v7
@@ -126,7 +133,8 @@ jobs:
             dist/checksums.txt
 
   publish:
-    runs-on: ubuntu-latest
+    # Recheck signatures after artifact transfer, public download, and release reuse.
+    runs-on: macos-latest
     needs: build-assets
     concurrency:
       group: release-channel-publication
