@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 
 	featureupdater "github.com/timmyagentic/awesome-agent-app-features/updater"
+	"github.com/timmyagentic/cc-connect-next/internal/processgroup"
 	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
@@ -36,12 +37,13 @@ type UpdateStage = featureupdater.Stage
 type UpdateResult = featureupdater.Result
 
 const (
-	StageDownloadingChecksums = featureupdater.StageDownloadingChecksums
-	StageDownloadingArchive   = featureupdater.StageDownloadingArchive
-	StageChecksumVerified     = featureupdater.StageChecksumVerified
-	StageStagedVerified       = featureupdater.StageStagedVerified
-	StageInstalling           = featureupdater.StageInstalling
-	StageInstalledVerified    = featureupdater.StageInstalledVerified
+	StageDownloadingChecksums             = featureupdater.StageDownloadingChecksums
+	StageDownloadingArchive               = featureupdater.StageDownloadingArchive
+	StageChecksumVerified                 = featureupdater.StageChecksumVerified
+	StageStagedVerified                   = featureupdater.StageStagedVerified
+	StageInstalling                       = featureupdater.StageInstalling
+	StageInstalledVerified                = featureupdater.StageInstalledVerified
+	StageVerifyingInstalled   UpdateStage = "verifying_installed"
 )
 
 type InstallKind string
@@ -80,6 +82,7 @@ type UpdateService struct {
 	platformOS   string
 	platformArch string
 	operation    sync.Mutex
+	observer     func(UpdateEvent) // owned by operation; never shared across calls
 	generation   atomic.Uint64
 }
 
@@ -170,7 +173,7 @@ func newUpdateService(config UpdateConfig, platformOS, platformArch string) (*Up
 			AssetName:         releaseArchiveName,
 			Source:            source,
 			Verifier:          verifier,
-			Progress:          config.Progress,
+			Progress:          service.emit,
 		})
 		if err != nil {
 			return nil, err
@@ -265,7 +268,13 @@ func (service *UpdateService) Prepare(ctx context.Context) (UpdatePlan, error) {
 	return UpdatePlan{state: state}, nil
 }
 
-func (service *UpdateService) Apply(ctx context.Context, plan UpdatePlan) (result UpdateResult, resultErr error) {
+func (service *UpdateService) Apply(ctx context.Context, plan UpdatePlan) (UpdateResult, error) {
+	return service.ApplyWithProgress(ctx, plan, nil)
+}
+
+// ApplyWithProgress reports only this operation. The installer lock also owns
+// the observer, so another caller cannot steal or receive its progress.
+func (service *UpdateService) ApplyWithProgress(ctx context.Context, plan UpdatePlan, progress func(UpdateEvent)) (result UpdateResult, resultErr error) {
 	if service == nil {
 		return result, fmt.Errorf("update service is nil")
 	}
@@ -273,6 +282,8 @@ func (service *UpdateService) Apply(ctx context.Context, plan UpdatePlan) (resul
 		return result, featureupdater.ErrUpdateInProgress
 	}
 	defer service.operation.Unlock()
+	service.observer = progress
+	defer func() { service.observer = nil }()
 	targetLockValue, _ := updateTargetLocks.LoadOrStore(service.installation.ExecutablePath, &sync.Mutex{})
 	targetLock := targetLockValue.(*sync.Mutex)
 	if !targetLock.TryLock() {
@@ -280,6 +291,17 @@ func (service *UpdateService) Apply(ctx context.Context, plan UpdatePlan) (resul
 	}
 	defer targetLock.Unlock()
 	var hostLock hostUpdateLock
+	if service.installation.Kind == InstallNPM {
+		lock, err := tryHostUpdateLock(filepath.Join(service.installation.NPMPrefix, ".cc-connect-next.update.lock"))
+		if err != nil {
+			return result, err
+		}
+		defer func() {
+			if err := lock.release(); resultErr == nil && err != nil {
+				resultErr = err
+			}
+		}()
+	}
 	if service.standalone == nil && service.installation.Kind == InstallStandalone {
 		lock, lockErr := tryHostUpdateLock(service.installation.ExecutablePath + ".update.lock")
 		if lockErr != nil {
@@ -367,6 +389,7 @@ func (service *UpdateService) applyNPM(ctx context.Context, tag string) error {
 		return fmt.Errorf("%w: npm install %s completed, but verification failed: %w", ErrUpdateInstalledUnverified, packageSpec, err)
 	}
 
+	service.emit(UpdateEvent{Stage: StageVerifyingInstalled, TargetVersion: tag, Asset: packageSpec})
 	metadata, err := readPackageMetadata(filepath.Join(installation.PackageDir, "package.json"))
 	if err != nil {
 		return verificationFailed(fmt.Errorf("verify updated npm package: %w", err))
@@ -788,6 +811,9 @@ func extractExactTarGzBinary(archivePath, binaryName, directory string, maximum 
 }
 
 func (service *UpdateService) emit(event featureupdater.Event) {
+	if service.observer != nil {
+		service.observer(event)
+	}
 	if service.config.Progress == nil {
 		return
 	}
@@ -908,6 +934,8 @@ func readPackageMetadata(path string) (packageMetadata, error) {
 
 func runUpdateCommand(ctx context.Context, name string, args ...string) error {
 	command := exec.CommandContext(ctx, name, args...)
+	processgroup.Prepare(command)
+	command.Cancel = func() error { return processgroup.Kill(command) }
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr

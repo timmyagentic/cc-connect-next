@@ -2553,7 +2553,7 @@ func TestCUJ_J2_UpdateReviewAppliesExactPlanOnce(t *testing.T) {
 
 	// 1. Review the immutable Plan.
 	env.userSends("updater", "/upgrade")
-	if !env.sentContains("reviewed notes") || !env.sentContains("reviewed-asset.tar.gz") {
+	if !env.sentContains("reviewed notes") || !env.sentContains("v1.1.0") {
 		t.Fatalf("user did not see exact release details: %v", env.plat.getSent())
 	}
 	if service.applyCalls != 0 {
@@ -2579,9 +2579,11 @@ func TestCUJ_J2_UpdateReviewAppliesExactPlanOnce(t *testing.T) {
 
 	// 3. A repeated confirm has no pending Plan and cannot install twice.
 	env.userSends("updater", "/upgrade confirm")
-	if service.applyCalls != 1 || !env.sentContains("reviewed update plan") {
+	if service.applyCalls != 1 || !env.sentContains(env.engine.i18n.T(MsgUpdateRestartingState)) {
 		t.Fatalf("repeated confirm was not rejected: calls=%d sent=%v", service.applyCalls, env.plat.getSent())
 	}
+
+	t.Run("shared tasks and same card across restart", testCUJUpdateDrainAndRecovery)
 
 	t.Run("installed but verification failed", func(t *testing.T) {
 		previousInfo := VersionInfo

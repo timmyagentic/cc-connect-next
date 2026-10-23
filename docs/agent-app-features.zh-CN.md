@@ -47,8 +47,8 @@ JSON/配置键、转义值、带前缀的凭证、Cookie、URL 凭证和宿主�
 
 ## Update
 
-daemon 提醒只负责发现。`/upgrade` 准备 immutable Plan，展示同一 Release 的 notes
-和选定产物，并用 session/user opaque token 保存。携带 token 的确认只 Apply 这份
+daemon 提醒只负责发现。`/upgrade` 准备 immutable Plan，展示同一 Release 的简短摘要
+和重启影响，并用 session/user opaque token 保存。携带 token 的确认只 Apply 这份
 Plan，不会重新解析 latest；存在多份待确认 Plan 时，泛化确认会被拒绝。
 
 - Stable 的 macOS/Linux 独立安装使用 Foundation checksum、staging、双版本探针、
@@ -60,6 +60,9 @@ Plan，不会重新解析 latest；存在多份待确认 Plan 时，泛化确认
 - npm 宿主 adapter 安装所选 Stable/Beta 通道中已审阅的精确 package version，并验证
   package metadata 与二进制版本。
 - 重启、重启后回执、卡片、自然语言意图、授权和本地化仍由 CC Connect Next 负责。
+
+进度、任务等待、重启恢复、失败处理与真实客户端验收边界，见
+[聊天更新体验](update-experience.md)。
 
 ## Relay source-subtree
 
