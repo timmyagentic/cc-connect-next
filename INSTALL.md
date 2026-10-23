@@ -80,6 +80,26 @@ Download the exact asset shown on the [release page](https://github.com/timmyage
 
 Homebrew is not currently a supported cc-connect-next installation method.
 
+### macOS permissions after an update
+
+Release builds use a stable Developer ID Application identity for both Mac
+architectures. Moving from an older ad hoc build to the first Developer ID build
+may require you to grant the needed permissions once again. Later signed builds
+must satisfy the previous build's designated requirement; the release gate checks
+the extracted binaries as well as archive checksums. npm and the built-in updater
+install the same signed release bytes.
+
+macOS may attribute an Agent child process's access to the background
+cc-connect-next service. The Agent receives the effective state directory and
+instructions to keep searches within relevant locations. Grant only the access
+your task needs. Do not reset the TCC database or grant unrelated directory access
+to work around an identity mismatch. See the [macOS signing runbook](docs/macos-signing.md)
+for release setup and the separate real-device upgrade acceptance check.
+
+从旧的 ad hoc 版本首次切换到 Developer ID 签名版本时，可能需要重新授权一次。
+后续版本保持相同产品签名身份；Agent 搜索使用实际数据目录，找不到文件时不应自动
+扩大到整个用户目录。不要通过清空 TCC 或授予无关目录权限处理签名失配。
+
 ## 3. Create or migrate configuration
 
 ### New installation

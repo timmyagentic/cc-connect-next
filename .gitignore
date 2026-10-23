@@ -81,6 +81,10 @@ test/
 !feedback-relay/test/**
 scripts/*
 !scripts/check-release-assets.js
+!scripts/macos-signing.js
+!scripts/macos-signing.test.js
+!scripts/sign-macos-release.js
+!scripts/with-macos-signing-keychain.sh
 !scripts/check-release-version.js
 !scripts/verify-agent-app-features.sh
 !scripts/release-channel-policy.js
