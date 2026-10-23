@@ -775,7 +775,306 @@ const (
 	MsgBackgroundAutoDenied     MsgKey = "background_auto_denied"
 )
 
+const (
+	MsgUpdateReviewTitle      MsgKey = "update_flow_reviewtitle"
+	MsgUpdateInstall          MsgKey = "update_flow_install"
+	MsgUpdateAfterTasks       MsgKey = "update_flow_aftertasks"
+	MsgUpdateLater            MsgKey = "update_flow_later"
+	MsgUpdateCancel           MsgKey = "update_flow_cancel"
+	MsgUpdateCheckAgain       MsgKey = "update_flow_checkagain"
+	MsgUpdateCancelCheck      MsgKey = "update_flow_cancel_check"
+	MsgUpdateVerifyingPackage MsgKey = "update_flow_verifying_package"
+	MsgUpdateRetry            MsgKey = "update_flow_retry"
+	MsgUpdateDetails          MsgKey = "update_flow_details"
+	MsgUpdateImpact           MsgKey = "update_flow_impact"
+	MsgUpdateActiveTasks      MsgKey = "update_flow_activetasks"
+	MsgUpdateCheckingState    MsgKey = "update_flow_checkingstate"
+	MsgUpdateWaitingState     MsgKey = "update_flow_waitingstate"
+	MsgUpdateInstallingState  MsgKey = "update_flow_installingstate"
+	MsgUpdateDownloadingState MsgKey = "update_flow_downloadingstate"
+	MsgUpdateVerifyingState   MsgKey = "update_flow_verifyingstate"
+	MsgUpdateRestartingState  MsgKey = "update_flow_restartingstate"
+	MsgUpdateCompleteState    MsgKey = "update_flow_completestate"
+	MsgUpdateFailureState     MsgKey = "update_flow_failurestate"
+	MsgUpdateCancelledState   MsgKey = "update_flow_cancelledstate"
+	MsgUpdateExpiredState     MsgKey = "update_flow_expiredstate"
+	MsgUpdateBusyState        MsgKey = "update_flow_busystate"
+	MsgUpdateElapsed          MsgKey = "update_flow_elapsed"
+	MsgUpdateStillWaiting     MsgKey = "update_flow_stillwaiting"
+	MsgUpdateRecoveryHint     MsgKey = "update_flow_recoveryhint"
+	MsgUpdateAdmissionClosed  MsgKey = "update_flow_admissionclosed"
+	MsgUpdateSafeFailure      MsgKey = "update_flow_safefailure"
+	MsgUpdateUncertainFailure MsgKey = "update_flow_uncertainfailure"
+	MsgUpdateMismatch         MsgKey = "update_flow_mismatch"
+	MsgUpdateConnected        MsgKey = "update_flow_connected"
+	MsgUpdatePartial          MsgKey = "update_flow_partial"
+	MsgUpdateSummaryFallback  MsgKey = "update_flow_summaryfallback"
+	MsgUpdateStable           MsgKey = "update_flow_stable"
+	MsgUpdateBeta             MsgKey = "update_flow_beta"
+	MsgUpdateNoResult         MsgKey = "update_flow_noresult"
+	MsgUpdateInterrupted      MsgKey = "update_flow_interrupted"
+	MsgUpdateWaitingExpired   MsgKey = "update_flow_waitingexpired"
+)
+
 var messages = map[MsgKey]map[Language]string{
+	MsgUpdateReviewTitle: {
+		LangEnglish:            "Review update",
+		LangChinese:            "准备更新",
+		LangTraditionalChinese: "準備更新",
+		LangJapanese:           "更新の確認",
+		LangSpanish:            "Revisar actualización",
+	},
+	MsgUpdateInstall: {
+		LangEnglish:            "Update and restart",
+		LangChinese:            "更新并重启",
+		LangTraditionalChinese: "更新並重新啟動",
+		LangJapanese:           "更新して再起動",
+		LangSpanish:            "Actualizar y reiniciar",
+	},
+	MsgUpdateAfterTasks: {
+		LangEnglish:            "Update when tasks finish",
+		LangChinese:            "任务结束后更新",
+		LangTraditionalChinese: "任務結束後更新",
+		LangJapanese:           "タスク完了後に更新",
+		LangSpanish:            "Actualizar al terminar las tareas",
+	},
+	MsgUpdateLater: {
+		LangEnglish:            "Later",
+		LangChinese:            "稍后",
+		LangTraditionalChinese: "稍後",
+		LangJapanese:           "あとで",
+		LangSpanish:            "Más tarde",
+	},
+	MsgUpdateCancel: {
+		LangEnglish:            "Cancel waiting",
+		LangChinese:            "取消等待",
+		LangTraditionalChinese: "取消等待",
+		LangJapanese:           "待機をキャンセル",
+		LangSpanish:            "Cancelar espera",
+	},
+	MsgUpdateCheckAgain: {
+		LangEnglish:            "Check again",
+		LangChinese:            "重新检查",
+		LangTraditionalChinese: "重新檢查",
+		LangJapanese:           "再確認",
+		LangSpanish:            "Volver a comprobar",
+	},
+	MsgUpdateCancelCheck: {
+		LangEnglish: "Cancel check", LangChinese: "取消检查", LangTraditionalChinese: "取消檢查", LangJapanese: "確認をキャンセル", LangSpanish: "Cancelar comprobación",
+	},
+	MsgUpdateVerifyingPackage: {
+		LangEnglish: "Verifying update package", LangChinese: "正在校验安装包", LangTraditionalChinese: "正在驗證安裝套件", LangJapanese: "更新パッケージを検証中", LangSpanish: "Verificando el paquete",
+	},
+	MsgUpdateRetry: {
+		LangEnglish:            "Retry this update",
+		LangChinese:            "重试本次更新",
+		LangTraditionalChinese: "重試本次更新",
+		LangJapanese:           "この更新を再試行",
+		LangSpanish:            "Reintentar esta actualización",
+	},
+	MsgUpdateDetails: {
+		LangEnglish:            "Full release notes",
+		LangChinese:            "完整更新说明",
+		LangTraditionalChinese: "完整更新說明",
+		LangJapanese:           "リリースノート",
+		LangSpanish:            "Notas completas",
+	},
+	MsgUpdateImpact: {
+		LangEnglish:            "The service and all its bots will briefly go offline during restart. Existing tasks finish first; configuration and conversation history are kept.",
+		LangChinese:            "更新后将重启此服务，所有机器人会短暂离线。先等待已有任务结束，保留配置和对话记录。",
+		LangTraditionalChinese: "更新後將重新啟動此服務，所有機器人會短暫離線。先等待現有任務結束，保留設定和對話記錄。",
+		LangJapanese:           "再起動中は全ボットが一時的にオフラインになります。実行中のタスクの完了を待ち、設定と会話履歴を保持します。",
+		LangSpanish:            "El servicio y sus bots quedarán brevemente sin conexión. Se espera a las tareas activas y se conservan la configuración y el historial.",
+	},
+	MsgUpdateActiveTasks: {
+		LangEnglish:            "%d tasks are running in this service.",
+		LangChinese:            "此服务有 %d 项任务正在运行。",
+		LangTraditionalChinese: "此服務有 %d 項任務正在執行。",
+		LangJapanese:           "このサービスで %d 件のタスクが実行中です。",
+		LangSpanish:            "Hay %d tareas activas en este servicio.",
+	},
+	MsgUpdateCheckingState: {
+		LangEnglish:            "Checking for updates",
+		LangChinese:            "正在检查更新",
+		LangTraditionalChinese: "正在檢查更新",
+		LangJapanese:           "更新を確認中",
+		LangSpanish:            "Buscando actualizaciones",
+	},
+	MsgUpdateWaitingState: {
+		LangEnglish:            "Waiting for running tasks to finish",
+		LangChinese:            "等待运行中的任务结束",
+		LangTraditionalChinese: "等待執行中的任務結束",
+		LangJapanese:           "実行中のタスクの完了を待機中",
+		LangSpanish:            "Esperando a que terminen las tareas",
+	},
+	MsgUpdateInstallingState: {
+		LangEnglish:            "Installing update",
+		LangChinese:            "正在安装更新",
+		LangTraditionalChinese: "正在安裝更新",
+		LangJapanese:           "更新をインストール中",
+		LangSpanish:            "Instalando actualización",
+	},
+	MsgUpdateDownloadingState: {
+		LangEnglish:            "Downloading update",
+		LangChinese:            "正在下载更新",
+		LangTraditionalChinese: "正在下載更新",
+		LangJapanese:           "更新をダウンロード中",
+		LangSpanish:            "Descargando actualización",
+	},
+	MsgUpdateVerifyingState: {
+		LangEnglish:            "Verifying installed version",
+		LangChinese:            "正在校验安装版本",
+		LangTraditionalChinese: "正在驗證安裝版本",
+		LangJapanese:           "インストール済みバージョンを検証中",
+		LangSpanish:            "Verificando la versión instalada",
+	},
+	MsgUpdateRestartingState: {
+		LangEnglish:            "Installed · restoring the service connection",
+		LangChinese:            "安装完成 · 正在恢复服务连接",
+		LangTraditionalChinese: "安裝完成 · 正在恢復服務連線",
+		LangJapanese:           "インストール完了・接続を復元中",
+		LangSpanish:            "Instalada · restableciendo la conexión",
+	},
+	MsgUpdateCompleteState: {
+		LangEnglish:            "Update complete",
+		LangChinese:            "更新完成",
+		LangTraditionalChinese: "更新完成",
+		LangJapanese:           "更新完了",
+		LangSpanish:            "Actualización completada",
+	},
+	MsgUpdateFailureState: {
+		LangEnglish:            "Update needs attention",
+		LangChinese:            "更新需要处理",
+		LangTraditionalChinese: "更新需要處理",
+		LangJapanese:           "更新を確認してください",
+		LangSpanish:            "La actualización requiere atención",
+	},
+	MsgUpdateCancelledState: {
+		LangEnglish:            "Update cancelled · nothing was installed",
+		LangChinese:            "已取消更新 · 尚未安装新版本",
+		LangTraditionalChinese: "已取消更新 · 尚未安裝新版本",
+		LangJapanese:           "更新をキャンセルしました・未インストール",
+		LangSpanish:            "Actualización cancelada · sin instalar",
+	},
+	MsgUpdateExpiredState: {
+		LangEnglish:            "This update confirmation expired. Check again before installing.",
+		LangChinese:            "本次更新确认已过期，请重新检查后安装。",
+		LangTraditionalChinese: "本次更新確認已過期，請重新檢查後安裝。",
+		LangJapanese:           "更新の確認が期限切れです。再確認してください。",
+		LangSpanish:            "La confirmación caducó. Vuelve a comprobar antes de instalar.",
+	},
+	MsgUpdateBusyState: {
+		LangEnglish:            "An update is already in progress in this service.",
+		LangChinese:            "此服务已有更新正在进行。",
+		LangTraditionalChinese: "此服務已有更新正在進行。",
+		LangJapanese:           "このサービスは既に更新中です。",
+		LangSpanish:            "Ya hay una actualización en curso.",
+	},
+	MsgUpdateElapsed: {
+		LangEnglish:            "Elapsed: %s",
+		LangChinese:            "已用时：%s",
+		LangTraditionalChinese: "已用時：%s",
+		LangJapanese:           "経過時間：%s",
+		LangSpanish:            "Tiempo transcurrido: %s",
+	},
+	MsgUpdateStillWaiting: {
+		LangEnglish:            "Waiting for the current step to return. No new progress has been reported.",
+		LangChinese:            "仍在等待当前步骤返回，暂未收到新的进度。",
+		LangTraditionalChinese: "仍在等待目前步驟返回，暫未收到新的進度。",
+		LangJapanese:           "現在の処理の応答を待っています。新しい進捗はありません。",
+		LangSpanish:            "Esperando al paso actual; aún no hay nuevos avances.",
+	},
+	MsgUpdateRecoveryHint: {
+		LangEnglish:            "If the service does not reconnect, run cc-connect-next daemon status and cc-connect-next doctor on the host. The update result is kept for recovery.",
+		LangChinese:            "若服务未恢复，请在本机运行 cc-connect-next daemon status 和 cc-connect-next doctor。更新结果已保留，可恢复后查看。",
+		LangTraditionalChinese: "若服務未恢復，請在本機執行 cc-connect-next daemon status 和 cc-connect-next doctor。更新結果已保留。",
+		LangJapanese:           "再接続しない場合はホストで cc-connect-next daemon status と cc-connect-next doctor を実行してください。結果は保存されています。",
+		LangSpanish:            "Si no vuelve la conexión, ejecuta cc-connect-next daemon status y cc-connect-next doctor en el equipo. El resultado queda guardado.",
+	},
+	MsgUpdateAdmissionClosed: {
+		LangEnglish:            "The service is preparing an update. This request has not started; send it again after the update, or cancel the pending update.",
+		LangChinese:            "服务正在准备更新，本条请求尚未开始。请更新结束后重发，或取消等待中的更新。",
+		LangTraditionalChinese: "服務正在準備更新，本則請求尚未開始。請更新結束後重傳，或取消等待中的更新。",
+		LangJapanese:           "更新の準備中です。このリクエストは未開始です。更新後に再送するか待機中の更新をキャンセルしてください。",
+		LangSpanish:            "El servicio prepara una actualización. Esta petición no ha empezado; reenvíala al terminar o cancela la actualización pendiente.",
+	},
+	MsgUpdateSafeFailure: {
+		LangEnglish:            "The update was not installed. The current service is still running.",
+		LangChinese:            "尚未安装新版本，当前服务仍在运行。",
+		LangTraditionalChinese: "尚未安裝新版本，目前服務仍在執行。",
+		LangJapanese:           "更新は未インストールです。現在のサービスは実行中です。",
+		LangSpanish:            "La actualización no se instaló. El servicio actual sigue ejecutándose.",
+	},
+	MsgUpdateUncertainFailure: {
+		LangEnglish:            "Installation may have changed files. The service was not restarted. Check the installed version before retrying.",
+		LangChinese:            "安装可能已更改文件，服务尚未重启。请检查已安装版本后再重试。",
+		LangTraditionalChinese: "安裝可能已更改檔案，服務尚未重新啟動。請檢查已安裝版本後再重試。",
+		LangJapanese:           "ファイルが変更された可能性があります。再起動はしていません。再試行の前にインストール済みのバージョンを確認してください。",
+		LangSpanish:            "La instalación puede haber cambiado archivos. El servicio no se reinició. Comprueba la versión instalada antes de reintentar.",
+	},
+	MsgUpdateMismatch: {
+		LangEnglish:            "Expected %s, but the running version is %s. The requested update has not been activated.",
+		LangChinese:            "目标版本为 %s，实际运行版本为 %s。本次更新尚未生效。",
+		LangTraditionalChinese: "目標版本為 %s，實際執行版本為 %s。本次更新尚未生效。",
+		LangJapanese:           "期待するバージョンは %s ですが、実行中は %s です。更新は有効になっていません。",
+		LangSpanish:            "Se esperaba %s, pero está ejecutándose %s. La actualización aún no está activa.",
+	},
+	MsgUpdateConnected: {
+		LangEnglish:            "Running %s · this chat connection is restored.",
+		LangChinese:            "正在运行 %s · 当前聊天连接已恢复。",
+		LangTraditionalChinese: "正在執行 %s · 目前聊天連線已恢復。",
+		LangJapanese:           "%s が実行中・このチャットの接続を復元しました。",
+		LangSpanish:            "Ejecutando %s · conexión de este chat restablecida.",
+	},
+	MsgUpdatePartial: {
+		LangEnglish:            "Some other service connections are still unavailable.",
+		LangChinese:            "此服务的部分其他连接尚未恢复。",
+		LangTraditionalChinese: "此服務的部分其他連線尚未恢復。",
+		LangJapanese:           "ほかの接続の一部はまだ利用できません。",
+		LangSpanish:            "Algunas otras conexiones del servicio siguen sin estar disponibles.",
+	},
+	MsgUpdateSummaryFallback: {
+		LangEnglish:            "A new version is available. See the release notes for the changes.",
+		LangChinese:            "有新版本可用，具体变化请查看完整更新说明。",
+		LangTraditionalChinese: "有新版本可用，具體變化請查看完整更新說明。",
+		LangJapanese:           "新しいバージョンがあります。変更内容はリリースノートをご覧ください。",
+		LangSpanish:            "Hay una nueva versión. Consulta las notas para ver los cambios.",
+	},
+	MsgUpdateStable: {
+		LangEnglish:            "Stable",
+		LangChinese:            "稳定版",
+		LangTraditionalChinese: "穩定版",
+		LangJapanese:           "安定版",
+		LangSpanish:            "Estable",
+	},
+	MsgUpdateBeta: {
+		LangEnglish:            "Beta",
+		LangChinese:            "测试版",
+		LangTraditionalChinese: "測試版",
+		LangJapanese:           "ベータ版",
+		LangSpanish:            "Beta",
+	},
+	MsgUpdateNoResult: {
+		LangEnglish:            "There is no saved update result for this chat.",
+		LangChinese:            "当前聊天没有已保存的更新结果。",
+		LangTraditionalChinese: "目前聊天沒有已儲存的更新結果。",
+		LangJapanese:           "このチャットに保存された更新結果はありません。",
+		LangSpanish:            "No hay un resultado de actualización guardado para este chat.",
+	},
+	MsgUpdateInterrupted: {
+		LangEnglish:            "The previous update was interrupted. Check the installed version before starting another update.",
+		LangChinese:            "上次更新被中断。请先检查已安装版本，再开始新的更新。",
+		LangTraditionalChinese: "上次更新被中斷。請先檢查已安裝版本，再開始新的更新。",
+		LangJapanese:           "前回の更新が中断されました。インストール済みのバージョンを確認してください。",
+		LangSpanish:            "La actualización anterior se interrumpió. Comprueba la versión instalada antes de empezar otra.",
+	},
+	MsgUpdateWaitingExpired: {
+		LangEnglish:            "Waiting timed out. Existing tasks were not interrupted and no update was installed. Check again when the service is idle.",
+		LangChinese:            "等待超时，未中断已有任务，也未安装更新。请空闲后重新检查。",
+		LangTraditionalChinese: "等待逾時，未中斷現有任務，也未安裝更新。請閒置後重新檢查。",
+		LangJapanese:           "待機がタイムアウトしました。タスクは中断されず、更新も未インストールです。",
+		LangSpanish:            "La espera agotó el plazo. No se interrumpieron tareas ni se instaló nada. Vuelve a comprobar cuando esté libre.",
+	},
 	MsgImageDeliveryIncomplete: {
 		LangEnglish:            "Image delivery incomplete: %d/%d confirmed. Check the failed group before retrying only the unconfirmed remainder: %v",
 		LangChinese:            "图片发送未完成：已确认 %d/%d 张。请核对失败批次后，仅补发未确认的剩余图片：%v",
@@ -4007,17 +4306,17 @@ var messages = map[MsgKey]map[Language]string{
 	},
 	MsgUpdateBtnNow: {
 		LangEnglish:            "Review update",
-		LangChinese:            "查看并更新",
-		LangTraditionalChinese: "查看並更新",
-		LangJapanese:           "確認して更新",
+		LangChinese:            "查看更新",
+		LangTraditionalChinese: "查看更新",
+		LangJapanese:           "更新を確認",
 		LangSpanish:            "Revisar actualización",
 	},
 	MsgUpdateHintReplyUpdate: {
-		LangEnglish:            "or reply “update” to review the exact plan",
-		LangChinese:            "也可以回复「更新」查看精确计划",
-		LangTraditionalChinese: "也可以回覆「更新」查看精確計畫",
-		LangJapanese:           "「update」と返信して正確なプランを確認できます",
-		LangSpanish:            "o responde “update” para revisar el plan exacto",
+		LangEnglish:            "or reply “update” to review the update",
+		LangChinese:            "也可以回复「更新」查看",
+		LangTraditionalChinese: "也可以回覆「更新」查看",
+		LangJapanese:           "「update」と返信して更新内容を確認できます",
+		LangSpanish:            "o responde “update” para revisar la actualización",
 	},
 	MsgUpdateHintReplyConfirm: {
 		LangEnglish:            "or just reply “confirm”",

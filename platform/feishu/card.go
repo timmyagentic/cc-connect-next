@@ -532,3 +532,59 @@ func renderCardForTarget(card *core.Card, target cardActionTarget) string {
 	}
 	return string(b)
 }
+
+// durableCardReference contains routing only, never API credentials. Binding to
+// both app and project prevents a restored result from editing another bot's card.
+type durableCardReference struct {
+	AppID        string `json:"app_id"`
+	Project      string `json:"project"`
+	MessageID    string `json:"message_id"`
+	ChatID       string `json:"chat_id"`
+	SessionKey   string `json:"session_key"`
+	DirectUserID string `json:"direct_user_id,omitempty"`
+}
+
+func (p *interactivePlatform) CardReference(rctx any) (json.RawMessage, error) {
+	rc, ok := rctx.(replyContext)
+	if !ok || rc.messageID == "" {
+		return nil, fmt.Errorf("%s: card reference requires an exact message", p.tag())
+	}
+	return json.Marshal(durableCardReference{AppID: p.appID, Project: p.boundProjectName(), MessageID: rc.messageID, ChatID: rc.chatID, SessionKey: rc.sessionKey, DirectUserID: rc.directUserID})
+}
+
+func (p *interactivePlatform) ReplyCardWithReference(ctx context.Context, rctx any, card *core.Card) (json.RawMessage, error) {
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return nil, fmt.Errorf("%s: invalid card reply context", p.tag())
+	}
+	content := p.renderBoundCard(card, rc.sessionKey, rc.directUserID)
+	var messageID string
+	var err error
+	if p.shouldUseThreadOrReplyAPI(rc) {
+		messageID, err = p.replyMessageWithID(ctx, rc, larkim.MsgTypeInteractive, content)
+	} else {
+		if rc.chatID == "" {
+			return nil, fmt.Errorf("%s: card chatID is empty", p.tag())
+		}
+		messageID, err = p.createMessageWithID(ctx, rc.chatID, larkim.MsgTypeInteractive, content, "send update card")
+	}
+	if err != nil {
+		return nil, err
+	}
+	rc.messageID = messageID
+	return p.CardReference(rc)
+}
+
+func (p *interactivePlatform) UpdateCardByReference(ctx context.Context, raw json.RawMessage, card *core.Card) error {
+	if len(raw) > 4096 {
+		return fmt.Errorf("%s: invalid card reference size", p.tag())
+	}
+	var ref durableCardReference
+	if err := json.Unmarshal(raw, &ref); err != nil {
+		return fmt.Errorf("%s: invalid card reference", p.tag())
+	}
+	if ref.AppID != p.appID || ref.Project != p.boundProjectName() || ref.MessageID == "" {
+		return fmt.Errorf("%s: card reference belongs to another app or project", p.tag())
+	}
+	return p.patchCard(ctx, ref.MessageID, ref.SessionKey, ref.DirectUserID, card)
+}
