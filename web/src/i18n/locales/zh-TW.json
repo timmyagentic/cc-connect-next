@@ -132,7 +132,12 @@
     "modelInherit": "繼承專案 / Agent 模型",
     "modelHint": "僅用於 Prompt 工作。留空繼承，清空已有值恢復繼承。Agent 必須支援逐回合指定模型；不會切換 Provider 或修改專案預設值。",
     "modelPromptOnly": "僅 Prompt 工作支援指定模型。",
-    "modelUnsupported": "目前 Agent 不支援工作層級模型覆寫；請留空以繼承。"
+    "modelUnsupported": "目前 Agent 不支援工作層級模型覆寫；請留空以繼承。",
+    "reasoningEffort": "推理強度",
+    "reasoningEffortInherit": "繼承專案 / Agent 推理強度",
+    "reasoningEffortHint": "選填，無需指定模型。留空時繼承專案 / Agent 預設強度，有效值由伺服器驗證。",
+    "reasoningEffortPromptOnly": "僅 Prompt 工作支援指定推理強度。",
+    "reasoningEffortUnsupported": "目前 Agent 不支援工作層級推理強度覆寫；清空強度以繼承。"
   },
   "heartbeat": {
     "title": "心跳",

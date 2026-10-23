@@ -132,7 +132,12 @@
     "modelInherit": "继承项目 / Agent 模型",
     "modelHint": "仅用于 Prompt 任务。留空继承，清空已有值恢复继承。Agent 必须支持逐回合指定模型；不会切换 Provider 或修改项目默认值。",
     "modelPromptOnly": "仅 Prompt 任务支持指定模型。",
-    "modelUnsupported": "当前 Agent 不支持任务级模型覆盖；请留空以继承。"
+    "modelUnsupported": "当前 Agent 不支持任务级模型覆盖；请留空以继承。",
+    "reasoningEffort": "推理强度",
+    "reasoningEffortInherit": "继承项目 / Agent 推理强度",
+    "reasoningEffortHint": "可选，无需指定模型。留空时继承项目 / Agent 默认强度，有效值由服务端校验。",
+    "reasoningEffortPromptOnly": "仅 Prompt 任务支持指定推理强度。",
+    "reasoningEffortUnsupported": "当前 Agent 不支持任务级推理强度覆盖；清空强度以继承。"
   },
   "heartbeat": {
     "title": "心跳",

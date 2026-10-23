@@ -213,6 +213,7 @@ type appServerSession struct {
 	runtimeMu       sync.RWMutex
 	turnOptions     *core.TurnOptions
 	defaultModel    *string // Project/native default, independent of a resumed thread's last turn.
+	defaultEffort   *string // Non-nil even when native effort is unset; resume must not adopt task effort.
 	defaultModelErr error   // Blocks explicit per-turn options, never the legacy Send path.
 	diagnostics     appServerDiagnostics
 }
@@ -443,27 +444,41 @@ func (s *appServerSession) ensureThread(resumeID string) error {
 	return nil
 }
 
-// A resumed thread can report the previous one-shot model. Read the native
-// configuration before resume so that a later default turn cannot inherit it.
+// A resumed thread can report the previous one-shot model and effort. Read
+// native defaults before resume so that later turns cannot inherit overrides.
 // config/read is the same inference-free RPC used by loadCodexRuntimeConfig.
 func (s *appServerSession) captureDefaultModel(resumeID string) error {
 	model := strings.TrimSpace(s.model)
-	if model == "" && (resumeID == "" || resumeID == core.ContinueSession) {
-		return nil // A new thread's response establishes its native default.
+	effort := strings.TrimSpace(s.effort)
+	if effort != "" {
+		s.defaultEffort = &effort
 	}
-	if model == "" {
-		// Never let a failed lookup expose the resumed task model as a default.
+	if model != "" {
 		s.defaultModel = &model
+	}
+	if resumeID == "" || resumeID == core.ContinueSession {
+		return nil // A new thread's response establishes omitted native defaults.
+	}
+	if model == "" || effort == "" {
+		// Never let a failed lookup expose resumed task options as defaults.
+		s.defaultModel = &model
+		s.defaultEffort = &effort
 		var response struct {
 			Config struct {
-				Model string `json:"model"`
+				Model           string  `json:"model"`
+				ReasoningEffort *string `json:"model_reasoning_effort"`
 			} `json:"config"`
 		}
 		if err := s.request("config/read", map[string]any{"includeLayers": false}, &response); err != nil {
-			s.defaultModelErr = fmt.Errorf("codex app-server read default model before resume: %w", err)
+			s.defaultModelErr = fmt.Errorf("codex app-server read default model/effort before resume: %w", err)
 			return s.defaultModelErr
 		}
-		model = strings.TrimSpace(response.Config.Model)
+		if model == "" {
+			model = strings.TrimSpace(response.Config.Model)
+		}
+		if effort == "" {
+			effort = normalizeRuntimeReasoningEffort(stringValue(response.Config.ReasoningEffort))
+		}
 		if model == "" {
 			var err error
 			model, err = codexCatalogDefaultModel(s.request)
@@ -474,6 +489,7 @@ func (s *appServerSession) captureDefaultModel(resumeID string) error {
 		}
 	}
 	s.defaultModel = &model
+	s.defaultEffort = &effort
 	return nil
 }
 
@@ -1286,7 +1302,11 @@ func (s *appServerSession) DefaultTurnOptions() core.TurnOptions {
 	if s.defaultModel != nil {
 		model = *s.defaultModel
 	}
-	return core.TurnOptions{Model: model, ReasoningEffort: s.effort, ServiceTier: s.serviceTier}
+	effort := s.effort
+	if s.defaultEffort != nil {
+		effort = *s.defaultEffort
+	}
+	return core.TurnOptions{Model: model, ReasoningEffort: effort, ServiceTier: s.serviceTier}
 }
 
 func (s *appServerSession) GetReasoningEffort() string {
