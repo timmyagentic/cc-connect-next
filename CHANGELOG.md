@@ -5,7 +5,20 @@
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
-## v0.3.3-beta.2 (2026-10-23)
+## v0.3.3-beta.3 (2026-10-23)
+
+See `changelogs/v0.3.3-beta.3.md` for bilingual highlights and migration notes.
+
+- Complete the isolated macOS signing keychain's Developer ID certificate chain
+  and search list, select the valid identity by fingerprint, and sign a probe
+  before compiling release binaries. Restore the original search list on exit.
+- Includes the macOS stable signing identity and bounded Agent search guidance
+  described below. Stable remains v0.3.2.
+
+## v0.3.3-beta.2 (2026-10-23; not published)
+
+The macOS signing job stopped publication. No GitHub Release or npm package was
+published for this tag; v0.3.3-beta.3 supersedes this candidate.
 
 See `changelogs/v0.3.3-beta.2.md` for bilingual highlights and migration notes.
 
