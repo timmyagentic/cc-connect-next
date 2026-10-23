@@ -1557,21 +1557,22 @@ func (m *ManagementServer) handleCron(w http.ResponseWriter, r *http.Request) {
 		}
 
 		job := &CronJob{
-			ID:          GenerateCronID(),
-			Project:     project,
-			SessionKey:  req.SessionKey,
-			CronExpr:    req.CronExpr,
-			Prompt:      req.Prompt,
-			Model:       req.Model,
-			Exec:        req.Exec,
-			WorkDir:     req.WorkDir,
-			Description: req.Description,
-			Enabled:     true,
-			Silent:      req.Silent,
-			SessionMode: NormalizeCronSessionMode(req.SessionMode),
-			Mode:        req.Mode,
-			TimeoutMins: req.TimeoutMins,
-			CreatedAt:   time.Now(),
+			ID:              GenerateCronID(),
+			Project:         project,
+			SessionKey:      req.SessionKey,
+			CronExpr:        req.CronExpr,
+			Prompt:          req.Prompt,
+			Model:           req.Model,
+			ReasoningEffort: req.ReasoningEffort,
+			Exec:            req.Exec,
+			WorkDir:         req.WorkDir,
+			Description:     req.Description,
+			Enabled:         true,
+			Silent:          req.Silent,
+			SessionMode:     NormalizeCronSessionMode(req.SessionMode),
+			Mode:            req.Mode,
+			TimeoutMins:     req.TimeoutMins,
+			CreatedAt:       time.Now(),
 		}
 		if err := m.cronScheduler.AddJob(job); err != nil {
 			mgmtError(w, http.StatusBadRequest, err.Error())

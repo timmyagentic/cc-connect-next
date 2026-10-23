@@ -206,6 +206,7 @@ const (
 	MsgProfileNotConfigured      MsgKey = "answer_profile_not_configured"
 	MsgProfileNotSupported       MsgKey = "answer_profile_not_supported"
 	MsgTaskModelNotSupported     MsgKey = "task_model_not_supported"
+	MsgTaskReasoningNotSupported MsgKey = "task_reasoning_not_supported"
 	MsgNoToolsAllowed            MsgKey = "no_tools_allowed"
 	MsgCurrentTools              MsgKey = "current_tools"
 	MsgCurrentSession            MsgKey = "current_session"
@@ -1108,6 +1109,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "目前 Agent 會話不支援任務級模型，任務未傳送。",
 		LangJapanese:           "現在のエージェントセッションはタスク単位のモデル指定をサポートしていません。タスクは送信されませんでした。",
 		LangSpanish:            "La sesión actual del agente no admite un modelo por tarea. La tarea no se ha enviado.",
+	},
+	MsgTaskReasoningNotSupported: {
+		LangEnglish:            "The current agent session does not support task-specific reasoning effort. The task was not sent.",
+		LangChinese:            "当前 Agent 会话不支持任务级推理强度，任务未发送。",
+		LangTraditionalChinese: "目前 Agent 會話不支援任務級推理強度，任務未傳送。",
+		LangJapanese:           "現在のエージェントセッションはタスク単位の推論強度をサポートしていません。タスクは送信されませんでした。",
+		LangSpanish:            "La sesión actual del agente no admite un esfuerzo de razonamiento por tarea. La tarea no se ha enviado.",
 	},
 	MsgSessionRestarting: {
 		LangEnglish:            "🔄 Session process exited, restarting...",

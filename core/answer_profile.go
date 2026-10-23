@@ -38,6 +38,8 @@ var ErrTurnOptionsUnsupported = errors.New("agent session does not support one-s
 
 var ErrModelOverrideUnsupported = errors.New("agent session does not support per-turn model overrides")
 
+var ErrReasoningEffortOverrideUnsupported = errors.New("agent session does not support per-turn reasoning effort overrides")
+
 // SetAnswerProfiles configures the two named one-shot profiles. It is expected
 // to run during engine bootstrap before messages are accepted.
 func (e *Engine) SetAnswerProfiles(profiles AnswerProfiles) {
@@ -143,24 +145,29 @@ func (e *Engine) sendAgentTurn(agent Agent, session AgentSession, prompt string,
 }
 
 // agentTurnOverrides travels with one admitted turn. restoreDefaults is kept
-// for sessions that have used a task model so subsequent ordinary turns reset
+// for sessions that have used task overrides so subsequent ordinary turns reset
 // backend defaults explicitly, including empty/default-valued options.
 type agentTurnOverrides struct {
 	profile         AnswerProfileName
 	model           string
+	reasoningEffort string
 	serviceTier     string
 	restoreDefaults bool
 }
 
-func prepareAgentTurnOverrides(sessions *SessionManager, session *Session, backend AgentSession, profile AnswerProfileName, model, serviceTier string) (agentTurnOverrides, error) {
+func prepareAgentTurnOverrides(sessions *SessionManager, session *Session, backend AgentSession, profile AnswerProfileName, model, reasoningEffort, serviceTier string) (agentTurnOverrides, error) {
 	model = strings.TrimSpace(model)
-	if model != "" {
+	reasoningEffort = strings.ToLower(strings.TrimSpace(reasoningEffort))
+	if model != "" || reasoningEffort != "" {
 		if _, ok := backend.(TurnOptionsSession); !ok {
+			if reasoningEffort != "" {
+				return agentTurnOverrides{}, ErrReasoningEffortOverrideUnsupported
+			}
 			return agentTurnOverrides{}, ErrModelOverrideUnsupported
 		}
 		if validator, ok := backend.(TurnDefaultsValidator); ok {
 			if err := validator.ValidateTurnDefaults(); err != nil {
-				return agentTurnOverrides{}, fmt.Errorf("prepare task model defaults: %w", err)
+				return agentTurnOverrides{}, fmt.Errorf("prepare task turn defaults: %w", err)
 			}
 		}
 		if err := sessions.RequireTurnDefaults(session); err != nil {
@@ -169,6 +176,7 @@ func prepareAgentTurnOverrides(sessions *SessionManager, session *Session, backe
 	}
 	return agentTurnOverrides{
 		profile: profile, model: model, serviceTier: serviceTier,
+		reasoningEffort: reasoningEffort,
 		restoreDefaults: session.TurnDefaultsRequired(),
 	}, nil
 }
@@ -176,10 +184,14 @@ func prepareAgentTurnOverrides(sessions *SessionManager, session *Session, backe
 func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, prompt string, images []ImageAttachment, files []FileAttachment, overrides agentTurnOverrides) error {
 	profile := overrides.profile
 	model := strings.TrimSpace(overrides.model)
+	reasoningEffort := strings.ToLower(strings.TrimSpace(overrides.reasoningEffort))
 	serviceTier := overrides.serviceTier
 	sender, supportsOptions := session.(TurnOptionsSession)
 	if model != "" && !supportsOptions {
 		return ErrModelOverrideUnsupported
+	}
+	if reasoningEffort != "" && !supportsOptions {
+		return ErrReasoningEffortOverrideUnsupported
 	}
 	catalog, supportsSpeed := serviceTierCatalog(agent, session)
 	// A saved preference may outlive a change to an agent/backend without
@@ -188,7 +200,7 @@ func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, p
 		serviceTier = ""
 	}
 	hasSpeed := serviceTier != ""
-	needsOptions := model != "" || profile != "" ||
+	needsOptions := model != "" || reasoningEffort != "" || profile != "" ||
 		supportsOptions && (overrides.restoreDefaults || hasSpeed || e.answerProfilesConfigured())
 	if !needsOptions {
 		return session.Send(prompt, images, files)
@@ -199,7 +211,7 @@ func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, p
 	if overrides.restoreDefaults {
 		if validator, ok := session.(TurnDefaultsValidator); ok {
 			if err := validator.ValidateTurnDefaults(); err != nil {
-				return fmt.Errorf("restore task model defaults: %w", err)
+				return fmt.Errorf("restore task turn defaults: %w", err)
 			}
 		}
 	}
@@ -209,6 +221,9 @@ func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, p
 	}
 	if model != "" {
 		options.Model = model
+	}
+	if reasoningEffort != "" {
+		options.ReasoningEffort = reasoningEffort
 	}
 	// A model/provider may have changed since the preference was saved. Never
 	// silently send an unsupported persistent choice to a different backend.
@@ -228,8 +243,8 @@ func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, p
 			}
 		}
 	}
-	if model != "" {
-		slog.Info("using task model for one turn", "project", e.name, "model", options.Model)
+	if model != "" || reasoningEffort != "" {
+		slog.Info("using task options for one turn", "project", e.name, "model", options.Model, "reasoning_effort", options.ReasoningEffort)
 	} else if profile != "" {
 		slog.Info("using one-shot answer profile",
 			"project", e.name,

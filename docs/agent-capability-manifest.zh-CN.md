@@ -93,6 +93,10 @@ Manifest 不把“命令存在”误写成“当前一定能执行”：模型�
 
 `cron` Agent CLI 工具契约包含可选 `model` 参数：仅 Prompt 任务可设置，省略继承，`cron edit <job-id> model ""` 恢复继承。注册/编辑写入任务持久状态；执行产生 Agent 回合及网络请求，但不切换 Provider、不修改项目或 Agent 默认模型。Shell 任务和不支持的 Agent 会拒绝显式模型，不能自动退回默认模型。
 
+同一工具契约还包含可选字符串参数 `reasoning_effort`：Prompt 任务使用 `cron add --reasoning-effort <value>` 或 `cron edit <job-id> reasoning_effort <value>`，可独立于模型覆盖设置。省略时继承；`cron edit <job-id> reasoning_effort ""` 恢复继承。有效强度与 Agent 支持由服务端校验，通用 CLI 元数据不枚举特定 Agent 的取值。Shell 任务、不支持的 Agent 和无效强度会拒绝显式覆盖。注册/编辑仅修改该任务持久状态，强度作用于它的 Agent 回合，不修改项目/Agent 默认值。CLI 列表和单字段 info 查询显示指定强度或继承状态，完整 info 保留可选 JSON 字段。
+
+运行态能力 `per_turn_reasoning_effort` 仅在 Agent 实现 `PerTurnReasoningEffortSupporter` 并返回 true，且通过 `ReasoningEffortSwitcher.AvailableReasoningEfforts()` 提供非空目录时可用。缺少支持或目录缺失、为空时仍显示为 `unavailable`；具体会话能力在执行时检查。运行态 `cron` 工具参数通过 `allowed_values` 提供该 Agent 的目录，通用元数据不硬编码 Provider 专属列表。按能力简报指引执行 `cc-connect-next capabilities --search "cron reasoning effort"` 可查询参数及运行态契约。Web 编辑器同时查询 `runtime` 和 `tools`，提供继承选项及已声明的强度；无可用列表时退回由服务端校验的文本输入。
+
 Agent 运行态条目 `per_turn_model` 通过 `PerTurnModelSupporter` 探测，不依赖 Agent 名称；缺失接口或返回 false 时仍保留为 `unavailable` 并说明拒绝原因。声明支持后，实际执行仍检查会话的 `TurnOptionsSession`；已有 `turn_options` 会话条目展示该能力。无活动会话不等于支持或不支持：会话条目保持 `conditional`，Agent 声明供创建任务前检查。当前 Codex `exec` 与 `app_server` 支持该契约。具体模型 ID 的可用性仍由当前 Agent/Provider 执行时决定，Manifest 不承诺模型目录或凭证有效性。
 
 ## 近期讨论背景
