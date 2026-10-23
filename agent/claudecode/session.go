@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/timmyagentic/cc-connect-next/agent/internal/processgroup"
+	"github.com/timmyagentic/cc-connect-next/internal/processgroup"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
