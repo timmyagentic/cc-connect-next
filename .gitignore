@@ -177,3 +177,9 @@ cc-connect-next-new
 !scripts/cloud/**
 .cloud-cache/
 !scripts/cloud-contract.test.js
+
+# Isolated macOS signing helper and pinned public Apple intermediate only
+!scripts/macos-keychain.js
+!scripts/certificates/
+scripts/certificates/*
+!scripts/certificates/DeveloperIDG2CA.cer

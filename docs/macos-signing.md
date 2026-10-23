@@ -26,6 +26,15 @@ run on hosted macOS runners so every publication path can use Apple's verifier:
 5. Extract and verify the archive signatures before artifact upload, after
    download, when reusing an immutable Release, and after public download.
 
+Before those builds, the CI wrapper imports the pinned public Apple Developer ID
+G2 intermediate certificate, temporarily adds its keychain to the existing user
+search list, resolves the one valid product-team identity to its fingerprint,
+and signs/verifies a small probe. `--keychain` alone does not supply the search
+list used to construct the certificate chain. The original list is restored on
+success, import/identity failure, or child-command failure, including paths with
+spaces and quotes. The public intermediate is not installed as a trust anchor;
+the system's Apple root still validates the chain.
+
 Signature failure or missing credentials stops publication. Historical unsigned
 assets cannot be made acceptable by rerunning the workflow or overwriting them;
 publish a new version after the release is explicitly authorized.
@@ -68,8 +77,9 @@ workflow before final packaging/checksums, then run the same artifact checks.
 ## Validation and real-device acceptance
 
 `node --test scripts/macos-signing.test.js` covers rejection of checksum-valid
-ad hoc archives, missing/ad hoc signing identities, and temporary-keychain
-cleanup, including import failure. On macOS an authorized local identity can
+ad hoc archives, missing/ad hoc signing identities, isolated-keychain discovery,
+and exact search-list restoration on import, identity and child-command failure.
+On macOS an authorized local identity can
 also exercise two different executable code hashes:
 
 ```sh
@@ -113,6 +123,8 @@ read TCC, request permissions, or publish local paths in the public Manifest.
 
 ## References
 
+- [Apple PKI: public Developer ID G2 intermediate](https://www.apple.com/certificateauthority/)
+- [Apple TN3161: code signing certificates and identity discovery](https://developer.apple.com/documentation/technotes/tn3161-inside-code-signing-certificates)
 - [Apple TN3127: code signing requirements](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
 - [Apple: creating distribution-signed code for macOS](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac/)
 - [GitHub: installing an Apple certificate on macOS runners](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)
