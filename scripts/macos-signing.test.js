@@ -53,23 +53,64 @@ test("Issue166 release signing refuses missing and ad hoc identities", () => {
   }
 });
 
-test("temporary signing keychain is cleaned on success and import failure", (t) => {
+test("Issue166 isolated keychain discovers its identity and restores the search list on every exit", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "ccn-keychain-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const bin = path.join(root, "tools");
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, "uname"), "#!/bin/sh\necho Darwin\n", { mode: 0o755 });
-  fs.writeFileSync(path.join(bin, "security"), '#!/bin/sh\nprintf "%s\\n" "$1" >> "$CCN_TEST_SECURITY_LOG"\nif [ "$1" = import ] && [ "$CCN_TEST_IMPORT_FAIL" = 1 ]; then exit 1; fi\n', { mode: 0o755 });
-  for (const failImport of ["0", "1"]) {
-    const log = path.join(root, `security-${failImport}.log`);
+  const fingerprint = "1234567890ABCDEF1234567890ABCDEF12345678";
+  fs.writeFileSync(path.join(bin, "security"), `#!${process.execPath}
+    const fs = require("node:fs"), path = require("node:path");
+    const args = process.argv.slice(2), command = args[0];
+    const state = JSON.parse(fs.readFileSync(process.env.CCN_TEST_KEYCHAIN_STATE, "utf8"));
+    fs.appendFileSync(process.env.CCN_TEST_SECURITY_LOG, command + "\\n");
+    if (command === "list-keychains") {
+      const index = args.indexOf("-s");
+      if (index < 0) process.stdout.write(state.search.map(p => "    " + JSON.stringify(p)).join("\\n") + "\\n");
+      else state.search = args.slice(index + 1);
+    }
+    if (command === "import") {
+      if (args[1].endsWith("certificate.p12") && process.env.CCN_TEST_SCENARIO === "import-failure") process.exit(1);
+      if (args[1].endsWith("DeveloperIDG2CA.cer")) state.intermediate = true;
+    }
+    if (command === "find-identity") {
+      if (process.env.CCN_TEST_SCENARIO !== "missing-identity" && state.intermediate && state.search.includes(process.env.MACOS_SIGN_KEYCHAIN)) {
+        process.stdout.write('  1) ${fingerprint} "Developer ID Application: Fixture (4356B4HF9R)"\\n     1 valid identities found\\n');
+      } else process.stdout.write("     0 valid identities found\\n");
+    }
+    fs.writeFileSync(process.env.CCN_TEST_KEYCHAIN_STATE, JSON.stringify(state));
+  `, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, "codesign"), `#!${process.execPath}
+    const fs = require("node:fs");
+    const state = JSON.parse(fs.readFileSync(process.env.CCN_TEST_KEYCHAIN_STATE, "utf8"));
+    fs.appendFileSync(process.env.CCN_TEST_SECURITY_LOG, "codesign-probe\\n");
+    if (!state.intermediate || !state.search.includes(process.env.MACOS_SIGN_KEYCHAIN) || process.env.MACOS_SIGN_IDENTITY !== "${fingerprint}") process.exit(1);
+  `, { mode: 0o755 });
+  for (const scenario of ["success", "import-failure", "missing-identity", "child-failure", "empty-search-list"]) {
+    const log = path.join(root, `security-${scenario}.log`);
+    const stateFile = path.join(root, `state-${scenario}.json`);
+    const marker = path.join(root, `child-${scenario}`);
+    const original = scenario === "empty-search-list" ? [] : ["/tmp/Existing Keychain.keychain-db", '/tmp/Keychain "quotes".keychain-db'];
+    fs.writeFileSync(stateFile, JSON.stringify({ search: original, intermediate: false }));
     const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, RUNNER_TEMP: root,
-      CCN_TEST_SECURITY_LOG: log, CCN_TEST_IMPORT_FAIL: failImport,
+      CCN_TEST_SECURITY_LOG: log, CCN_TEST_KEYCHAIN_STATE: stateFile, CCN_TEST_SCENARIO: scenario,
       MACOS_CERTIFICATE_P12_BASE64: Buffer.from("fixture certificate").toString("base64"),
-      MACOS_CERTIFICATE_PASSWORD: "fixture password", MACOS_SIGN_IDENTITY: "fixture identity" };
-    const command = "if (process.env.MACOS_CERTIFICATE_P12_BASE64 || process.env.MACOS_CERTIFICATE_PASSWORD) process.exit(2); if (!process.env.MACOS_SIGN_KEYCHAIN) process.exit(3)";
+      MACOS_CERTIFICATE_PASSWORD: "fixture password", MACOS_SIGN_IDENTITY: "Developer ID Application" };
+    const command = `
+      if (process.env.MACOS_CERTIFICATE_P12_BASE64 || process.env.MACOS_CERTIFICATE_PASSWORD) process.exit(2);
+      if (!process.env.MACOS_SIGN_KEYCHAIN || process.env.MACOS_SIGN_IDENTITY !== "${fingerprint}") process.exit(3);
+      require("node:fs").writeFileSync(${JSON.stringify(marker)}, "started");
+      if (process.env.CCN_TEST_SCENARIO === "child-failure") process.exit(17);
+    `;
     const result = spawnSync("bash", [path.join(__dirname, "with-macos-signing-keychain.sh"), process.execPath, "-e", command], { env, encoding: "utf8" });
-    assert.equal(result.status, failImport === "1" ? 1 : 0, result.stderr);
+    const expected = scenario === "child-failure" ? 17 : ["import-failure", "missing-identity"].includes(scenario) ? 1 : 0;
+    assert.equal(result.status, expected, `${scenario}: ${result.stderr}`);
     assert.match(fs.readFileSync(log, "utf8"), /delete-keychain/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(stateFile, "utf8")).search, original, scenario);
+    const shouldStart = ["success", "child-failure", "empty-search-list"].includes(scenario);
+    assert.equal(fs.existsSync(marker), shouldStart, "unusable signing identities must fail before builds");
+    if (shouldStart) assert.match(fs.readFileSync(log, "utf8"), /codesign-probe/);
     assert.deepEqual(fs.readdirSync(root).filter((name) => name.startsWith("ccn-signing.")), []);
     assert.doesNotMatch(result.stdout + result.stderr, /fixture certificate|fixture password/);
   }
