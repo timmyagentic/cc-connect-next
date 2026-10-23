@@ -5,6 +5,17 @@
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
+## v0.3.3-beta.2 (2026-10-23)
+
+See `changelogs/v0.3.3-beta.2.md` for bilingual highlights and migration notes.
+
+- Sign both macOS architectures with Developer ID Application and stable code
+  identity, and reject unsigned or incompatible release artifacts (Issue #166).
+- Give connected Agents the effective local state directory and bounded search
+  guidance to reduce unnecessary access to unrelated protected directories.
+- Migration from an older ad hoc signature may require one new authorization;
+  real macOS permission persistence across upgrades remains a Beta acceptance item.
+
 ## v0.3.2 (2026-10-20)
 
 Stable release from the latest main, promoting v0.3.2-beta.3 without additional
