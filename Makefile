@@ -159,6 +159,7 @@ release-all: web clean
 		GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 \
 			go build $(_TAGS_FLAG) -ldflags "$(LDFLAGS)" -o $(OUT) $(CMD) && \
 	) true
+	node scripts/sign-macos-release.js $(DIST)
 	@echo "Packaging archives..."
 	@cd $(DIST) && for f in $(APP)-*; do \
 		case "$$f" in \
@@ -167,7 +168,8 @@ release-all: web clean
 			*)     tar czf "$$f.tar.gz" "$$f" ;; \
 		esac; \
 	done
-	@cd $(DIST) && sha256sum *.tar.gz *.zip > checksums.txt
+	@cd $(DIST) && shasum -a 256 *.tar.gz *.zip > checksums.txt
+	node scripts/check-release-assets.js $(DIST) --require-macos-signatures
 	@echo "Done. Binaries and archives in $(DIST)/"
 
 release:

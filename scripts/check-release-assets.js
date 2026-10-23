@@ -6,6 +6,9 @@ const crypto = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
+
+const { verifyCompatibleMacOSBinaries } = require("./macos-signing.js");
 
 const { parseChecksumManifest } = require("../npm/install.js");
 const { tag } = require("./check-release-version.js").readReleaseVersion();
@@ -33,6 +36,10 @@ function archiveEntries(file, extension) {
 
 function main() {
   const dist = path.resolve(process.argv[2] || path.join(__dirname, "..", "dist"));
+  const requireMacOSSignatures = process.platform === "darwin" || process.argv.includes("--require-macos-signatures");
+  if (requireMacOSSignatures && process.platform !== "darwin") {
+    fail("macOS signature verification requires a macOS host");
+  }
   const manifestPath = path.join(dist, "checksums.txt");
   const manifest = fs.readFileSync(manifestPath, "utf8");
   const nonEmptyLines = manifest.split(/\r?\n/).filter(Boolean);
@@ -70,7 +77,21 @@ function main() {
     fail(`archive set differs: found ${JSON.stringify(actualArchives)}`);
   }
 
-  process.stdout.write(`[release-assets] verified ${platforms.length} archives and checksums.txt\n`);
+  if (requireMacOSSignatures) {
+    const extracted = fs.mkdtempSync(path.join(os.tmpdir(), "ccn-release-signatures-"));
+    try {
+      const binaries = ["amd64", "arm64"].map((arch) => {
+        const binary = `${name}-${tag}-darwin-${arch}`;
+        execFileSync("tar", ["xzf", path.join(dist, `${binary}.tar.gz`), "-C", extracted], { stdio: "pipe" });
+        return path.join(extracted, binary);
+      });
+      verifyCompatibleMacOSBinaries(...binaries);
+    } finally {
+      fs.rmSync(extracted, { recursive: true, force: true });
+    }
+  }
+
+  process.stdout.write(`[release-assets] verified ${platforms.length} archives and checksums.txt${requireMacOSSignatures ? "; macOS Developer ID signatures verified" : "; macOS signatures not checked on this host"}\n`);
 }
 
 try {
