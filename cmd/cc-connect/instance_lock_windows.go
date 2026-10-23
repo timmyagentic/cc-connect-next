@@ -27,7 +27,7 @@ func AcquireInstanceLock(configPath string) (*InstanceLock, error) {
 	lockName := fmt.Sprintf(".%s.lock", configBase)
 	lockPath := filepath.Join(configDir, lockName)
 
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		return nil, fmt.Errorf("cannot create config directory: %w", err)
 	}
 

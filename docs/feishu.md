@@ -1,6 +1,8 @@
 # 飞书 (Feishu/Lark) 接入指南
 
-本文档介绍如何将 **cc-connect-next** 接入飞书，让你可以通过飞书机器人远程调用 Claude Code。
+本文档介绍如何将 **cc-connect-next** 接入飞书/Lark，远程使用 Codex、Claude Code 等 Agent。
+
+**第一次安装请先看[从零安装教程](getting-started.zh-CN.md)**：准备 Agent、安装 Next、生成配置并填写工作目录，再回到这里配置机器人。本文是飞书平台的详细参考。
 
 机器人即时私聊完成通知（附原对话链接，Codex / Claude 通用）：见[完成通知配置](completion-notifications.md)。
 
@@ -8,7 +10,8 @@
 
 - 飞书账号（个人或企业均可）
 - 一台可运行 cc-connect-next 的设备（无需公网 IP）
-- Claude Code 已安装并配置完成
+- 所选 Agent CLI 已安装、登录并能在目标目录工作；Starter 默认使用 Codex
+- 已生成 Next 配置，并将 `work_dir` 改为真实项目路径
 
 > 💡 **优势**：使用长连接模式，无需公网 IP、无需域名、无需反向代理（ngrok/frp）
 
@@ -16,7 +19,7 @@
 
 ## 快速配置（推荐）
 
-如果你已经装好 `cc-connect-next`，可以直接用内置命令完成“新建机器人/关联已有机器人”，并自动写回 `config.toml`：
+如果你已经装好 `cc-connect-next`、运行一次生成配置并填写好工作目录，可以用内置命令完成“新建机器人/关联已有机器人”，并自动写回 `config.toml`：
 
 ```bash
 # 推荐：统一入口
@@ -41,7 +44,9 @@ cc-connect-next feishu bind --project my-project --app cli_xxx:sec_xxx
 - `setup --app ...` 与 `bind --app ...` 功能等价。
 
 - `setup/new` 会在终端打印二维码和 URL，使用飞书/Lark 手机 App 扫码完成创建。
-- `--project` 不存在时会自动创建该项目；若项目存在但没有 `feishu/lark` 平台，也会自动补一个。
+- `--project` 必须与准备好的项目名一致。新名称会创建额外项目，不会重命名或移除原 Starter；原项目还有占位值时仍无法启动。若项目存在但没有 `feishu/lark` 平台，会自动补一个。
+- setup 不会生成缺失的配置文件、安装/登录 Agent，或修改已有项目的 `work_dir`。使用自定义路径时，setup 和启动命令都传相同的 `--config`。
+- 首次只想跑通聊天可加 `--no-recommended --no-lark-cli`：Starter 已有推荐样式，lark-cli 扩展可以以后再装。
 - 写回配置时仅定点更新目标字段（`app_id`、`app_secret`、`allow_from` 等），尽量保留原有注释与排版。
 - 该流程会回填凭证；通过扫码新建时，飞书通常会同时预配权限与事件订阅。
 - 交互式 setup 会询问是否安装官方 `lark-cli` 并复用这个机器人；脚本使用
@@ -105,10 +110,10 @@ cc-connect-next lark-cli setup --project my-project
 
 ```
 App ID:     cli_axxxxxxxxxxxx
-App Secret: QhkMpxxxxxxxxxxxxxxxxxxxx
+App Secret: ***
 ```
 
-> ⚠️ **重要**：请妥善保存这两个凭证，后续配置 cc-connect-next 时需要用到。App Secret 只会显示一次，如果忘记了需要重置。
+> 请从应用的凭据页面获取并妥善保存这两个值，后续配置会用到；不要把 App Secret 放进聊天、issue 或截图。下面的配置使用占位值，运行前需要替换。
 
 ### 2.3 配置到 cc-connect-next
 
@@ -145,8 +150,8 @@ enclosure_style = "code"
 type = "feishu"
 
 [projects.platforms.options]
-app_id = "cli_axxxxxxxxxxxx"
-app_secret = "QhkMpxxxxxxxxxxxxxxxxxxxx"
+app_id = "your-feishu-app-id"
+app_secret = "your-feishu-app-secret"
 reply_to_trigger = true
 done_emoji = "Done"
 # domain = "https://open.feishu.cn" # 可选：覆盖运行时 API/WebSocket 域名

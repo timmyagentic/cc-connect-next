@@ -1,10 +1,25 @@
-# cc-connect-next installation runbook
+# cc-connect-next installation and maintenance
 
-This runbook is intentionally safe for a person or coding agent to follow. cc-connect-next can be installed beside official CC Connect, but the two runtimes must not connect to the same Feishu app at the same time.
+**First time here? Follow [First-time setup](docs/getting-started.md) / [从零安装](docs/getting-started.zh-CN.md)** for a complete path from an empty machine to a real reply. You do not need official CC Connect or an existing bot.
+
+This page is the reference for installation methods, configuration, services, and updates. Official users can follow the [migration guide](docs/migration.md). cc-connect-next can be installed beside official CC Connect, but the two runtimes must not connect to the same Feishu app at the same time.
+
+| Starting point | Path |
+|---|---|
+| New installation | [Prepare an agent and get your first reply](docs/getting-started.md) |
+| Existing official CC Connect | [Migration and rollback](docs/migration.md) |
+| Existing Next | [Update](#update-a-published-installation), [service control](#background-service-and-uninstall) |
+| Alternative installer | [Standalone binary](#github-release-asset) or [source build](#current-source) |
 
 Repository: <https://github.com/timmyagentic/cc-connect-next>
 
-## 1. Inspect before changing anything
+## 1. Requirements and existing installations
+
+For npm installation, install [current Node.js LTS](https://nodejs.org/en/download) and check `node --version` and `npm --version`. No Go toolchain or repository clone is required. The npm launcher continues to use Node.js after installation; standalone binaries do not.
+
+Install and authenticate an agent separately in the same OS account that will run Next. The starter uses Codex, not Claude Code; see [agent preparation](docs/getting-started.md#1-prepare-the-host-and-agent). A working chat bot requires an awake host, model access, and platform app permissions.
+
+If you already have an installation, inspect it first. The following block is for macOS/Linux:
 
 ```bash
 uname -s
@@ -26,7 +41,11 @@ npm install -g cc-connect-next
 cc-connect-next --version
 ```
 
-`cc-connect-next@beta` installs the newest prerelease instead, when one exists.
+For a deliberate Beta installation, use `npm install -g cc-connect-next@beta`.
+
+If npm reports `EACCES`, use a user-writable Node.js installation or global prefix. On macOS/Linux, npm puts command links in `<prefix>/bin`; on Windows, it puts command launchers directly in `<prefix>`. Inspect `npm prefix -g`, add that command directory to PATH using your shell's normal configuration, and reopen the terminal. Do not switch to a different OS account just to install Next: that account will not inherit your agent login.
+
+Windows PowerShell can use `npm.cmd` and `cc-connect-next.cmd` if execution policy blocks the `.ps1` launchers.
 
 The npm installer downloads the same-version native asset from the GitHub release. Supported targets are macOS, Linux, and Windows on amd64 or arm64.
 
@@ -48,7 +67,7 @@ Prerelease updates remain explicit through `npm install -g cc-connect-next@beta`
 
 ### Current source
 
-When testing an unreleased commit, use Go 1.25+, Node.js 20+, and Git:
+When testing an unreleased commit, use the Go version required by [go.mod](go.mod) or newer, current Node.js LTS, Git, and Make. These are developer prerequisites:
 
 ```bash
 git clone https://github.com/timmyagentic/cc-connect-next.git
@@ -104,7 +123,23 @@ for release setup and the separate real-device upgrade acceptance check.
 
 ### New installation
 
-Run the binary once. It creates `~/.cc-connect-next/config.toml` with directory mode `0700` and file mode `0600`:
+Follow the [first-time guide](docs/getting-started.md) for the full sequence. Configuration resolution is `--config` → `./config.toml` → `~/.cc-connect-next/config.toml`, so use an explicit path for a predictable first installation.
+
+On macOS/Linux:
+
+```bash
+cc-connect-next --config "$HOME/.cc-connect-next/config.toml"
+```
+
+On Windows PowerShell:
+
+```powershell
+cc-connect-next --config "$env:USERPROFILE\.cc-connect-next\config.toml"
+```
+
+When that file does not exist, the command creates it and exits without connecting a bot. The file is created with mode `0600` on Unix; Windows access is governed by the user's profile ACLs. Current source also creates a missing configuration directory with mode `0700`, including when the instance lock creates it first. Existing directory permissions are preserved; older releases may create it with mode `0755`.
+
+If you prefer automatic path discovery, run:
 
 ```bash
 cc-connect-next
@@ -113,6 +148,8 @@ cc-connect-next
 The generated file already carries the [recommended Feishu configuration](#the-recommended-feishu-configuration) — it is rendered from the same definition `feishu setup` applies, so the two cannot drift apart. What it leaves to you is marked `REPLACE`: the working directory and the Feishu credentials. Do not commit the configuration.
 
 Startup refuses to run while any `REPLACE` value is still in place, and names both the key and the step that resolves it. That refusal is deliberate: with placeholder credentials the process would otherwise print `platform ready`, `engine started` and `cc-connect-next is running`, and only then fail to connect.
+
+Before configuring Feishu, edit the existing `[projects.agent.options]` section: set `work_dir` to an existing absolute project directory and choose the agent and permission mode. The starter uses Codex app-server with `mode = "yolo"`; first-time users can choose `suggest` for a read-only starting sandbox and interactive approvals. For Claude Code, use `type = "claudecode"`, `mode = "default"`, and remove `backend` / `app_server_url`.
 
 For Feishu, `cc-connect-next feishu setup` fills the credentials for you, offers
 the recommended configuration, and then offers the official `lark-cli`
@@ -200,11 +237,15 @@ Configuration paths follow official CC Connect's `${NAME}` placeholder semantics
 
 ## 4. Configure Feishu
 
-Connect the bot and let setup offer the recommended configuration:
+Create the configuration first, and use its existing project name. To create a new bot by QR code:
 
 ```bash
-cc-connect-next feishu setup --project my-project --app cli_xxx:sec_xxx
+cc-connect-next feishu setup --project my-project
 ```
+
+Pass the same `--config` used at startup when using a custom or explicit path. Setup does not install/authenticate the agent or replace an existing project's `work_dir`. A new `--project` name creates an additional project; it does not rename the starter.
+
+For an existing app, enter its credentials in the existing configuration or follow the [Feishu binding guide](docs/feishu.md). `lark-cli` is optional; it is not required to chat with the bot.
 
 After the credentials are saved, setup prints the recommended Feishu
 configuration and asks whether to apply it. It then offers the official
@@ -286,7 +327,20 @@ See the [Feishu answer-card contract](docs/feishu-card-contract.md) for the exac
 
 Set `card_mode = "legacy"` only when intentionally opting back into inherited CC Connect rendering.
 
-## 5. Validate the cutover plan
+## 5. Validate installation
+
+### First installation
+
+Use the same config path for both commands; this block uses the default discovery path:
+
+```bash
+cc-connect-next doctor
+cc-connect-next
+```
+
+Keep the foreground process running. Send `/version` to the bot in a private chat, then an ordinary prompt such as “Describe this project without changing files.” The command reply checks messaging; the ordinary reply checks agent execution. `doctor` never opens a platform connection and cannot replace this acceptance step. Configure user access and administrators as described in the [first-time guide](docs/getting-started.md#5-verify-the-first-reply-in-the-foreground).
+
+### Migration only
 
 Validate the source and environment before switching production:
 
@@ -364,9 +418,59 @@ cc-connect-next daemon uninstall
 cc-connect daemon start
 ```
 
+## Background service and uninstall
+
+After a real foreground reply succeeds, stop the foreground process with `Ctrl+C`. Install under the OS account where the agent is authenticated. `daemon install` also starts the service.
+
+macOS/Linux:
+
+```bash
+cc-connect-next daemon install --config "$HOME/.cc-connect-next/config.toml"
+```
+
+Windows PowerShell:
+
+```powershell
+cc-connect-next daemon install --config "$env:USERPROFILE\.cc-connect-next\config.toml"
+```
+
+Use the actual path for custom configurations. If any configuration paths are relative, pass `--work-dir` with the original runtime working directory as well. Check both service state and Runtime/Platforms readiness:
+
+```bash
+cc-connect-next daemon status
+cc-connect-next daemon logs -f
+```
+
+Send another ordinary prompt after installing the service. If foreground worked but the service does not, compare Binary, Config, WorkDir, PATH, and OS account with the working terminal. Linux user services may require linger to survive the last logout; follow the install command's message. Windows uses Task Scheduler and macOS uses launchd. Keep the host awake and connected.
+
+Stop or remove the service with:
+
+```bash
+cc-connect-next daemon stop
+cc-connect-next daemon uninstall
+```
+
+For an npm installation, remove the package only after removing its service:
+
+```bash
+npm uninstall -g cc-connect-next
+```
+
+For a standalone installation, remove the binary you placed on PATH. Configuration, credentials, and history remain in the data directory; back them up and delete them separately only if you intend to discard that data. Uninstalling Next does not uninstall the agent or revoke the chat app.
+
 ## Agent completion checklist
 
-An installing agent should report each item separately:
+For a **new installation**, report:
+
+- OS/architecture, exact version, and installation source;
+- the actual config path, chosen agent, and working directory;
+- successful independent agent login/use, or **UNVERIFIED**;
+- doctor failures/warnings, bot publication and access scope;
+- a real `/version` reply and ordinary agent reply, separately;
+- foreground shutdown, service/runtime readiness, and a reply after service installation if requested;
+- any remaining steps as **UNVERIFIED**, including real platform checks that were not performed.
+
+For a **migration**, additionally report:
 
 - exact cc-connect-next version and installation source;
 - target OS and architecture;
