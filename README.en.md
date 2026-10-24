@@ -15,6 +15,8 @@ A privacy-first successor to [CC Connect](https://github.com/chenhg5/cc-connect)
 
 [中文文档](README.md) · [Install](INSTALL.md) · [Usage guide](docs/usage.md) · [Feishu setup](docs/feishu.md) · [Migration](docs/migration.md)
 
+**First time here? [Copy the install prompt for your agent](#first-installation-let-your-agent-do-it).**
+
 <img src="docs/images/turn-demo.svg" alt="One agent turn in Feishu: message, streaming card lifecycle, mid-turn steer handoff, exactly one Done card" width="820">
 
 </div>
@@ -55,6 +57,38 @@ Most bridges port a Telegram bot to Feishu and stop at "it sends messages". cc-c
 Every item above is a documented config key in the [Feishu guide](docs/feishu.md) or a tested guarantee in the [card contract](docs/feishu-card-contract.md) — not marketing copy.
 
 ## 🚀 Quick start
+
+### First installation: let your agent do it
+
+If you have never used CC Connect and do not have a bot, paste this into a coding agent with local terminal access:
+
+```text
+Install the published stable cc-connect-next from https://github.com/timmyagentic/cc-connect-next
+for a first-time Feishu/Lark setup. Verify OS/architecture, the agent CLI and its login state,
+and the absolute project directory; prefer my current agent/project and ask only for missing
+information. Preserve existing CC Connect/Next configurations and services; do not migrate or overwrite.
+Choose an explicit absolute config path. If it does not exist, run `cc-connect-next --config <config-path>`
+to create it, then fill in the real work_dir, agent type, and its options yourself. Keep one project name.
+Run `cc-connect-next feishu setup --config <config-path> --project <project-name>`, show the QR code,
+and keep the process waiting while I scan it. Accept the recommended settings and confirm the official
+lark-cli companion; use `--recommended --lark-cli` for non-interactive execution, preserve existing
+profiles, and make the same bot the default bot profile.
+Run `cc-connect-next doctor --config <config-path>`, then start in the foreground with
+`cc-connect-next --config <config-path>`. Ask me to send /version, /whoami, and an ordinary prompt
+in a private chat; verify replies and configure access
+using the actual user ID. Stop the foreground process you started, then run
+`cc-connect-next daemon install --config <config-path>`. Check service status, Runtime, and platform readiness in
+`cc-connect-next daemon status` and verify replies still work in the background. Report version,
+config path, work_dir, and verification results. Call on me for login, QR scanning, or app publication;
+mark any incomplete real-message verification UNVERIFIED.
+```
+
+[First-install notes](docs/getting-started.md) · [Migration prompt for official users](docs/migration.md#agent-readable-install-task)
+
+### Manual installation
+
+Prepare an installed, authenticated agent CLI first. After generating the config, set `work_dir` to
+an existing absolute project path; `feishu setup` configures the bot but does not fill an existing project's directory.
 
 ```bash
 # 1. Install (macOS / Linux / Windows, amd64 & arm64)
