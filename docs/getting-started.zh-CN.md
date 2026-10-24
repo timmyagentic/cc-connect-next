@@ -12,15 +12,16 @@
 请从 https://github.com/timmyagentic/cc-connect-next 安装已发布稳定版，按首次安装流程接入飞书/Lark。
 先确认操作系统、CPU 架构、Agent CLI 及登录状态和项目绝对路径；优先复用当前 Agent 与项目，
 缺少必要信息再问我。检查并保留已有 CC Connect/Next 配置和服务，不执行迁移或覆盖。
-安装后选择明确的配置路径；文件不存在时运行 `cc-connect-next --config <配置路径>` 生成配置，
+安装后选择明确的配置绝对路径；文件不存在时运行 `cc-connect-next --config <配置路径>` 生成配置，
 由你填写真实 work_dir、Agent 类型和对应选项，保持项目名一致，不让我手工编辑配置。
 执行 `cc-connect-next feishu setup --config <配置路径> --project <项目名>`，展示二维码并保持
 进程等待我扫码。接受推荐配置，并按提示确认官方 lark-cli companion；非交互执行时使用
 `--recommended --lark-cli`，保留已有 profile，让同一机器人作为默认 bot profile。
-执行 `cc-connect-next doctor --config <配置路径>` 并前台启动；引导我在机器人私聊发送
-/version、/whoami 和一条普通提问，核对回复并按实际用户 ID 配置访问范围。
+执行 `cc-connect-next doctor --config <配置路径>`，再用
+`cc-connect-next --config <配置路径>` 前台启动；引导我在机器人私聊发送 /version、/whoami
+和一条普通提问，核对回复并按实际用户 ID 配置访问范围。
 验证后停止本次前台进程，执行 `cc-connect-next daemon install --config <配置路径>`，检查
-`cc-connect-next daemon status` 的 Service 与 Runtime/Platforms，并验证后台仍能回复。
+`cc-connect-next daemon status` 的服务状态、Runtime 和平台就绪状态，并验证后台仍能回复。
 报告版本、配置路径、work_dir 和验证结果；需要我登录、扫码或发布应用时再提示，未完成的
 真实消息验证明确标为 UNVERIFIED。
 ```

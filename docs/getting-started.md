@@ -13,16 +13,17 @@ Install the published stable cc-connect-next from https://github.com/timmyagenti
 for a first-time Feishu/Lark setup. Verify OS/architecture, the agent CLI and its login state,
 and the absolute project directory; prefer my current agent/project and ask only for missing
 information. Preserve existing CC Connect/Next configurations and services; do not migrate or overwrite.
-Choose an explicit config path. If it does not exist, run `cc-connect-next --config <config-path>`
+Choose an explicit absolute config path. If it does not exist, run `cc-connect-next --config <config-path>`
 to create it, then fill in the real work_dir, agent type, and its options yourself. Keep one project name.
 Run `cc-connect-next feishu setup --config <config-path> --project <project-name>`, show the QR code,
 and keep the process waiting while I scan it. Accept the recommended settings and confirm the official
 lark-cli companion; use `--recommended --lark-cli` for non-interactive execution, preserve existing
 profiles, and make the same bot the default bot profile.
-Run `cc-connect-next doctor --config <config-path>` and start in the foreground. Ask me to send
-/version, /whoami, and an ordinary prompt in a private chat; verify replies and configure access
+Run `cc-connect-next doctor --config <config-path>`, then start in the foreground with
+`cc-connect-next --config <config-path>`. Ask me to send /version, /whoami, and an ordinary prompt
+in a private chat; verify replies and configure access
 using the actual user ID. Stop the foreground process you started, then run
-`cc-connect-next daemon install --config <config-path>`. Check Service and Runtime/Platforms in
+`cc-connect-next daemon install --config <config-path>`. Check service status, Runtime, and platform readiness in
 `cc-connect-next daemon status` and verify replies still work in the background. Report version,
 config path, work_dir, and verification results. Call on me for login, QR scanning, or app publication;
 mark any incomplete real-message verification UNVERIFIED.
