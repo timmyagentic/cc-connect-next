@@ -32,10 +32,8 @@ func AcquireInstanceLock(configPath string) (*InstanceLock, error) {
 	lockName := fmt.Sprintf(".%s.lock", configBase)
 	lockPath := filepath.Join(configDir, lockName)
 
-	// First run takes this lock before writing credentials to the starter
-	// config. Match bootstrapConfig's private directory mode without changing
-	// permissions on an existing, possibly shared, configuration directory.
-	if err := os.MkdirAll(configDir, 0o700); err != nil {
+	// Ensure directory exists
+	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return nil, fmt.Errorf("cannot create config directory: %w", err)
 	}
 
