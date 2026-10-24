@@ -1,5 +1,7 @@
 # cc-connect-next installation runbook
 
+First installation without an existing bot/config? Copy the [Agent install prompt](docs/getting-started.md) / [首次安装 Prompt](docs/getting-started.zh-CN.md).
+
 This runbook is intentionally safe for a person or coding agent to follow. cc-connect-next can be installed beside official CC Connect, but the two runtimes must not connect to the same Feishu app at the same time.
 
 Repository: <https://github.com/timmyagentic/cc-connect-next>
@@ -103,6 +105,8 @@ for release setup and the separate real-device upgrade acceptance check.
 ## 3. Create or migrate configuration
 
 ### New installation
+
+For an Agent-led installation, use the [first-install task](docs/getting-started.md). Prepare the selected agent CLI and login, then have the installing agent set the generated config's `work_dir` to the real absolute project path. `feishu setup` fills bot credentials, not an existing project's working directory.
 
 Run the binary once. It creates `~/.cc-connect-next/config.toml` with directory mode `0700` and file mode `0600`:
 

@@ -15,6 +15,8 @@
 
 [English](README.en.md) · [安装文档](INSTALL.md) · [使用指南](docs/usage.zh-CN.md) · [飞书配置](docs/feishu.md) · [迁移指南](docs/migration.zh-CN.md)
 
+**首次使用？[复制一段安装 Prompt 交给 Agent](#首次安装交给-agent-执行)。**
+
 <img src="docs/images/turn-demo.svg" alt="一次 Agent 回合：发消息、卡片流式生命周期、回合中途 steer 交接、唯一一张完成卡片" width="820">
 
 </div>
@@ -55,6 +57,35 @@
 以上每一条，要么是[飞书指南](docs/feishu.md)里有文档的配置项，要么是[卡片契约](docs/feishu-card-contract.md)里有测试保障的行为——不是营销话术。
 
 ## 🚀 快速开始
+
+### 首次安装：交给 Agent 执行
+
+没有用过 CC Connect、也没有机器人的用户，把下面整段复制给能执行本机命令的编码 Agent：
+
+```text
+请从 https://github.com/timmyagentic/cc-connect-next 安装已发布稳定版，按首次安装流程接入飞书/Lark。
+先确认操作系统、CPU 架构、Agent CLI 及登录状态和项目绝对路径；优先复用当前 Agent 与项目，
+缺少必要信息再问我。检查并保留已有 CC Connect/Next 配置和服务，不执行迁移或覆盖。
+安装后选择明确的配置绝对路径；文件不存在时运行 `cc-connect-next --config <配置路径>` 生成配置，
+由你填写真实 work_dir、Agent 类型和对应选项，保持项目名一致，不让我手工编辑配置。
+执行 `cc-connect-next feishu setup --config <配置路径> --project <项目名>`，展示二维码并保持
+进程等待我扫码。接受推荐配置，并按提示确认官方 lark-cli companion；非交互执行时使用
+`--recommended --lark-cli`，保留已有 profile，让同一机器人作为默认 bot profile。
+执行 `cc-connect-next doctor --config <配置路径>`，再用
+`cc-connect-next --config <配置路径>` 前台启动；引导我在机器人私聊发送 /version、/whoami
+和一条普通提问，核对回复并按实际用户 ID 配置访问范围。
+验证后停止本次前台进程，执行 `cc-connect-next daemon install --config <配置路径>`，检查
+`cc-connect-next daemon status` 的服务状态、Runtime 和平台就绪状态，并验证后台仍能回复。
+报告版本、配置路径、work_dir 和验证结果；需要我登录、扫码或发布应用时再提示，未完成的
+真实消息验证明确标为 UNVERIFIED。
+```
+
+[首次安装说明](docs/getting-started.zh-CN.md) · [已有官方用户的迁移 Prompt](docs/migration.zh-CN.md#交给-agent-一键执行)
+
+### 手动安装
+
+先准备可用且已登录的 Agent CLI。首次生成配置后，将 `work_dir` 填为真实项目绝对路径；
+`feishu setup` 负责机器人配置，不会替已有项目填写工作目录。
 
 ```bash
 # 1. 安装（macOS / Linux / Windows，amd64 与 arm64）

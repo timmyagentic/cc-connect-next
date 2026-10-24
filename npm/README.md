@@ -1,5 +1,7 @@
 # cc-connect-next
 
+**First time here?** Copy the [Agent install prompt](https://github.com/timmyagentic/cc-connect-next/blob/main/docs/getting-started.md) / [首次安装 Prompt](https://github.com/timmyagentic/cc-connect-next/blob/main/docs/getting-started.zh-CN.md). The agent handles installation, configuration, bot setup, and the background service.
+
 Bridge local AI coding agents (Claude Code, Cursor, Gemini CLI, Codex) to messaging platforms (Feishu/Lark, DingTalk, Slack, Telegram, Discord, LINE, WeChat Work).
 
 Chat with your AI dev assistant from anywhere.
