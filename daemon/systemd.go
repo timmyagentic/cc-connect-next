@@ -49,6 +49,14 @@ func (m *systemdManager) Platform() string {
 }
 
 func (m *systemdManager) Install(cfg Config) error {
+	// WorkingDirectory is a literal path, not a quoted/escaped argument list.
+	// Reject characters that could split or terminate the unit directive.
+	if strings.ContainsAny(cfg.WorkDir, "\x00\r\n") {
+		return fmt.Errorf("systemd working directory must not contain NUL or line breaks")
+	}
+	if strings.TrimRight(cfg.WorkDir, " \t\v\f") != cfg.WorkDir {
+		return fmt.Errorf("systemd working directory must not end in whitespace")
+	}
 	unitPath := m.unitPath()
 
 	if err := os.MkdirAll(filepath.Dir(unitPath), 0755); err != nil {
@@ -216,7 +224,7 @@ func (m *systemdManager) buildUnit(cfg Config) string {
 	sb.WriteString("[Service]\n")
 	sb.WriteString("Type=simple\n")
 	fmt.Fprintf(&sb, "ExecStart=%s --config %s\n", quoteSystemdExecArg(cfg.BinaryPath), quoteSystemdExecArg(configPathFor(cfg)))
-	fmt.Fprintf(&sb, "WorkingDirectory=%s\n", quoteSystemdExecArg(cfg.WorkDir))
+	fmt.Fprintf(&sb, "WorkingDirectory=%s\n", escapeSystemdWorkingDirectory(cfg.WorkDir))
 	sb.WriteString("Restart=on-failure\n")
 	sb.WriteString("RestartSec=10\n")
 	fmt.Fprintf(&sb, "Environment=\"CC_LOG_FILE=%s\"\n", cfg.LogFile)
@@ -251,6 +259,13 @@ func (m *systemdManager) buildUnit(cfg Config) string {
 		sb.WriteString("WantedBy=default.target\n")
 	}
 	return sb.String()
+}
+
+// WorkingDirectory does not unquote or C-unescape its value. Keep quotes and
+// backslashes literal, escape specifiers, and add a trailing slash so a final
+// backslash cannot be treated as a unit-file line continuation.
+func escapeSystemdWorkingDirectory(value string) string {
+	return strings.ReplaceAll(strings.TrimSuffix(value, "/")+"/", "%", "%%")
 }
 
 // quoteSystemdExecArg preserves one literal argv value in ExecStart. Percent

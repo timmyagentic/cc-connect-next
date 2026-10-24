@@ -126,6 +126,12 @@ jobs:
       - name: Run tests with race detector
         run: go test ./... -race
 
+      - name: Verify generated units with real systemd
+        run: |
+          set -euo pipefail
+          go test -c -tags=systemd_integration -o "${RUNNER_TEMP}/daemon-systemd.test" ./daemon
+          sudo "${RUNNER_TEMP}/daemon-systemd.test" -test.run '^TestSystemdWorkingDirectoryRegression$' -test.v -test.timeout=90s
+
   feedback-relay:
     runs-on: ubuntu-latest
     strategy:
