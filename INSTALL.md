@@ -1,17 +1,36 @@
 # cc-connect-next installation and maintenance
 
-**First time here? Follow [First-time setup](docs/getting-started.md) / [从零安装](docs/getting-started.zh-CN.md)** for a complete path from an empty machine to a real reply. You do not need official CC Connect or an existing bot.
+**First time here? [Copy one install prompt](docs/getting-started.md#install-with-one-prompt) / [复制一段安装 Prompt](docs/getting-started.zh-CN.md#交给-agent-一键安装)** and let your coding agent perform setup. You do not need official CC Connect, an existing bot, or a hand-edited Next configuration.
 
 This page is the reference for installation methods, configuration, services, and updates. Official users can follow the [migration guide](docs/migration.md). cc-connect-next can be installed beside official CC Connect, but the two runtimes must not connect to the same Feishu app at the same time.
 
 | Starting point | Path |
 |---|---|
-| New installation | [Prepare an agent and get your first reply](docs/getting-started.md) |
+| New installation | [One-prompt installation](#install-with-a-coding-agent) · [Agent execution guide](docs/getting-started.md#execution-guide-for-the-installing-agent) |
 | Existing official CC Connect | [Migration and rollback](docs/migration.md) |
 | Existing Next | [Update](#update-a-published-installation), [service control](#background-service-and-uninstall) |
 | Alternative installer | [Standalone binary](#github-release-asset) or [source build](#current-source) |
 
 Repository: <https://github.com/timmyagentic/cc-connect-next>
+
+## Install with a coding agent
+
+Paste this into an agent that can run commands on the target machine:
+
+```text
+Install the published stable cc-connect-next from
+https://github.com/timmyagentic/cc-connect-next for my first use with Feishu/Lark. Prefer my
+current working coding agent and project directory. Execute dependency checks and installation,
+generate and fill in the configuration including the real work_dir, guide me through QR bot
+registration, verify the first reply, and install and start the background service. Ask me only
+when the agent or directory is unclear, or when I must sign in, scan a QR code, confirm app
+publication, or send a verification message. Identify and preserve existing configurations and
+services; do not migrate or overwrite them. Finish by reporting the version, config path,
+agent/project directory, messaging verification, and background status, explicitly marking
+anything unverified.
+```
+
+The [agent execution guide](docs/getting-started.md#execution-guide-for-the-installing-agent) covers resuming setup, filling the configuration, presenting QR codes while keeping setup alive, verifying replies, and starting the service. The sections below are the command reference; the agent should execute them rather than hand them back as a to-do list.
 
 ## 1. Requirements and existing installations
 

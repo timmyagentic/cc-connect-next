@@ -10,56 +10,36 @@
 [![npm](https://img.shields.io/npm/v/cc-connect-next?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/cc-connect-next)
 [![License: MIT](https://img.shields.io/github/license/timmyagentic/cc-connect-next?color=blue)](LICENSE)
 
-[English](README.en.md) · **[从零安装](docs/getting-started.zh-CN.md)** · [使用指南](docs/usage.zh-CN.md) · [飞书配置](docs/feishu.md) · [迁移指南](docs/migration.zh-CN.md)
+[English](README.en.md) · **[一段 Prompt 安装](docs/getting-started.zh-CN.md#交给-agent-一键安装)** · [使用指南](docs/usage.zh-CN.md) · [飞书配置](docs/feishu.md) · [迁移指南](docs/migration.zh-CN.md)
 
 </div>
 
 cc-connect-next 是 [CC Connect](https://github.com/chenhg5/cc-connect) 的独立后继项目，重点维护飞书原生卡片和本机 Agent 的使用体验。首次使用不需要安装原版 CC Connect，也不需要已有机器人或旧配置。
 
-它负责连接聊天平台和 Agent；**Agent CLI、登录账号和模型使用额度需要单独准备**。代码和 Agent 进程运行在你的机器上，发出的消息和最终回答会经过所选聊天平台；模型请求由 Agent 发给其配置的提供商。运行机器需要保持开机、联网。
+它负责连接聊天平台和 Agent。**安装 Agent 会检查并准备所需 CLI，你按提示完成账号登录，并使用自己的模型访问权限与额度**。代码和 Agent 进程运行在你的机器上，发出的消息和最终回答会经过所选聊天平台；模型请求由 Agent 发给其配置的提供商。运行机器需要保持开机、联网。
 
 | 你的情况 | 从这里开始 |
 |---|---|
-| 从未用过 CC Connect / Next | **[从零安装：准备环境 → 创建机器人 → 收到第一条回答](docs/getting-started.zh-CN.md)** |
+| 从未用过 CC Connect / Next | **[复制安装 Prompt，让 Agent 完成首次安装](docs/getting-started.zh-CN.md#交给-agent-一键安装)** |
 | 已在使用官方 CC Connect | [迁移指南](docs/migration.zh-CN.md)，复用已有配置与机器人 |
 | 已安装 cc-connect-next | [更新与后台服务](INSTALL.md)，或查看[使用指南](docs/usage.zh-CN.md) |
 
 ## 🚀 快速开始
 
-下面以 **Codex + 飞书** 为例。完整教程提供 macOS/Linux 和 Windows PowerShell 命令、每一步的成功标志及排错方法：[从零安装](docs/getting-started.zh-CN.md)。
+**推荐：把下面整段 Prompt 复制给能执行本机命令的编码 Agent，例如 Codex、Claude Code 或 Cursor。** Agent 会负责安装和配置，你按提示完成登录、扫码和验证消息即可。
 
-**1. 准备环境。** 安装 [Node.js LTS](https://nodejs.org/en/download)，确认 `node --version`、`npm --version` 可运行。按 [Codex CLI 官方指引](https://learn.chatgpt.com/docs/codex/cli)安装 CLI，在目标项目目录运行 `codex`，完成登录并确认它能回答问题。也可以使用 [Claude Code](https://code.claude.com/docs/en/overview)，配置差异见入门教程。
-
-**2. 安装稳定版并生成配置。** 无需克隆仓库或安装 Go。
-
-```bash
-npm install -g cc-connect-next
-cc-connect-next --version
-cc-connect-next
+```text
+请从 https://github.com/timmyagentic/cc-connect-next 为我完成首次安装，使用已发布稳定版并接入飞书/Lark。
+优先复用当前可用的编码 Agent 和当前项目目录；
+请直接执行依赖检查与安装、生成和填写配置（含真实 work_dir）、扫码创建机器人的引导、首条回复验证，以及后台服务安装和启动。
+只有 Agent/目录无法确定，或需要我登录、扫码、确认应用发布、发送验证消息时再叫我；
+先识别并保留已有配置和服务，不执行迁移或覆盖。
+完成后报告版本、配置路径、Agent/项目目录、消息验证和后台状态，未验证项明确说明。
 ```
 
-第一次运行会生成配置并退出，**此时机器人还没有启动**。打开输出中的 `config.toml`，将 `[projects.agent.options]` 下的 `work_dir` 改为真实存在的项目绝对路径。默认 Agent 是 Codex；首次配置还应选择 Agent 的权限模式，详见[配置步骤](docs/getting-started.zh-CN.md#3-生成并编辑配置)。
+这个任务从没有旧配置、没有机器人的状态开始，包含首次安装和后台运行。执行细节见[给安装 Agent 的执行流程](docs/getting-started.zh-CN.md#给安装-agent-的执行流程)。普通网页聊天如果没有本机终端权限，无法直接执行安装。
 
-**3. 创建机器人并检查环境。** 保留配置中的项目名 `my-project`，运行：
-
-```bash
-cc-connect-next feishu setup --project my-project --no-recommended --no-lark-cli
-cc-connect-next doctor
-cc-connect-next
-```
-
-用飞书/Lark 手机 App 扫终端二维码创建机器人。模板已有推荐卡片样式，因此这里跳过重复套用；`lark-cli` 是可选扩展，首次聊天无需安装。`setup` 只配置机器人，不会安装 Agent、登录模型账号或替你选择工作目录。扫码结束后，按提示核验应用发布状态和可用范围。
-
-**4. 验证第一条回复。** 保持终端运行，在飞书中打开机器人私聊，先发 `/version`，再发「请简要介绍当前项目，不要修改文件」。前者验证消息链路，后者验证 Agent 确实可以工作。`doctor` 通过不能代替这一条实际回复。
-
-**5. 转为后台运行。** 首条回复正常后，用 `Ctrl+C` 停止前台进程，再安装后台服务。macOS/Linux 使用：
-
-```bash
-cc-connect-next daemon install --config "$HOME/.cc-connect-next/config.toml"
-cc-connect-next daemon status
-```
-
-Windows 和自定义配置路径见[后台运行步骤](docs/getting-started.zh-CN.md#6-转为后台运行)。同一配置只运行一个实例；如果当前目录已有 `config.toml`，程序会优先使用它，按输出确认实际路径，或全程显式传入 `--config`。
+需要自己操作或检查某一步时，查看[手动安装步骤与排错](docs/getting-started.zh-CN.md#手动安装步骤)。已有官方 CC Connect 用户使用[迁移安装 Prompt](docs/migration.zh-CN.md#交给-agent-一键执行)。
 
 ## ✨ 亮点
 
@@ -99,7 +79,7 @@ cc-connect-next migrate --dry-run
 
 | 你要做什么 | 文档 |
 |---|---|
-| 第一次安装并收到回复 | [从零安装](docs/getting-started.zh-CN.md) |
+| 让 Agent 完成首次安装 | [复制安装 Prompt](docs/getting-started.zh-CN.md#交给-agent-一键安装) · [手动步骤与排错](docs/getting-started.zh-CN.md#手动安装步骤) |
 | npm / 独立二进制 / 源码安装、更新、服务、卸载 | [安装与维护参考](INSTALL.md) |
 | 创建飞书应用、设置权限与事件、配置群聊 | [飞书指南](docs/feishu.md) |
 | 会话、权限、模型、定时任务与日常命令 | [使用指南](docs/usage.zh-CN.md) |

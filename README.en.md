@@ -10,56 +10,40 @@ Connect local agents such as Codex, Claude Code, and Cursor to Feishu/Lark, Tele
 [![npm](https://img.shields.io/npm/v/cc-connect-next?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/cc-connect-next)
 [![License: MIT](https://img.shields.io/github/license/timmyagentic/cc-connect-next?color=blue)](LICENSE)
 
-[中文](README.md) · **[First-time setup](docs/getting-started.md)** · [Usage](docs/usage.md) · [Feishu setup](docs/feishu.md) · [Migration](docs/migration.md)
+[中文](README.md) · **[Install with one prompt](docs/getting-started.md#install-with-one-prompt)** · [Usage](docs/usage.md) · [Feishu setup](docs/feishu.md) · [Migration](docs/migration.md)
 
 </div>
 
 cc-connect-next is an independently maintained successor to [CC Connect](https://github.com/chenhg5/cc-connect), focused on native Feishu cards and local agent workflows. New users do not need the original CC Connect, an existing bot, or an old configuration.
 
-It connects chat platforms to agents. **Install and authenticate your agent CLI separately, with access to the model you intend to use.** Code and agent processes run on your machine. Messages and final answers pass through the selected chat platform, and the agent sends model requests to its configured provider. Keep the host awake and online.
+It connects chat platforms to agents. **The installing agent prepares the required CLI; you complete sign-in and use your own model access.** Code and agent processes run on your machine. Messages and final answers pass through the selected chat platform, and the agent sends model requests to its configured provider. Keep the host awake and online.
 
 | Your starting point | Start here |
 |---|---|
-| Never used CC Connect or Next | **[First-time setup: prepare the host → create a bot → get a reply](docs/getting-started.md)** |
+| Never used CC Connect or Next | **[Copy the install prompt and let your agent do the setup](docs/getting-started.md#install-with-one-prompt)** |
 | Already use official CC Connect | [Migration guide](docs/migration.md), reusing your bot and configuration |
 | Already use cc-connect-next | [Updates and services](INSTALL.md), or the [usage guide](docs/usage.md) |
 
 ## 🚀 Quick start
 
-This example uses **Codex + Feishu**. The [first-time guide](docs/getting-started.md) includes macOS/Linux and Windows PowerShell commands, expected results, and troubleshooting.
+**Recommended: copy this whole prompt into a coding agent with access to your local terminal, such as Codex, Claude Code, or Cursor.** The agent handles installation and configuration; you participate when sign-in, QR scanning, or verification messages are needed.
 
-**1. Prepare the host.** Install [Node.js LTS](https://nodejs.org/en/download) and confirm `node --version` and `npm --version` work. Follow the [official Codex CLI instructions](https://learn.chatgpt.com/docs/codex/cli), run `codex` in your project directory, sign in, and verify that it can answer a question. [Claude Code](https://code.claude.com/docs/en/overview) is another option; the first-time guide explains the configuration change.
-
-**2. Install stable and create the configuration.** No repository clone or Go installation is needed.
-
-```bash
-npm install -g cc-connect-next
-cc-connect-next --version
-cc-connect-next
+```text
+Install the published stable cc-connect-next from
+https://github.com/timmyagentic/cc-connect-next for my first use with Feishu/Lark. Prefer my
+current working coding agent and project directory. Execute dependency checks and installation,
+generate and fill in the configuration including the real work_dir, guide me through QR bot
+registration, verify the first reply, and install and start the background service. Ask me only
+when the agent or directory is unclear, or when I must sign in, scan a QR code, confirm app
+publication, or send a verification message. Identify and preserve existing configurations and
+services; do not migrate or overwrite them. Finish by reporting the version, config path,
+agent/project directory, messaging verification, and background status, explicitly marking
+anything unverified.
 ```
 
-The first run creates a configuration and exits. **The bot is not running yet.** Open the printed `config.toml` path and set `work_dir` under `[projects.agent.options]` to an existing absolute project path. The starter uses Codex. Also choose the agent permission mode as described in the [configuration step](docs/getting-started.md#3-create-and-edit-the-configuration).
+This task starts without an old configuration or bot and continues through background service setup. See the [installing agent's execution guide](docs/getting-started.md#execution-guide-for-the-installing-agent). A web chat without local terminal access cannot execute the installation.
 
-**3. Create the bot and check the host.** Keep the starter project name `my-project` and run:
-
-```bash
-cc-connect-next feishu setup --project my-project --no-recommended --no-lark-cli
-cc-connect-next doctor
-cc-connect-next
-```
-
-Scan the terminal QR code with the Feishu/Lark mobile app. The starter already contains the recommended card appearance, so these flags skip reapplying it and skip the optional `lark-cli` companion. `setup` configures the bot; it does not install or authenticate an agent or choose its working directory. Check the app's publication status and availability after registration.
-
-**4. Verify a reply.** Keep the terminal running. Open a private chat with the bot, send `/version`, then ask “Briefly describe this project without changing files.” The first checks messaging; the second checks that the agent works. A passing `doctor` alone does not verify a real reply.
-
-**5. Run in the background.** Once a reply succeeds, stop the foreground process with `Ctrl+C`, then install the service. On macOS/Linux:
-
-```bash
-cc-connect-next daemon install --config "$HOME/.cc-connect-next/config.toml"
-cc-connect-next daemon status
-```
-
-See the [background service step](docs/getting-started.md#6-run-in-the-background) for Windows and custom paths. Use one process per configuration. A `config.toml` in the current directory takes precedence over the home-directory file; check the printed path or pass `--config` consistently.
+For individual steps or manual installation, use the [manual guide and troubleshooting](docs/getting-started.md#manual-installation). Existing official CC Connect users should use the [migration prompt](docs/migration.md#agent-readable-install-task).
 
 ## ✨ Highlights
 
@@ -99,7 +83,7 @@ Then follow the [migration guide](docs/migration.md) for cutover, validation, an
 
 | What you want to do | Guide |
 |---|---|
-| Install for the first time and get a reply | [First-time setup](docs/getting-started.md) |
+| Have an agent complete your first installation | [Install prompt](docs/getting-started.md#install-with-one-prompt) · [Manual steps](docs/getting-started.md#manual-installation) |
 | Install via npm, binary, or source; update, manage services, uninstall | [Installation reference](INSTALL.md) |
 | Configure Feishu apps, permissions, events, and groups | [Feishu guide](docs/feishu.md) |
 | Use sessions, approvals, models, schedules, and chat commands | [Usage guide](docs/usage.md) |

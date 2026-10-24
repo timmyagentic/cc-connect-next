@@ -6,6 +6,79 @@ This guide starts with **no official CC Connect installation, no old configurati
 
 The sequence is **prepare the agent → install Next → select a directory → create a bot → verify a reply → run a service**. Each step has a separate success check.
 
+## Install with one prompt
+
+Copy the whole block into a coding agent with **local terminal access**, such as Codex, Claude Code, or Cursor. You do not need to install Next or edit its configuration first. The agent handles setup and calls on you for sign-in, QR scanning, app publication, and verification messages.
+
+```text
+Install the published stable cc-connect-next from
+https://github.com/timmyagentic/cc-connect-next for my first use with Feishu/Lark. Prefer my
+current working coding agent and project directory. Execute dependency checks and installation,
+generate and fill in the configuration including the real work_dir, guide me through QR bot
+registration, verify the first reply, and install and start the background service. Ask me only
+when the agent or directory is unclear, or when I must sign in, scan a QR code, confirm app
+publication, or send a verification message. Identify and preserve existing configurations and
+services; do not migrate or overwrite them. Finish by reporting the version, config path,
+agent/project directory, messaging verification, and background status, explicitly marking
+anything unverified.
+```
+
+The prompt describes the full task without requiring an existing Next installation. The installing agent should follow the [execution guide](#execution-guide-for-the-installing-agent). For individual commands, use the [manual steps](#manual-installation).
+
+## Execution guide for the installing agent
+
+**Execute the installation, configuration edits, and checks.** The request already includes first-time setup and a background service. Complete steps that can be determined from context and local inspection. Keep progress when user participation is needed, then continue after their response.
+
+### A. Identify the target
+
+Inspect OS, architecture, account, Node/npm, available agent CLIs, the project directory, and any CC Connect/Next installation or service. Prefer the user's current working agent and the project clearly associated with their task. Do not treat a temporary folder, home directory, or tooling control directory as the project. Ask for the agent and directory together only when intent is unclear.
+
+When no agent is available, prepare Codex unless the user selected another agent. Install the chosen CLI and guide its official sign-in. Account access, paid access, and organization permissions remain user actions; keep authentication inside the official login flow.
+
+If configuration already exists, inspect its structure and resume completed steps. Preserve existing installations. A first-time request does not authorize migrating, overwriting, or replacing an existing official/Next service: explain the current state and resolve the target before changing an existing installation.
+
+### B. Install stable and verify the executable
+
+Use the published stable release described in [INSTALL.md](../INSTALL.md#published-release). For npm, install current Node.js LTS and set up PATH if needed; alternatively, install a standalone binary verified against the same release's `checksums.txt`. Use the OS account that authenticated the selected agent.
+
+Run `cc-connect-next --version` and the relevant `--help`. Record source and version. Follow the installed release's flags; newer main-branch documentation is not a reason to switch to Beta or build from source.
+
+### C. Generate and fill in the configuration yourself
+
+Choose an explicit absolute configuration path and use it consistently for startup, setup, doctor, and daemon commands. If it does not exist, run Next once as shown in [configuration creation](#3-create-and-edit-the-configuration); its first-run exit is expected.
+
+Then **edit the generated TOML yourself**: set the confirmed real `work_dir` and agent type, use one consistent project name, and remove options belonging to another agent. Honor the user's confirmed permission preference; otherwise use this guide's first-trial mode (`suggest` for Codex, `default` for Claude Code). Do not ask the user to find the file, replace paths, or assemble TOML. Preserve unrelated existing settings.
+
+Before bot binding, check parsing, directory existence, and agent CLI startup. Missing Feishu credentials mean bot setup is still pending.
+
+### D. Create the bot and present the QR code
+
+A new user has no App ID/App Secret. Use `feishu setup` to create a bot, with the configuration path and project name from C. The starter already has card styling; use `--no-recommended --no-lark-cli` for the first chat and add optional extensions later as needed.
+
+Start setup in a terminal session that can remain running. Use `--qr-image` to save an image in a private temporary location when needed, show the QR code or session login link, and **keep setup waiting while the user scans it**. Keep QR images, credentials, and temporary login links out of repositories and delivery logs. Read the result and confirm credentials were saved. After a timeout, inspect completed steps before retrying so you do not create duplicate apps.
+
+If QR registration is unavailable, use the [manual app reference](feishu.md). Continue doing the local configuration yourself, handing back only the developer-console actions the user must perform. Verify bot capability, long-connection message events, card callbacks, publication, and app availability. Use an app available only to this user for initial verification.
+
+### E. Verify messaging and the agent, then set user access
+
+Run doctor and fix required configuration, directory, or agent failures. Assess optional warnings such as voice dependencies against actual needs. Start Next in the foreground, inspect the real connection, and keep it running for verification. Doctor success or a live process does not establish working chat.
+
+Ask the user to send `/version`, `/whoami`, and “Briefly describe this project without changing files” in a private chat with the new bot. These messages need the real user's identity. Inspect accessible replies or wait for the user's report; do not invent successful verification. **Write the access configuration yourself** using the app-scoped user ID returned by `/whoami`: project `admin_from`, platform `allow_from`, and `group_reply_all = false` for the initial group setup. Preserve an already explicit user-selected access scope.
+
+If `/version` fails, investigate messaging, permissions, and connectivity. If an ordinary prompt fails, investigate agent authentication, model access, and the working directory. Perform deterministic repairs yourself.
+
+### F. Start the service and report the result
+
+After the first reply succeeds, stop the foreground process you started for this installation. Follow [background setup](#6-run-in-the-background) under the same OS account, explicitly passing the configuration path and preserving the original runtime directory when relative paths are used. Leave one consumer for the configuration.
+
+Check both Service and Runtime/Platforms in `daemon status`, inspect logs, and verify another real reply after service startup. Investigate persistent readiness failures instead of repeatedly reinstalling or using `--force` to finish.
+
+Report the version/source, configuration path, agent/project directory, messaging result, service status, and status/log/stop commands. If login, QR registration, publication, or a real reply is still pending, state the exact remaining user action and mark it **UNVERIFIED**. File existence and a passing doctor are not complete installation evidence.
+
+## Manual installation
+
+The following sections provide the commands and configuration reference for the agent workflow, or for users who prefer manual setup.
+
 ## 1. Prepare the host and agent
 
 You need:
