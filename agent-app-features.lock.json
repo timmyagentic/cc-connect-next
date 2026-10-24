@@ -2,7 +2,7 @@
   "schema": 1,
   "source": {
     "repository": "timmyagentic/awesome-agent-app-features",
-    "commit": "f4429da87d048e34e3f183a5ee77838543487f6b"
+    "commit": "b520b9c4f6d2d1c3ce2016c39542f7e3b2a9a281"
   },
   "features": [
     {
@@ -111,12 +111,12 @@
         "internal/appfeatures/testdata/approved-feedback-v1.json",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-10-06T17:02:35Z",
+      "verified_at": "2026-10-24T16:18:24Z",
       "checks": [
-        "GOTOOLCHAIN=go1.25.13 make test-release",
-        "GOTOOLCHAIN=go1.25.13 go test ./core -run TestCUJ -count=1",
-        "GOTOOLCHAIN=go1.25.13 make test-release-local",
-        "GOTOOLCHAIN=go1.25.13 make test-feature-foundation"
+        "make test-full",
+        "sh feedback-relay/verify-host.sh",
+        "./scripts/verify-agent-app-features.sh",
+        "node scripts/check-release-version.js v0.3.4"
       ],
       "unverified": [
         "No production Relay was deployed or sent a real approved report; no real GitHub issue or production App credential was used",
@@ -185,12 +185,12 @@
         "internal/updatechannel/channel_test.go",
         "scripts/verify-agent-app-features.sh"
       ],
-      "verified_at": "2026-10-06T17:02:35Z",
+      "verified_at": "2026-10-24T16:18:24Z",
       "checks": [
-        "GOTOOLCHAIN=go1.25.13 make test-release",
-        "GOTOOLCHAIN=go1.25.13 go test ./core -run TestCUJ -count=1",
-        "GOTOOLCHAIN=go1.25.13 make test-release-local",
-        "GOTOOLCHAIN=go1.25.13 make test-feature-foundation"
+        "make test-full",
+        "sh feedback-relay/verify-host.sh",
+        "./scripts/verify-agent-app-features.sh",
+        "node scripts/check-release-version.js v0.3.4"
       ],
       "unverified": [
         "Windows replacement and cross-process locking were cross-compiled but not executed on a native Windows machine",
