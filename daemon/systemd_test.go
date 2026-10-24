@@ -182,8 +182,37 @@ func TestBuildUnit_LaunchesExplicitConfigFromIndependentWorkDir(t *testing.T) {
 	if !strings.Contains(out, `ExecStart="/opt/cc connect/cc%%next" --config "/srv/migrated config/config.toml"`) {
 		t.Fatalf("unit does not pass the explicit migrated config safely:\n%s", out)
 	}
-	if !strings.Contains(out, `WorkingDirectory="/srv/original project"`) {
+	if !strings.Contains(out, "WorkingDirectory=/srv/original project/\n") {
 		t.Fatalf("unit does not preserve the independent runtime work dir:\n%s", out)
+	}
+}
+
+func TestSystemdInstall_RejectsUnrepresentableWorkingDirectoryBeforeWriting(t *testing.T) {
+	for _, workDir := range []string{"/tmp/new\nline", "/tmp/return\rline", "/tmp/nul\x00path", "/tmp/trailing ", "/tmp/trailing\t"} {
+		t.Run(workDir, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			mgr := &systemdManager{}
+			if err := os.MkdirAll(filepath.Dir(mgr.unitPath()), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			const previous = "existing service must be preserved"
+			if err := os.WriteFile(mgr.unitPath(), []byte(previous), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			orig := runSystemctl
+			t.Cleanup(func() { runSystemctl = orig })
+			runSystemctl = func(args ...string) (string, error) {
+				t.Fatalf("invalid path reached systemctl: %v", args)
+				return "", nil
+			}
+			if err := mgr.Install(Config{WorkDir: workDir}); err == nil {
+				t.Fatal("Install accepted a working directory that systemd cannot preserve")
+			}
+			data, err := os.ReadFile(mgr.unitPath())
+			if err != nil || string(data) != previous {
+				t.Fatalf("Install modified the existing unit: %q (%v)", data, err)
+			}
+		})
 	}
 }
 
