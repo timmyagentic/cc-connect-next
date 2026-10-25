@@ -132,7 +132,12 @@
     "modelInherit": "Heredar modelo del proyecto / Agent",
     "modelHint": "Solo tareas Prompt. Deje vacío para heredar; borrar el valor restaura la herencia. El Agent debe admitir modelos por turno. No cambia el proveedor ni los valores predeterminados del proyecto.",
     "modelPromptOnly": "Solo las tareas Prompt admiten un modelo específico.",
-    "modelUnsupported": "Este Agent no admite modelos por tarea. Deje el campo vacío para heredar."
+    "modelUnsupported": "Este Agent no admite modelos por tarea. Deje el campo vacío para heredar.",
+    "reasoningEffort": "Esfuerzo de razonamiento",
+    "reasoningEffortInherit": "Heredar esfuerzo del proyecto / Agent",
+    "reasoningEffortHint": "Opcional e independiente del modelo. Un valor vacío hereda el predeterminado del proyecto / Agent. El servidor valida los valores admitidos.",
+    "reasoningEffortPromptOnly": "El esfuerzo de razonamiento solo se puede especificar en tareas Prompt.",
+    "reasoningEffortUnsupported": "Este Agent no admite esfuerzo de razonamiento por tarea. Borre el valor para heredar."
   },
   "heartbeat": {
     "title": "Latido",

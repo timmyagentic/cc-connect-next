@@ -1034,6 +1034,19 @@ cc-connect-next cron edit <job-id> model ""  # Restore inheritance
 
 Both Codex `exec` and `app_server` backends support this setting. Omitting it preserves existing project/Agent model inheritance. An explicit model applies to the job's turn; ordinary chat and other jobs keep their defaults. It never switches providers or changes Project/Agent defaults. `--exec` and a non-empty `--model` are mutually exclusive. Agents without per-turn model support reject an explicit model during configuration and execution instead of silently ignoring it. The model ID must be usable through the current provider; the Agent/provider validates the actual ID at execution time. The Web cron editor exposes the same field, and job listings show the model or inheritance. Clear the field to restore inheritance.
 
+Prompt jobs also accept an optional `--reasoning-effort <value>`, independently of `--model`:
+
+```bash
+cc-connect-next cron add --cron "0 6 * * *" --prompt "Summarize GitHub trending" --reasoning-effort "<supported-value>"
+cc-connect-next cron edit <job-id> reasoning_effort "<supported-value>"
+cc-connect-next cron edit <job-id> reasoning_effort ""  # Restore inheritance
+cc-connect-next cron info <job-id> reasoning_effort
+```
+
+Replace `<supported-value>` with an effort supported by the active Agent. The server validates supported values and Agent support; the generic CLI does not maintain an Agent-specific value list. A non-empty effort is prompt-only and cannot be combined with `--exec`. Omit it or clear it to inherit the project/Agent default without changing that default or other jobs. `cron list` and the single-field `cron info <job-id> reasoning_effort` display the explicit effort or `inherit project default`, including for legacy jobs. Full `cron info <job-id>` remains JSON; its optional string `reasoning_effort` is empty or absent when inherited.
+
+The Web cron editor exposes the same prompt-only effort field. When capability metadata supplies allowed values, it offers a dropdown with inheritance; otherwise it accepts text for server validation. Lists display the selected effort or inheritance. Switching a prompt job to shell clears model and effort in the same update as the task type; editing unrelated fields preserves unchanged legacy overrides.
+
 Persisted cron jobs and one-shot timers require a durable messaging target.
 Browser-connected Web/Bridge chat sessions are intentionally rejected because
 their adapter disappears when the tab or browser closes. In the Web cron

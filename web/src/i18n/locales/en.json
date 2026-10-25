@@ -132,7 +132,12 @@
     "modelInherit": "Inherit project / Agent model",
     "modelHint": "Prompt jobs only. Leave empty to inherit; clearing an override restores inheritance. The Agent must support per-turn model selection. This changes neither the provider nor project defaults.",
     "modelPromptOnly": "Model overrides are only available for prompt jobs.",
-    "modelUnsupported": "This Agent does not support task model overrides. Leave the model empty to inherit."
+    "modelUnsupported": "This Agent does not support task model overrides. Leave the model empty to inherit.",
+    "reasoningEffort": "Reasoning effort",
+    "reasoningEffortInherit": "Inherit project / Agent effort",
+    "reasoningEffortHint": "Optional, independent of model. Inherits the project / Agent default when empty. Supported values are validated by the server.",
+    "reasoningEffortPromptOnly": "Reasoning effort overrides are only available for prompt jobs.",
+    "reasoningEffortUnsupported": "This Agent does not support task reasoning effort overrides. Clear the effort to inherit."
   },
   "heartbeat": {
     "title": "Heartbeat",

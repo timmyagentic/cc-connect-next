@@ -132,7 +132,12 @@
     "modelInherit": "プロジェクト / Agent のモデルを継承",
     "modelHint": "Prompt タスクのみ。空欄で継承し、設定済みの値を消すと継承に戻ります。Agent はターン単位のモデル指定に対応している必要があります。Provider やプロジェクトの既定値は変更しません。",
     "modelPromptOnly": "モデル指定は Prompt タスクでのみ使用できます。",
-    "modelUnsupported": "この Agent はタスク単位のモデル指定に対応していません。空欄にして継承してください。"
+    "modelUnsupported": "この Agent はタスク単位のモデル指定に対応していません。空欄にして継承してください。",
+    "reasoningEffort": "推論強度",
+    "reasoningEffortInherit": "プロジェクト / Agent の推論強度を継承",
+    "reasoningEffortHint": "任意。モデルの指定は不要です。空欄ではプロジェクト / Agent の既定値を継承します。値はサーバーが検証します。",
+    "reasoningEffortPromptOnly": "推論強度の指定は Prompt タスクでのみ使用できます。",
+    "reasoningEffortUnsupported": "この Agent はタスク単位の推論強度に対応していません。空欄にして継承してください。"
   },
   "heartbeat": {
     "title": "ハートビート",

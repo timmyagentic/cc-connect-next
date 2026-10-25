@@ -506,6 +506,8 @@ func (a *Agent) SetSessionEnv(env []string) {
 
 func (a *Agent) SupportsPerTurnModel() bool { return true }
 
+func (a *Agent) SupportsPerTurnReasoningEffort() bool { return true }
+
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
 	a.mu.Lock()
 	mode := a.mode

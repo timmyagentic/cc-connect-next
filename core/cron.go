@@ -21,24 +21,25 @@ import (
 
 // CronJob represents a persisted scheduled task.
 type CronJob struct {
-	ID          string    `json:"id"`
-	Project     string    `json:"project"`
-	SessionKey  string    `json:"session_key"`
-	CronExpr    string    `json:"cron_expr"`
-	Prompt      string    `json:"prompt"`
-	Model       string    `json:"model,omitempty"`    // per-run prompt model; empty = inherit project/session defaults
-	Exec        string    `json:"exec,omitempty"`     // shell command; mutually exclusive with Prompt
-	WorkDir     string    `json:"work_dir,omitempty"` // working directory for exec; empty = agent work_dir
-	Description string    `json:"description"`
-	Enabled     bool      `json:"enabled"`
-	Silent      *bool     `json:"silent,omitempty"`       // suppress start notification; nil = use global default
-	Mute        bool      `json:"mute,omitempty"`         // suppress ALL messages (start + result); job runs silently
-	SessionMode string    `json:"session_mode,omitempty"` // "" or "reuse" = share active session; "new_per_run" = fresh session each run
-	Mode        string    `json:"mode,omitempty"`         // permission mode override for this job; "" = use project default
-	TimeoutMins *int      `json:"timeout_mins,omitempty"` // nil = default 30m wait; 0 = no limit; >0 = minutes
-	CreatedAt   time.Time `json:"created_at"`
-	LastRun     time.Time `json:"last_run,omitempty"`
-	LastError   string    `json:"last_error,omitempty"`
+	ID              string    `json:"id"`
+	Project         string    `json:"project"`
+	SessionKey      string    `json:"session_key"`
+	CronExpr        string    `json:"cron_expr"`
+	Prompt          string    `json:"prompt"`
+	Model           string    `json:"model,omitempty"`            // per-run prompt model; empty = inherit project/session defaults
+	ReasoningEffort string    `json:"reasoning_effort,omitempty"` // per-run prompt effort; empty = inherit project/session defaults
+	Exec            string    `json:"exec,omitempty"`             // shell command; mutually exclusive with Prompt
+	WorkDir         string    `json:"work_dir,omitempty"`         // working directory for exec; empty = agent work_dir
+	Description     string    `json:"description"`
+	Enabled         bool      `json:"enabled"`
+	Silent          *bool     `json:"silent,omitempty"`       // suppress start notification; nil = use global default
+	Mute            bool      `json:"mute,omitempty"`         // suppress ALL messages (start + result); job runs silently
+	SessionMode     string    `json:"session_mode,omitempty"` // "" or "reuse" = share active session; "new_per_run" = fresh session each run
+	Mode            string    `json:"mode,omitempty"`         // permission mode override for this job; "" = use project default
+	TimeoutMins     *int      `json:"timeout_mins,omitempty"` // nil = default 30m wait; 0 = no limit; >0 = minutes
+	CreatedAt       time.Time `json:"created_at"`
+	LastRun         time.Time `json:"last_run,omitempty"`
+	LastError       string    `json:"last_error,omitempty"`
 }
 
 // IsShellJob returns true if the job runs a shell command directly.
@@ -91,6 +92,9 @@ func validateCronJob(j *CronJob) error {
 	if err := validateCronModel(j); err != nil {
 		return err
 	}
+	if err := validateCronReasoningEffort(j); err != nil {
+		return err
+	}
 	// SessionKey anchors the cron execution to a platform (ExecuteCronJob
 	// derives platformName from the prefix before ":"). Without it the job
 	// is persisted but fails at fire-time with the unhelpful
@@ -120,6 +124,13 @@ func validateCronJob(j *CronJob) error {
 func validateCronModel(j *CronJob) error {
 	if strings.TrimSpace(j.Model) != "" && (j.IsShellJob() || strings.TrimSpace(j.Prompt) == "") {
 		return fmt.Errorf("model is only supported for prompt jobs")
+	}
+	return nil
+}
+
+func validateCronReasoningEffort(j *CronJob) error {
+	if strings.TrimSpace(j.ReasoningEffort) != "" && (j.IsShellJob() || strings.TrimSpace(j.Prompt) == "") {
+		return fmt.Errorf("reasoning_effort is only supported for prompt jobs")
 	}
 	return nil
 }
@@ -322,7 +333,7 @@ func (s *CronStore) Update(id string, field string, value any) bool {
 }
 
 // updateFields validates and commits a complete edit under one lock. In
-// particular, clearing model while converting a prompt job to exec is atomic.
+// particular, clearing model and effort while converting a prompt job to exec is atomic.
 func (s *CronStore) updateFields(id string, updates map[string]any, validate func(*CronJob) error) (*CronJob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -341,6 +352,9 @@ func (s *CronStore) updateFields(id string, updates map[string]any, validate fun
 			}
 		}
 		if err := validateCronModel(candidate); err != nil {
+			return nil, err
+		}
+		if err := validateCronReasoningEffort(candidate); err != nil {
 			return nil, err
 		}
 		if validate != nil {
@@ -386,6 +400,11 @@ func updateJobField(job *CronJob, field string, value any) error {
 	case "model":
 		if v, ok := value.(string); ok {
 			job.Model = strings.TrimSpace(v)
+			return nil
+		}
+	case "reasoning_effort":
+		if v, ok := value.(string); ok {
+			job.ReasoningEffort = strings.ToLower(strings.TrimSpace(v))
 			return nil
 		}
 	case "exec":
@@ -546,17 +565,18 @@ func (cs *CronScheduler) AddJob(job *CronJob) error {
 	if err := validateCronJob(job); err != nil {
 		return err
 	}
-	job.SessionMode = NormalizeCronSessionMode(job.SessionMode)
-	job.Model = strings.TrimSpace(job.Model)
 	if _, err := cron.ParseStandard(job.CronExpr); err != nil {
 		return fmt.Errorf("invalid cron expression %q: %w", job.CronExpr, err)
 	}
 	if err := cs.validatePersistentTarget(job.Project, job.SessionKey); err != nil {
 		return err
 	}
-	if err := cs.validateModelSupport(job); err != nil {
+	if err := cs.validateOverrides(job); err != nil {
 		return err
 	}
+	job.SessionMode = NormalizeCronSessionMode(job.SessionMode)
+	job.Model = strings.TrimSpace(job.Model)
+	job.ReasoningEffort = strings.ToLower(strings.TrimSpace(job.ReasoningEffort))
 	if err := cs.store.Add(job); err != nil {
 		return err
 	}
@@ -588,7 +608,7 @@ func (cs *CronScheduler) EnableJob(id string) error {
 	if err := cs.validatePersistentTarget(job.Project, job.SessionKey); err != nil {
 		return err
 	}
-	if err := cs.validateModelSupport(job); err != nil {
+	if err := cs.validateOverrides(job); err != nil {
 		return err
 	}
 	if !cs.store.SetEnabled(id, true) {
@@ -621,7 +641,7 @@ func (cs *CronScheduler) UpdateJob(id string, field string, value any) error {
 	return cs.UpdateJobFields(id, map[string]any{field: value})
 }
 
-// UpdateJobFields applies an API edit atomically, including model/exec changes.
+// UpdateJobFields applies an API edit atomically, including prompt override/exec changes.
 func (cs *CronScheduler) UpdateJobFields(id string, updates map[string]any) error {
 	cs.editMu.Lock()
 	defer cs.editMu.Unlock()
@@ -654,9 +674,12 @@ func (cs *CronScheduler) UpdateJobFields(id string, updates map[string]any) erro
 			}
 		}
 		_, modelChanged := updates["model"]
+		_, effortChanged := updates["reasoning_effort"]
+		_, promptChanged := updates["prompt"]
+		_, execChanged := updates["exec"]
 		_, enabledChanged := updates["enabled"]
-		if modelChanged || projectChanged || (enabledChanged && candidate.Enabled) {
-			return cs.validateModelSupport(candidate)
+		if modelChanged || effortChanged || promptChanged || execChanged || projectChanged || (enabledChanged && candidate.Enabled) {
+			return cs.validateOverrides(candidate)
 		}
 		return nil
 	})
@@ -744,7 +767,7 @@ func (cs *CronScheduler) RunJobNow(id string) error {
 	if !ok {
 		return fmt.Errorf("%w: %q", ErrCronProjectNotFound, job.Project)
 	}
-	if err := cs.validateModelSupport(job); err != nil {
+	if err := cs.validateOverrides(job); err != nil {
 		return err
 	}
 	if err := engine.ValidatePersistentProactiveTarget(job.SessionKey); err != nil {
@@ -771,6 +794,13 @@ func (cs *CronScheduler) runJob(job *CronJob, manual bool) {
 		cs.store.MarkRun(job.ID, fmt.Errorf("project %q not found", job.Project))
 		return
 	}
+	if err := cs.validateOverrides(job); err != nil {
+		cs.store.MarkRun(job.ID, err)
+		slog.Error("cron: invalid prompt overrides", "id", job.ID, "manual", manual, "error", err)
+		return
+	}
+	job = cloneCronJob(job)
+	job.ReasoningEffort = strings.ToLower(strings.TrimSpace(job.ReasoningEffort))
 	if err := engine.ValidatePersistentProactiveTarget(job.SessionKey); err != nil {
 		cs.store.MarkRun(job.ID, err)
 		slog.Error("cron: unsupported persistent target", "id", job.ID, "manual", manual, "error", err)
@@ -830,6 +860,43 @@ func (cs *CronScheduler) validateModelSupport(job *CronJob) error {
 		return fmt.Errorf("project %q: %w", job.Project, ErrModelOverrideUnsupported)
 	}
 	return nil
+}
+
+func (cs *CronScheduler) validateOverrides(job *CronJob) error {
+	if err := validateCronModel(job); err != nil {
+		return err
+	}
+	if err := validateCronReasoningEffort(job); err != nil {
+		return err
+	}
+	if err := cs.validateModelSupport(job); err != nil {
+		return err
+	}
+	effort := strings.ToLower(strings.TrimSpace(job.ReasoningEffort))
+	if effort == "" {
+		return nil
+	}
+	cs.mu.RLock()
+	engine := cs.engines[job.Project]
+	cs.mu.RUnlock()
+	// As with model overrides, offline projects are validated at execution.
+	if engine == nil {
+		return nil
+	}
+	if support, ok := engine.agent.(PerTurnReasoningEffortSupporter); !ok || !support.SupportsPerTurnReasoningEffort() {
+		return fmt.Errorf("project %q: %w", job.Project, ErrReasoningEffortOverrideUnsupported)
+	}
+	switcher, ok := engine.agent.(ReasoningEffortSwitcher)
+	if !ok {
+		return fmt.Errorf("project %q: %w (reasoning effort catalog unavailable)", job.Project, ErrReasoningEffortOverrideUnsupported)
+	}
+	available := switcher.AvailableReasoningEfforts()
+	for _, value := range available {
+		if effort == strings.ToLower(strings.TrimSpace(value)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("project %q: invalid reasoning_effort %q (available: %s)", job.Project, effort, strings.Join(available, ", "))
 }
 
 // mutePlatform wraps a Platform and discards all outgoing messages.
