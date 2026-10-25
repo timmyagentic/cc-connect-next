@@ -70,9 +70,9 @@ export const translations = {
     startTitle: "从这里，连起来。",
     startBody: "全新安装、接入飞书，或从官方 CC Connect 迁移。",
     pathTitleinstall: "第一次使用",
-    pathBodyinstall: "安装 CLI，配置 Agent，再运行 doctor 检查环境。",
+    pathBodyinstall: "复制完整安装 Prompt，让 Agent 帮你配置、验证首条回复，再启动后台服务。",
     pathTitlefeishu: "接入飞书",
-    pathBodyfeishu: "交互式配置机器人与工作区，跟随指南授予所需权限。",
+    pathBodyfeishu: "配置机器人并扫码授权；已有项目的工作目录需在配置文件中填写。",
     pathTitlemigration: "从 CC Connect 迁移",
     pathBodymigration: "先用 dry-run 查看迁移计划，再按文档决定是否切换服务。",
     faqTitle: "还有几个常见问题。",
@@ -90,18 +90,32 @@ export const translations = {
       "代码采用 MIT 许可。Agent 订阅、模型 API 与聊天平台可能产生各自的费用。",
     finalTitle: "下一个想法，\n就在下一条消息里。",
     finalCta: "开始连接",
+    agentInstallEyebrow: "让 Agent 帮你装好",
+    agentInstallTitle: "从安装，\n到第一条回复。",
+    agentInstallBody: "复制完整 Prompt，交给 Codex、Claude Code 等本地编码 Agent。它会处理配置与验收；登录、扫码和必要授权由你完成。",
+    agentInstallCopy: "复制安装 Prompt",
+    agentInstallDetails: "查看完整 Prompt",
+    installPrompt: "请从 https://github.com/timmyagentic/cc-connect-next 安装已发布稳定版，按首次安装流程接入飞书/Lark。\n先确认操作系统、CPU 架构、Agent CLI 及登录状态和项目绝对路径；优先复用当前 Agent 与项目，\n缺少必要信息再问我。检查并保留已有 CC Connect/Next 配置和服务，不执行迁移或覆盖。\n安装后选择明确的配置绝对路径；文件不存在时运行 `cc-connect-next --config <配置路径>` 生成配置，\n由你填写真实 work_dir、Agent 类型和对应选项，保持项目名一致，不让我手工编辑配置。\n执行 `cc-connect-next feishu setup --config <配置路径> --project <项目名>`，展示二维码并保持\n进程等待我扫码。接受推荐配置，并按提示确认官方 lark-cli companion；非交互执行时使用\n`--recommended --lark-cli`，保留已有 profile，让同一机器人作为默认 bot profile。\n执行 `cc-connect-next doctor --config <配置路径>`，再用\n`cc-connect-next --config <配置路径>` 前台启动；引导我在机器人私聊发送 /version、/whoami\n和一条普通提问，核对回复并按实际用户 ID 配置访问范围。\n验证后停止本次前台进程，执行 `cc-connect-next daemon install --config <配置路径>`，检查\n`cc-connect-next daemon status` 的服务状态、Runtime 和平台就绪状态，并验证后台仍能回复。\n报告版本、配置路径、work_dir 和验证结果；需要我登录、扫码或发布应用时再提示，未完成的\n真实消息验证明确标为 UNVERIFIED。",
+    manualTitle: "手动安装，按这五步走。",
+    prepareTitle: "先准备可用的 Agent",
+    prepareBody: "安装并登录一个受支持的 Agent CLI，确认它能在本机回答；选择真实存在的项目目录，并记下绝对路径。还没有 Agent 时先完成它的安装与登录。",
+    verifyTitle: "前台启动，收到真实回复",
+    verifyBody: "doctor 只检查环境，不连接平台。通过后前台启动，在机器人私聊发送 /version、/whoami 和一条普通提问，确认 Agent 回答；按实际用户 ID 设置访问范围。",
+    backgroundTitle: "转到后台，再验证一次",
+    backgroundBody: "先停止本次启动的前台进程，再安装后台服务。核对服务、Runtime 和平台就绪状态，然后再次发送普通提问，确认关闭终端后仍能回答。",
+    migrationEyebrow: "已有官方 CC Connect？",
     docsEyebrow: "使用指南",
     docsTitle: "把你的 Agent 连起来。",
     docsIntro:
-      "准备好已安装并登录的编程 Agent，再选择一条适合你的路径。以下命令在你的终端执行。",
-    docsHeadinginstall: "全新安装",
+      "把完整安装 Prompt 交给能执行本机命令的 Agent，或按下面五步手动完成。已有配置和服务应先检查并保留。",
+    docsHeadinginstall: "安装并填写配置",
     docsBodyinstall:
-      "先安装，再创建配置并替换 REPLACE 占位值。doctor 检查配置与依赖，不建立平台连接。",
+      "以下命令以 macOS / Linux 的默认配置路径为例；Windows 请使用对应的绝对路径。首次运行生成模板后退出是正常行为。填写真实 work_dir、Agent 类型和项目名，并替换所有 REPLACE 占位值；后续始终使用同一个配置文件。",
     docsCopyinstall: "复制命令",
-    docsReadinstall: "阅读完整指南",
+    docsReadinstall: "查看完整首次安装说明",
     docsHeadingfeishu: "接入飞书",
     docsBodyfeishu:
-      "交互式配置飞书机器人与工作区，可选择绑定官方 lark-cli。配置完成后运行 doctor，再启动服务。",
+      "使用配置里的同一项目名完成机器人设置与扫码，可选择官方 lark-cli companion。feishu setup 配置机器人，不会替已有项目填写 work_dir。",
     docsCopyfeishu: "复制命令",
     docsReadfeishu: "阅读完整指南",
     docsHeadingmigration: "先评估迁移，再切换服务",
@@ -119,7 +133,7 @@ export const translations = {
     meta404: "页面未找到 — CC Connect Next",
     descriptionHome:
       "通过飞书、Telegram、Slack 等聊天平台使用自己机器上的 Codex、Claude Code 等编程 Agent。",
-    descriptionDocs: "安装 CC Connect Next，连接飞书，检查环境，安全评估迁移。",
+    descriptionDocs: "用完整安装 Prompt 或五步指南，完成 Agent 准备、项目配置、飞书连接、首条回复和后台运行。",
     description404: "请求的页面不存在。",
   },
   en: {
@@ -210,10 +224,10 @@ export const translations = {
       "Start fresh, connect Feishu, or migrate from official CC Connect.",
     pathTitleinstall: "Start fresh",
     pathBodyinstall:
-      "Install the CLI, configure your agent, then check the environment with doctor.",
+      "Give your agent the complete setup prompt, then verify a real reply and background operation.",
     pathTitlefeishu: "Connect Feishu",
     pathBodyfeishu:
-      "Configure your bot and workspace interactively, following the guide for permissions.",
+      "Configure and authorize your bot; set an existing project’s work directory in the config file.",
     pathTitlemigration: "Migrate from CC Connect",
     pathBodymigration:
       "Inspect the migration plan with a dry run before choosing whether to switch services.",
@@ -232,18 +246,32 @@ export const translations = {
       "The code is MIT licensed. Agent subscriptions, model APIs, and chat platforms may have their own costs.",
     finalTitle: "Your next idea is\none message away.",
     finalCta: "Get connected",
+    agentInstallEyebrow: "LET YOUR AGENT SET IT UP",
+    agentInstallTitle: "From installation to your first reply.",
+    agentInstallBody: "Copy the complete prompt into Codex, Claude Code, or another local coding agent. It handles configuration and verification; you complete sign-in, QR scanning, and required permissions.",
+    agentInstallCopy: "Copy setup prompt",
+    agentInstallDetails: "Read the complete prompt",
+    installPrompt: "Install the published stable cc-connect-next from https://github.com/timmyagentic/cc-connect-next\nfor a first-time Feishu/Lark setup. Verify OS/architecture, the agent CLI and its login state,\nand the absolute project directory; prefer my current agent/project and ask only for missing\ninformation. Preserve existing CC Connect/Next configurations and services; do not migrate or overwrite.\nChoose an explicit absolute config path. If it does not exist, run `cc-connect-next --config <config-path>`\nto create it, then fill in the real work_dir, agent type, and its options yourself. Keep one project name.\nRun `cc-connect-next feishu setup --config <config-path> --project <project-name>`, show the QR code,\nand keep the process waiting while I scan it. Accept the recommended settings and confirm the official\nlark-cli companion; use `--recommended --lark-cli` for non-interactive execution, preserve existing\nprofiles, and make the same bot the default bot profile.\nRun `cc-connect-next doctor --config <config-path>`, then start in the foreground with\n`cc-connect-next --config <config-path>`. Ask me to send /version, /whoami, and an ordinary prompt\nin a private chat; verify replies and configure access\nusing the actual user ID. Stop the foreground process you started, then run\n`cc-connect-next daemon install --config <config-path>`. Check service status, Runtime, and platform readiness in\n`cc-connect-next daemon status` and verify replies still work in the background. Report version,\nconfig path, work_dir, and verification results. Call on me for login, QR scanning, or app publication;\nmark any incomplete real-message verification UNVERIFIED.",
+    manualTitle: "Prefer to set up manually?",
+    prepareTitle: "Prepare a working agent",
+    prepareBody: "Install and sign in to a supported agent CLI, check that it can answer locally, and choose an existing project directory. Keep its absolute path ready. If you do not have an agent yet, complete its installation and sign-in first.",
+    verifyTitle: "Start in the foreground and get a reply",
+    verifyBody: "doctor checks the environment without connecting to a platform. After it passes, start in the foreground. Send /version, /whoami, and an ordinary question in a private chat, confirm the agent answers, and set access using the actual user ID.",
+    backgroundTitle: "Move to the background and verify again",
+    backgroundBody: "Stop the foreground process you started before installing the background service. Check the service, Runtime, and platform readiness, then send another ordinary question to confirm replies still work after the terminal is closed.",
+    migrationEyebrow: "ALREADY USING OFFICIAL CC CONNECT?",
     docsEyebrow: "GET STARTED",
     docsTitle: "Connect your local agent.",
     docsIntro:
-      "Start with an installed, authenticated coding agent and choose the path that fits. Run these commands in your terminal.",
-    docsHeadinginstall: "A fresh installation",
+      "Give the complete setup prompt to an agent with local terminal access, or follow the five manual steps below. Check and preserve existing configurations and services first.",
+    docsHeadinginstall: "Install and fill in the configuration",
     docsBodyinstall:
-      "Install the CLI, create the configuration, and replace REPLACE placeholders. doctor checks configuration and dependencies without connecting to chat platforms.",
+      "These examples use the default config path on macOS / Linux; use the corresponding absolute path on Windows. The first run creates a template and exits. Fill in the real work_dir, agent type, and project name, replace every REPLACE placeholder, and use this same config file throughout.",
     docsCopyinstall: "Copy commands",
-    docsReadinstall: "Read the full guide",
+    docsReadinstall: "Read the complete first-install guide",
     docsHeadingfeishu: "Connect Feishu",
     docsBodyfeishu:
-      "Set up your Feishu bot and workspace interactively, with optional official lark-cli binding. Then run doctor and start the service.",
+      "Use the same project name from your config for bot setup and QR authorization, with the optional official lark-cli companion. feishu setup configures the bot; it does not fill in an existing project’s work_dir.",
     docsCopyfeishu: "Copy commands",
     docsReadfeishu: "Read the full guide",
     docsHeadingmigration: "Inspect a migration before switching",
@@ -262,7 +290,7 @@ export const translations = {
     descriptionHome:
       "Work with local Codex, Claude Code, and other coding agents through Feishu, Telegram, Slack, and more.",
     descriptionDocs:
-      "Install CC Connect Next, connect Feishu, check your environment, and inspect migration plans.",
+      "Use the complete setup prompt or five-step guide to prepare your agent, configure a project, connect Feishu, verify a reply, and run in the background.",
     description404: "The requested page could not be found.",
   },
 };
@@ -291,6 +319,10 @@ export function applyLanguage(value) {
   document.querySelectorAll("[data-i18n]").forEach((node) => {
     const value = translations[language][node.dataset.i18n];
     if (value !== undefined) node.textContent = value;
+  });
+  document.querySelectorAll("[data-guide]").forEach((link) => {
+    const suffix = language === "en" ? "" : ".zh-CN";
+    link.href = `https://github.com/timmyagentic/cc-connect-next/blob/main/docs/${link.dataset.guide}${suffix}.md`;
   });
   document
     .querySelectorAll("[data-language]")
@@ -373,9 +405,11 @@ function initialize() {
         await navigator.clipboard.writeText(target.textContent);
         label.textContent = language === "en" ? "Copied" : "已复制";
         status.textContent =
-          language === "en" ? "Commands copied" : "命令已复制";
+          language === "en" ? "Copied to clipboard" : "已复制到剪贴板";
         setTimeout(() => applyLanguage(language), 1800);
       } catch {
+        const details = target.closest("details");
+        if (details) details.open = true;
         const range = document.createRange();
         range.selectNodeContents(target);
         const selection = window.getSelection();
@@ -385,8 +419,8 @@ function initialize() {
           language === "en" ? "Select and copy" : "请手动复制";
         status.textContent =
           language === "en"
-            ? "Clipboard unavailable. The commands are selected for manual copy."
-            : "剪贴板不可用，已选中命令，请手动复制。";
+            ? "Clipboard unavailable. The content is selected for manual copy."
+            : "剪贴板不可用，已选中内容，请手动复制。";
       }
     }),
   );

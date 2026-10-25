@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Improve the website setup guide with the complete bilingual Agent prompt, a five-step path through the first real reply and background service, and a share preview.
+
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
