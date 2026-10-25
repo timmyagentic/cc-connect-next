@@ -4,6 +4,14 @@
 
 CC-Connect is a bridge that connects AI coding agents (Claude Code, Codex, Gemini CLI, Cursor, etc.) with messaging platforms (Feishu/Lark, Telegram, Discord, Slack, DingTalk, WeChat Work, QQ, LINE). Users interact with their coding agent through their preferred messaging app.
 
+## Repository Workflow and Branch Protection
+
+- Confirm the current default branch on GitHub before starting; it is currently `main`. Fetch that branch and make changes on a separate `codex/` branch in an isolated worktree. Keep the primary checkout read-only. Under Tingjun Workspace, use its Task, Session and worktree commands and hold an active writer claim.
+- All changes to the default branch must go through a PR. Direct pushes (including fast-forward pushes), force pushes and branch deletion are prohibited. No user, administrator, app or other actor may bypass these rules. Never use `--admin`, add a bypass actor, or disable protection to land a change.
+- The desired ruleset is checked in at [.github/rulesets/default-branch.json](.github/rulesets/default-branch.json). It targets `~DEFAULT_BRANCH`, so protection follows a default-branch rename. The live [main-protection ruleset](https://github.com/timmyagentic/cc-connect-next/rules/20888449) is configured separately: changing the JSON alone does not apply it. After an authorized ruleset update, read it back from GitHub and verify the effective rules for the default branch.
+- All review conversations must be resolved before merge. The single-maintainer setup requires zero approving reviews; this does not permit ignoring substantive review findings. Inspect the current diff, head SHA, review threads and verification evidence before an authorized merge. Use `gh pr merge --match-head-commit <verified-full-head-SHA>` with the chosen merge method and without `--admin`. Verify the merged state afterward.
+- CI currently runs only for `v*` tag pushes; PRs and ordinary branch pushes do not run that workflow. Required CI checks for PR merging are deferred and are not configured in this ruleset. Follow the local verification requirements below and in [CONTRIBUTING.md](CONTRIBUTING.md); an empty PR checks list is not evidence that tests passed.
+
 ## Architecture
 
 ```
