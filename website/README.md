@@ -13,7 +13,7 @@ The site uses Cloudflare Workers static assets, with no application worker, acco
 
 The prepared production target is `cc-connect-next.timmyagentic.si`, matching this project's existing domain family. Custom-domain routing, canonical URLs, and the sitemap use that hostname. It is not provisioned or published by local checks. After explicit production authorization, verify the hostname is available in the intended Cloudflare account, run `npm run deploy`, verify the public routes, and only then add the live URL to the GitHub repository homepage.
 
-`/docs` provides the three main setup paths and links to the authoritative repository guides. The hero and demo do not claim identical capabilities across agents and platforms. Migration copy offers only the read-only dry run; the installation guide documents the explicit service-switch operation.
+`/docs` starts with the complete bilingual README installation prompt, followed by five manual setup steps from Agent preparation through a real reply and background operation. Migration remains a separate path, and repository guide links follow the selected language. The hero and demo do not claim identical capabilities across agents and platforms. Migration copy offers only the read-only dry run; the installation guide documents the explicit service-switch operation.
 
 Icons are from Tabler Icons 3.49.0, with their MIT license under `public/icons/LICENSE.txt`. The decorative landscape is generated for this website family. The message flow is a labeled interactive example, not a captured customer conversation.
 

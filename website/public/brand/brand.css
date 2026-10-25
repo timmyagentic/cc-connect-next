@@ -242,3 +242,9 @@ body.brand-site { background: var(--paper); color: var(--ink); font-family: var(
 @media (max-width: 760px) { .brand-cc .hero { display: block; } .brand-cc .hero-links { align-items: flex-start; margin-top: 24px; } }
 
 .brand-site .header-inner { display: flex; align-items: center; }
+
+/* Noto Sans SC supplements for the current website copy. */
+@font-face { font-family: "Studio Chinese"; font-style: normal; font-weight: 400; font-display: swap; src: url("/brand/fonts/chinese-extra-400.ttf") format("truetype"); unicode-range: U+4E94,U+505C,U+626B,U+666E,U+67B6,U+7EEA,U+8350; }
+@font-face { font-family: "Studio Chinese"; font-style: normal; font-weight: 500; font-display: swap; src: url("/brand/fonts/chinese-extra-500.ttf") format("truetype"); unicode-range: U+4E94,U+505C,U+626B,U+666E,U+67B6,U+7EEA,U+8350; }
+@font-face { font-family: "Studio Chinese"; font-style: normal; font-weight: 600; font-display: swap; src: url("/brand/fonts/chinese-extra-600.ttf") format("truetype"); unicode-range: U+4E94,U+505C,U+626B,U+666E,U+67B6,U+7EEA,U+8350; }
+@font-face { font-family: "Studio Chinese"; font-style: normal; font-weight: 700; font-display: swap; src: url("/brand/fonts/chinese-extra-700.ttf") format("truetype"); unicode-range: U+4E94,U+505C,U+626B,U+666E,U+67B6,U+7EEA,U+8350; }
