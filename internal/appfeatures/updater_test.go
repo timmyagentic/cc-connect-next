@@ -592,3 +592,29 @@ func writePackageMetadata(t *testing.T, path, version string) {
 		t.Fatal(err)
 	}
 }
+
+func TestUpdateService_OperationObserverDoesNotLeakIntoLaterChecks(t *testing.T) {
+	target, source := updateFixture(t, "v1.0.0", "v1.1.0")
+	service, err := NewUpdateService(UpdateConfig{CurrentVersion: "v1.0.0", ExecutablePath: target, Source: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := service.Prepare(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []UpdateStage
+	if _, err := service.ApplyWithProgress(context.Background(), plan, func(event UpdateEvent) { events = append(events, event.Stage) }); err != nil {
+		t.Fatal(err)
+	}
+	n := len(events)
+	if n == 0 {
+		t.Fatal("operation did not receive stages")
+	}
+	if _, err := service.Prepare(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != n {
+		t.Fatal("later check was sent to previous operation")
+	}
+}

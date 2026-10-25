@@ -118,8 +118,10 @@ var (
 
 // RestartRequest carries info needed to send a post-restart notification.
 type RestartRequest struct {
-	SessionKey string `json:"session_key"`
-	Platform   string `json:"platform"`
+	SessionKey     string `json:"session_key"`
+	Platform       string `json:"platform"`
+	UpdateID       string `json:"update_id,omitempty"`
+	ExecutablePath string `json:"executable_path,omitempty"`
 }
 
 func SaveRestartNotify(dataDir string, req RestartRequest) error {
@@ -453,10 +455,13 @@ type Engine struct {
 	updateIntents updateIntentState
 	// updateServices prepare one immutable, channel-bound Plan and apply that
 	// same Plan only after the host receives explicit approval.
-	updateServiceMu sync.Mutex
-	updateChannel   updatechannel.Channel
-	updateServices  map[updatechannel.Channel]UpdateService
-	updatePlans     map[string]pendingUpdatePlan
+	updateServiceMu   sync.Mutex
+	updateChannel     updatechannel.Channel
+	updateServices    map[updatechannel.Channel]UpdateService
+	updatePlans       map[string]pendingUpdatePlan
+	updateCoordinator *UpdateCoordinator
+	updateReceiptMu   sync.Mutex
+	updateChecks      map[string]*updateCheck
 
 	hooks              *HookManager
 	cronScheduler      *CronScheduler
@@ -1604,6 +1609,9 @@ func (e *Engine) RequestDeferredRestart(credential string) (RestartRequest, erro
 		return RestartRequest{}, ErrDeferredRestartNoActiveTurn
 	}
 
+	if !e.updates().reserveRestart() {
+		return RestartRequest{}, ErrDeferredRestartAlreadyPending
+	}
 	req := RestartRequest{SessionKey: sessionKey, Platform: state.platform.Name()}
 	state.deferredRestart = &req
 	// Freeze the accepted-message set at the scheduling boundary. Messages
@@ -1639,7 +1647,7 @@ func (e *Engine) restartAdmissionFenced(interactiveKey string) bool {
 	return state.restartAdmissionFenced
 }
 
-func dispatchDeferredRestartAfterDrain(state *interactiveState, session *Session, unlocked *bool) bool {
+func (e *Engine) dispatchDeferredRestartAfterDrain(state *interactiveState, session *Session, unlocked *bool) bool {
 	restart := takeDeferredRestart(state)
 	if restart == nil {
 		return false
@@ -1648,18 +1656,17 @@ func dispatchDeferredRestartAfterDrain(state *interactiveState, session *Session
 		session.Unlock()
 		*unlocked = true
 	}
-	queueDeferredRestart(restart)
+	e.queueDeferredRestart(restart)
 	return true
 }
 
-func queueDeferredRestart(req *RestartRequest) {
+func (e *Engine) queueDeferredRestart(req *RestartRequest) {
 	if req == nil {
 		return
 	}
-	select {
-	case RestartCh <- *req:
+	if e.queueServiceRestart(*req) {
 		slog.Info("deferred Agent restart queued", "platform", req.Platform, "session", req.SessionKey)
-	default:
+	} else {
 		// A process-wide restart is already queued. Coalescing is sufficient: the
 		// first request will restart this same process, and blocking here could
 		// strand a completed Agent goroutine during shutdown.
@@ -2068,6 +2075,12 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 // executeScheduledJob owns the shared Cron/Timer platform resolution,
 // proactive target, notification, workspace, session, and prompt lifecycle.
 func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
+	finishWork, workErr := e.beginUpdateWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer finishWork()
+
 	e.hooks.Emit(HookEvent{
 		Event:      spec.hookEvent,
 		SessionKey: spec.sessionKey,
@@ -2450,6 +2463,12 @@ func (e *Engine) finishScheduledShell(p Platform, replyCtx any, cmd *exec.Cmd, m
 // ExecuteHeartbeat runs a heartbeat check by injecting a synthetic message
 // into the main session, similar to cron but designed for periodic awareness.
 func (e *Engine) ExecuteHeartbeat(sessionKey, prompt string, silent bool) error {
+	finishWork, workErr := e.beginUpdateWork()
+	if workErr != nil {
+		return workErr
+	}
+	defer finishWork()
+
 	targetPlatform, platformName, resolvedSessionKey, err := e.resolvePlatformSessionTarget(sessionKey)
 	if err != nil {
 		return err
@@ -2663,6 +2682,7 @@ func (e *Engine) onPlatformReady(p Platform) {
 	}
 	slog.Info("platform ready", "project", e.name, "platform", p.Name())
 	e.initPlatformCapabilities(p)
+	go e.updates().recoverReceipts()
 }
 
 func (e *Engine) markPlatformReady(p Platform) bool {
@@ -3320,6 +3340,13 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		return
 	}
 
+	finishWork, workErr := e.beginUpdateWork()
+	if workErr != nil {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpdateAdmissionClosed))
+		return
+	}
+	defer finishWork()
+
 	if e.discardStaleUserMessageIfNeeded(interactiveKey, msg) {
 		return
 	}
@@ -3354,7 +3381,11 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 			// and the queue append. Re-try TryLock — if it succeeds, no one is
 			// draining the queue so we must start a processor ourselves.
 			if session.TryLock() {
-				go e.drainOrphanedQueue(session, sessions, interactiveKey, agent, resolvedWorkspace)
+				done := e.updates().retainWork()
+				go func() {
+					defer done()
+					e.drainOrphanedQueue(session, sessions, interactiveKey, agent, resolvedWorkspace)
+				}()
 			}
 			return
 		}
@@ -3391,7 +3422,11 @@ sessionLocked:
 		"session", session.ID,
 	)
 
-	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, resolvedWorkspace, msg.SessionKey)
+	done := e.updates().retainWork()
+	go func() {
+		defer done()
+		e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, resolvedWorkspace, msg.SessionKey)
+	}()
 }
 
 func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions *SessionManager, interactiveKey string, session *Session) *Session {
@@ -3823,7 +3858,7 @@ func (e *Engine) drainOrphanedQueue(session *Session, sessions *SessionManager, 
 	e.stopUnsolicitedReader(state)
 
 	unlocked = e.drainPendingMessages(state, session, sessions, interactiveKey)
-	if dispatchDeferredRestartAfterDrain(state, session, &unlocked) {
+	if e.dispatchDeferredRestartAfterDrain(state, session, &unlocked) {
 		return
 	}
 
@@ -4461,7 +4496,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// writer), and every message accepted into the FIFO has completed. If a
 	// queued turn failed before drainPendingMessages could unlock, release the
 	// session here before asking main to shut the Engine down.
-	if dispatchDeferredRestartAfterDrain(state, session, &unlocked) {
+	if e.dispatchDeferredRestartAfterDrain(state, session, &unlocked) {
 		return
 	}
 
@@ -9101,6 +9136,16 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		return true
 	}
 
+	// Shell owns admission for both /shell and the ! shorthand.
+	if !updateControlCommand(cmdID) && cmdID != "shell" {
+		finishWork, err := e.beginUpdateWork()
+		if err != nil {
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpdateAdmissionClosed))
+			return true
+		}
+		defer finishWork()
+	}
+
 	if cmdID != "" {
 		slog.Info("audit: command_executed",
 			"user_id", msg.UserID, "platform", msg.Platform,
@@ -10267,7 +10312,12 @@ func (e *Engine) cmdShell(p Platform, msg *Message, raw string) {
 		workDir, _ = os.Getwd()
 	}
 
-	go func() { _ = e.runShellWithProgress(p, msg.ReplyCtx, shellCmd, workDir, timeout, 4000) }()
+	done, err := e.beginUpdateWork()
+	if err != nil {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpdateAdmissionClosed))
+		return
+	}
+	go func() { defer done(); _ = e.runShellWithProgress(p, msg.ReplyCtx, shellCmd, workDir, timeout, 4000) }()
 }
 
 func (e *Engine) cmdDiff(p Platform, msg *Message, raw string) {
@@ -10299,7 +10349,9 @@ func (e *Engine) cmdDiff(p Platform, msg *Message, raw string) {
 		workDir, _ = os.Getwd()
 	}
 
+	done := e.updates().retainWork()
 	go func() {
+		defer done()
 		ctx, cancel := context.WithTimeout(e.ctx, 60*time.Second)
 		defer cancel()
 
@@ -12441,7 +12493,8 @@ func (e *Engine) cmdCompress(p Platform, msg *Message) {
 
 	e.send(p, msg.ReplyCtx, e.i18n.T(MsgCompressing))
 
-	go e.runCompress(state, session, sessions, iKey, p, msg.ReplyCtx, false)
+	done := e.updates().retainWork()
+	go func() { defer done(); e.runCompress(state, session, sessions, iKey, p, msg.ReplyCtx, false) }()
 }
 
 // runCompress sends the agent's compress command and handles results.
@@ -12636,7 +12689,7 @@ func (e *Engine) drainQueuedMessagesAfterCompress(state *interactiveState, sessi
 	if e.drainPendingMessages(state, session, sessions, sessionKey) {
 		*unlocked = true
 	}
-	dispatchDeferredRestartAfterDrain(state, session, unlocked)
+	e.dispatchDeferredRestartAfterDrain(state, session, unlocked)
 }
 
 func (e *Engine) cmdAllow(p Platform, msg *Message, args []string) {
@@ -15837,7 +15890,7 @@ func (e *Engine) renderUpgradeCard() *Card {
 		} else {
 			body := localizedReleaseBodyPreview(res.release.Body, e.i18n.CurrentLang())
 			summary := e.i18n.Tf(MsgUpgradeChannelSummary, channel, channel.ReleaseType(res.release.Prerelease))
-			content = fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, res.release.TagName, summary+"\n\n"+body)
+			content = fmt.Sprintf(e.i18n.T(MsgUpgradeAvailableAction), cur, res.release.TagName, summary+"\n\n"+body)
 		}
 	case <-time.After(8 * time.Second):
 		content = "⏱ " + e.i18n.Tf(MsgUpgradeCheckingChannel, channel) + e.i18n.T(MsgUpgradeTimeoutSuffix)
@@ -16639,7 +16692,8 @@ func (e *Engine) executeCustomCommand(p Platform, msg *Message, cmd *CustomComma
 	}
 	// If this is an exec command, run shell command directly
 	if cmd.Exec != "" {
-		go e.executeShellCommand(p, msg, cmd, args)
+		done := e.updates().retainWork()
+		go func() { defer done(); e.executeShellCommand(p, msg, cmd, args) }()
 		return
 	}
 
@@ -16670,7 +16724,11 @@ func (e *Engine) executeCustomCommand(p Platform, msg *Message, cmd *CustomComma
 	)
 
 	msg.Content = prompt
-	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey)
+	done := e.updates().retainWork()
+	go func() {
+		defer done()
+		e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey)
+	}()
 }
 
 // executeShellCommand runs a shell command and sends the output to the user.
@@ -16898,7 +16956,11 @@ func (e *Engine) executeSkill(p Platform, msg *Message, skill *Skill, args []str
 	)
 
 	msg.Content = prompt
-	go e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey)
+	done := e.updates().retainWork()
+	go func() {
+		defer done()
+		e.processInteractiveMessageWith(p, msg, session, agent, sessions, interactiveKey, workspaceDir, msg.SessionKey)
+	}()
 }
 
 func (e *Engine) cmdSkills(p Platform, msg *Message) {
@@ -17266,138 +17328,132 @@ func (e *Engine) cmdDoctor(p Platform, msg *Message) {
 
 func (e *Engine) cmdUpgrade(p Platform, msg *Message, args []string) {
 	channel := e.updateChannel.Effective()
-	channelSelected := false
+	selected := false
 	if len(args) > 0 {
-		if selected, ok := updatechannel.Parse(args[0]); ok && strings.TrimSpace(args[0]) != "" {
-			channel = selected
-			channelSelected = true
+		if value, ok := updatechannel.Parse(args[0]); ok && strings.TrimSpace(args[0]) != "" {
+			channel = value
+			selected = true
 			args = args[1:]
 		}
 	}
-	subCmd := ""
 	if len(args) > 0 {
-		subCmd = matchSubCommand(args[0], []string{"confirm", "check"})
-		if subCmd == "" {
-			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradeChannelUsage))
-			return
-		}
-	}
-
-	if subCmd == "confirm" {
 		token := ""
 		if len(args) > 1 {
 			token = args[1]
 		}
-		if channelSelected {
-			e.cmdUpgradeConfirmForChannel(p, msg, token, channel)
-		} else {
-			e.cmdUpgradeConfirm(p, msg, token)
+		switch args[0] {
+		case "confirm":
+			if selected {
+				e.cmdUpgradeConfirmForChannel(p, msg, token, channel)
+			} else {
+				e.cmdUpgradeConfirm(p, msg, token)
+			}
+			return
+		case "cancel":
+			e.cancelUpdate(p, msg, token)
+			return
+		case "status":
+			e.showUpdateStatus(p, msg, token)
+			return
+		case "check":
+		default:
+			e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradeChannelUsage))
+			return
 		}
-		return
 	}
-
-	// Default: check for updates
-	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradeCheckingChannel, channel))
-
-	cur := CurrentVersion
-	if cur == "" || cur == "dev" {
+	view := newUpdateView(e, p, msg)
+	if CurrentVersion == "" || CurrentVersion == "dev" {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradeDevBuild))
 		return
 	}
-
-	service, err := e.currentUpdateService(channel)
-	if err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+	c := e.updates()
+	c.mu.Lock()
+	active := c.operation
+	c.mu.Unlock()
+	if active != nil {
+		e.showUpdateStatus(p, msg, "")
 		return
 	}
-	prepareCtx, cancel := context.WithTimeout(e.ctx, 45*time.Second)
-	defer cancel()
-	plan, err := service.Prepare(prepareCtx)
+	service, err := e.currentUpdateService(channel)
 	if err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
+		view.show(e.updateStateCard("failed", "", e.i18n.T(MsgUpdateSafeFailure), time.Time{}, "", false), false)
+		return
+	}
+	ctx, checkToken, finishCheck, err := e.beginUpdateCheck(msg)
+	if err != nil {
+		if !errors.Is(err, errUpdateCheckInProgress) {
+			slog.Warn("update check unavailable", "error", err)
+		}
+		return
+	}
+	defer finishCheck()
+	view.show(e.updateStateCard("checking", "", "", time.Time{}, checkToken, true), true)
+	plan, err := service.Prepare(ctx)
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			view.show(e.updateStateCard("cancelled", "", "", time.Time{}, "", false), false)
+		} else {
+			view.show(e.updateStateCard("failed", "", e.i18n.T(MsgUpdateSafeFailure), time.Time{}, "", false), false)
+		}
 		return
 	}
 	if !plan.Available {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradeUpToDateChannel, channel, cur))
+		view.show(NewCard().Title(e.i18n.Tf(MsgUpgradeUpToDateChannel, channel, CurrentVersion), "green").Build(), false)
 		return
 	}
-
-	body := localizedReleaseBodyPreview(plan.Release.Body, e.i18n.CurrentLang())
-	details := e.i18n.Tf(MsgUpgradePlanDetails, channel, channel.ReleaseType(plan.Release.Prerelease), plan.ArchiveAsset, body)
-
-	// Store the exact immutable plan before opening the consent window. Confirm
-	// never re-resolves latest or swaps the reviewed release/assets/checksum.
 	token, err := e.rememberUpdatePlan(msg.SessionKey, msg.UserID, plan)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
 	}
+	e.updateServiceMu.Lock()
+	pending := e.updatePlans[token]
+	pending.View = view
+	e.updatePlans[token] = pending
+	e.updateServiceMu.Unlock()
+	if err := view.render(e.updateReviewCard(plan, token), false); err != nil {
+		slog.Warn("update review presentation failed", "error", err)
+		e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
+		return
+	}
 	e.updateIntents.recordAsk(msg.SessionKey)
-	e.replyUpdateActionable(p, msg.ReplyCtx, token,
-		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailableAction), cur, plan.Release.TagName, details),
-		fmt.Sprintf(e.i18n.T(MsgUpgradeAvailable), cur, plan.Release.TagName, details))
 }
 
 func (e *Engine) cmdUpgradeConfirm(p Platform, msg *Message, token string) {
 	e.cmdUpgradeConfirmForChannel(p, msg, token, "")
 }
-
 func (e *Engine) cmdUpgradeConfirmForChannel(p Platform, msg *Message, token string, expectedChannel updatechannel.Channel) {
-	cur := CurrentVersion
-	if cur == "" || cur == "dev" {
+	if CurrentVersion == "" || CurrentVersion == "dev" {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradeDevBuild))
 		return
 	}
-
-	plan, exists := e.pendingUpdatePlan(msg.SessionKey, msg.UserID, token)
-	if !exists {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpgradePlanMissing))
+	if token == "" {
+		e.updateServiceMu.Lock()
+		token = e.uniqueUpdateTokenLocked(msg.SessionKey, msg.UserID)
+		e.updateServiceMu.Unlock()
+	}
+	plan, ok := e.pendingUpdatePlan(msg.SessionKey, msg.UserID, token)
+	if !ok {
+		e.showUpdateStatus(p, msg, token)
 		return
 	}
-	planChannel := updatechannel.Channel(plan.Release.Channel).Effective()
-	if expectedChannel != "" {
-		expectedChannel = expectedChannel.Effective()
-		if planChannel != expectedChannel {
-			e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradePlanChannelMismatch, planChannel, expectedChannel, expectedChannel))
-			return
-		}
+	channel := updatechannel.Channel(plan.Release.Channel).Effective()
+	if expectedChannel != "" && channel != expectedChannel.Effective() {
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradePlanChannelMismatch, channel, expectedChannel, expectedChannel))
+		return
 	}
-
-	service, err := e.currentUpdateService(planChannel)
+	service, err := e.currentUpdateService(channel)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgError, err))
 		return
 	}
-	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeDownloading), plan.Release.TagName))
-
-	result, err := service.Apply(e.ctx, plan)
-	if err != nil {
-		if terminalUpdatePlanError(err) {
-			e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
-		}
-		messageKey := MsgError
-		if errors.Is(err, ErrUpdateInstalledUnverified) {
-			messageKey = MsgUpgradeInstalledUnverified
-		}
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(messageKey, err))
-		return
-	}
-	e.clearUpdatePlan(msg.SessionKey, msg.UserID, token)
-	if !result.Updated {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgUpgradeUpToDateChannel, planChannel, cur))
-		return
-	}
-
-	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgUpgradeSuccess), result.Release.TagName))
-
-	// Auto-restart to apply the update
-	select {
-	case RestartCh <- RestartRequest{
-		SessionKey: msg.SessionKey,
-		Platform:   p.Name(),
-	}:
-	default:
-	}
+	e.updateServiceMu.Lock()
+	view := e.updatePlans[token].View
+	e.updateServiceMu.Unlock()
+	e.installReviewedUpdate(p, msg, token, plan, service, view)
 }
 
 func (e *Engine) cmdConfigReload(p Platform, msg *Message) {
@@ -17415,13 +17471,10 @@ func (e *Engine) cmdConfigReload(p Platform, msg *Message) {
 }
 
 func (e *Engine) cmdRestart(p Platform, msg *Message) {
-	e.reply(p, msg.ReplyCtx, e.i18n.T(MsgRestarting))
-	select {
-	case RestartCh <- RestartRequest{
-		SessionKey: msg.SessionKey,
-		Platform:   p.Name(),
-	}:
-	default:
+	if e.queueServiceRestart(RestartRequest{SessionKey: msg.SessionKey, Platform: p.Name()}) {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgRestarting))
+	} else {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgUpdateBusyState))
 	}
 }
 
@@ -17924,6 +17977,11 @@ func (e *Engine) relayContextForSourceSessionKey(fromProject, sourceSessionKey s
 // dedicated relay session, sends the message to the agent, and blocks until
 // the complete response is collected (or the relay context times out).
 func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey, message string) (string, error) {
+	finishWork, workErr := e.beginUpdateWork()
+	if workErr != nil {
+		return "", workErr
+	}
+	defer finishWork()
 	agent, sessions, relaySessionKey, err := e.relayContextForSourceSessionKey(fromProject, sourceSessionKey)
 	if err != nil {
 		return "", err
@@ -18058,7 +18116,11 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 			// Relay timed out. Let the agent finish its turn in the
 			// background so the session state is saved cleanly and the
 			// session remains resumable for the next relay call.
-			go e.drainRelaySession(agentSession, session, sessions, agent.Name(), relaySessionKey)
+			done := e.updates().retainWork()
+			go func() {
+				defer done()
+				e.drainRelaySession(agentSession, session, sessions, agent.Name(), relaySessionKey)
+			}()
 			return relayPartialResponseOrError(ctx.Err(), textParts, fromProject, e.name)
 		}
 	}

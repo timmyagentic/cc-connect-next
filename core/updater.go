@@ -50,6 +50,12 @@ type UpdateService interface {
 	Apply(context.Context, PreparedUpdate) (UpdateResult, error)
 }
 
+// UpdateProgressService optionally exposes installation stages without changing
+// the immutable Prepare/Apply contract used by other hosts and test doubles.
+type UpdateProgressService interface {
+	ApplyWithProgress(context.Context, PreparedUpdate, func(appfeatures.UpdateEvent)) (UpdateResult, error)
+}
+
 type foundationUpdateService struct {
 	service *appfeatures.UpdateService
 	channel updatechannel.Channel
@@ -76,6 +82,14 @@ func newFoundationUpdateService(channel updatechannel.Channel) (*foundationUpdat
 	return &foundationUpdateService{service: service, channel: channel}, nil
 }
 
+func (service *foundationUpdateService) UpdateExecutablePath() string {
+	return service.service.Installation().ExecutablePath
+}
+
+func (service *foundationUpdateService) UpdateInstallationKind() string {
+	return string(service.service.Installation().Kind)
+}
+
 func (service *foundationUpdateService) Prepare(ctx context.Context) (PreparedUpdate, error) {
 	plan, err := service.service.Prepare(ctx)
 	if err != nil {
@@ -91,11 +105,15 @@ func (service *foundationUpdateService) Prepare(ctx context.Context) (PreparedUp
 }
 
 func (service *foundationUpdateService) Apply(ctx context.Context, prepared PreparedUpdate) (UpdateResult, error) {
+	return service.ApplyWithProgress(ctx, prepared, nil)
+}
+
+func (service *foundationUpdateService) ApplyWithProgress(ctx context.Context, prepared PreparedUpdate, progress func(appfeatures.UpdateEvent)) (UpdateResult, error) {
 	plan, ok := prepared.token.(appfeatures.UpdatePlan)
 	if !ok {
 		return UpdateResult{}, fmt.Errorf("update plan is invalid")
 	}
-	result, err := service.service.Apply(ctx, plan)
+	result, err := service.service.ApplyWithProgress(ctx, plan, progress)
 	return UpdateResult{
 		Release:          releaseInfo(result.Release, service.channel),
 		Updated:          result.Updated,
@@ -201,6 +219,7 @@ type pendingUpdatePlan struct {
 	At         time.Time
 	SessionKey string
 	UserID     string
+	View       *updateView
 }
 
 func (e *Engine) rememberUpdatePlan(sessionKey, userID string, plan PreparedUpdate) (string, error) {
@@ -251,6 +270,12 @@ func (e *Engine) clearUpdatePlan(sessionKey, userID, token string) {
 	if pending, exists := e.updatePlans[token]; exists && pending.SessionKey == sessionKey && pending.UserID == userID {
 		e.deleteUpdatePlanLocked(token)
 	}
+	for _, pending := range e.updatePlans {
+		if pending.SessionKey == sessionKey && pending.UserID == userID {
+			return
+		}
+	}
+	e.updateIntents.clearAsk(sessionKey)
 }
 
 func (e *Engine) uniqueUpdateTokenLocked(sessionKey, userID string) string {

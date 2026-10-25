@@ -452,6 +452,14 @@ func (m *ManagementServer) handleRestart(w http.ResponseWriter, r *http.Request)
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}
 
+	for _, engine := range m.engines {
+		if engine.queueServiceRestart(RestartRequest{SessionKey: body.SessionKey, Platform: body.Platform}) {
+			mgmtOK(w, "restart initiated")
+		} else {
+			mgmtError(w, http.StatusConflict, "restart or update already in progress")
+		}
+		return
+	}
 	select {
 	case RestartCh <- RestartRequest{SessionKey: body.SessionKey, Platform: body.Platform}:
 		mgmtOK(w, "restart initiated")
