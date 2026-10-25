@@ -576,6 +576,12 @@ type PerTurnModelSupporter interface {
 	SupportsPerTurnModel() bool
 }
 
+// PerTurnReasoningEffortSupporter advertises isolated effort overrides before
+// a session exists. Persistent reasoning switches do not imply this capability.
+type PerTurnReasoningEffortSupporter interface {
+	SupportsPerTurnReasoningEffort() bool
+}
+
 // ServiceTierProvider exposes the Agent's ordinary service-tier default so the
 // engine can restore it after a one-shot answer profile.
 type ServiceTierProvider interface {

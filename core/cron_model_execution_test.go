@@ -20,21 +20,38 @@ type cronModelCall struct {
 }
 
 type cronModelAgent struct {
-	mu          sync.Mutex
-	model       string
-	nativeModel string
-	resumeModel string
-	setCalls    int
-	calls       []cronModelCall
-	sessions    []*cronModelSession
-	startErr    error
-	defaultsErr error
-	onSend      func(*cronModelSession, cronModelCall) error
+	mu           sync.Mutex
+	model        string
+	effort       string
+	nativeEffort string
+	nativeModel  string
+	resumeModel  string
+	setCalls     int
+	calls        []cronModelCall
+	sessions     []*cronModelSession
+	startErr     error
+	defaultsErr  error
+	onSend       func(*cronModelSession, cronModelCall) error
 }
 
-func (a *cronModelAgent) Name() string                                  { return "cron-model-test" }
-func (a *cronModelAgent) Stop() error                                   { return nil }
-func (a *cronModelAgent) SupportsPerTurnModel() bool                    { return true }
+func (a *cronModelAgent) Name() string                         { return "cron-model-test" }
+func (a *cronModelAgent) Stop() error                          { return nil }
+func (a *cronModelAgent) SupportsPerTurnModel() bool           { return true }
+func (a *cronModelAgent) SupportsPerTurnReasoningEffort() bool { return true }
+func (a *cronModelAgent) GetReasoningEffort() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.effort
+}
+func (a *cronModelAgent) AvailableReasoningEfforts() []string {
+	return []string{"low", "medium", "high", "xhigh", "max"}
+}
+func (a *cronModelAgent) SetReasoningEffort(effort string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.effort = effort
+	a.setCalls++
+}
 func (a *cronModelAgent) AvailableModels(context.Context) []ModelOption { return nil }
 func (a *cronModelAgent) ListSessions(context.Context) ([]AgentSessionInfo, error) {
 	return nil, nil
@@ -108,7 +125,7 @@ func (s *cronModelSession) send(call cronModelCall) error {
 	return nil
 }
 func (s *cronModelSession) DefaultTurnOptions() TurnOptions {
-	return TurnOptions{Model: s.agent.nativeModel}
+	return TurnOptions{Model: s.agent.nativeModel, ReasoningEffort: s.agent.nativeEffort}
 }
 func (s *cronModelSession) ValidateTurnDefaults() error {
 	s.agent.mu.Lock()
