@@ -16,8 +16,17 @@
 <link rel="canonical" href="https://cc-connect-next.timmyagentic.si/docs">
 <meta property="og:url" content="https://cc-connect-next.timmyagentic.si/docs">
 <link rel="stylesheet" href="/brand/brand.css">
+<meta property="og:image" content="https://cc-connect-next.timmyagentic.si/assets/social-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="CC Connect Next — 在聊天里，把工作继续做完。">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://cc-connect-next.timmyagentic.si/assets/social-card.png">
+<meta name="twitter:image:alt" content="CC Connect Next — 在聊天里，把工作继续做完。">
 </head>
 <body data-page="Docs" class="brand-site brand-cc">
+<a class="skip" data-i18n="skip" href="#main">跳到正文</a>
 <header class="site-header">
 <div class="container header-inner">
 <div class="studio-identity"><a class="studio-home" href="https://timmyagentic.si/">timmyagentic</a><a class="brand" href="/">
@@ -42,54 +51,71 @@
 <main class="container docs" id="main">
 <p data-i18n="docsEyebrow" class="eyebrow">使用指南</p>
 <h1 data-i18n="docsTitle">把你的 Agent 连起来。</h1>
-<p data-i18n="docsIntro" class="lede">准备好已安装并登录的编程 Agent，再选择一条适合你的路径。以下命令在你的终端执行。</p>
-<section id="install">
-<span class="step-number">01</span>
-<h2 data-i18n="docsHeadinginstall">全新安装</h2>
-<p data-i18n="docsBodyinstall">先安装，再创建配置并替换 REPLACE 占位值。doctor 检查配置与依赖，不建立平台连接。</p>
-<div class="code-block">
-<pre id="code-install">
-<code>npm install -g cc-connect-next
-cc-connect-next
-cc-connect-next doctor</code>
-</pre>
-<button data-copy="code-install" aria-label="Copy commands">
-<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
-<span data-copy-label>
-<span data-i18n="docsCopyinstall">复制命令</span>
-</span>
-</button>
-</div>
-<a data-i18n="docsReadinstall" class="text-link" href="https://github.com/timmyagentic/cc-connect-next/blob/main/INSTALL.md">阅读完整指南</a>
+<p data-i18n="docsIntro" class="lede">把完整安装 Prompt 交给能执行本机命令的 Agent，或按下面五步手动完成。已有配置和服务应先检查并保留。</p>
+<section id="agent-install" class="agent-install" aria-labelledby="agent-install-title">
+<p data-i18n="agentInstallEyebrow" class="eyebrow">让 Agent 帮你装好</p>
+<h2 id="agent-install-title" data-i18n="agentInstallTitle">从安装，<br>到第一条回复。</h2>
+<p data-i18n="agentInstallBody">复制完整 Prompt，交给 Codex、Claude Code 等本地编码 Agent。它会处理配置与验收；登录、扫码和必要授权由你完成。</p>
+<div class="code-block prompt-block">
+<button data-copy="code-agent-install"><img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true"><span data-copy-label><span data-i18n="agentInstallCopy">复制安装 Prompt</span></span></button>
+<details class="prompt-details"><summary data-i18n="agentInstallDetails">查看完整 Prompt</summary>
+<pre id="code-agent-install"><code data-i18n="installPrompt">请从 https://github.com/timmyagentic/cc-connect-next 安装已发布稳定版，按首次安装流程接入飞书/Lark。
+先确认操作系统、CPU 架构、Agent CLI 及登录状态和项目绝对路径；优先复用当前 Agent 与项目，
+缺少必要信息再问我。检查并保留已有 CC Connect/Next 配置和服务，不执行迁移或覆盖。
+安装后选择明确的配置绝对路径；文件不存在时运行 `cc-connect-next --config &lt;配置路径&gt;` 生成配置，
+由你填写真实 work_dir、Agent 类型和对应选项，保持项目名一致，不让我手工编辑配置。
+执行 `cc-connect-next feishu setup --config &lt;配置路径&gt; --project &lt;项目名&gt;`，展示二维码并保持
+进程等待我扫码。接受推荐配置，并按提示确认官方 lark-cli companion；非交互执行时使用
+`--recommended --lark-cli`，保留已有 profile，让同一机器人作为默认 bot profile。
+执行 `cc-connect-next doctor --config &lt;配置路径&gt;`，再用
+`cc-connect-next --config &lt;配置路径&gt;` 前台启动；引导我在机器人私聊发送 /version、/whoami
+和一条普通提问，核对回复并按实际用户 ID 配置访问范围。
+验证后停止本次前台进程，执行 `cc-connect-next daemon install --config &lt;配置路径&gt;`，检查
+`cc-connect-next daemon status` 的服务状态、Runtime 和平台就绪状态，并验证后台仍能回复。
+报告版本、配置路径、work_dir 和验证结果；需要我登录、扫码或发布应用时再提示，未完成的
+真实消息验证明确标为 UNVERIFIED。</code></pre>
+</details></div>
+<a class="text-link" data-guide="getting-started" data-i18n="docsReadinstall" href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/getting-started.zh-CN.md">查看完整首次安装说明</a>
 </section>
-<section id="feishu">
-<span class="step-number">02</span>
+<section id="prepare">
+<p class="eyebrow" data-i18n="manualTitle">手动安装，按这五步走。</p>
+<span class="step-number">01</span><h2 data-i18n="prepareTitle">先准备可用的 Agent</h2>
+<p data-i18n="prepareBody">安装并登录一个受支持的 Agent CLI，确认它能在本机回答；选择真实存在的项目目录，并记下绝对路径。还没有 Agent 时先完成它的安装与登录。</p>
+</section>
+<section id="install"><span class="step-number">02</span>
+<h2 data-i18n="docsHeadinginstall">安装并填写配置</h2>
+<p data-i18n="docsBodyinstall">以下命令以 macOS / Linux 的默认配置路径为例；Windows 请使用对应的绝对路径。首次运行生成模板后退出是正常行为。填写真实 work_dir、Agent 类型和项目名，并替换所有 REPLACE 占位值；后续始终使用同一个配置文件。</p>
+<div class="code-block"><pre id="code-install"><code>npm install -g cc-connect-next
+cc-connect-next --config ~/.cc-connect-next/config.toml</code></pre><button data-copy="code-install"><img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true"><span data-copy-label><span data-i18n="docsCopyinstall">复制命令</span></span></button></div>
+<a class="text-link" data-guide="getting-started" data-i18n="docsReadinstall" href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/getting-started.zh-CN.md">查看完整首次安装说明</a>
+</section>
+<section id="feishu"><span class="step-number">03</span>
 <h2 data-i18n="docsHeadingfeishu">接入飞书</h2>
-<p data-i18n="docsBodyfeishu">交互式配置飞书机器人与工作区，可选择绑定官方 lark-cli。配置完成后运行 doctor，再启动服务。</p>
-<div class="code-block">
-<pre id="code-feishu">
-<code>cc-connect-next feishu setup
-cc-connect-next doctor
-cc-connect-next</code>
-</pre>
-<button data-copy="code-feishu" aria-label="Copy commands">
-<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
-<span data-copy-label>
-<span data-i18n="docsCopyfeishu">复制命令</span>
-</span>
-</button>
-</div>
+<p data-i18n="docsBodyfeishu">使用配置里的同一项目名完成机器人设置与扫码，可选择官方 lark-cli companion。feishu setup 配置机器人，不会替已有项目填写 work_dir。</p>
+<div class="code-block"><pre id="code-feishu"><code>cc-connect-next feishu setup --config ~/.cc-connect-next/config.toml</code></pre><button data-copy="code-feishu"><img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true"><span data-copy-label><span data-i18n="docsCopyinstall">复制命令</span></span></button></div>
 <a data-i18n="docsReadfeishu" class="text-link" href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/feishu.md">阅读完整指南</a>
 </section>
+<section id="verify"><span class="step-number">04</span>
+<h2 data-i18n="verifyTitle">前台启动，收到真实回复</h2>
+<p data-i18n="verifyBody">doctor 只检查环境，不连接平台。通过后前台启动，在机器人私聊发送 /version、/whoami 和一条普通提问，确认 Agent 回答；按实际用户 ID 设置访问范围。</p>
+<div class="code-block"><pre id="code-verify"><code>cc-connect-next doctor --config ~/.cc-connect-next/config.toml
+cc-connect-next --config ~/.cc-connect-next/config.toml</code></pre><button data-copy="code-verify"><img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true"><span data-copy-label><span data-i18n="docsCopyinstall">复制命令</span></span></button></div>
+</section>
+<section id="background"><span class="step-number">05</span>
+<h2 data-i18n="backgroundTitle">转到后台，再验证一次</h2>
+<p data-i18n="backgroundBody">先停止本次启动的前台进程，再安装后台服务。核对服务、Runtime 和平台就绪状态，然后再次发送普通提问，确认关闭终端后仍能回答。</p>
+<div class="code-block"><pre id="code-background"><code>cc-connect-next daemon install --config ~/.cc-connect-next/config.toml
+cc-connect-next daemon status</code></pre><button data-copy="code-background"><img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true"><span data-copy-label><span data-i18n="docsCopyinstall">复制命令</span></span></button></div>
+</section>
 <section id="migration">
-<span class="step-number">03</span>
+<p class="eyebrow" data-i18n="migrationEyebrow">已有官方 CC Connect？</p>
 <h2 data-i18n="docsHeadingmigration">先评估迁移，再切换服务</h2>
 <p data-i18n="docsBodymigration">dry-run 只报告计划。实际 migrate --switch 会切换服务运行与自启动状态；先阅读安装文档中的备份、兼容性和回滚说明。</p>
 <div class="code-block">
 <pre id="code-migration">
 <code>cc-connect-next migrate --dry-run</code>
 </pre>
-<button data-copy="code-migration" aria-label="Copy commands">
+<button data-copy="code-migration">
 <img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
 <span data-copy-label>
 <span data-i18n="docsCopymigration">复制命令</span>
@@ -101,13 +127,13 @@ cc-connect-next</code>
 <section>
 <h2 data-i18n="nextTitle">接着了解</h2>
 <div class="docs-links">
-<a href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/usage.zh-CN.md">
+<a data-guide="usage" href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/usage.zh-CN.md">
 <span data-i18n="usage">聊天命令与日常使用</span>
 </a>
-<a href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/configuration.zh-CN.md">
+<a data-guide="configuration" href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/configuration.zh-CN.md">
 <span data-i18n="config">完整配置参考</span>
 </a>
-<a href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/agent-capability-manifest.zh-CN.md">
+<a data-guide="agent-capability-manifest" href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/agent-capability-manifest.zh-CN.md">
 <span data-i18n="manifest">Agent 能力与权限</span>
 </a>
 <a href="https://github.com/timmyagentic/cc-connect-next/issues">
