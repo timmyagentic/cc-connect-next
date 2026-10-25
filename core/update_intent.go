@@ -202,15 +202,6 @@ func (e *Engine) maybeHandleUpdateIntent(p Platform, msg *Message, content strin
 	return false
 }
 
-// withUpdateHint appends the natural-language hint as its own line, for
-// surfaces that render buttons but have no footnote element.
-func withUpdateHint(body, hint string) string {
-	if hint == "" {
-		return body
-	}
-	return body + "\n\n" + hint
-}
-
 func previewReleaseBody(body string) string {
 	runes := []rune(body)
 	if len(runes) > updateReleaseBodyPreviewRunes {
@@ -241,40 +232,8 @@ func localizedReleaseBodyPreview(body string, lang Language) string {
 	return previewReleaseBody(releaseBodyForLanguage(body, lang))
 }
 
-// replyUpdateActionable delivers the exact release Plan with a confirm action
-// action on platforms that support cards or inline buttons, falling back to
-// plain text elsewhere. The buttons reuse the cmd:/ scheme, so a tap goes
-// through exactly the gates a typed command would.
-//
-// Three pieces of copy, one rule — a message carries exactly one *primary*
-// call to action:
-//
-//   - actionCopy: the facts, shown next to a button. The button is the CTA.
-//   - hint: a footnote (small grey on cards) telling the user a plain reply
-//     works too. Subordinate on purpose — discoverable, never competing.
-//   - textCopy: for surfaces with no button at all, where the typed reply
-//     *is* the CTA and therefore must be stated outright. Also used when a
-//     card or button send fails, so delivery never degrades into
-//     button-copy without a button.
-func (e *Engine) replyUpdateActionable(p Platform, replyCtx any, token, actionCopy, textCopy string) {
-	btnNow := e.i18n.T(MsgUpdateBtnNow)
-	hint := e.i18n.T(MsgUpdateHintReplyConfirm)
-	confirmCommand := "/upgrade confirm " + token
-	if cs, ok := p.(CardSender); ok {
-		card := e.renderCardForPlatform(p, NewCard().
-			Markdown(actionCopy).
-			Buttons(CardButton{Text: btnNow, Type: "primary", Value: "cmd:" + confirmCommand}).
-			Note(hint).
-			Build())
-		if err := cs.ReplyCard(e.ctx, replyCtx, card); err == nil {
-			return
-		}
-	}
-	if bs, ok := p.(InlineButtonSender); ok {
-		row := []ButtonOption{{Text: btnNow, Data: "cmd:" + confirmCommand}}
-		if err := bs.SendWithButtons(e.ctx, replyCtx, withUpdateHint(actionCopy, hint), [][]ButtonOption{row}); err == nil {
-			return
-		}
-	}
-	e.reply(p, replyCtx, textCopy+"\n\n`"+confirmCommand+"`")
+func (s *updateIntentState) clearAsk(sessionKey string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.askAt, sessionKey)
 }

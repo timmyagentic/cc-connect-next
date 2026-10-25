@@ -316,9 +316,13 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	channel := updatechannel.Channel(release.Channel).Effective()
 	text := e.i18n.Tf(MsgUpdateNoticeAvailable, release.TagName, channel, CurrentVersion)
 	action := e.i18n.Tf(MsgUpdateNoticeAvailableAction, release.TagName, channel, CurrentVersion)
+	if summary := updateSummary(release.Body, e.i18n.CurrentLang()); summary != "" {
+		action += "\n\n" + summary
+	}
+	detailsLink := releaseNotesLink(*release, e.i18n.T(MsgUpdateDetails))
 	delivered := 0
 	for _, target := range targets {
-		if err := e.sendUpdateNoticeTarget(target, channel, action, text); err != nil {
+		if err := e.sendUpdateNoticeTarget(target, channel, action, text, detailsLink); err != nil {
 			slog.Debug("update notice: admin private send failed",
 				"project", e.name, "platform", target.platform.Name(), "error", err)
 			continue
@@ -336,27 +340,24 @@ func (e *Engine) NotifyUpdateAvailable(release *ReleaseInfo) bool {
 	return true
 }
 
-func (e *Engine) sendUpdateNoticeTarget(target updateNoticeTarget, channel updatechannel.Channel, actionCopy, textCopy string) error {
-	if err := e.sendDirectUpdateNotice(target.platform, target.sender, target.userID, channel, actionCopy, textCopy); err != nil {
+func (e *Engine) sendUpdateNoticeTarget(target updateNoticeTarget, channel updatechannel.Channel, actionCopy, textCopy, detailsLink string) error {
+	if err := e.sendDirectUpdateNotice(target.platform, target.sender, target.userID, channel, actionCopy, textCopy, detailsLink); err != nil {
 		return err
 	}
 	e.updateIntents.recordDirectNotice(target.platform.Name(), target.userID)
 	return nil
 }
 
-func (e *Engine) sendDirectUpdateNotice(platform Platform, sender DirectUserSender, userID string, channel updatechannel.Channel, actionCopy, textCopy string) error {
+func (e *Engine) sendDirectUpdateNotice(platform Platform, sender DirectUserSender, userID string, channel updatechannel.Channel, actionCopy, textCopy, detailsLink string) error {
 	if cards, ok := platform.(DirectUserCardSender); ok {
 		btnNow := e.i18n.T(MsgUpdateBtnNow)
-		btnLog := e.i18n.T(MsgUpdateBtnChangelog)
 		hint := e.i18n.T(MsgUpdateHintReplyUpdate)
-		card := e.renderCardForPlatform(platform, NewCard().
-			Markdown(actionCopy).
-			Buttons(
-				CardButton{Text: btnNow, Type: "primary", Value: "cmd:/upgrade " + string(channel.Effective())},
-				CardButton{Text: btnLog, Value: "nav:/upgrade"},
-			).
-			Note(hint).
-			Build())
+		buttons := []CardButton{PrimaryBtn(btnNow, "cmd:/upgrade "+string(channel.Effective()))}
+		if detailsLink == "" {
+			buttons = append(buttons, DefaultBtn(e.i18n.T(MsgUpdateDetails), "nav:/upgrade"))
+		}
+		card := e.renderCardForPlatform(platform, NewCard().Markdown(actionCopy).
+			Buttons(buttons...).Markdown(detailsLink).Note(hint).Build())
 		if err := cards.SendDirectUserCard(e.ctx, userID, card); err == nil {
 			return nil
 		}

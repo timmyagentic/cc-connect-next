@@ -17,7 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/timmyagentic/cc-connect-next/agent/internal/processgroup"
+	"github.com/timmyagentic/cc-connect-next/internal/processgroup"
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 

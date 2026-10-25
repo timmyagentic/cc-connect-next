@@ -79,8 +79,8 @@ func TestUpdateCardConfirmationBindsDisplayedPlan(t *testing.T) {
 	engine.cmdUpgrade(platform, message, nil)
 
 	platform.mu.Lock()
-	firstAction := feedbackAskButtons(t, platform.repliedCards[0])[0].Value
-	secondAction := feedbackAskButtons(t, platform.repliedCards[1])[0].Value
+	firstAction := feedbackAskButtons(t, platform.repliedCards[1])[0].Value
+	secondAction := feedbackAskButtons(t, platform.repliedCards[3])[0].Value
 	platform.mu.Unlock()
 	if firstAction == secondAction {
 		t.Fatalf("two update cards share one confirmation action: %q", firstAction)
@@ -113,13 +113,13 @@ func TestCmdUpgradeBetaLabelsChannelAndPrereleaseWithoutCallingItStable(t *testi
 	engine.cmdUpgrade(platform, &Message{SessionKey: "feishu:group", Platform: "feishu", UserID: "ou_admin"}, []string{"beta"})
 
 	platform.mu.Lock()
-	if len(platform.repliedCards) != 1 {
+	if len(platform.repliedCards) != 2 {
 		platform.mu.Unlock()
 		t.Fatalf("replied cards = %d", len(platform.repliedCards))
 	}
-	rendered := platform.repliedCards[0].RenderText()
+	rendered := platform.repliedCards[1].RenderText()
 	platform.mu.Unlock()
-	for _, want := range []string{"Channel: `beta`", "Release type: `prerelease`", "v0.3.0-beta.2"} {
+	for _, want := range []string{"Beta", "v0.3.0-beta.2"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("beta plan missing %q: %s", want, rendered)
 		}
@@ -265,7 +265,7 @@ func TestCmdUpgradeConfirmWithoutReviewedPlanNeverApplies(t *testing.T) {
 	if service.prepareCalls != 0 || service.applyCalls != 0 {
 		t.Fatalf("confirm without review called service: prepare/apply=%d/%d", service.prepareCalls, service.applyCalls)
 	}
-	if sent := strings.Join(platform.getSent(), "\n"); !strings.Contains(sent, "reviewed update plan") {
+	if sent := strings.Join(platform.getSent(), "\n"); !strings.Contains(sent, engine.i18n.T(MsgUpdateExpiredState)) {
 		t.Fatalf("missing review guidance: %s", sent)
 	}
 }

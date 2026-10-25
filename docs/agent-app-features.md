@@ -62,7 +62,7 @@ CLI or network calls. Other adapters degrade through the optional interface.
 ## Updates
 
 The daemon notice is discovery only. `/upgrade` prepares an immutable Plan,
-shows the exact Release notes and selected artifact, and retains the Plan under
+shows a short summary of that Release and its restart impact, and retains the Plan under
 an opaque session/user token. The token-bearing action applies only that Plan
 without resolving latest again; a generic confirmation is rejected when more
 than one Plan is pending.
@@ -79,6 +79,9 @@ than one Plan is pending.
   channel, then verifies package metadata and binary version.
 - Restart, post-restart acknowledgement, cards, natural-language intent,
   authorization, and localization remain CC Connect Next responsibilities.
+
+See [Chat update experience](update-experience.md) for progress, task draining,
+restart recovery, failure handling, and real-client QA boundaries.
 
 ## Relay source subtree
 
