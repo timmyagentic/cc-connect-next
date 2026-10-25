@@ -481,6 +481,7 @@ func main() {
 	}
 
 	engines := make([]*core.Engine, 0, len(cfg.Projects))
+	updateCoordinator := core.NewUpdateCoordinator()
 	effectiveWorkDirs := make([]string, 0, len(cfg.Projects))
 	configCatalog := config.CapabilityCatalog(core.CurrentVersion)
 
@@ -531,6 +532,7 @@ func main() {
 		lang := configLanguage(cfg.Language)
 
 		engine := core.NewEngine(proj.Name, agent, platforms, sessionFile, lang)
+		engine.SetUpdateCoordinator(updateCoordinator)
 		engine.SetAnswerProfiles(configAnswerProfilesToCore(proj.Agent.AnswerProfiles))
 		// Global [display] config can be overridden by project-level settings.
 		_, _, _, _, _, _, showFooter, _ := config.EffectiveDisplay(cfg, &proj)
@@ -1468,7 +1470,10 @@ func main() {
 	// for the target platform (or with a 10s safety timeout), so async
 	// platforms that need 2-3s to actually connect (e.g. Telegram) do not
 	// silently drop the notify. See issue #1383.
-	if notify := core.ConsumeRestartNotify(cfg.DataDir); notify != nil {
+	for _, engine := range engines {
+		go engine.RecoverUpdateResult()
+	}
+	if notify := core.ConsumeRestartNotify(cfg.DataDir); notify != nil && notify.UpdateID == "" {
 		slog.Info("post-restart: queuing success notification", "platform", notify.Platform, "session", notify.SessionKey)
 		for _, e := range engines {
 			e.SetPendingRestartNotify(notify)
@@ -1528,7 +1533,7 @@ func main() {
 		if err := core.SaveRestartNotify(cfg.DataDir, *restartReq); err != nil {
 			slog.Error("restart: save notify failed", "error", err)
 		}
-		execPath, err := os.Executable()
+		execPath, err := executableForRestart(*restartReq)
 		if err != nil {
 			slog.Error("restart: cannot determine executable path", "error", err)
 			os.Exit(1)

@@ -154,7 +154,7 @@ func TestUpdateIntent_BareAfterNoticePreparesBeforeInstall(t *testing.T) {
 		t.Fatal("bare intent after a notice must be consumed")
 	}
 	sent := strings.Join(p.getSent(), "\n")
-	if strings.Contains(sent, "Downloading") || !strings.Contains(sent, "New version available") {
+	if strings.Contains(sent, "Installed · restoring") || !strings.Contains(sent, "Review update") {
 		t.Fatalf("a discovery notice must lead to exact-plan review before install:\n%s", sent)
 	}
 	if !strings.Contains(sent, "v9.9.9") {
@@ -164,7 +164,7 @@ func TestUpdateIntent_BareAfterNoticePreparesBeforeInstall(t *testing.T) {
 	if !e.maybeHandleUpdateIntent(p, updateIntentMsg("确认"), "确认") {
 		t.Fatal("confirm after exact-plan review must be consumed")
 	}
-	if sent := strings.Join(p.getSent(), "\n"); !strings.Contains(sent, "Downloading") {
+	if sent := strings.Join(p.getSent(), "\n"); !strings.Contains(sent, "Installed · restoring") {
 		t.Fatalf("expected install after plan confirmation, got:\n%s", sent)
 	}
 }
@@ -176,10 +176,10 @@ func TestUpdateIntent_StrongWithoutContextAsksFirst(t *testing.T) {
 		t.Fatal("strong intent must be consumed")
 	}
 	sent := strings.Join(p.getSent(), "\n")
-	if strings.Contains(sent, "Downloading") {
+	if strings.Contains(sent, "Installed · restoring") {
 		t.Fatalf("strong intent outside a conversation must ask, not install:\n%s", sent)
 	}
-	if !strings.Contains(sent, "New version available") {
+	if !strings.Contains(sent, "Review update") {
 		t.Fatalf("expected the upgrade prompt, got:\n%s", sent)
 	}
 
@@ -188,7 +188,7 @@ func TestUpdateIntent_StrongWithoutContextAsksFirst(t *testing.T) {
 	if !e.maybeHandleUpdateIntent(p, updateIntentMsg("确认"), "确认") {
 		t.Fatal("confirm after the prompt must be consumed")
 	}
-	if sent := strings.Join(p.getSent(), "\n"); !strings.Contains(sent, "Downloading") {
+	if sent := strings.Join(p.getSent(), "\n"); !strings.Contains(sent, "Installed · restoring") {
 		t.Fatalf("expected install after confirm, got:\n%s", sent)
 	}
 }
@@ -234,7 +234,7 @@ func TestUpdateIntent_RespectsPrivilegedGate(t *testing.T) {
 		t.Fatal("intent should still be consumed (with a refusal reply)")
 	}
 	sent := strings.Join(p.getSent(), "\n")
-	if strings.Contains(sent, "Downloading") {
+	if strings.Contains(sent, "Installed · restoring") {
 		t.Fatalf("non-admin must not trigger an install:\n%s", sent)
 	}
 	if !strings.Contains(strings.ToLower(sent), "admin") {
@@ -455,10 +455,10 @@ func TestUpgradePrompt_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
 	p.mu.Lock()
 	cards := append([]*Card(nil), p.repliedCards...)
 	p.mu.Unlock()
-	if len(cards) != 1 {
-		t.Fatalf("got %d reply cards, want 1", len(cards))
+	if len(cards) != 2 {
+		t.Fatalf("got %d reply cards, want checking and review cards", len(cards))
 	}
-	body := cardMarkdown(cards[0])
+	body := cardMarkdown(cards[1])
 	for _, banned := range []string{"回复", "确认"} {
 		if strings.Contains(body, banned) {
 			t.Fatalf("prompt card must not instruct a typed reply (found %q):\n%s", banned, body)
@@ -467,10 +467,10 @@ func TestUpgradePrompt_CardCopyHasNoTypedReplyInstruction(t *testing.T) {
 	if !strings.Contains(body, "v9.9.9") || !strings.Contains(body, "notes") {
 		t.Fatalf("prompt card lost release details:\n%s", body)
 	}
-	if labels := cardButtonLabels(cards[0]); len(labels) != 1 {
-		t.Fatalf("prompt card buttons = %v, want exactly [查看并更新]", labels)
+	if labels := cardButtonLabels(cards[1]); len(labels) != 2 || labels[0] != "更新并重启" || labels[1] != "稍后" {
+		t.Fatalf("prompt card buttons = %v, want install and defer actions", labels)
 	}
-	note := cardNotes(cards[0])
+	note := cardNotes(cards[1])
 	if !strings.Contains(note, "回复") || !strings.Contains(note, "确认") {
 		t.Fatalf("prompt card must hint the natural-language reply in a note, got %q", note)
 	}
@@ -499,10 +499,10 @@ func TestUpgradePrompt_CardUsesConfiguredReleaseLanguage(t *testing.T) {
 	p.mu.Lock()
 	cards := append([]*Card(nil), p.repliedCards...)
 	p.mu.Unlock()
-	if len(cards) != 1 {
-		t.Fatalf("got %d reply cards, want 1", len(cards))
+	if len(cards) != 2 {
+		t.Fatalf("got %d reply cards, want checking and review cards", len(cards))
 	}
-	body := cardMarkdown(cards[0])
+	body := cardMarkdown(cards[1])
 	if !strings.Contains(body, "English notes") || strings.Contains(body, "中文说明") {
 		t.Fatalf("English card used the wrong release section:\n%s", body)
 	}
