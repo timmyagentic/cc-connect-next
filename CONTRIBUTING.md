@@ -16,9 +16,11 @@ cc-connect-next is an independent successor derived from [CC Connect](https://gi
 
 Keep changes narrow and preserve the independent runtime boundaries: the `cc-connect-next` command, `~/.cc-connect-next` data directory, daemon/service names, API socket, release assets, and npm package must not collide with official CC Connect.
 
-Every change to the default branch (currently `main`) must go through a PR from a separate branch. Direct pushes, force pushes and deletion of the default branch are prohibited. The rules apply to administrators as well, with no bypass actors. Resolve all review conversations and address substantive findings before merging. Zero mandatory approvals supports the single-maintainer workflow; it does not remove the review and verification responsibilities. Merge, squash and rebase remain supported.
+Every change to the default branch (currently `main`) must go through a PR from a separate branch. Direct pushes, force pushes and deletion of the default branch are prohibited. The rules apply to administrators as well, with no bypass actors. Resolve all review conversations and address substantive findings before merging. Zero mandatory approvals supports the single-maintainer workflow; it does not remove the review and verification responsibilities. Only squash merging is allowed, so each PR becomes one commit on the default branch; merge commits and rebase merging are disabled in both repository settings and the ruleset.
 
 The desired protection is recorded in [.github/rulesets/default-branch.json](.github/rulesets/default-branch.json) and applied through the [GitHub ruleset](https://github.com/timmyagentic/cc-connect-next/rules/20888449). The JSON is a declaration, not an automatic deployment. It targets the current default branch rather than a fixed branch name. Never disable protection or use an administrator bypass to merge.
+
+Keep automatic deletion of remote PR branches enabled (`delete_branch_on_merge = true`) and verify deletion after merging when eligible. Under Tingjun Workspace, local branches and worktrees stay available for its existing archive workflow; completion releases the writer claim without deleting them. Avoid `gh pr merge --delete-branch`, which also deletes the local branch.
 
 CI is intentionally triggered only by pushing a version tag matching `v*`. Pull requests and ordinary branch pushes do not start the CI workflow, so run the local checks below before opening a PR. The release workflow runs its own complete validation for the same tag.
 
@@ -59,9 +61,11 @@ cc-connect-next 是从 [CC Connect](https://github.com/chenhg5/cc-connect) 派�
 
 改动应保持聚焦，并保护独立运行边界：`cc-connect-next` 命令、`~/.cc-connect-next` 数据目录、daemon/service、API socket、Release 产物和 npm 包均不能与官方 CC Connect 冲突。
 
-默认分支（当前为 `main`）的所有变更必须从独立分支通过 PR 合并。禁止直接推送、强推和删除默认分支，管理员同样受保护规则约束，不设置任何 bypass。合并前解决全部 review 讨论并处理实质问题。零强制审批人数用于支持单维护者工作流，不免除审查和验证责任；仍支持 merge、squash 和 rebase。
+默认分支（当前为 `main`）的所有变更必须从独立分支通过 PR 合并。禁止直接推送、强推和删除默认分支，管理员同样受保护规则约束，不设置任何 bypass。合并前解决全部 review 讨论并处理实质问题。零强制审批人数用于支持单维护者工作流，不免除审查和验证责任。只允许 squash 合并，每个 PR 在默认分支生成一个提交；仓库设置和 ruleset 均禁用 merge commit 与 rebase 合并。
 
 预期保护配置记录在 [.github/rulesets/default-branch.json](.github/rulesets/default-branch.json)，并通过 [GitHub ruleset](https://github.com/timmyagentic/cc-connect-next/rules/20888449) 生效。JSON 只是声明，提交文件不会自动修改远程设置。规则匹配当前默认分支，不写死分支名；禁止为合并而关闭保护或使用管理员绕过。
+
+保留合并后自动删除远程 PR 分支的设置（`delete_branch_on_merge = true`），并核对符合条件的远程分支确已删除。受 Tingjun Workspace 管理时，本地分支和 worktree 留给现有归档流程处理；任务完成只释放 writer claim，不直接删除它们。不要使用 `gh pr merge --delete-branch`，因为该选项也会删除本地分支。
 
 CI 现在只在推送匹配 `v*` 的版本 tag 时触发；Pull Request 和普通分支 push 不会启动 CI。因此提交 PR 前请先在本地执行下面的检查；同一个 tag 的 Release workflow 还会执行完整发布验证。
 
