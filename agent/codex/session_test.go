@@ -461,12 +461,14 @@ func TestSend_UsesStdinForMultilinePrompt(t *testing.T) {
 	argsFile := filepath.Join(workDir, "args.txt")
 	stdinFile := filepath.Join(workDir, "stdin.txt")
 	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" > \"$CODEX_ARGS_FILE\"\n" +
+		"printf '%s\\n' \"$@\" > \"$CODEX_ARGS_FILE.tmp\"\n" +
+		"mv \"$CODEX_ARGS_FILE.tmp\" \"$CODEX_ARGS_FILE\"\n" +
 		"cat > \"$CODEX_STDIN_FILE\"\n" +
 		"printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"thread-stdin\"}'\n" +
 		"printf '%s\\n' '{\"type\":\"turn.completed\"}'\n"
 	powershellScript := `
-[IO.File]::WriteAllLines($env:CODEX_ARGS_FILE, (fakeCodexArgs))
+[IO.File]::WriteAllLines($env:CODEX_ARGS_FILE + ".tmp", (fakeCodexArgs))
+[IO.File]::Move($env:CODEX_ARGS_FILE + ".tmp", $env:CODEX_ARGS_FILE)
 [IO.File]::WriteAllText($env:CODEX_STDIN_FILE, [Console]::In.ReadToEnd())
 [Console]::Out.WriteLine('{"type":"thread.started","thread_id":"thread-stdin"}')
 [Console]::Out.WriteLine('{"type":"turn.completed"}')
