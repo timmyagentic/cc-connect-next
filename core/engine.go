@@ -289,6 +289,24 @@ type PlatformStatus struct {
 // Usable reports whether this platform can currently deliver a message.
 func (s PlatformStatus) Usable() bool { return s.Ready && s.Err == nil }
 
+// Standby is an idle, on-demand transport, not a failed connection.
+func (s PlatformStatus) Standby() bool { return errors.Is(s.Err, ErrPlatformStandby) }
+
+// PlatformsReady requires a usable delivery path and no failed or starting
+// platforms. Standby transports do not block other usable paths, but cannot
+// make a project ready on their own.
+func PlatformsReady(statuses []PlatformStatus) bool {
+	usable := false
+	for _, status := range statuses {
+		if status.Usable() {
+			usable = true
+		} else if !status.Standby() {
+			return false
+		}
+	}
+	return usable
+}
+
 // PlatformStatuses returns the state of every platform of this engine, in
 // configuration order.
 //

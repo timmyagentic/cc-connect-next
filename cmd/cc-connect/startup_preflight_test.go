@@ -156,6 +156,31 @@ func TestUnusablePlatformWarning_SilentWhenEverythingIsUsable(t *testing.T) {
 
 type stubStatuses []core.PlatformStatus
 
+func TestUnusablePlatformWarningDoesNotTreatStandbyBridgeAsFailure(t *testing.T) {
+	bridge := core.NewBridgeServerInsecure(0, "", "/bridge/ws", nil).NewPlatform("alpha")
+	warning := unusablePlatformWarning([]projectPlatformReadiness{{
+		project: "alpha", engine: stubStatuses{
+			{Name: "native", Ready: true},
+			{Name: "bridge", Err: bridge.ConnectionError()},
+		},
+	}})
+	if warning != "" {
+		t.Fatalf("standby Bridge generated a failure warning: %s", warning)
+	}
+}
+
+func TestUnusablePlatformWarningPreservesOtherReadyPlatforms(t *testing.T) {
+	warning := unusablePlatformWarning([]projectPlatformReadiness{{
+		project: "alpha", engine: stubStatuses{
+			{Name: "connected", Ready: true},
+			{Name: "disconnected", Err: errors.New("connection lost")},
+		},
+	}})
+	if !strings.Contains(warning, "alpha/disconnected") || !strings.Contains(warning, "Other ready platforms remain available") || strings.Contains(warning, "nothing reaches the agent") {
+		t.Fatalf("partial failure warning misrepresents ready platforms: %s", warning)
+	}
+}
+
 func (s stubStatuses) PlatformStatuses() []core.PlatformStatus { return s }
 
 func configFromTOML(t *testing.T, doc string) *config.Config {

@@ -127,10 +127,8 @@ func (c *UpdateCoordinator) engineSnapshot() []*Engine {
 }
 func (c *UpdateCoordinator) connectionsReady() bool {
 	for _, e := range c.engineSnapshot() {
-		for _, p := range e.PlatformStatuses() {
-			if !p.Usable() {
-				return false
-			}
+		if !PlatformsReady(e.PlatformStatuses()) {
+			return false
 		}
 	}
 	return true

@@ -64,6 +64,20 @@ func TestSummarizeRuntimeHealth(t *testing.T) {
 	}
 }
 
+func TestSummarizeRuntimeHealthReadyWithStandbyBridge(t *testing.T) {
+	health := core.RuntimeHealth{Ready: true, Projects: []core.RuntimeProjectHealth{{
+		Name: "alpha", Ready: true,
+		Platforms: []core.RuntimePlatformHealth{
+			{Name: "native", State: core.RuntimePlatformReady},
+			{Name: "bridge", State: "standby", Reason: "waiting for first client"},
+		},
+	}}}
+	state, lines := summarizeRuntimeHealth(health)
+	if state != "Ready" || len(lines) != 2 || !strings.Contains(lines[0], "bridge: standby") {
+		t.Fatalf("summary = %q / %v", state, lines)
+	}
+}
+
 func TestRuntimeAPIReachableDistinguishesMissingAndListeningSockets(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix socket fixture")

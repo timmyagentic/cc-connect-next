@@ -205,7 +205,7 @@ func newBridgeServer(port int, token, path string, corsOrigins []string, insecur
 
 // NewPlatform creates a BridgePlatform for a specific project engine.
 func (bs *BridgeServer) NewPlatform(projectName string) *BridgePlatform {
-	return &BridgePlatform{server: bs, project: projectName, connectionErr: errBridgeNoAdapters}
+	return &BridgePlatform{server: bs, project: projectName, connectionErr: fmt.Errorf("%w: no Bridge adapters connected", ErrPlatformStandby)}
 }
 
 // RegisterEngine associates a project engine with its BridgePlatform.
@@ -245,7 +245,7 @@ func (bs *BridgeServer) setEnginePlatformsReady() {
 	}
 }
 
-func (bs *BridgeServer) setEnginePlatformsUnavailable() {
+func (bs *BridgeServer) setEnginePlatformsUnavailable(err error) {
 	bs.enginesMu.RLock()
 	refs := make([]*bridgeEngineRef, 0, len(bs.engines))
 	for _, ref := range bs.engines {
@@ -253,8 +253,8 @@ func (bs *BridgeServer) setEnginePlatformsUnavailable() {
 	}
 	bs.enginesMu.RUnlock()
 	for _, ref := range refs {
-		ref.platform.setConnectionError(errBridgeNoAdapters)
-		ref.engine.OnPlatformUnavailable(ref.platform, errBridgeNoAdapters)
+		ref.platform.setConnectionError(err)
+		ref.engine.OnPlatformUnavailable(ref.platform, err)
 	}
 }
 
@@ -274,6 +274,9 @@ func (bs *BridgeServer) Start() {
 		slog.Info("bridge: server started", "addr", addr, "path", bs.path)
 		if err := bs.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("bridge: server error", "error", err)
+			bs.lifecycleMu.Lock()
+			bs.setEnginePlatformsUnavailable(err)
+			bs.lifecycleMu.Unlock()
 		}
 	}()
 }
@@ -980,7 +983,7 @@ func (bs *BridgeServer) handleConnection(conn *websocket.Conn) {
 		}
 		bs.mu.Unlock()
 		if lastAdapterDisconnected {
-			bs.setEnginePlatformsUnavailable()
+			bs.setEnginePlatformsUnavailable(errBridgeNoAdapters)
 		}
 		bs.lifecycleMu.Unlock()
 		slog.Info("bridge: adapter disconnected", "platform", reg.Platform)

@@ -497,13 +497,19 @@ type PlatformLifecycleHandler interface {
 	OnPlatformUnavailable(p Platform, err error)
 }
 
+// ErrPlatformStandby marks an on-demand transport waiting for its first client.
+// It cannot deliver messages yet, but does not block another usable platform.
+// Connection loss or listener failures must use ordinary errors instead.
+var ErrPlatformStandby = errors.New("waiting for first client")
+
 // PlatformHealth is an optional interface for platforms whose connection can
 // fail after Start returned successfully.
 //
 // A long connection is established in the background, so Start succeeding says
 // nothing about whether the platform can deliver a message. Implementations
 // return the error that ended the last connection attempt, or nil while the
-// connection is usable.
+// connection is usable. An on-demand platform may wrap ErrPlatformStandby
+// before its first client connects.
 type PlatformHealth interface {
 	ConnectionError() error
 }

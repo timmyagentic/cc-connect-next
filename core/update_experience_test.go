@@ -330,6 +330,10 @@ func TestUpdateExperience_PartialConnectionsUpdateWhenOtherProjectRecovers(t *te
 	e.dataDir = t.TempDir()
 	e.SetUpdateCoordinator(c)
 	e.markPlatformReady(p)
+	bs := NewBridgeServerInsecure(0, "", "/bridge/ws", nil)
+	bp := bs.NewPlatform("test")
+	bs.RegisterEngine("test", e, bp)
+	e.AddPlatform(bp)
 	otherPlatform := &stubPlatformEngine{n: "other-platform"}
 	other := NewEngine("other", &stubAgent{}, []Platform{otherPlatform}, "", LangEnglish)
 	other.SetUpdateCoordinator(c)
