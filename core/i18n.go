@@ -343,6 +343,21 @@ const (
 	MsgModelCardSwitched                MsgKey = "model_card_switched"
 	MsgModelCardSwitchFailed            MsgKey = "model_card_switch_failed"
 	MsgModelNotSupported                MsgKey = "model_not_supported"
+	MsgModelGroupOnly                   MsgKey = "model_group_only"
+	MsgModelGroupStorageUnavailable     MsgKey = "model_group_storage_unavailable"
+	MsgModelGroupUnsupported            MsgKey = "model_group_unsupported"
+	MsgModelGroupProviderChanged        MsgKey = "model_group_provider_changed"
+	MsgModelGroupSessionProviderChanged MsgKey = "model_group_session_provider_changed"
+	MsgModelGroupUnknown                MsgKey = "model_group_unknown"
+	MsgModelGroupUsage                  MsgKey = "model_group_usage"
+	MsgModelGroupReset                  MsgKey = "model_group_reset"
+	MsgModelGroupChanged                MsgKey = "model_group_changed"
+	MsgModelGroupCurrent                MsgKey = "model_group_current"
+	MsgModelGroupDefault                MsgKey = "model_group_default"
+	MsgModelGroupResetButton            MsgKey = "model_group_reset_button"
+	MsgModelGroupSelect                 MsgKey = "model_group_select"
+	MsgModelScopeProject                MsgKey = "model_scope_project"
+	MsgModelScopeWorkspace              MsgKey = "model_scope_workspace"
 	MsgSpeedNotSupported                MsgKey = "speed_not_supported"
 	MsgSpeedUnavailable                 MsgKey = "speed_unavailable"
 	MsgSpeedInvalid                     MsgKey = "speed_invalid"
@@ -1492,7 +1507,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  Manage API providers\n\n" +
 			"/memory [add|global|global add]\n  View/edit agent memory files\n\n" +
 			"/allow <tool>\n  Pre-allow a tool (next session)\n\n" +
-			"/model [switch <name>]\n  View/switch model\n\n" +
+			"/model [switch <name>|group [<name>|reset]]\n  View models; set project/workspace default or group model\n\n" +
 			"/reasoning [level]\n  View/switch reasoning effort\n\n" +
 			"/speed [default|fast|tier]\n  View/switch saved conversation speed (next turn)\n\n" +
 			"/mode [name]\n  View/switch permission mode\n\n" +
@@ -1537,7 +1552,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  管理 API Provider\n\n" +
 			"/memory [add|global|global add]\n  查看/编辑 Agent 记忆文件\n\n" +
 			"/allow <工具名>\n  预授权工具（下次会话生效）\n\n" +
-			"/model [switch <名称>]\n  查看/切换模型\n\n" +
+			"/model [switch <名称>|group [<名称>|reset]]\n  查看模型；设置项目/工作区默认或群模型\n\n" +
 			"/reasoning [级别]\n  查看/切换推理强度\n\n" +
 			"/speed [default|fast|tier]\n  查看/切换会话速度并保存（后续回合生效）\n\n" +
 			"/mode [名称]\n  查看/切换权限模式\n\n" +
@@ -1582,7 +1597,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  管理 API Provider\n\n" +
 			"/memory [add|global|global add]\n  查看/編輯 Agent 記憶檔案\n\n" +
 			"/allow <工具名>\n  預授權工具（下次會話生效）\n\n" +
-			"/model [switch <名稱>]\n  查看/切換模型\n\n" +
+			"/model [switch <名稱>|group [<名稱>|reset]]\n  查看模型；設定專案/工作區預設或群組模型\n\n" +
 			"/reasoning [級別]\n  查看/切換推理強度\n\n" +
 			"/speed [default|fast|tier]\n  查看/切換會話速度並儲存（後續回合生效）\n\n" +
 			"/mode [名稱]\n  查看/切換權限模式\n\n" +
@@ -1625,7 +1640,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  API プロバイダ管理\n\n" +
 			"/memory [add|global|global add]\n  エージェントメモリの表示/編集\n\n" +
 			"/allow <ツール名>\n  ツールを事前許可（次のセッションで有効）\n\n" +
-			"/model [switch <名前>]\n  モデルの表示/切り替え\n\n" +
+			"/model [switch <名前>|group [<名前>|reset]]\n  モデル表示・プロジェクト/ワークスペースの既定値またはグループモデルを設定\n\n" +
 			"/reasoning [レベル]\n  推論レベルの表示/切り替え\n\n" +
 			"/speed [default|fast|tier]\n  会話の速度を表示/保存（次のターンから）\n\n" +
 			"/mode [名前]\n  権限モードの表示/切り替え\n\n" +
@@ -1668,7 +1683,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  Gestionar proveedores API\n\n" +
 			"/memory [add|global|global add]\n  Ver/editar archivos de memoria del agente\n\n" +
 			"/allow <herramienta>\n  Pre-autorizar herramienta (próxima sesión)\n\n" +
-			"/model [switch <nombre>]\n  Ver/cambiar modelo\n\n" +
+			"/model [switch <nombre>|group [<nombre>|reset]]\n  Ver modelos; fijar predeterminado del proyecto/espacio o modelo del grupo\n\n" +
 			"/reasoning [nivel]\n  Ver/cambiar nivel de razonamiento\n\n" +
 			"/speed [default|fast|tier]\n  Ver/cambiar velocidad guardada (próximo turno)\n\n" +
 			"/mode [nombre]\n  Ver/cambiar modo de permisos\n\n" +
@@ -1757,35 +1772,35 @@ var messages = map[MsgKey]map[Language]string{
 	},
 	MsgHelpAgentSection: {
 		LangEnglish: "**Agent Configuration**\n" +
-			"/model [switch <name>] — View/switch model\n" +
+			"/model [switch <name>|group [<name>|reset]] — View models; set project/workspace default or group model\n" +
 			"/mode [name] — View/switch permission mode\n" +
 			"/provider [list|add|...] — Manage API providers\n" +
 			"/memory [add|global|...] — View/edit memory files\n" +
 			"/allow <tool> — Pre-allow a tool\n" +
 			"/lang [en|zh|...] — View/switch language",
 		LangChinese: "**Agent 配置**\n" +
-			"/model [switch <名称>] — 查看/切换模型\n" +
+			"/model [switch <名称>|group [<名称>|reset]] — 查看模型；设置项目/工作区默认或群模型\n" +
 			"/mode [名称] — 查看/切换权限模式\n" +
 			"/provider [list|add|...] — 管理 API Provider\n" +
 			"/memory [add|global|...] — 查看/编辑记忆文件\n" +
 			"/allow <工具名> — 预授权工具\n" +
 			"/lang [en|zh|...] — 查看/切换语言",
 		LangTraditionalChinese: "**Agent 配置**\n" +
-			"/model [switch <名稱>] — 查看/切換模型\n" +
+			"/model [switch <名稱>|group [<名稱>|reset]] — 查看模型；設定專案/工作區預設或群組模型\n" +
 			"/mode [名稱] — 查看/切換權限模式\n" +
 			"/provider [list|add|...] — 管理 API Provider\n" +
 			"/memory [add|global|...] — 查看/編輯記憶檔案\n" +
 			"/allow <工具名> — 預授權工具\n" +
 			"/lang [en|zh|...] — 查看/切換語言",
 		LangJapanese: "**エージェント設定**\n" +
-			"/model [switch <名前>] — モデルの表示/切り替え\n" +
+			"/model [switch <名前>|group [<名前>|reset]] — モデル表示・プロジェクト/ワークスペースの既定値またはグループモデルを設定\n" +
 			"/mode [名前] — 権限モードの表示/切り替え\n" +
 			"/provider [list|add|...] — API プロバイダ管理\n" +
 			"/memory [add|global|...] — メモリの表示/編集\n" +
 			"/allow <ツール名> — ツールを事前許可\n" +
 			"/lang [en|zh|...] — 言語の表示/切り替え",
 		LangSpanish: "**Configuración del agente**\n" +
-			"/model [switch <nombre>] — Ver/cambiar modelo\n" +
+			"/model [switch <nombre>|group [<nombre>|reset]] — Ver modelos; fijar predeterminado del proyecto/espacio o modelo del grupo\n" +
 			"/mode [nombre] — Ver/cambiar modo de permisos\n" +
 			"/provider [list|add|...] — Gestionar proveedores\n" +
 			"/memory [add|global|...] — Ver/editar memoria\n" +
@@ -2746,11 +2761,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Modelo actual: %s",
 	},
 	MsgModelChanged: {
-		LangEnglish:            "Model switched to `%s`. This session and all future sessions will use it.",
-		LangChinese:            "模型已切换为 `%s`，当前会话与后续会话均使用此模型。",
-		LangTraditionalChinese: "模型已切換為 `%s`，當前會話與後續會話均使用此模型。",
-		LangJapanese:           "モデルを `%s` に切り替えました。このセッションと今後のセッションで使用されます。",
-		LangSpanish:            "Modelo cambiado a `%s`. Esta sesión y las futuras usarán este modelo.",
+		LangEnglish:            "Model switched to `%s`. Project/workspace default updated; groups with a fixed model keep their selection.",
+		LangChinese:            "模型已切换为 `%s`。已更新项目/工作区默认模型；固定模型的群不跟随此变更。",
+		LangTraditionalChinese: "模型已切換為 `%s`。已更新專案/工作區預設模型；固定模型的群組不跟隨此變更。",
+		LangJapanese:           "モデルを `%s` に切り替えました。プロジェクト/ワークスペースの既定値を更新しました。モデルを固定したグループには反映されません。",
+		LangSpanish:            "Modelo cambiado a `%s`. Se actualizó el valor predeterminado del proyecto/espacio de trabajo; los grupos con un modelo fijo conservan su selección.",
 	},
 	MsgModelChangeFailed: {
 		LangEnglish:            "❌ Failed to change model: %v",
@@ -2760,18 +2775,18 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "❌ Error al cambiar el modelo: %v",
 	},
 	MsgModelCardSwitching: {
-		LangEnglish:            "Switching model to `%s`...",
-		LangChinese:            "正在切换模型为 `%s`...",
-		LangTraditionalChinese: "正在切換模型為 `%s`...",
-		LangJapanese:           "モデルを `%s` に切り替えています...",
-		LangSpanish:            "Cambiando el modelo a `%s`...",
+		LangEnglish:            "Switching project/workspace default model to `%s`... Groups with a fixed model keep their selection.",
+		LangChinese:            "正在将项目/工作区默认模型切换为 `%s`... 固定模型的群不跟随此变更。",
+		LangTraditionalChinese: "正在將專案/工作區預設模型切換為 `%s`... 固定模型的群組不跟隨此變更。",
+		LangJapanese:           "プロジェクト/ワークスペースの既定モデルを `%s` に切り替えています... モデルを固定したグループには反映されません。",
+		LangSpanish:            "Cambiando el modelo predeterminado del proyecto/espacio de trabajo a `%s`... Los grupos con un modelo fijo conservan su selección.",
 	},
 	MsgModelCardSwitched: {
-		LangEnglish:            "Model switched to `%s`.",
-		LangChinese:            "模型已切换为 `%s`。",
-		LangTraditionalChinese: "模型已切換為 `%s`。",
-		LangJapanese:           "モデルを `%s` に切り替えました。",
-		LangSpanish:            "Modelo cambiado a `%s`.",
+		LangEnglish:            "Model switched to `%s`. Project/workspace default updated; groups with a fixed model keep their selection.",
+		LangChinese:            "模型已切换为 `%s`。已更新项目/工作区默认模型；固定模型的群不跟随此变更。",
+		LangTraditionalChinese: "模型已切換為 `%s`。已更新專案/工作區預設模型；固定模型的群組不跟隨此變更。",
+		LangJapanese:           "モデルを `%s` に切り替えました。プロジェクト/ワークスペースの既定値を更新しました。モデルを固定したグループには反映されません。",
+		LangSpanish:            "Modelo cambiado a `%s`. Se actualizó el valor predeterminado del proyecto/espacio de trabajo; los grupos con un modelo fijo conservan su selección.",
 	},
 	MsgModelCardSwitchFailed: {
 		LangEnglish:            "Failed to switch model: %v",
@@ -2786,6 +2801,111 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "當前 Agent 不支援模型切換。",
 		LangJapanese:           "このエージェントはモデルの切り替えをサポートしていません。",
 		LangSpanish:            "Este agente no soporta el cambio de modelo.",
+	},
+	MsgModelGroupOnly: {
+		LangEnglish:            "Group model selection requires a verified group chat. If the group is not yet recognized, send `/model` in the group first.",
+		LangChinese:            "仅已验证的群聊可设置群模型。若尚未识别本群，请先在群里发送 `/model`。",
+		LangTraditionalChinese: "僅已驗證的群組可設定群組模型。若尚未識別本群組，請先在群組中傳送 `/model`。",
+		LangJapanese:           "グループモデルは確認済みのグループチャットでのみ設定できます。まだ認識されていない場合は、まずグループ内で `/model` を送信してください。",
+		LangSpanish:            "Solo se puede fijar un modelo en un grupo verificado. Si el grupo aún no se reconoce, envía primero `/model` en el grupo.",
+	},
+	MsgModelGroupStorageUnavailable: {
+		LangEnglish:            "Persistent storage for group models is unavailable. The group model setting was not changed.",
+		LangChinese:            "群模型持久化存储不可用，未更改本群模型设置。",
+		LangTraditionalChinese: "群組模型持久化儲存無法使用，未變更本群組模型設定。",
+		LangJapanese:           "グループモデルの永続ストレージを利用できないため、設定は変更されませんでした。",
+		LangSpanish:            "El almacenamiento persistente de modelos de grupo no está disponible. No se cambió la configuración del grupo.",
+	},
+	MsgModelGroupUnsupported: {
+		LangEnglish:            "Group models require per-turn model support from the current backend. This backend does not support it; no fallback model will be used.",
+		LangChinese:            "群模型需要当前后端支持逐回合指定模型（per-turn model）。当前后端不支持，不会回退到其他模型。",
+		LangTraditionalChinese: "群組模型需要目前後端支援逐回合指定模型（per-turn model）。目前後端不支援，不會退回其他模型。",
+		LangJapanese:           "グループモデルには現在のバックエンドのターンごとのモデル指定機能が必要です。このバックエンドは非対応のため、別のモデルへのフォールバックは行いません。",
+		LangSpanish:            "Los modelos de grupo requieren que el backend actual admita modelos por turno. Este backend no los admite; no se usará otro modelo como alternativa.",
+	},
+	MsgModelGroupProviderChanged: {
+		LangEnglish:            "The current backend/provider does not match this group's saved binding. Set `/model group <name>` again or run `/model group reset`; no automatic fallback will be used.",
+		LangChinese:            "当前后端/Provider 与本群保存的绑定不符。请重新执行 `/model group <name>` 设置，或执行 `/model group reset`；不会静默回退。",
+		LangTraditionalChinese: "目前後端/Provider 與本群組儲存的綁定不符。請重新執行 `/model group <name>` 設定，或執行 `/model group reset`；不會默默退回預設模型。",
+		LangJapanese:           "現在のバックエンド/Provider は保存済みのグループ設定と一致しません。`/model group <name>` で設定し直すか、`/model group reset` を実行してください。自動フォールバックは行いません。",
+		LangSpanish:            "El backend/Provider actual no coincide con la vinculación guardada del grupo. Configura de nuevo `/model group <name>` o ejecuta `/model group reset`; no habrá una sustitución automática.",
+	},
+	MsgModelGroupSessionProviderChanged: {
+		LangEnglish:            "This conversation is still connected to a different Provider. Reconnect it with `/provider switch <name>` or start `/new`, then retry. The group binding was not changed.",
+		LangChinese:            "本对话仍连接着另一个 Provider。请在本对话通过 `/provider switch <name>` 重新连接，或使用 `/new`，然后重试。群绑定未改变。",
+		LangTraditionalChinese: "本對話仍連接另一個 Provider。請在本對話透過 `/provider switch <name>` 重新連接，或使用 `/new`，然後重試。群組綁定未變更。",
+		LangJapanese:           "この会話は別の Provider に接続したままです。`/provider switch <name>` で再接続するか `/new` を開始して再試行してください。グループ設定は変更されていません。",
+		LangSpanish:            "Esta conversación sigue conectada a otro Provider. Reconéctala con `/provider switch <name>` o inicia `/new` y vuelve a intentarlo. La selección del grupo no cambió.",
+	},
+	MsgModelGroupUnknown: {
+		LangEnglish:            "`%s` is not selectable from the current model list. Send `/model` to view the available group model choices.",
+		LangChinese:            "`%s` 不在当前模型列表的可选项中。请发送 `/model` 查看本群可选模型。",
+		LangTraditionalChinese: "`%s` 不在目前模型清單的可選項目中。請傳送 `/model` 查看本群組可選模型。",
+		LangJapanese:           "`%s` は現在のモデル一覧から選択できません。`/model` でグループに設定できるモデルを確認してください。",
+		LangSpanish:            "`%s` no se puede seleccionar en la lista actual de modelos. Envía `/model` para ver los modelos disponibles para el grupo.",
+	},
+	MsgModelGroupUsage: {
+		LangEnglish:            "Usage: `/model group <name|reset>`",
+		LangChinese:            "用法：`/model group <name|reset>`",
+		LangTraditionalChinese: "用法：`/model group <name|reset>`",
+		LangJapanese:           "使い方: `/model group <name|reset>`",
+		LangSpanish:            "Uso: `/model group <name|reset>`",
+	},
+	MsgModelGroupReset: {
+		LangEnglish:            "This group now follows the workspace/project default model. Applies from the next request.",
+		LangChinese:            "本群已恢复跟随工作区/项目默认模型，从下次请求生效。",
+		LangTraditionalChinese: "本群組已恢復跟隨工作區/專案預設模型，從下次請求生效。",
+		LangJapanese:           "このグループはワークスペース/プロジェクトの既定モデルを使用する設定に戻りました。次のリクエストから適用されます。",
+		LangSpanish:            "El grupo vuelve a usar el modelo predeterminado del espacio de trabajo/proyecto. Se aplicará a partir de la próxima solicitud.",
+	},
+	MsgModelGroupChanged: {
+		LangEnglish:            "Group model set to `%s` for all members and all topics. Applies to the next new request without interrupting the current reply.",
+		LangChinese:            "本群模型已固定为 `%s`，适用于全部成员和全部话题。从下次新请求生效，不打断当前回复。",
+		LangTraditionalChinese: "本群組模型已固定為 `%s`，適用於所有成員和所有話題。從下次新請求生效，不中斷目前回覆。",
+		LangJapanese:           "グループモデルを `%s` に固定しました。全メンバー・全トピックが対象です。現在の応答を中断せず、次の新しいリクエストから適用されます。",
+		LangSpanish:            "Modelo del grupo fijado en `%s` para todos los miembros y temas. Se aplicará a la próxima solicitud nueva sin interrumpir la respuesta actual.",
+	},
+	MsgModelGroupCurrent: {
+		LangEnglish:            "Ordinary-message model: `%s` (source: fixed for this group).",
+		LangChinese:            "普通消息实际使用模型：`%s`（来源：本群固定）。",
+		LangTraditionalChinese: "一般訊息實際使用模型：`%s`（來源：本群組固定）。",
+		LangJapanese:           "通常メッセージで使用するモデル: `%s`（設定元: このグループの固定モデル）。",
+		LangSpanish:            "Modelo para mensajes normales: `%s` (origen: modelo fijo de este grupo).",
+	},
+	MsgModelGroupDefault: {
+		LangEnglish:            "Ordinary-message model source: follows the workspace/project default.",
+		LangChinese:            "普通消息模型来源：跟随工作区/项目默认。",
+		LangTraditionalChinese: "一般訊息模型來源：跟隨工作區/專案預設。",
+		LangJapanese:           "通常メッセージのモデル設定元: ワークスペース/プロジェクトの既定値に従います。",
+		LangSpanish:            "Origen del modelo para mensajes normales: valor predeterminado del espacio de trabajo/proyecto.",
+	},
+	MsgModelGroupResetButton: {
+		LangEnglish:            "Follow default",
+		LangChinese:            "跟随默认",
+		LangTraditionalChinese: "跟隨預設",
+		LangJapanese:           "既定値に従う",
+		LangSpanish:            "Usar predeterminado",
+	},
+	MsgModelGroupSelect: {
+		LangEnglish:            "Set this group's model",
+		LangChinese:            "设置本群模型",
+		LangTraditionalChinese: "設定本群組模型",
+		LangJapanese:           "このグループのモデルを設定",
+		LangSpanish:            "Configurar modelo del grupo",
+	},
+	MsgModelScopeProject: {
+		LangEnglish:            "Project default: affects private chats and groups without a fixed model.",
+		LangChinese:            "项目默认：影响未固定模型的群和私聊。",
+		LangTraditionalChinese: "專案預設：影響未固定模型的群組和私人聊天。",
+		LangJapanese:           "プロジェクトの既定値: 個別チャットとモデル未固定のグループに適用。",
+		LangSpanish:            "Predeterminado del proyecto: afecta a chats privados y grupos sin un modelo fijo.",
+	},
+	MsgModelScopeWorkspace: {
+		LangEnglish:            "Workspace default: affects conversations without a fixed group model in this workspace.",
+		LangChinese:            "工作区默认：影响该工作区未固定群模型的对话。",
+		LangTraditionalChinese: "工作區預設：影響該工作區未固定群組模型的對話。",
+		LangJapanese:           "ワークスペースの既定値: このワークスペース内でグループモデルを固定していない会話に適用。",
+		LangSpanish:            "Predeterminado del espacio de trabajo: afecta a las conversaciones de este espacio sin un modelo de grupo fijo.",
 	},
 	MsgSpeedNotSupported: {
 		LangEnglish:            "This agent/session does not support speed switching.",
@@ -3083,11 +3203,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Modelos disponibles:\n",
 	},
 	MsgModelUsage: {
-		LangEnglish:            "Usage: `/model switch <number>` or `/model switch <model_name>`",
-		LangChinese:            "用法: `/model switch <序号>` 或 `/model switch <模型名>`",
-		LangTraditionalChinese: "用法: `/model switch <序號>` 或 `/model switch <模型名>`",
-		LangJapanese:           "使い方: `/model switch <番号>` または `/model switch <モデル名>`",
-		LangSpanish:            "Uso: `/model switch <número>` o `/model switch <nombre_modelo>`",
+		LangEnglish:            "Usage: `/model switch <number>` or `/model switch <model_name>` changes the project/workspace default; groups with a fixed model keep their selection. Use `/model group <name|reset>` for this group.",
+		LangChinese:            "用法：`/model switch <序号>` 或 `/model switch <模型名>` 更改项目/工作区默认模型；固定模型的群不跟随。使用 `/model group <name|reset>` 设置本群。",
+		LangTraditionalChinese: "用法：`/model switch <序號>` 或 `/model switch <模型名>` 變更專案/工作區預設模型；固定模型的群組不跟隨。使用 `/model group <name|reset>` 設定本群組。",
+		LangJapanese:           "使い方: `/model switch <番号>` または `/model switch <モデル名>` でプロジェクト/ワークスペースの既定値を変更します。固定モデルのグループには反映されません。このグループには `/model group <name|reset>` を使用してください。",
+		LangSpanish:            "Uso: `/model switch <número>` o `/model switch <nombre_modelo>` cambia el valor predeterminado del proyecto/espacio de trabajo; los grupos con modelo fijo conservan su selección. Usa `/model group <name|reset>` para este grupo.",
 	},
 	MsgReasoningDefault: {
 		LangEnglish:            "Current reasoning effort: (not set, using Codex default)\n",
@@ -3122,8 +3242,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese: "言語を選択", LangSpanish: "Seleccionar idioma",
 	},
 	MsgModelSelectPlaceholder: {
-		LangEnglish: "Select model", LangChinese: "选择模型", LangTraditionalChinese: "選擇模型",
-		LangJapanese: "モデルを選択", LangSpanish: "Seleccionar modelo",
+		LangEnglish:            "Project/workspace default (fixed groups unchanged)",
+		LangChinese:            "选择项目/工作区默认模型（固定群不跟随）",
+		LangTraditionalChinese: "選擇專案/工作區預設模型（固定群組不跟隨）",
+		LangJapanese:           "プロジェクト/ワークスペースの既定値（固定グループは対象外）",
+		LangSpanish:            "Predeterminado del proyecto/espacio (grupos con modelo fijo sin cambios)",
 	},
 	MsgReasoningSelectPlaceholder: {
 		LangEnglish: "Select reasoning level", LangChinese: "选择推理强度", LangTraditionalChinese: "選擇推理強度",
@@ -4647,11 +4770,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Pre-autorizar herramienta (próxima sesión), arg: <herramienta>",
 	},
 	MsgBuiltinCmdModel: {
-		LangEnglish:            "View/switch model, arg: [name]",
-		LangChinese:            "查看/切换模型，参数: [名称]",
-		LangTraditionalChinese: "查看/切換模型，參數: [名稱]",
-		LangJapanese:           "モデルの表示/切り替え、引数: [名前]",
-		LangSpanish:            "Ver/cambiar modelo, arg: [nombre]",
+		LangEnglish:            "View models; set project/workspace default or group model",
+		LangChinese:            "查看模型；设置项目/工作区默认或群模型",
+		LangTraditionalChinese: "查看模型；設定專案/工作區預設或群組模型",
+		LangJapanese:           "モデル表示・プロジェクト/ワークスペースの既定値またはグループモデルを設定",
+		LangSpanish:            "Ver modelos; fijar predeterminado del proyecto/espacio o modelo del grupo",
 	},
 	MsgBuiltinCmdReasoning: {
 		LangEnglish:            "View/switch reasoning effort, arg: [level]",

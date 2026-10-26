@@ -352,10 +352,13 @@ type sessionRuntimeCapabilitySpec struct {
 	unboundDescription, unboundZH          string
 	fallback, fallbackZH                   string
 	unavailableReason, unavailableReasonZH string
+	readOnly                               bool
+	fallbackMode                           string
 	supported                              func(AgentSession) bool
 }
 
 var sessionRuntimeCapabilitySpecs = []sessionRuntimeCapabilitySpec{
+	{id: "model_provider_identity", description: "Inspect the provider identity captured by the backend session without exposing its value.", zh: "检查后端会话创建时记录的 Provider 身份能力，不公开配置值。", unboundDescription: "Inspect the session's captured provider identity.", unboundZH: "检查会话创建时记录的 Provider 身份。", readOnly: true, fallbackMode: "reject", fallback: "Provider-switching Agents require session identity for pinned group turns; reconnect a mismatched session before retrying.", fallbackZH: "可切换 Provider 的 Agent 执行群固定模型请求时必须能确认会话身份；会话不匹配时重新连接后重试。", supported: func(session AgentSession) bool { _, ok := session.(ModelProviderSession); return ok }},
 	{id: "feedback_diagnostics", description: "Capture cached turn and transport diagnostics without probing the backend.", zh: "读取缓存的回合和传输诊断，不额外探测后端。", unboundDescription: "Capture cached feedback diagnostics.", unboundZH: "读取缓存的反馈诊断。", fallback: "Reports include host observations and mark unsupported backend fields as unavailable.", fallbackZH: "报告保留宿主观测，并标记后端不支持的字段。", supported: func(session AgentSession) bool { _, ok := session.(AgentDiagnosticProvider); return ok }},
 	{id: "turn_options", description: "Apply model, reasoning, service tier, or answer profile to one turn.", zh: "为单个回合应用模型、推理强度、服务等级或回答档位。", unboundDescription: "Apply runtime settings to one turn.", unboundZH: "为单个回合应用运行时设置。", fallback: "Use persistent Agent defaults when no override is requested; explicit unsupported cron models are rejected.", fallbackZH: "未请求覆盖时使用 Agent 持久默认值；不支持的 Cron 显式模型会被拒绝。", supported: func(session AgentSession) bool { _, ok := session.(TurnOptionsSession); return ok }},
 	{id: "steer", description: "Append input to the active turn.", zh: "把输入并入当前回合。", unboundDescription: "Append input to the active turn.", unboundZH: "把输入并入当前回合。", fallback: "Use FIFO for ordinary busy messages; /ps rejects when it cannot safely supplement.", fallbackZH: "普通忙时消息使用 FIFO；/ps 无法安全补充时会拒绝。", supported: func(session AgentSession) bool { _, ok := session.(SteerableSession); return ok }},
@@ -384,7 +387,16 @@ func (e *Engine) sessionRuntimeCapabilities(session AgentSession) RuntimeAdapter
 				}
 			}
 		}
-		result.Capabilities = append(result.Capabilities, feature(item.id, item.description, item.zh, availability, CapabilityFallback{Mode: "degrade", Description: item.fallback, DescriptionZH: item.fallbackZH}))
+		fallbackMode := item.fallbackMode
+		if fallbackMode == "" {
+			fallbackMode = "degrade"
+		}
+		capability := feature(item.id, item.description, item.zh, availability, CapabilityFallback{Mode: fallbackMode, Description: item.fallback, DescriptionZH: item.fallbackZH})
+		if item.readOnly {
+			readOnly := true
+			capability.ReadOnly = &readOnly
+		}
+		result.Capabilities = append(result.Capabilities, capability)
 	}
 	return result
 }
@@ -398,8 +410,12 @@ func (e *Engine) unboundSessionRuntimeCapabilities() RuntimeAdapterCapabilities 
 			availability = unavailable(item.unavailableReason, item.unavailableReasonZH)
 			fallback = CapabilityFallback{Mode: "degrade", Description: item.fallback, DescriptionZH: item.fallbackZH}
 		}
-		result.Capabilities = append(result.Capabilities, feature(item.id, item.unboundDescription, item.unboundZH,
-			availability, fallback))
+		capability := feature(item.id, item.unboundDescription, item.unboundZH, availability, fallback)
+		if item.readOnly {
+			readOnly := true
+			capability.ReadOnly = &readOnly
+		}
+		result.Capabilities = append(result.Capabilities, capability)
 	}
 	return result
 }

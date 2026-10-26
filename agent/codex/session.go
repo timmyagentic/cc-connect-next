@@ -17,8 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/timmyagentic/cc-connect-next/internal/processgroup"
 	"github.com/timmyagentic/cc-connect-next/core"
+	"github.com/timmyagentic/cc-connect-next/internal/processgroup"
 )
 
 // codexSession manages a multi-turn Codex conversation.
@@ -32,6 +32,7 @@ type codexSession struct {
 	mode           string
 	baseURL        string   // provider base URL; passed as -c openai_base_url=<url>
 	modelProvider  string   // Codex model_provider name; passed as -c model_provider=<name>
+	providerName   string   // immutable configured provider identity, including Env-only providers
 	cmd            string   // CLI binary, default "codex"
 	cliExtraArgs   []string // extra args from cmd, prepended before exec args
 	extraEnv       []string
@@ -101,6 +102,7 @@ type codexSessionParams struct {
 	resumeID      string
 	baseURL       string
 	modelProvider string
+	providerName  string
 	extraEnv      []string
 	systemPrompt  string
 	appendPrompt  string
@@ -118,6 +120,7 @@ func newCodexSession(ctx context.Context, p codexSessionParams) (*codexSession, 
 		mode:           p.mode,
 		baseURL:        p.baseURL,
 		modelProvider:  p.modelProvider,
+		providerName:   p.providerName,
 		cmd:            p.cliBin,
 		cliExtraArgs:   p.cliExtraArgs,
 		extraEnv:       p.extraEnv,
@@ -135,6 +138,10 @@ func newCodexSession(ctx context.Context, p codexSessionParams) (*codexSession, 
 
 	return cs, nil
 }
+
+// ModelProviderName returns the configured provider captured at session creation.
+// It can differ from the CLI model_provider and never follows later Agent switches.
+func (cs *codexSession) ModelProviderName() string { return cs.providerName }
 
 // Send launches a codex subprocess.
 // If a threadID exists (from a prior turn or resume), uses `codex exec resume <id> <prompt>`.

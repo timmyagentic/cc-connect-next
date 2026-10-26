@@ -532,8 +532,9 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	extraEnv := append([]string(nil), a.configEnv...)
 	extraEnv = append(extraEnv, a.providerEnvLocked()...)
 	extraEnv = append(extraEnv, a.sessionEnv...)
-	var baseURL string
+	var baseURL, configuredProviderName string
 	if provider := a.GetActiveProvider(); provider != nil {
+		configuredProviderName = provider.Name
 		model = a.Model(model)
 		baseURL = provider.BaseURL
 	}
@@ -563,6 +564,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 			resumeID:           sessionID,
 			baseURL:            baseURL,
 			modelProvider:      provName,
+			providerName:       configuredProviderName,
 			extraEnv:           extraEnv,
 			codexHome:          codexHome,
 			systemPrompt:       systemPrompt,
@@ -587,6 +589,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		resumeID:      sessionID,
 		baseURL:       baseURL,
 		modelProvider: provName,
+		providerName:  configuredProviderName,
 		extraEnv:      extraEnv,
 		systemPrompt:  systemPrompt,
 		appendPrompt:  appendPrompt,

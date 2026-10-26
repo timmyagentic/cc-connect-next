@@ -43,7 +43,7 @@ Each user gets an independent session with full conversation context. Manage ses
 | `/history [n]` | Show last n messages (default 10; each entry follows `[display].history_max_len`, default 1000) |
 | `/usage` | Show account/model quota usage (if supported) |
 | `/provider [...]` | Manage API providers |
-| `/model [switch <alias>]` | List available models or switch by alias |
+| `/model [switch <name>\|group [<name>\|reset]]` | View models, change the project/workspace default, or set this group's model |
 | `/dir [path]` | Show or switch the agent work directory |
 | `/allow <tool>` | Pre-allow a tool (next session) |
 | `/reasoning [level]` | View or switch reasoning effort (Codex) |
@@ -73,7 +73,7 @@ The built-in default is `0`, which always continues the previous session.
 
 ### Model switch preserves history
 
-`/model` preserves the current session — the agent resumes the conversation with the new model (no extra token cost). Model switching affects the shared agent instance — if multiple platforms use the same project, the model change applies to all of them.
+`/model switch <name>` preserves conversation history and changes the project default, or the current workspace's default in multi-workspace mode. Private chats and groups without a fixed model follow that default within its scope. Groups with a fixed model keep their selection. Use `/model group <name>` to change only this group's model; it applies to the next new request without interrupting the current reply. See [Model Selection](#model-selection) for scope and precedence.
 
 ---
 
@@ -420,13 +420,32 @@ alias = "spark"
 ### Chat Commands
 
 ```
-/model              List available models (format: alias - model)
-/model switch <alias>      Switch to the model matching the alias
-/model switch <name>       Switch to the model by its full name
-/model <alias>             Legacy syntax, still supported
+/model                    View models and the ordinary-message model source
+/model switch <alias>     Set the project/workspace default by alias
+/model switch <name>      Set the project/workspace default by full name
+/model <alias>            Legacy default-switching syntax, still supported
+/model group              View this group's model selection
+/model group <name>       Pin a listed model for this group (name, alias, or number)
+/model group reset        Restore following the workspace/project default
 ```
 
 When `models` is configured, `/model` shows exactly that list without making an API round-trip. When omitted, models are fetched from the provider API or fall back to a built-in list.
+
+### Defaults and fixed group models
+
+Feishu/Lark supplies verified group identity in this release. The group model list also includes models explicitly configured for the active Provider, even when a native catalog omits them.
+
+`/model switch` changes the project default, or the workspace default when using multi-workspace mode. This affects private chats and groups that follow that default; it does not replace a group's fixed selection. The model card labels the default's scope and, in a verified group, separately identifies the actual model source for ordinary messages as either **fixed for this group** or **following the workspace/project default**.
+
+`/model group <name>` requires a verified group chat and per-turn model support from the configured backend (currently Codex `exec` and `app_server`). It uses the current backend and Provider; it does not change Provider. Choose from the current `/model` list. Direct messages and unverified group identities cannot create a group binding. If the group is not yet recognized, send `/model` in that group first. Backends that support legacy model switching retain `/model switch` even when they cannot pin a group model. Group commands retain the existing `/model` member-access and disabled-command policies.
+
+The binding covers **all members and all existing or new topics in that group**. It is isolated by project and keyed by platform plus stable group ID, not by topic, conversation, or workspace directory. Other groups and projects are unaffected. It persists across `/reset`, `/new`, and bridge restarts; use `/model group reset` to remove the binding and follow defaults again. Persistent storage must be available; failed saves are reported without claiming success.
+
+Group selections are resolved when each new request executes, including queued requests. A change or reset takes effect on the next new request; an already running reply keeps its model. An explicit one-shot model from `/fast`, another answer profile, or a task takes precedence for that request; subsequent ordinary messages return to the group's selection. A profile without an explicit model still inherits the group model.
+
+A fixed group never silently falls back to the default when per-turn support is unavailable, the backend/Provider no longer matches the binding, or applying/running the model fails. The request reports the error. After a backend/Provider change, explicitly select an available group model again or use `/model group reset`.
+
+An existing conversation still connected to a different Provider is also rejected. Use `/provider switch <name>` in that conversation to reconnect it, or start `/new`, then retry. Rich-card failures retain these recovery instructions.
 
 ---
 

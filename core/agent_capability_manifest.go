@@ -183,7 +183,23 @@ var builtinCommands = []builtinCommandDefinition{
 	{id: "usage", aliases: []string{"quota"}, category: "agent", usage: "/usage", readOnly: true, probe: "usage"},
 	{id: "history", category: "session", usage: "/history [n]", parameters: []CapabilityParameter{capabilityParam("limit", "integer", false, "Maximum number of recent messages; defaults to 10.", "最近消息数量上限；默认 10。")}, readOnly: true},
 	{id: "allow", category: "agent", usage: "/allow <tool>", parameters: []CapabilityParameter{capabilityParam("tool", "string", true, "Tool name to allow for the next Agent session.", "为下一个 Agent 会话预授权的工具名。")}, effects: []string{"agent_permission_state"}, probe: "tool_authorizer"},
-	{id: "model", category: "agent", usage: "/model [switch <name>]", parameters: []CapabilityParameter{capabilityParam("action", "string", false, "Optional model action.", "可选模型操作。", "switch"), capabilityParam("name", "string", false, "Provider model identifier or displayed choice.", "Provider 模型标识或显示选项。")}, effects: []string{"configuration", "agent_process"}, probe: "model"},
+	{
+		id: "model", category: "agent", usage: "/model [switch <name>|group [<name>|reset]]",
+		parameters: []CapabilityParameter{
+			capabilityParam("action", "string", false,
+				"Omit to inspect models. switch (or legacy /model <name>) changes the project/workspace default for private chats and groups without a fixed model. group queries, pins, or resets this verified group's model for all members and existing/new topics. Group selections require ModelSwitcher and PerTurnModelSupporter on the configured backend; no Provider change.",
+				"省略时查看模型。switch（或旧写法 /model <name>）更改项目/工作区默认模型，影响私聊和未固定模型的群。group 查询、固定或重置已验证群的模型，覆盖全部成员和新旧话题。群固定要求配置的后端具备 ModelSwitcher 和 PerTurnModelSupporter，不改变 Provider。", "switch", "group"),
+			capabilityParam("name", "string", false,
+				"Model identifier, alias, or displayed choice; group accepts only the current model list, or reset to follow defaults. The group binding persists within the project by platform + stable group ID, not topic or workspace, across /reset, /new, and restarts. Resolve it at execution on all three send paths, including queued requests; changes affect the next new turn without interrupting a running reply. An explicit one-shot /fast or task model takes precedence. Omit after group to query.",
+				"模型标识、别名或显示选项；group 仅接受当前模型列表可选项，或 reset 恢复跟随默认。群绑定在项目内按平台 + 稳定群 ID 持久化，不按话题或工作区划分，跨 /reset、/new 和重启保留。全部三条发送路径（包括排队请求）在执行时解析；变更在下次新回合生效，不打断正在回复的回合。/fast 或任务的显式单次模型优先。group 后省略时查询。"),
+		},
+		effects: []string{"configuration", "agent_process", "persistent_state"}, probe: "model",
+		fallback: CapabilityFallback{
+			Mode:          "reject",
+			Description:   "Group pinning rejects unverified group identity, unavailable storage, unsupported per-turn models, or an unlisted selection. A pinned group's ordinary turn fails on backend/Provider mismatch or model/application errors without silently falling back or switching Provider; explicitly reselect the group model or reset it. Legacy project/workspace switching remains supported by ModelSwitcher alone.",
+			DescriptionZH: "群固定会拒绝未验证群身份、不可用存储、不支持逐回合模型或不在当前列表的选择。固定群的普通回合遇到后端/Provider 不匹配、模型或应用设置错误时失败，不会静默回退或切换 Provider；请显式重新设置群模型或 reset。原项目/工作区模型切换仍只需 ModelSwitcher。",
+		},
+	},
 	{id: "reasoning", aliases: []string{"effort"}, category: "agent", usage: "/reasoning [level]", parameters: []CapabilityParameter{capabilityParam("level", "string", false, "Reasoning effort supported by the active Agent.", "当前 Agent 支持的推理强度。")}, effects: []string{"configuration", "agent_process"}, probe: "reasoning"},
 	{id: "speed", category: "agent", usage: "/speed [tier]", parameters: []CapabilityParameter{capabilityParam("tier", "string", false, "Omit to query. Choose default, fast, or another tier declared by the active model catalog. Saved for this conversation; affects subsequent turns without changing model/effort or interrupting a running turn. One-shot answer profiles take precedence.", "省略时只查询。选择 default、fast 或当前模型目录声明的其他档位。选择保存到当前会话；后续回合生效，不改变模型/推理强度或打断当前回合；单次回答预设优先。")}, effects: []string{"session_state", "persistent_state"}, probe: "speed"},
 	{id: "mode", category: "agent", usage: "/mode [name]", parameters: []CapabilityParameter{capabilityParam("name", "string", false, "Permission mode supported by the active Agent.", "当前 Agent 支持的权限模式。")}, effects: []string{"configuration", "agent_permission_state"}, probe: "mode"},
@@ -528,7 +544,10 @@ func (e *Engine) commandCapabilityAvailability(id, probe string, snapshot capabi
 		return unavailable("The active Agent does not implement dynamic tool authorization.", "当前 Agent 未实现动态工具授权。")
 	case "model":
 		if _, ok := e.agent.(ModelSwitcher); ok {
-			return available("The active Agent supports model switching.", "当前 Agent 支持模型切换。")
+			if supporter, ok := e.agent.(PerTurnModelSupporter); ok && supporter.SupportsPerTurnModel() {
+				return available("ModelSwitcher supports legacy project/workspace default switching. Group pinning additionally has PerTurnModelSupporter support; verified group identity, persistent storage, the current model list, and concrete session support are checked at invocation/execution time. Existing member and command policies apply.", "ModelSwitcher 支持原项目/工作区默认模型切换。群固定另已具备 PerTurnModelSupporter 支持；已验证群身份、持久化存储、当前模型列表和实际会话能力在调用/执行时检查。沿用现有成员权限和命令策略。")
+			}
+			return available("ModelSwitcher supports legacy project/workspace default switching. Group pinning is unavailable because the configured backend lacks PerTurnModelSupporter support; this does not disable legacy switching. Group reset can clear a saved binding when group identity and storage are available. Existing member and command policies apply.", "ModelSwitcher 支持原项目/工作区默认模型切换。配置的后端缺少 PerTurnModelSupporter 支持，群固定不可用，但不影响原切换能力。群身份已验证且存储可用时，group reset 可清除已有绑定。沿用现有成员权限和命令策略。")
 		}
 		return unavailable("The active Agent does not implement model switching.", "当前 Agent 未实现模型切换。")
 	case "reasoning":

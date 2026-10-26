@@ -701,6 +701,7 @@ type interactiveState struct {
 	// so a busy message that would cross this boundary must start a queued turn.
 	activeAnswerProfile           AnswerProfileName
 	activeModelOverride           string // task model of the in-flight turn; never inherited by queued input
+	activeGroupModel              bool   // keeps a bound turn out of steering even if its binding is reset
 	activeReasoningEffortOverride string
 	activeServiceTier             string // session override captured at turn admission
 
@@ -2161,9 +2162,7 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 		ModeOverride:            spec.mode,
 		ModelOverride:           spec.model,
 		ReasoningEffortOverride: spec.reasoningEffort,
-	}
-	if spec.model != "" || spec.reasoningEffort != "" {
-		msg.scheduledResult = &scheduledTurnResult{}
+		scheduledResult:         &scheduledTurnResult{},
 	}
 
 	agent := e.agent
@@ -2200,6 +2199,11 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 	ccSessionKey := sessionKey
 	var session *Session
 	if spec.newSession {
+		if scope := e.groupModelKey(sessionKey); scope != "" && runSessionKey != sessionKey {
+			if err := e.sessions.UpdateGroupModelKey(runSessionKey, scope); err != nil {
+				return fmt.Errorf("save scheduled group model scope: %w", err)
+			}
+		}
 		msg.SessionKey = runSessionKey
 		lockKey = runSessionKey
 		ccSessionKey = runSessionKey
@@ -3199,6 +3203,10 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		return
 	}
 	e.rememberReplyTarget(p, msg)
+	if err := e.rememberGroupModelScope(p, msg); err != nil {
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgModelChangeFailed, err))
+		return
+	}
 
 	// Multi-workspace resolution
 	var wsAgent Agent
@@ -3495,6 +3503,11 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 // session lacks the steer capability, or the steer was definitively rejected
 // without delivering anything.
 func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey string, session *Session, sessions *SessionManager) bool {
+	if _, bound := e.groupModelBinding(msg.SessionKey); bound {
+		// A binding may have changed while the previous turn was running.
+		// Resolve it when the queued turn starts, never steer into an old model.
+		return false
+	}
 	// turn/steer cannot carry model, reasoning-effort, or service-tier
 	// overrides. A profiled message must remain a distinct queued turn or the
 	// user would be told a profile was applied when it was not.
@@ -3522,7 +3535,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		state.mu.Unlock()
 		return false
 	}
-	if state.activeAnswerProfile != "" || state.activeModelOverride != "" || state.activeReasoningEffortOverride != "" || state.activeServiceTier != sessions.ServiceTier(session) {
+	if state.activeAnswerProfile != "" || state.activeModelOverride != "" || state.activeGroupModel || state.activeReasoningEffortOverride != "" || state.activeServiceTier != sessions.ServiceTier(session) {
 		state.mu.Unlock()
 		return false
 	}
@@ -4446,6 +4459,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.sideText = ""
 	state.activeAnswerProfile = msg.AnswerProfile
 	state.activeModelOverride = msg.ModelOverride
+	_, state.activeGroupModel = e.groupModelBinding(msg.SessionKey)
 	state.activeReasoningEffortOverride = msg.ReasoningEffortOverride
 	speedTier := sessions.ServiceTier(session)
 	state.activeServiceTier = speedTier
@@ -4468,7 +4482,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			sendDone <- fmt.Errorf("agent session became nil")
 			return
 		}
-		overrides, err := prepareAgentTurnOverrides(sessions, session, as, msg.AnswerProfile, msg.ModelOverride, msg.ReasoningEffortOverride, speedTier)
+		overrides, err := e.prepareInteractiveTurnOverrides(state, agent, sessions, session, as, msg.SessionKey, msg.AnswerProfile, msg.ModelOverride, msg.ReasoningEffortOverride, speedTier)
 		if err != nil {
 			sendDone <- err
 			return
@@ -5679,6 +5693,7 @@ func (t *turnProcessor) run() {
 		state.mu.Lock()
 		state.activeAnswerProfile = ""
 		state.activeModelOverride = ""
+		state.activeGroupModel = false
 		state.activeReasoningEffortOverride = ""
 		state.mu.Unlock()
 	}()
@@ -6285,6 +6300,12 @@ func (t *turnProcessor) run() {
 			p := state.platform
 			state.mu.Unlock()
 			safePartial := persistVisibleRichPartial(p)
+			var groupErr *groupModelError
+			if usesRichCard(p) && errors.As(err, &groupErr) {
+				// These errors contain only our localized recovery instructions.
+				// Preserve generic redaction for arbitrary backend failures.
+				e.send(p, replyCtx, groupErr.Error())
+			}
 			phase := richCardFailurePhase(err)
 			if !markRichCardFailedWithPhase(p, cardMessageID, phase, safePartial) {
 				if usesRichCard(p) {
@@ -7183,6 +7204,7 @@ func (queue *turnQueue) handle() {
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		state.activeModelOverride = queued.modelOverride
+		_, state.activeGroupModel = e.groupModelBinding(queued.msgSessionKey)
 		state.activeReasoningEffortOverride = queued.reasoningEffortOverride
 		speedTier := sessions.ServiceTier(session)
 		state.activeServiceTier = speedTier
@@ -7233,7 +7255,7 @@ func (queue *turnQueue) handle() {
 				nextSend <- fmt.Errorf("agent session became nil")
 				return
 			}
-			overrides, err := prepareAgentTurnOverrides(sessions, session, as, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
+			overrides, err := e.prepareInteractiveTurnOverrides(state, turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
 			if err != nil {
 				nextSend <- err
 				return
@@ -8794,6 +8816,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		state.activeModelOverride = queued.modelOverride
+		_, state.activeGroupModel = e.groupModelBinding(queued.msgSessionKey)
 		state.activeReasoningEffortOverride = queued.reasoningEffortOverride
 		speedTier := sessions.ServiceTier(session)
 		state.activeServiceTier = speedTier
@@ -8836,7 +8859,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 				sendDone <- fmt.Errorf("agent session became nil")
 				return
 			}
-			overrides, err := prepareAgentTurnOverrides(sessions, session, as, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
+			overrides, err := e.prepareInteractiveTurnOverrides(state, turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
 			if err != nil {
 				sendDone <- err
 				return
@@ -11801,6 +11824,10 @@ func (e *Engine) cmdModel(p Platform, msg *Message, args []string) {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgWsResolutionError, err))
 		return
 	}
+	if len(args) > 0 && strings.EqualFold(args[0], "group") {
+		e.cmdGroupModel(p, msg, agent, args[1:])
+		return
+	}
 
 	switcher, ok := agent.(ModelSwitcher)
 	if !ok {
@@ -11809,6 +11836,10 @@ func (e *Engine) cmdModel(p Platform, msg *Message, args []string) {
 	}
 
 	if len(args) == 0 {
+		if e.groupModelKey(msg.SessionKey) != "" {
+			e.replyWithCard(p, msg.ReplyCtx, e.renderModelCardForAgent(msg.SessionKey, agent))
+			return
+		}
 		if !supportsCards(p) {
 			fetchCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
 			defer cancel()
@@ -12537,6 +12568,7 @@ func (e *Engine) runCompress(state *interactiveState, session *Session, sessions
 	state.activeServiceTier = speedTier
 	state.activeAnswerProfile = ""
 	state.activeModelOverride = ""
+	state.activeGroupModel = false
 	state.activeReasoningEffortOverride = ""
 	state.mu.Unlock()
 	state.steerMu.Unlock()
@@ -15021,13 +15053,16 @@ func (e *Engine) renderLangCard() *Card {
 }
 
 func (e *Engine) renderModelCard(sessionKey string) *Card {
-	if ms := e.getModelSwitchState(sessionKey); ms != nil && ms.phase == "switching" {
-		return e.renderModelSwitchingCard(ms.target)
-	}
-
 	agent := e.agent
 	if sessionKey != "" {
 		agent, _ = e.sessionContextForKey(sessionKey)
+	}
+	return e.renderModelCardForAgent(sessionKey, agent)
+}
+
+func (e *Engine) renderModelCardForAgent(sessionKey string, agent Agent) *Card {
+	if ms := e.getModelSwitchState(sessionKey); ms != nil && ms.phase == "switching" {
+		return e.renderModelSwitchingCard(ms.target)
 	}
 
 	switcher, ok := agent.(ModelSwitcher)
@@ -15037,7 +15072,12 @@ func (e *Engine) renderModelCard(sessionKey string) *Card {
 
 	fetchCtx, cancel := context.WithTimeout(e.ctx, 3*time.Second)
 	defer cancel()
-	models := switcher.AvailableModels(fetchCtx)
+	var models []ModelOption
+	if e.groupModelKey(sessionKey) != "" {
+		models = groupSelectableModels(fetchCtx, agent, switcher)
+	} else {
+		models = switcher.AvailableModels(fetchCtx)
+	}
 	current := switcher.GetModel()
 
 	var sb strings.Builder
@@ -15057,14 +15097,24 @@ func (e *Engine) renderModelCard(sessionKey string) *Card {
 			label += " — " + m.Desc
 		}
 		val := fmt.Sprintf("act:/model switch %d", i+1)
+		if e.groupModelKey(sessionKey) != "" {
+			// Use the normal command context so a topic's workspace binding is
+			// resolved consistently, and retain the selected model's identity.
+			val = "cmd:/model switch " + m.Name
+		}
 		opts = append(opts, CardSelectOption{Text: label, Value: val})
 		if m.Name == current {
 			initVal = val
 		}
 	}
 
-	cb := NewCard().Title(e.i18n.T(MsgCardTitleModel), "indigo").
-		Markdown(sb.String()).
+	cb := NewCard().Title(e.i18n.T(MsgCardTitleModel), "indigo")
+	e.groupModelCard(cb, sessionKey, agent, models)
+	scope := MsgModelScopeProject
+	if agent != e.agent {
+		scope = MsgModelScopeWorkspace
+	}
+	cb.Markdown(e.i18n.T(scope)).Markdown(sb.String()).
 		Select(e.i18n.T(MsgModelSelectPlaceholder), opts, initVal).
 		Buttons(e.cardBackButton())
 	cb.Note(e.i18n.T(MsgModelUsage))

@@ -89,6 +89,33 @@ Manifest 会保留不支持的运行态能力条目，而不是静默删除。�
 
 Manifest 不把“命令存在”误写成“当前一定能执行”：模型、Provider、TTS、多工作区、Cron/Timer、Relay、Web、活动回合等都会检查对应运行态接口或组件。
 
+## 项目/工作区默认模型与群模型
+
+`model` 命令公布 `/model [switch <name>|group [<name>|reset]]`，保持 `member`
+权限及原角色/禁用命令策略。`switch` 和旧写法 `/model <name>` 更改项目/工作区
+默认模型，影响私聊和未固定模型的群。只需 `ModelSwitcher` 即可保留这些旧能力，
+不能因后端不是 Codex 就把整个命令标为不可用。
+
+`group` 查询、固定或重置已验证群的模型。固定模型还要求配置的当前后端实现
+`PerTurnModelSupporter` 并返回 true（目前 Codex `exec` 与 `app_server` 支持），
+模型属于当前可选列表，且持久化存储可用。操作不切换 Provider。调用时必须验证群身份，
+不能仅凭 session key 形式推断；未知群应先在群里发送 `/model`。后端不再支持群固定时，
+只要群身份及存储有效，reset 仍可清除已有绑定。命令级可用性原因分别说明旧切换能力与
+群操作条件，不将旧能力一并禁用。
+
+参数契约明确按项目隔离，以“平台 + 稳定群 ID”作为绑定 key，不按话题或工作区划分。
+本群全部成员和新旧话题继承绑定，跨 `/reset`、`/new` 及重启持久保留。
+群设置声明 `persistent_state` 副作用；原有 `configuration`、`agent_process`
+仍描述默认模型切换。不带模型的查询只读；整体命令因包含设置操作而保持可写。
+
+全部三条发送路径在执行时解析绑定，包括排队请求。变更在下次新回合生效，不打断当前回复。
+`/fast`/回答预设或任务显式指定的单次模型优先；没有显式覆盖时，普通消息使用本群固定模型，
+只有不存在群绑定时才跟随工作区/项目默认。`reject` 契约覆盖逐回合能力不支持、
+后端/Provider 不匹配、不可选模型、存储及模型应用错误；固定群请求不能静默改用其他模型。
+恢复时应显式重新设置群模型或 reset 绑定。
+
+只读会话能力 `model_provider_identity` 检查 `ModelProviderSession`，不公开其记录的 Provider 名称。可切换 Provider 的 Agent 执行群固定模型请求时需要此能力；引擎同时校验实际会话和当前 Agent 的身份。
+
 ## Cron 任务模型
 
 `cron` Agent CLI 工具契约包含可选 `model` 参数：仅 Prompt 任务可设置，省略继承，`cron edit <job-id> model ""` 恢复继承。注册/编辑写入任务持久状态；执行产生 Agent 回合及网络请求，但不切换 Provider、不修改项目或 Agent 默认模型。Shell 任务和不支持的 Agent 会拒绝显式模型，不能自动退回默认模型。

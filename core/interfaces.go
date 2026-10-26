@@ -576,6 +576,13 @@ type PerTurnModelSupporter interface {
 	SupportsPerTurnModel() bool
 }
 
+// ModelProviderSession identifies the configured provider captured when a
+// backend session was created. Group model routing must validate the actual
+// session connection, not only the mutable Agent default. Empty means native.
+type ModelProviderSession interface {
+	ModelProviderName() string
+}
+
 // PerTurnReasoningEffortSupporter advertises isolated effort overrides before
 // a session exists. Persistent reasoning switches do not imply this capability.
 type PerTurnReasoningEffortSupporter interface {
