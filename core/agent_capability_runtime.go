@@ -423,7 +423,10 @@ func (e *Engine) unboundSessionRuntimeCapabilities() RuntimeAdapterCapabilities 
 func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformStatus, snapshot capabilitySnapshot) RuntimeAdapterCapabilities {
 	state := CapabilityAvailable
 	reason := ""
-	if status.Err != nil {
+	if status.Standby() {
+		state = CapabilityConditional
+		reason = strings.TrimSpace(redactFeedbackText(status.Err.Error()))
+	} else if status.Err != nil {
 		state = CapabilityUnavailable
 		reason = strings.TrimSpace(redactFeedbackText(status.Err.Error()))
 	} else if !status.Usable() {
@@ -435,7 +438,7 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		if state == CapabilityUnavailable {
 			return unavailable("The platform transport is unavailable: "+reason, "平台传输当前不可用。")
 		}
-		if state == CapabilityConditional {
+		if state == CapabilityConditional && ok {
 			return conditional("The adapter implements this capability but is still waiting for readiness.", "适配器实现了该能力，但仍在等待 Ready。")
 		}
 		return interfaceAvailability(ok, "The active platform adapter implements this capability.", "当前平台适配器实现了该能力。", "The active platform adapter does not implement this capability.", "当前平台适配器未实现该能力。")

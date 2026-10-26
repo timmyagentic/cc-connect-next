@@ -102,15 +102,20 @@ type projectPlatformReadiness struct {
 }
 
 // unusablePlatformWarning names the platforms that cannot deliver a message,
-// or "" when every platform is usable.
+// or "" when every platform is usable or waiting for its first client.
 func unusablePlatformWarning(sources []projectPlatformReadiness) string {
 	var broken []string
+	anyUsable := false
 	for _, s := range sources {
 		if s.engine == nil {
 			continue
 		}
 		for _, status := range s.engine.PlatformStatuses() {
 			if status.Usable() {
+				anyUsable = true
+				continue
+			}
+			if status.Standby() {
 				continue
 			}
 			reason := "never connected"
@@ -123,8 +128,12 @@ func unusablePlatformWarning(sources []projectPlatformReadiness) string {
 	if len(broken) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%s cannot deliver messages — cc-connect-next stays up and keeps retrying, but nothing reaches the agent until this is fixed. Diagnose with: cc-connect-next doctor",
-		strings.Join(broken, ", "))
+	availability := "No platform is currently ready to deliver messages."
+	if anyUsable {
+		availability = "Other ready platforms remain available."
+	}
+	return fmt.Sprintf("%s cannot deliver messages. %s cc-connect-next stays up. Diagnose with: cc-connect-next doctor",
+		strings.Join(broken, ", "), availability)
 }
 
 // watchPlatformReadiness reports platforms that never became usable, once,

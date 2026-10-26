@@ -59,6 +59,20 @@ path = "/bridge/ws"       # optional, default "/bridge/ws"
 token = "your-secret"     # required for authentication
 ```
 
+### Runtime health
+
+Before its first adapter connects, Bridge reports `standby` in the local
+`/healthz` response and `daemon status`. This is an idle transport, so it does
+not block a project whose other configured platforms are ready. A project
+with only a standby Bridge remains not ready (HTTP 503) until an adapter
+connects. The same rule is used for post-update connection receipts.
+
+After an adapter has connected, losing the last adapter reports `unavailable`.
+A Bridge listener failure also reports `unavailable`. These failures, and
+failures of other configured platforms, still make the project not ready.
+Startup warnings name the affected platforms without claiming that healthy
+platforms cannot deliver messages.
+
 ### Authentication
 
 The adapter must authenticate on connection using one of:

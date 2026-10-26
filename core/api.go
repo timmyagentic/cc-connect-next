@@ -81,6 +81,7 @@ type RuntimePlatformState string
 
 const (
 	RuntimePlatformStarting    RuntimePlatformState = "starting"
+	RuntimePlatformStandby     RuntimePlatformState = "standby"
 	RuntimePlatformReady       RuntimePlatformState = "ready"
 	RuntimePlatformUnavailable RuntimePlatformState = "unavailable"
 )
@@ -178,20 +179,20 @@ func (s *APIServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	health := RuntimeHealth{Ready: len(names) > 0, Projects: make([]RuntimeProjectHealth, 0, len(names))}
 	for _, name := range names {
 		statuses := engines[name].PlatformStatuses()
-		project := RuntimeProjectHealth{Name: name, Ready: len(statuses) > 0, Platforms: make([]RuntimePlatformHealth, 0, len(statuses))}
+		project := RuntimeProjectHealth{Name: name, Ready: PlatformsReady(statuses), Platforms: make([]RuntimePlatformHealth, 0, len(statuses))}
 		for _, status := range statuses {
 			platform := RuntimePlatformHealth{Name: status.Name, State: RuntimePlatformStarting}
 			switch {
 			case status.Usable():
 				platform.State = RuntimePlatformReady
+			case status.Standby():
+				platform.State = RuntimePlatformStandby
+				platform.Reason = strings.TrimSpace(status.Err.Error())
 			case status.Err != nil:
 				platform.State = RuntimePlatformUnavailable
 				platform.Reason = strings.TrimSpace(status.Err.Error())
 			default:
 				platform.Reason = "waiting for platform connection"
-			}
-			if platform.State != RuntimePlatformReady {
-				project.Ready = false
 			}
 			project.Platforms = append(project.Platforms, platform)
 		}
