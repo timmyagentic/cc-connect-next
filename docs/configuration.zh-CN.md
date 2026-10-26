@@ -68,7 +68,7 @@
 
 ### 补读近期群聊讨论 (`group-conversation-context`)
 
-仅在明确被 @ 时补读有界近期消息，隔离话题、保留归因并按会话去重。
+符合群聊回复规则时补读有界近期消息，兼容无需 @ 回复，隔离话题、保留归因并按会话去重。
 
 相关配置： `projects.platforms.options.group_context`, `projects.platforms.options.group_context_max_messages`, `projects.platforms.options.group_context_window_minutes`, `projects.platforms.options.group_context_max_chars`
 
@@ -3598,7 +3598,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.group_context` — `feishu, lark`
 
-明确 @ 触发群聊回合前，补读有界近期讨论作为不可信背景；普通群和真实话题分别隔离。仅使用已有读取权限，不下载附件、不轮询；未 @ 的消息（含附件）保持安静。要求关闭所有无需 @ 即回复的选项。
+符合回复规则的群聊回合开始前，补读有界近期讨论作为不可信背景；兼容无需 @ 回复和显式开启的 @全体 回复。普通群和真实话题分别隔离；仅使用已有读取权限，不下载背景附件、不轮询。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3608,7 +3608,6 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 默认值：`false`
 - 默认值来源：`builtin`
 - 生效方式：`restart`
-- 冲突: `group_reply_all = true`, `non-empty group_reply_all_chats`, `require_mention = false`, `respond_to_at_everyone_and_here = true`
 - 示例: `group_context = true`
 
 ### `projects.platforms.options.group_context_max_chars` — `feishu, lark`
@@ -3629,7 +3628,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.group_context_max_messages` — `feishu, lark`
 
-每个被 @ 的回合最多读取的人类消息条数，再按 Agent 会话去重；省略机器人输出，明确提示读取失败或截断。
+每个符合回复规则的群聊回合最多读取的人类消息条数，再按 Agent 会话去重；省略机器人输出，明确提示读取失败或截断。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
