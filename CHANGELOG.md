@@ -7,6 +7,16 @@
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
+## v0.3.5-beta.3 (2026-10-27)
+
+See `changelogs/v0.3.5-beta.3.md` for bilingual highlights and usage notes.
+
+- Pin a persistent per-group model in Feishu/Lark with `/model group`, including
+  queued requests, explicit one-shot precedence and Provider identity checks.
+- Treat an initially unconnected Bridge as standby without blocking healthy
+  native platforms; preserve unavailable states for real connection failures.
+- Stable GitHub Latest and npm `latest` remain v0.3.4.
+
 ## v0.3.3-beta.3 (2026-10-23)
 
 See `changelogs/v0.3.3-beta.3.md` for bilingual highlights and migration notes.
