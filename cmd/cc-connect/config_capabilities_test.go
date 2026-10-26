@@ -930,8 +930,8 @@ func TestGroupContextConfigurationIsSearchableAndBounded(t *testing.T) {
 			}
 		}
 		option := findCatalogOption(t, core.PlatformConfigOptions(owner), "group_context")
-		if option.Default != "false" || len(option.ConflictsWith) == 0 || len(option.PresetValues) != 0 {
-			t.Fatalf("context must be opt-in: %+v", option)
+		if option.Default != "false" || len(option.ConflictsWith) != 0 || len(option.PresetValues) != 0 {
+			t.Fatalf("context must stay opt-in and compatible with reply triggers: %+v", option)
 		}
 	}
 	for _, query := range []string{"群聊补读", "recent discussion"} {

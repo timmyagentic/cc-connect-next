@@ -112,17 +112,16 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 		case "group_context":
 			option.Type = "boolean"
 			option.Default = "false"
-			option.Description = "Before an explicit group @mention turn, read bounded recent discussion as untrusted background. Ordinary groups and real topics are isolated. Uses existing read access only; does not download attachments or poll. Unmentioned messages, including attachments, stay silent. Requires mention-free reply options to be disabled."
-			option.DescriptionZH = "明确 @ 触发群聊回合前，补读有界近期讨论作为不可信背景；普通群和真实话题分别隔离。仅使用已有读取权限，不下载附件、不轮询；未 @ 的消息（含附件）保持安静。要求关闭所有无需 @ 即回复的选项。"
+			option.Description = "Before a group turn accepted by the configured reply rules, read bounded recent discussion as untrusted background. Compatible with mention-free replies and opt-in @all replies. Ordinary groups and real topics are isolated. Uses existing read access only; does not download background attachments or poll."
+			option.DescriptionZH = "符合回复规则的群聊回合开始前，补读有界近期讨论作为不可信背景；兼容无需 @ 回复和显式开启的 @全体 回复。普通群和真实话题分别隔离；仅使用已有读取权限，不下载背景附件、不轮询。"
 			option.Keywords = []string{"recent discussion", "group context", "catch up", "补读近期讨论", "群聊上下文", "未@讨论", "群聊补读"}
-			option.ConflictsWith = []string{"group_reply_all = true", "non-empty group_reply_all_chats", "require_mention = false", "respond_to_at_everyone_and_here = true"}
 		case "group_context_max_messages", "group_context_window_minutes", "group_context_max_chars":
 			option.Type = "integer"
 			option.Requires = []string{"group_context = true"}
 			minimum, maximum, fallback := 1.0, float64(maxGroupContextMessages), defaultGroupContextMessages
 			option.Unit = "messages"
-			option.Description = "Maximum recent human messages per mentioned turn, before per-Agent-conversation deduplication. Bot output is omitted; failed or truncated reads are disclosed."
-			option.DescriptionZH = "每个被 @ 的回合最多读取的人类消息条数，再按 Agent 会话去重；省略机器人输出，明确提示读取失败或截断。"
+			option.Description = "Maximum recent human messages per accepted group turn, before per-Agent-conversation deduplication. Bot output is omitted; failed or truncated reads are disclosed."
+			option.DescriptionZH = "每个符合回复规则的群聊回合最多读取的人类消息条数，再按 Agent 会话去重；省略机器人输出，明确提示读取失败或截断。"
 			switch option.Key {
 			case "group_context_window_minutes":
 				maximum, fallback = float64(maxGroupContextMinutes), defaultGroupContextMinutes

@@ -69,23 +69,11 @@ func parseGroupContextConfig(opts map[string]any) (groupContextConfig, error) {
 			*setting.target = int(number)
 		}
 	}
-	if cfg.enabled {
-		chats, err := parseGroupReplyAllChats(opts["group_reply_all_chats"])
-		if err != nil {
-			return cfg, err
-		}
-		all, _ := opts["group_reply_all"].(bool)
-		requireMention, mentionSet := opts["require_mention"].(bool)
-		everyone, _ := opts["respond_to_at_everyone_and_here"].(bool)
-		if all || len(chats) > 0 || (mentionSet && !requireMention) || everyone {
-			return cfg, fmt.Errorf("group_context requires explicit bot mentions: disable group_reply_all, group_reply_all_chats, require_mention=false, and respond_to_at_everyone_and_here")
-		}
-	}
 	return cfg, nil
 }
 
 // MessageContextEnabled is false for private, synthetic, and proactive
-// targets. The live event path sets contextEligible only after mention and
+// targets. The live event path sets contextEligible only after reply-trigger and
 // access checks; persisting a reply target does not preserve that authority.
 func (p *Platform) MessageContextEnabled(target any) bool {
 	rctx, ok := target.(replyContext)
@@ -94,13 +82,13 @@ func (p *Platform) MessageContextEnabled(target any) bool {
 
 func (p *Platform) RuntimeCapabilityAvailability(_ string, target any) map[string]core.CapabilityAvailability {
 	availability := core.CapabilityAvailability{
-		State: core.CapabilityConditional, Reason: "Read-only context is enabled; requires an authorized group mention and existing message-history access. Reads happen only before a turn; no new permissions are requested.",
-		ReasonZH: "已启用只读上下文；要求授权群中的明确 @ 和已有历史读取权限。仅在回合开始前读取，不申请新权限。",
+		State: core.CapabilityConditional, Reason: "Read-only context is enabled; requires an authorized group message accepted by the configured reply rules and existing message-history access. Reads happen only before a turn; no new permissions are requested.",
+		ReasonZH: "已启用只读上下文；要求授权群中符合回复规则的消息和已有历史读取权限。仅在回合开始前读取，不申请新权限。",
 	}
 	if !p.groupContext.enabled {
 		availability = core.CapabilityAvailability{State: core.CapabilityUnavailable, Reason: "Recent conversation context is disabled in platform configuration.", ReasonZH: "平台配置未启用近期讨论上下文。"}
 	} else if target != nil && !p.MessageContextEnabled(target) {
-		availability = core.CapabilityAvailability{State: core.CapabilityUnavailable, Reason: "This target is not a verified group mention.", ReasonZH: "当前目标不是已核验的群内 @ 消息。"}
+		availability = core.CapabilityAvailability{State: core.CapabilityUnavailable, Reason: "This target is not a verified group trigger.", ReasonZH: "当前目标不是已核验的群内触发消息。"}
 	}
 	batches := core.CapabilityAvailability{State: core.CapabilityAvailable, Reason: "Multiple images are sent as two-column Card 2.0 galleries, up to five originals per message; single images stay native.", ReasonZH: "多张图片按每批最多 5 张原图发送双列 Card 2.0 图集；单张保持原生图片消息。"}
 	if !p.useInteractiveCard {

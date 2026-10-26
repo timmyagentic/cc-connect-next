@@ -18,7 +18,7 @@ import (
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
-func TestGroupContextConfigurationBoundsAndConflicts(t *testing.T) {
+func TestGroupContextConfigurationBounds(t *testing.T) {
 	cfg, err := parseGroupContextConfig(nil)
 	if err != nil || cfg.enabled || cfg.maxMessages != 20 || cfg.minutes != 30 || cfg.maxChars != 8000 {
 		t.Fatalf("omitted defaults = %+v, %v", cfg, err)
@@ -28,10 +28,6 @@ func TestGroupContextConfigurationBoundsAndConflicts(t *testing.T) {
 		{"group_context_max_messages": 1.5}, {"group_context_window_minutes": 1441},
 		{"group_context_max_chars": 511}, {"group_context_max_chars": 32001},
 		{"group_context_max_chars": "8000"},
-		{"group_context": true, "group_reply_all": true},
-		{"group_context": true, "group_reply_all_chats": "oc_somewhere"},
-		{"group_context": true, "require_mention": false},
-		{"group_context": true, "respond_to_at_everyone_and_here": true},
 	} {
 		for _, name := range []string{"feishu", "lark"} {
 			opts := map[string]any{"app_id": "cli_test", "app_secret": "synthetic-secret"}
@@ -55,6 +51,9 @@ func TestGroupContextConfigurationBoundsAndConflicts(t *testing.T) {
 		}
 		if option.Key != "group_context" && (option.Minimum == nil || option.Maximum == nil || option.Type != "integer") {
 			t.Fatalf("missing numeric bounds: %+v", option)
+		}
+		if option.Key == "group_context" && len(option.ConflictsWith) != 0 {
+			t.Fatalf("context contract still rejects configured reply triggers: %+v", option)
 		}
 	}
 }

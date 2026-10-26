@@ -1107,7 +1107,7 @@ app_secret = "your-feishu-app-secret"
 #                           # Optional: only these group chats bypass @mention; all other groups
 #                           # still require @. A TOML string array is also accepted.
 #                           # 可选：仅这些群聊无需 @；其他群聊仍需 @。也支持 TOML 字符串数组。
-# group_context = false    # Opt in to bounded recent discussion on explicit @ only / 被 @ 时补读有界近期讨论
+# group_context = false    # Read bounded recent discussion before an accepted group turn / 符合回复规则时补读有界近期讨论
 # group_context_max_messages = 20    # 1-100 human messages / 人类消息条数
 # group_context_window_minutes = 30  # 1-1440 minutes before the trigger / 触发消息之前的分钟数
 # group_context_max_chars = 8000     # 512-32000 Unicode characters, including metadata / 含元数据的字符数

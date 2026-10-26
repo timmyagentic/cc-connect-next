@@ -68,7 +68,7 @@ Related configuration: `feedback.enabled`, `feedback.endpoint`, `update_channel`
 
 ### Catch up on recent group discussion (`group-conversation-context`)
 
-Read bounded recent messages only when explicitly mentioned, with topic isolation, attribution and per-conversation deduplication.
+Read bounded recent messages before an accepted group turn, including configured mention-free replies, with topic isolation, attribution and per-conversation deduplication.
 
 Related configuration: `projects.platforms.options.group_context`, `projects.platforms.options.group_context_max_messages`, `projects.platforms.options.group_context_window_minutes`, `projects.platforms.options.group_context_max_chars`
 
@@ -3598,7 +3598,7 @@ Leave unset to consume events over WebSocket; set the event encrypt key to selec
 
 ### `projects.platforms.options.group_context` — `feishu, lark`
 
-Before an explicit group @mention turn, read bounded recent discussion as untrusted background. Ordinary groups and real topics are isolated. Uses existing read access only; does not download attachments or poll. Unmentioned messages, including attachments, stay silent. Requires mention-free reply options to be disabled.
+Before a group turn accepted by the configured reply rules, read bounded recent discussion as untrusted background. Compatible with mention-free replies and opt-in @all replies. Ordinary groups and real topics are isolated. Uses existing read access only; does not download background attachments or poll.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3608,7 +3608,6 @@ Before an explicit group @mention turn, read bounded recent discussion as untrus
 - Default: `false`
 - Default source: `builtin`
 - Takes effect: `restart`
-- Conflicts with: `group_reply_all = true`, `non-empty group_reply_all_chats`, `require_mention = false`, `respond_to_at_everyone_and_here = true`
 - Example: `group_context = true`
 
 ### `projects.platforms.options.group_context_max_chars` — `feishu, lark`
@@ -3629,7 +3628,7 @@ Bound the complete JSON background including message text, sender, time and repl
 
 ### `projects.platforms.options.group_context_max_messages` — `feishu, lark`
 
-Maximum recent human messages per mentioned turn, before per-Agent-conversation deduplication. Bot output is omitted; failed or truncated reads are disclosed.
+Maximum recent human messages per accepted group turn, before per-Agent-conversation deduplication. Bot output is omitted; failed or truncated reads are disclosed.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`

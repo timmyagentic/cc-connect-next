@@ -255,7 +255,7 @@ func parseMentionMap(raw any) (map[string]string, error) {
 }
 
 type replyContext struct {
-	contextEligible bool // authorized, explicitly mentioned group trigger only
+	contextEligible bool // authorized group trigger accepted by configured reply rules
 	contextTimeMs   int64
 	contextRootID   string
 	messageID       string
@@ -1900,14 +1900,15 @@ func (p *Platform) onMessageRecalled(_ context.Context, event *larkim.P2MessageR
 }
 
 func (p *Platform) shouldDispatchGroupMessage(msg *larkim.EventMessage, msgType, chatID, sessionKey string, groupReplyAllForChat bool) bool {
-	if stringValue(msg.ChatType) == "group" && p.groupContext.enabled {
-		// Opt-in background reading stays silent for every unmentioned message,
-		// including attachments and deployments without a resolved bot identity.
-		botID := p.getBotOpenID()
-		return botID != "" && isBotMentioned(msg.Mentions, botID)
-	}
 	if stringValue(msg.ChatType) != "group" || groupReplyAllForChat {
 		return true
+	}
+	if stringValue(msg.ChatType) == "group" && p.groupContext.enabled {
+		// Background reading honors the configured reply triggers. Outside
+		// reply-all chats, keep the verified mention gate, including attachments.
+		botID := p.getBotOpenID()
+		return botID != "" && (isBotMentioned(msg.Mentions, botID) ||
+			(p.respondToAtEveryoneAndHere && msg.Content != nil && strings.Contains(*msg.Content, "@_all")))
 	}
 
 	botOpenID, identityErr := p.botIdentityState()
@@ -2043,7 +2044,7 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 
 	rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, threadID: stringValue(msg.ThreadId)}
 	if chatType == "group" && p.groupContext.enabled {
-		rctx.contextEligible = true // shouldDispatchGroupMessage verified @bot above
+		rctx.contextEligible = true // reply trigger and user/chat access were verified above
 		rctx.contextTimeMs = createTimeMs
 		if rctx.contextTimeMs == 0 {
 			rctx.contextTimeMs = time.Now().UnixMilli()
