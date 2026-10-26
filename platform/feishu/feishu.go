@@ -260,6 +260,7 @@ type replyContext struct {
 	contextRootID   string
 	messageID       string
 	chatID          string
+	groupID         string // chatID only when the inbound chat type was verified as group
 	sessionKey      string
 	threadID        string
 	directUserID    string
@@ -1273,6 +1274,11 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	if chatID == "" {
 		chatID = userID
 	}
+	// Model navigation must carry the real message/topic context through the
+	// same resolver as text commands, including old help/back cards.
+	if actionVal == "nav:/model" {
+		actionVal = "cmd:/model"
+	}
 	sessionKey := p.sessionKeyFromCardAction(chatID, userID, values)
 	directUserID := cardActionString(values, cardActionDirectUserKey)
 
@@ -1665,6 +1671,9 @@ func (p *Platform) dispatchCoreMessage(msg *core.Message) bool {
 	if msg == nil || h == nil {
 		return false
 	}
+	if rctx, ok := msg.ReplyCtx.(replyContext); ok {
+		msg.GroupID = rctx.groupID
+	}
 	p.populateWorkspaceChannelKeys(msg)
 	if p.isMessageRecalled(msg.MessageID) {
 		slog.Debug(p.tag()+": recalled message dispatch dropped", "message_id", msg.MessageID)
@@ -2048,6 +2057,9 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	parentID := stringValue(msg.ParentId)
 
 	rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, threadID: stringValue(msg.ThreadId)}
+	if chatType == "group" {
+		rctx.groupID = chatID
+	}
 	if chatType == "group" && p.groupContext.enabled {
 		rctx.contextEligible = true // reply trigger and user/chat access were verified above
 		rctx.contextTimeMs = createTimeMs

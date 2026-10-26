@@ -85,6 +85,46 @@ Agent command files may publish only an explicit frontmatter `description`. Thei
 
 Existence is not presented as executable availability: model/provider switching, TTS, multi-workspace, schedulers, Relay, Web setup, and in-flight-turn operations probe their corresponding runtime interfaces or components.
 
+## Project/workspace defaults and group models
+
+The `model` command publishes `/model [switch <name>|group [<name>|reset]]`.
+It retains `member` permission and existing role/disabled-command policies.
+`switch` and legacy `/model <name>` change the project/workspace default for
+private chats and groups without a fixed model. `ModelSwitcher` alone keeps
+these legacy operations available, including on non-Codex backends.
+
+`group` queries, pins, or resets the verified group's selection. Pinning also
+requires the configured backend's `PerTurnModelSupporter` to return true
+(currently Codex `exec` and `app_server`), a current selectable model, and
+available persistent storage. It never switches Provider. Invocation verifies
+group identity; a session-key shape alone is not proof. Unknown groups must
+first send `/model` in the group. Reset can clear an existing binding even if
+the backend no longer supports pinning, provided identity and storage exist.
+The command-level availability reason distinguishes legacy switching from
+these group prerequisites instead of disabling the entire command.
+
+The parameter contract describes project isolation and the binding key:
+platform + stable group ID, never topic or workspace. All members and existing
+or new topics inherit it across `/reset`, `/new`, and restarts. Group writes
+declare `persistent_state`; the command's existing `configuration` and
+`agent_process` effects still describe default switching. Querying without
+a model is read-only; the overall command remains mutating because it also
+exposes setters.
+
+All three send paths resolve the binding at execution, including queued work.
+Changes affect the next new turn and leave a running reply alone. An explicit
+one-shot `/fast`/answer-profile or task model takes precedence; without one,
+ordinary messages use the fixed group model, then the workspace/project default
+only when no binding exists. The `reject` fallback contract covers unsupported
+per-turn settings, backend/Provider mismatch, unknown selections, storage and
+model/application errors: a pinned request must not silently use another model.
+Reselect the group model or explicitly reset the binding to recover.
+
+The read-only session capability `model_provider_identity` checks
+`ModelProviderSession` without publishing its captured provider name. A
+provider-switching Agent must expose this identity for pinned group turns;
+the engine validates the concrete session as well as the current Agent.
+
 ## Cron task models
 
 The `cron` Agent CLI tool contract includes optional `model`: prompt jobs only, omitted means inherit, and `cron edit <job-id> model ""` restores inheritance. Creating/editing writes persistent job state; execution starts an Agent turn and network requests without switching providers or changing project/Agent model defaults. Shell jobs and unsupported Agents reject explicit models rather than silently reverting to a default.

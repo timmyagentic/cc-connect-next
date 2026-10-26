@@ -67,6 +67,24 @@ type cujAgent struct {
 	failStartErr   error
 }
 
+func TestCUJ_H7_GroupModelBindingIsolatesTopicsAndDefaultChanges(t *testing.T) {
+	e, p, a := newGroupModelEngine(t, "")
+	e.ReceiveMessage(p, groupModelMessage("A", "one", "bind", "/model group group-B"))
+	groupModelChat(t, e, p, a, groupModelMessage("A", "two", "A1", "A1"), "group-B")
+	groupModelChat(t, e, p, a, groupModelMessage("B", "", "B1", "B1"), "project-A")
+	e.ReceiveMessage(p, groupModelMessage("B", "", "default", "/model switch project-C"))
+	groupModelChat(t, e, p, a, groupModelMessage("A", "two", "A2", "A2"), "group-B")
+	groupModelChat(t, e, p, a, groupModelMessage("B", "", "B2", "B2"), "project-C")
+	e.ReceiveMessage(p, groupModelMessage("A", "one", "reset", "/model group reset"))
+	groupModelChat(t, e, p, a, groupModelMessage("A", "two", "A3", "A3"), "project-C")
+	visible := strings.Join(p.getSent(), "\n")
+	for _, reply := range []string{"model=group-B A1", "model=project-A B1", "model=group-B A2", "model=project-C B2", "model=project-C A3"} {
+		if !strings.Contains(visible, reply) {
+			t.Fatalf("missing visible reply %q in %s", reply, visible)
+		}
+	}
+}
+
 func TestCUJ_H4_FeishuTopicsKeepWorkspaceBindingsIsolated(t *testing.T) {
 	baseDir := t.TempDir()
 	defaultWorkspace := normalizeWorkspacePath(filepath.Join(baseDir, "workspace-default"))

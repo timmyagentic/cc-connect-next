@@ -317,6 +317,7 @@ type Message struct {
 	MessageID    string // platform message ID for tracing
 	Recalled     bool   // true for platform message recall/delete events targeting MessageID
 	ChannelID    string
+	GroupID      string // stable group ID, set only after platform verification; excludes topic/root/user IDs
 	UserID       string
 	UserName     string
 	ChatName     string // human-readable chat/group name (optional)

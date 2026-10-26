@@ -165,6 +165,7 @@ type appServerSession struct {
 	mode               string
 	baseURL            string
 	modelProvider      string
+	providerName       string // immutable configured provider identity, including Env-only providers
 	extraEnv           []string
 	codexHome          string
 	promptPreamble     string
@@ -241,6 +242,7 @@ type appServerSessionParams struct {
 	resumeID           string
 	baseURL            string
 	modelProvider      string
+	providerName       string
 	extraEnv           []string
 	codexHome          string
 	systemPrompt       string
@@ -267,6 +269,7 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 		mode:                p.mode,
 		baseURL:             p.baseURL,
 		modelProvider:       p.modelProvider,
+		providerName:        p.providerName,
 		extraEnv:            append([]string(nil), p.extraEnv...),
 		codexHome:           strings.TrimSpace(p.codexHome),
 		promptPreamble:      buildCodexPromptPreamble(p.systemPrompt, p.appendPrompt),
@@ -304,6 +307,10 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 
 	return s, nil
 }
+
+// ModelProviderName returns the configured provider captured at session creation.
+// It can differ from the CLI model_provider and never follows later Agent switches.
+func (s *appServerSession) ModelProviderName() string { return s.providerName }
 
 // launchArgs builds the argv (after the binary) used to spawn the Codex
 // app-server. cliExtraArgs from the user's cmd option go before the

@@ -2,16 +2,24 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 )
 
+// GroupModelBinding selects a model and optional provider for a group.
+type GroupModelBinding struct {
+	Model    string `json:"model"`
+	Provider string `json:"provider,omitempty"`
+}
+
 type projectStateData struct {
-	WorkDirOverride         string            `json:"work_dir_override,omitempty"`
-	WorkspaceDirOverrides   map[string]string `json:"workspace_dir_overrides,omitempty"`
-	WorkspaceModelOverrides map[string]string `json:"workspace_model_overrides,omitempty"`
+	WorkDirOverride         string                       `json:"work_dir_override,omitempty"`
+	WorkspaceDirOverrides   map[string]string            `json:"workspace_dir_overrides,omitempty"`
+	WorkspaceModelOverrides map[string]string            `json:"workspace_model_overrides,omitempty"`
+	GroupModelBindings      map[string]GroupModelBinding `json:"group_model_bindings,omitempty"`
 }
 
 // ProjectStateStore persists lightweight runtime state for one project.
@@ -109,29 +117,65 @@ func (ps *ProjectStateStore) ClearWorkDirOverride() {
 	ps.SetWorkDirOverride("")
 }
 
+// GroupModelBinding looks up the caller-provided platform instance and group key.
+func (ps *ProjectStateStore) GroupModelBinding(key string) (GroupModelBinding, bool) {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	binding, ok := ps.state.GroupModelBindings[key]
+	return binding, ok
+}
+
+// SaveGroupModelBinding persists a binding before making it visible in memory.
+// An empty Model removes the binding. Stores without a path remain memory-only.
+func (ps *ProjectStateStore) SaveGroupModelBinding(key string, binding GroupModelBinding) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+
+	next := ps.state
+	next.GroupModelBindings = make(map[string]GroupModelBinding, len(ps.state.GroupModelBindings)+1)
+	for k, v := range ps.state.GroupModelBindings {
+		next.GroupModelBindings[k] = v
+	}
+	if binding.Model == "" {
+		delete(next.GroupModelBindings, key)
+		if len(next.GroupModelBindings) == 0 {
+			next.GroupModelBindings = nil
+		}
+	} else {
+		next.GroupModelBindings[key] = binding
+	}
+
+	if err := ps.saveLocked(next); err != nil {
+		return err
+	}
+	ps.state = next
+	return nil
+}
+
 func (ps *ProjectStateStore) Save() {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	ps.saveLocked()
+	if err := ps.saveLocked(ps.state); err != nil {
+		slog.Error("project_state: failed to save", "path", ps.storePath, "error", err)
+	}
 }
 
-func (ps *ProjectStateStore) saveLocked() {
+func (ps *ProjectStateStore) saveLocked(state projectStateData) error {
 	if ps.storePath == "" {
-		return
+		return nil
 	}
 
-	data, err := json.MarshalIndent(ps.state, "", "  ")
+	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
-		slog.Error("project_state: failed to marshal", "error", err)
-		return
+		return fmt.Errorf("project_state: marshal: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(ps.storePath), 0o755); err != nil {
-		slog.Error("project_state: failed to create dir", "path", ps.storePath, "error", err)
-		return
+		return fmt.Errorf("project_state: create dir: %w", err)
 	}
 	if err := AtomicWriteFile(ps.storePath, data, 0o644); err != nil {
-		slog.Error("project_state: failed to write", "path", ps.storePath, "error", err)
+		return fmt.Errorf("project_state: write: %w", err)
 	}
+	return nil
 }
 
 func (ps *ProjectStateStore) load() {

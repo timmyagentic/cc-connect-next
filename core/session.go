@@ -311,6 +311,9 @@ type UserMeta struct {
 	UserName    string                 `json:"user_name,omitempty"`
 	ChatName    string                 `json:"chat_name,omitempty"`
 	ReplyTarget *PersistentReplyTarget `json:"reply_target,omitempty"`
+	// GroupModelKey is routing metadata verified by the platform, independent
+	// of the active agent session, topic, and workspace.
+	GroupModelKey string `json:"group_model_key,omitempty"`
 }
 
 // snapshotVersion tracks the schema version so we can detect data saved by
@@ -547,6 +550,32 @@ func (sm *SessionManager) UpdateUserMeta(sessionKey, userName, chatName string) 
 	if chatName != "" {
 		meta.ChatName = chatName
 	}
+}
+
+// UpdateGroupModelKey saves verified group routing before commands/cards can
+// use it. Unknown routing must not be inferred from a session key's shape.
+func (sm *SessionManager) UpdateGroupModelKey(sessionKey, key string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	old := sm.userMeta[sessionKey]
+	if old == nil && key == "" || old != nil && old.GroupModelKey == key {
+		return nil
+	}
+	meta := &UserMeta{}
+	if old != nil {
+		*meta = *old
+	}
+	meta.GroupModelKey = key
+	sm.userMeta[sessionKey] = meta
+	if err := sm.saveLocked(); err != nil {
+		if old == nil {
+			delete(sm.userMeta, sessionKey)
+		} else {
+			sm.userMeta[sessionKey] = old
+		}
+		return err
+	}
+	return nil
 }
 
 // UpdateReplyTarget persists an immutable copy of a platform-owned reply
