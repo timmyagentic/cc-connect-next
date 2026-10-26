@@ -16,7 +16,7 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 	options := core.DescribePlatformOptions([]string{
 		"allow_chat", "allow_from", "app_id", "app_secret", "callback_path", "cc_data_dir", "cc_project", "domain", "done_emoji",
 		"enable_feishu_card", "encrypt_key", "group_only", "group_reply_all", "group_reply_all_chats",
-		"group_context", "group_context_max_messages", "group_context_window_minutes", "group_context_max_chars",
+		"group_context", "group_context_include_peer_bots", "group_context_max_messages", "group_context_window_minutes", "group_context_max_chars",
 		"image_batch_window_ms", "mention_map", "peer_bots", "port", "progress_style", "reaction_emoji",
 		"reply_to_trigger", "require_mention", "resolve_mentions", "respond_to_at_everyone_and_here",
 		"share_session_in_channel", "thread_isolation", "completion_notify", "completion_notify_users", "unread_reminder", "unread_reminder_users", "unread_reminder_delay_mins",
@@ -115,19 +115,26 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 			option.Description = "Before a group turn accepted by the configured reply rules, read bounded recent discussion as untrusted background. Compatible with mention-free replies and opt-in @all replies. Ordinary groups and real topics are isolated. Uses existing read access only; does not download background attachments or poll."
 			option.DescriptionZH = "符合回复规则的群聊回合开始前，补读有界近期讨论作为不可信背景；兼容无需 @ 回复和显式开启的 @全体 回复。普通群和真实话题分别隔离；仅使用已有读取权限，不下载背景附件、不轮询。"
 			option.Keywords = []string{"recent discussion", "group context", "catch up", "补读近期讨论", "群聊上下文", "未@讨论", "群聊补读"}
+		case "group_context_include_peer_bots":
+			option.Type = "boolean"
+			option.Default = "false"
+			option.Requires = []string{"group_context = true", "non-empty peer_bots with other bot app IDs and aliases"}
+			option.Description = "Include public text and readable card snapshots from the exact peer_bots app IDs in the same group/topic. Preserve sender and card status, re-read edited snapshots, and ignore bot-originated triggers. Own/unknown bots and private conversations are excluded. Bounded recent context only, not shared native Agent sessions or permanent memory."
+			option.DescriptionZH = "将 peer_bots 中精确 app ID 的公开文本及可读卡片快照纳入同群、同话题背景。保留发送者和卡片状态，更新后可重新补读，忽略机器人触发消息。排除自身、未知机器人和私聊。仅共享有界近期背景，不合并原生 Agent 会话或永久记忆。"
+			option.Keywords = []string{"shared bot context", "peer bot", "机器人上下文互通", "同群同话题", "接续对话"}
 		case "group_context_max_messages", "group_context_window_minutes", "group_context_max_chars":
 			option.Type = "integer"
 			option.Requires = []string{"group_context = true"}
 			minimum, maximum, fallback := 1.0, float64(maxGroupContextMessages), defaultGroupContextMessages
 			option.Unit = "messages"
-			option.Description = "Maximum recent human messages per accepted group turn, before per-Agent-conversation deduplication. Bot output is omitted; failed or truncated reads are disclosed."
-			option.DescriptionZH = "每个符合回复规则的群聊回合最多读取的人类消息条数，再按 Agent 会话去重；省略机器人输出，明确提示读取失败或截断。"
+			option.Description = "Maximum recent human and explicitly enabled peer-bot messages per accepted group turn, before per-Agent-conversation deduplication. Failed or truncated reads are disclosed."
+			option.DescriptionZH = "每个符合回复规则的群聊回合最多读取的人类和显式开启的对端机器人消息条数，再按 Agent 会话去重；明确提示读取失败或截断。"
 			switch option.Key {
 			case "group_context_window_minutes":
 				maximum, fallback = float64(maxGroupContextMinutes), defaultGroupContextMinutes
 				option.Unit = "minutes"
-				option.Description = "Read only discussion within this many minutes before the triggering message, including when that message waits in the queue."
-				option.DescriptionZH = "仅补读触发消息之前该分钟数内的讨论；即使触发消息在排队，也使用其原始时间窗口。"
+				option.Description = "Read messages created within this many minutes before the triggering message, even when queued. Cards created outside the window are excluded; peer snapshots updated after the trigger are omitted with an incomplete-context notice until a later trigger."
+				option.DescriptionZH = "仅补读触发消息之前该分钟数内创建的消息，排队时仍使用原始时间。窗口外创建的卡片不纳入；触发后更新的对端卡片会跳过并提示背景不完整，后续触发再补读。"
 			case "group_context_max_chars":
 				minimum, maximum, fallback = float64(minGroupContextChars), float64(maxGroupContextChars), defaultGroupContextChars
 				option.Unit = "Unicode characters"
@@ -151,8 +158,8 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 		case "peer_bots":
 			option.Type = "table"
 			option.Default = "empty"
-			option.Description = "Map each peer bot app_id to a friendly alias for quoted-reply attribution."
-			option.DescriptionZH = "将每个对端机器人 app_id 映射为友好别名，用于引用回复归因。"
+			option.Description = "Map each peer bot app_id to a friendly alias for quoted-reply attribution. Also acts as the exact sender allowlist only when group_context_include_peer_bots is explicitly enabled; this table alone never enables sharing."
+			option.DescriptionZH = "将每个对端机器人 app_id 映射为友好别名，用于引用回复归因。仅显式开启 group_context_include_peer_bots 时兼作发送者白名单；单独配置此表不会开启共享。"
 			option.Example = `peer_bots = { cli_peer_app_id = "Reviewer-Bot" }`
 		case "port":
 			option.Type = "string"
@@ -212,6 +219,7 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 	options = core.ConfigureOptionExample(options, "mention_map", `mention_map = { Reviewer-Bot = "ou_bot_open_id" }`)
 	options = core.ConfigureOptionExample(options, "peer_bots", `peer_bots = { cli_peer_app_id = "Reviewer-Bot" }`)
 	options = core.ConfigureOptionExample(options, "group_context", "group_context = true")
+	options = core.ConfigureOptionExample(options, "group_context_include_peer_bots", "group_context_include_peer_bots = true")
 	options = core.ConfigureOptionExample(options, "group_context_max_messages", "group_context_max_messages = 20")
 	options = core.ConfigureOptionExample(options, "group_context_window_minutes", "group_context_window_minutes = 30")
 	options = core.ConfigureOptionExample(options, "group_context_max_chars", "group_context_max_chars = 8000")

@@ -49,7 +49,7 @@ func TestGroupContextConfigurationBounds(t *testing.T) {
 		if option.DefaultSource != core.ConfigDefaultBuiltin || option.ApplyMode != core.ConfigApplyRestart || option.Example == "" {
 			t.Fatalf("incomplete config contract: %+v", option)
 		}
-		if option.Key != "group_context" && (option.Minimum == nil || option.Maximum == nil || option.Type != "integer") {
+		if option.Key != "group_context" && option.Key != "group_context_include_peer_bots" && (option.Minimum == nil || option.Maximum == nil || option.Type != "integer") {
 			t.Fatalf("missing numeric bounds: %+v", option)
 		}
 		if option.Key == "group_context" && len(option.ConflictsWith) != 0 {

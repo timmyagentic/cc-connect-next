@@ -125,6 +125,54 @@ func TestMessageContextReceiptsPersistAndFollowNativeConversation(t *testing.T) 
 	}
 }
 
+func TestMessageContextRevisionReceiptsSurviveRestart(t *testing.T) {
+	env, p := newContextCUJEnv(t)
+	key := "test:shared-topic"
+	session := &Session{}
+	session.SetAgentSessionID("native", "agent")
+	state := &interactiveState{}
+	entry := ContextMessage{ID: "editable", SenderID: "bot-a", SenderName: "Peer A", SenderType: "app", Text: "Working: checking", Revision: "partial"}
+	p.setBackground(key, []ContextMessage{entry}, nil)
+	first := env.engine.prepareMessageContext(p, key, session, state, "continue", "first")
+	if !strings.Contains(first, "Working: checking") || strings.Contains(first, `"Revision"`) {
+		t.Fatalf("wrong snapshot encoding: %s", first)
+	}
+	completeMessageContext(state, session, env.engine.sessions)
+	data, _ := json.Marshal(session)
+	var restored Session
+	if err := json.Unmarshal(data, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "again", "second"); strings.Contains(got, "Working: checking") {
+		t.Fatal("restart lost revision receipt")
+	}
+	entry.Text, entry.Revision = "Completed: checking", "completed"
+	p.setBackground(key, []ContextMessage{entry}, nil)
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "continue", "third"); !strings.Contains(got, "Completed: checking") {
+		t.Fatal("final snapshot with same ID was lost")
+	}
+	// A failed attempt does not call completeMessageContext.
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "retry", "fourth"); !strings.Contains(got, "Completed: checking") {
+		t.Fatal("failed attempt consumed final revision")
+	}
+	completeMessageContext(state, &restored, env.engine.sessions)
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "continue", "fifth"); strings.Contains(got, "Completed: checking") {
+		t.Fatal("unchanged final snapshot repeated")
+	}
+	entry.Text, entry.Revision = "Working: checking", "partial"
+	p.setBackground(key, []ContextMessage{entry}, nil)
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "corrected status", "reverted"); !strings.Contains(got, "Working: checking") {
+		t.Fatal("A -> B -> A edit was mistaken for an already delivered snapshot")
+	}
+	completeMessageContext(state, &restored, env.engine.sessions)
+	entry.Text, entry.Revision = "Completed: checking", "completed"
+	p.setBackground(key, []ContextMessage{entry}, nil)
+	restored.SetAgentSessionID("fresh-native", "agent")
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "catch up", "sixth"); !strings.Contains(got, "Completed: checking") {
+		t.Fatal("new native session inherited old receipts")
+	}
+}
+
 func TestMessageContextUsesQueueInsteadOfSteering(t *testing.T) {
 	env, p := newContextCUJEnv(t)
 	key := "test:group"

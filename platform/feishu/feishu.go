@@ -364,7 +364,7 @@ type Platform struct {
 	botIdentityErr       error
 	botOpenIDFetcher     func() (string, error)
 	botRetryCancel       context.CancelFunc
-	peerBots             map[string]string // app_id -> friendly alias, for quoted-reply attribution
+	peerBots             map[string]string // app_id -> alias; also context allowlist with explicit opt-in
 	mentionMap           map[string]string // friendly bot name -> open_id, for outbound native @ notifications
 	userNameCache        sync.Map          // open_id -> display name
 	chatNameCache        sync.Map          // chat_id -> chat name
@@ -1946,6 +1946,11 @@ func (p *Platform) shouldDispatchGroupMessage(msg *larkim.EventMessage, msgType,
 func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 	msg := event.Event.Message
 	sender := event.Event.Sender
+	// Shared bot replies are read as quoted background on a human trigger.
+	// Never turn them into requests, even in mention-free reply groups.
+	if p.groupContext.includePeerBots && sender != nil && stringValue(sender.SenderType) == "app" {
+		return nil
+	}
 
 	msgType := ""
 	if msg.MessageType != nil {

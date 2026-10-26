@@ -78,6 +78,12 @@ Run multiple named projects, dynamically bind workspaces, isolate OS users, and 
 
 Related configuration: `projects.name`, `projects.mode`, `projects.base_dir`, `projects.workspace_init_allow_local_paths`, `projects.run_as_user`, `workspace_idle_timeout_mins`
 
+### Continue a peer bot conversation (`peer-bot-conversation-context`)
+
+Opt in to bounded public peer-bot snapshots in the same group/topic; native Agent sessions remain independent.
+
+Related configuration: `projects.platforms.options.group_context`, `projects.platforms.options.group_context_include_peer_bots`, `projects.platforms.options.peer_bots`, `projects.platforms.options.group_context_max_messages`, `projects.platforms.options.group_context_window_minutes`, `projects.platforms.options.group_context_max_chars`
+
 ### Messaging platforms (`platform-connections`)
 
 Connect and tune Feishu, Telegram, Discord, Slack, DingTalk, WeCom, Weixin, QQ, Matrix, and other compiled adapters.
@@ -3610,6 +3616,21 @@ Before a group turn accepted by the configured reply rules, read bounded recent 
 - Takes effect: `restart`
 - Example: `group_context = true`
 
+### `projects.platforms.options.group_context_include_peer_bots` — `feishu, lark`
+
+Include public text and readable card snapshots from the exact peer_bots app IDs in the same group/topic. Preserve sender and card status, re-read edited snapshots, and ignore bot-originated triggers. Own/unknown bots and private conversations are excluded. Bounded recent context only, not shared native Agent sessions or permanent memory.
+
+- Source: `toml`
+- Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
+- Scope: `platform` (`feishu, lark`)
+- Type: `boolean`
+- Requirement: `optional`
+- Default: `false`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Requires: `group_context = true`, `non-empty peer_bots with other bot app IDs and aliases`
+- Example: `group_context_include_peer_bots = true`
+
 ### `projects.platforms.options.group_context_max_chars` — `feishu, lark`
 
 Bound the complete JSON background including message text, sender, time and reply metadata; preserve the newest discussion and disclose truncation.
@@ -3628,7 +3649,7 @@ Bound the complete JSON background including message text, sender, time and repl
 
 ### `projects.platforms.options.group_context_max_messages` — `feishu, lark`
 
-Maximum recent human messages per accepted group turn, before per-Agent-conversation deduplication. Bot output is omitted; failed or truncated reads are disclosed.
+Maximum recent human and explicitly enabled peer-bot messages per accepted group turn, before per-Agent-conversation deduplication. Failed or truncated reads are disclosed.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3644,7 +3665,7 @@ Maximum recent human messages per accepted group turn, before per-Agent-conversa
 
 ### `projects.platforms.options.group_context_window_minutes` — `feishu, lark`
 
-Read only discussion within this many minutes before the triggering message, including when that message waits in the queue.
+Read messages created within this many minutes before the triggering message, even when queued. Cards created outside the window are excluded; peer snapshots updated after the trigger are omitted with an incomplete-context notice until a later trigger.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3876,7 +3897,7 @@ Set the account display name used by the platform adapter.
 
 ### `projects.platforms.options.peer_bots` — `feishu, lark`
 
-Map each peer bot app_id to a friendly alias for quoted-reply attribution.
+Map each peer bot app_id to a friendly alias for quoted-reply attribution. Also acts as the exact sender allowlist only when group_context_include_peer_bots is explicitly enabled; this table alone never enables sharing.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`

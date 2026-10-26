@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -27,10 +28,11 @@ const (
 )
 
 type groupContextConfig struct {
-	enabled     bool
-	maxMessages int
-	minutes     int
-	maxChars    int
+	enabled         bool
+	includePeerBots bool
+	maxMessages     int
+	minutes         int
+	maxChars        int
 }
 
 func parseGroupContextConfig(opts map[string]any) (groupContextConfig, error) {
@@ -40,6 +42,28 @@ func parseGroupContextConfig(opts map[string]any) (groupContextConfig, error) {
 		cfg.enabled, ok = raw.(bool)
 		if !ok {
 			return cfg, fmt.Errorf("group_context must be a boolean")
+		}
+	}
+	if raw, exists := opts["group_context_include_peer_bots"]; exists {
+		var ok bool
+		cfg.includePeerBots, ok = raw.(bool)
+		if !ok {
+			return cfg, fmt.Errorf("group_context_include_peer_bots must be a boolean")
+		}
+	}
+	if cfg.includePeerBots {
+		if !cfg.enabled {
+			return cfg, fmt.Errorf("group_context_include_peer_bots requires group_context = true")
+		}
+		peers, ok := opts["peer_bots"].(map[string]any)
+		if !ok || len(peers) == 0 {
+			return cfg, fmt.Errorf("group_context_include_peer_bots requires a non-empty peer_bots table")
+		}
+		for id, value := range peers {
+			alias, ok := value.(string)
+			if !ok || strings.TrimSpace(alias) == "" || strings.TrimSpace(id) != id || id == "" || id == opts["app_id"] {
+				return cfg, fmt.Errorf("group_context_include_peer_bots requires other bot app IDs with non-empty string aliases")
+			}
 		}
 	}
 	for _, setting := range []struct {
@@ -90,6 +114,10 @@ func (p *Platform) RuntimeCapabilityAvailability(_ string, target any) map[strin
 	} else if target != nil && !p.MessageContextEnabled(target) {
 		availability = core.CapabilityAvailability{State: core.CapabilityUnavailable, Reason: "This target is not a verified group trigger.", ReasonZH: "当前目标不是已核验的群内触发消息。"}
 	}
+	if p.groupContext.includePeerBots && availability.State == core.CapabilityConditional {
+		availability.Reason += " Explicit peer-bot sharing includes attributed public snapshots in the same group/topic and recent window; it does not share native Agent sessions or dispatch bot messages."
+		availability.ReasonZH += " 已显式开启对端机器人共享：仅补读同群同话题、近期窗口内带归因的公开快照，不合并原生 Agent 会话，不因机器人消息触发回复。"
+	}
 	batches := core.CapabilityAvailability{State: core.CapabilityAvailable, Reason: "Multiple images are sent as two-column Card 2.0 galleries, up to five originals per message; single images stay native.", ReasonZH: "多张图片按每批最多 5 张原图发送双列 Card 2.0 图集；单张保持原生图片消息。"}
 	if !p.useInteractiveCard {
 		batches = core.CapabilityAvailability{State: core.CapabilityUnavailable, Reason: "enable_feishu_card is false; images are sent individually.", ReasonZH: "enable_feishu_card 为 false，图片逐张发送。"}
@@ -124,6 +152,9 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any) (result c
 	for page := 0; page < groupContextMaxPages; page++ {
 		builder := larkim.NewListMessageReqBuilder().ContainerIdType(containerType).ContainerId(containerID).
 			SortType("ByCreateTimeDesc").PageSize(groupContextPageSize).WithSenderName(true)
+		if p.groupContext.includePeerBots {
+			builder.CardMsgContentType("user_card_content")
+		}
 		if pageToken != "" {
 			builder.PageToken(pageToken)
 		}
@@ -193,7 +224,14 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 		return core.ContextMessage{}, false, false
 	}
 	id := stringValue(item.MessageId)
-	if id == rctx.messageID || (item.Sender != nil && stringValue(item.Sender.SenderType) == "app") {
+	if id == rctx.messageID {
+		return core.ContextMessage{}, false, false
+	}
+	senderType, senderID := "", ""
+	if item.Sender != nil {
+		senderType, senderID = stringValue(item.Sender.SenderType), stringValue(item.Sender.Id)
+	}
+	if senderType == "app" && (!p.groupContext.includePeerBots || senderID == p.appID || p.peerBots[senderID] == "") {
 		return core.ContextMessage{}, false, false
 	}
 	if stringValue(item.ChatId) != rctx.chatID {
@@ -205,12 +243,20 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 	}
 	ms, err := strconv.ParseInt(stringValue(item.CreateTime), 10, 64)
 	if err != nil || id == "" || item.Sender == nil || item.Body == nil ||
-		stringValue(item.Sender.SenderType) != "user" || stringValue(item.Sender.Id) == "" {
+		(senderType != "user" && senderType != "app") || senderID == "" {
 		return core.ContextMessage{}, false, true
 	}
 	at := time.UnixMilli(ms).UTC()
 	if at.Before(start) || at.After(cutoff) {
 		return core.ContextMessage{}, false, false
+	}
+	// A queued trigger cannot read the old version of a card edited after it
+	// arrived. Omit that snapshot visibly; the next trigger can pick it up.
+	if senderType == "app" && stringValue(item.UpdateTime) != "" {
+		updated, err := strconv.ParseInt(*item.UpdateTime, 10, 64)
+		if err != nil || updated > cutoff.UnixMilli() {
+			return core.ContextMessage{}, false, true
+		}
 	}
 	content := stringValue(item.Body.Content)
 	var text string
@@ -226,6 +272,14 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 		text = replaceMentions(body.Text, item.Mentions)
 	case "post":
 		text = replaceMentions(extractPostPlainText(content), item.Mentions)
+	case "interactive":
+		if senderType != "app" {
+			return core.ContextMessage{}, false, true
+		}
+		text = extractGroupContextCardText(content)
+		if text == "" {
+			return core.ContextMessage{}, false, true
+		}
 	default:
 		// Never download another participant's attachments implicitly.
 		return core.ContextMessage{}, false, true
@@ -233,10 +287,115 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 	if strings.TrimSpace(text) == "" {
 		return core.ContextMessage{}, false, false
 	}
+	entry := core.ContextMessage{ID: id, SenderID: senderID, SenderName: stringValue(item.Sender.SenderName), SenderType: senderType, Time: at, ReplyTo: stringValue(item.ParentId)}
+	if senderType == "app" {
+		entry.SenderName = p.peerBots[senderID]
+		// Hash the complete readable snapshot before truncation. Streaming
+		// cards keep their message ID when the final answer replaces progress.
+		entry.Revision = fmt.Sprintf("%x", sha256.Sum256([]byte(text)))
+	}
 	runes := []rune(text)
 	if len(runes) > p.groupContext.maxChars {
 		text = string(runes[:p.groupContext.maxChars])
 		incomplete = true
 	}
-	return core.ContextMessage{ID: id, SenderID: stringValue(item.Sender.Id), SenderName: stringValue(item.Sender.SenderName), Time: at, ReplyTo: stringValue(item.ParentId), Text: text}, true, incomplete
+	entry.Text = text
+	return entry, true, incomplete
+}
+
+// Retain the card title: in cc-connect it distinguishes working, completed,
+// failed and interrupted replies. streaming_mode=false alone is not completion.
+func extractGroupContextCardText(content string) string {
+	var wrapper struct {
+		JSONCard string `json:"json_card"`
+	}
+	if json.Unmarshal([]byte(content), &wrapper) == nil && wrapper.JSONCard != "" {
+		content = wrapper.JSONCard
+	}
+	var card struct {
+		Body struct {
+			Elements []json.RawMessage `json:"elements"`
+		} `json:"body"`
+		Elements []json.RawMessage `json:"elements"`
+		Header   struct {
+			Title struct {
+				Content string `json:"content"`
+			} `json:"title"`
+			Property struct {
+				Title struct {
+					Property struct {
+						Content string `json:"content"`
+					} `json:"property"`
+				} `json:"title"`
+			} `json:"property"`
+		} `json:"header"`
+		Config struct {
+			Streaming    bool `json:"streaming_mode"`
+			RawStreaming bool `json:"streamingMode"`
+		} `json:"config"`
+	}
+	if json.Unmarshal([]byte(content), &card) != nil {
+		return ""
+	}
+	text := extractInteractiveCardText(content)
+	// user_card_content returns original cards, including direct nested
+	// elements rather than the AST's property.elements representation.
+	elements := append(card.Body.Elements, card.Elements...)
+	if len(elements) > 0 {
+		var parts []string
+		extractContextSourceElements(elements, &parts)
+		text = strings.Join(parts, "\n")
+	}
+	if text == "[interactive card]" {
+		return ""
+	}
+	title := card.Header.Title.Content
+	if title == "" {
+		title = card.Header.Property.Title.Property.Content
+	}
+	if strings.TrimSpace(text) == "" || (len(elements) == 0 && text == title) {
+		return "" // a title alone does not prove the card body was readable
+	}
+	if title != "" && text != title && !strings.HasPrefix(text, title+"\n") {
+		text = title + "\n" + text
+	}
+	if card.Config.Streaming || card.Config.RawStreaming {
+		text = "[in-progress card snapshot]\n" + text
+	}
+	return text
+}
+
+func extractContextSourceElements(elements []json.RawMessage, parts *[]string) {
+	for _, raw := range elements {
+		var node struct {
+			Tag      string            `json:"tag"`
+			Content  string            `json:"content"`
+			Text     json.RawMessage   `json:"text"`
+			Elements []json.RawMessage `json:"elements"`
+			Columns  []json.RawMessage `json:"columns"`
+			Fields   []json.RawMessage `json:"fields"`
+		}
+		if json.Unmarshal(raw, &node) != nil {
+			continue
+		}
+		if node.Content != "" {
+			*parts = append(*parts, node.Content)
+		}
+		if len(node.Text) > 0 {
+			var text string
+			if json.Unmarshal(node.Text, &text) == nil {
+				if text != "" {
+					*parts = append(*parts, text)
+				}
+			} else {
+				extractContextSourceElements([]json.RawMessage{node.Text}, parts)
+			}
+		}
+		if node.Tag == "img" {
+			*parts = append(*parts, "[image: attachment not provided from history]")
+		}
+		extractContextSourceElements(node.Elements, parts)
+		extractContextSourceElements(node.Columns, parts)
+		extractContextSourceElements(node.Fields, parts)
+	}
 }

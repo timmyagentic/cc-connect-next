@@ -78,6 +78,12 @@
 
 相关配置： `projects.name`, `projects.mode`, `projects.base_dir`, `projects.workspace_init_allow_local_paths`, `projects.run_as_user`, `workspace_idle_timeout_mins`
 
+### 同群同话题机器人上下文互通 (`peer-bot-conversation-context`)
+
+显式开启同群同话题内有界公开机器人回复的补读，原生 Agent 会话仍独立。
+
+相关配置： `projects.platforms.options.group_context`, `projects.platforms.options.group_context_include_peer_bots`, `projects.platforms.options.peer_bots`, `projects.platforms.options.group_context_max_messages`, `projects.platforms.options.group_context_window_minutes`, `projects.platforms.options.group_context_max_chars`
+
 ### 消息平台 (`platform-connections`)
 
 连接并调整飞书、Telegram、Discord、Slack、钉钉、企业微信、微信、QQ、Matrix 等当前构建内的平台适配器。
@@ -3610,6 +3616,21 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 生效方式：`restart`
 - 示例: `group_context = true`
 
+### `projects.platforms.options.group_context_include_peer_bots` — `feishu, lark`
+
+将 peer_bots 中精确 app ID 的公开文本及可读卡片快照纳入同群、同话题背景。保留发送者和卡片状态，更新后可重新补读，忽略机器人触发消息。排除自身、未知机器人和私聊。仅共享有界近期背景，不合并原生 Agent 会话或永久记忆。
+
+- 来源：`toml`
+- 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
+- 作用域：`platform` (`feishu, lark`)
+- 类型：`boolean`
+- 要求：`可选`
+- 默认值：`false`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 依赖: `group_context = true`, `non-empty peer_bots with other bot app IDs and aliases`
+- 示例: `group_context_include_peer_bots = true`
+
 ### `projects.platforms.options.group_context_max_chars` — `feishu, lark`
 
 限制完整 JSON 背景的字符数，包含正文、发送者、时间及回复元数据；优先保留最新讨论并提示截断。
@@ -3628,7 +3649,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.group_context_max_messages` — `feishu, lark`
 
-每个符合回复规则的群聊回合最多读取的人类消息条数，再按 Agent 会话去重；省略机器人输出，明确提示读取失败或截断。
+每个符合回复规则的群聊回合最多读取的人类和显式开启的对端机器人消息条数，再按 Agent 会话去重；明确提示读取失败或截断。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3644,7 +3665,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.group_context_window_minutes` — `feishu, lark`
 
-仅补读触发消息之前该分钟数内的讨论；即使触发消息在排队，也使用其原始时间窗口。
+仅补读触发消息之前该分钟数内创建的消息，排队时仍使用原始时间。窗口外创建的卡片不纳入；触发后更新的对端卡片会跳过并提示背景不完整，后续触发再补读。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3876,7 +3897,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.peer_bots` — `feishu, lark`
 
-将每个对端机器人 app_id 映射为友好别名，用于引用回复归因。
+将每个对端机器人 app_id 映射为友好别名，用于引用回复归因。仅显式开启 group_context_include_peer_bots 时兼作发送者白名单；单独配置此表不会开启共享。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
