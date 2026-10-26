@@ -1108,12 +1108,15 @@ app_secret = "your-feishu-app-secret"
 #                           # still require @. A TOML string array is also accepted.
 #                           # 可选：仅这些群聊无需 @；其他群聊仍需 @。也支持 TOML 字符串数组。
 # group_context = false    # Read bounded recent discussion before an accepted group turn / 符合回复规则时补读有界近期讨论
-# group_context_max_messages = 20    # 1-100 human messages / 人类消息条数
-# group_context_window_minutes = 30  # 1-1440 minutes before the trigger / 触发消息之前的分钟数
+# group_context_include_peer_bots = false # Opt in with peer_bots below / 显式开启后才共享下方 peer_bots 的公开回复
+# group_context_max_messages = 20    # 1-100 human + enabled peer messages / 人类及显式开启的对端机器人消息总数
+# group_context_window_minutes = 30  # 1-1440 minutes, by creation time / 按消息创建时间计算的分钟数
 # group_context_max_chars = 8000     # 512-32000 Unicode characters, including metadata / 含元数据的字符数
-# Requires group_reply_all=false, empty group_reply_all_chats, require_mention=true,
-# and respond_to_at_everyone_and_here=false. No attachment downloads or extra permissions.
-# 需关闭全部免 @ 回复选项；不自动下载附件、不申请新权限。忙时按独立回合排队。
+# Compatible with configured mention-free replies. No attachment downloads or extra permissions.
+# Peer sharing stays within the current group/topic and window, excludes own/unknown bots,
+# and never dispatches bot messages as requests. Native Agent sessions remain separate.
+# 兼容已配置的免 @ 回复；不自动下载附件、不申请新权限。忙时按独立回合排队。
+# 对端共享只在当前群/话题和时间窗口内生效，排除自身和未知机器人，不因机器人消息触发回复；原生 Agent 会话独立。
 # completion_notify = false          # Opt in to an immediate private completion notice from this bot, with an original-conversation link.
 # completion_notify_users = ["ou_your_id_in_this_bot_app"] # Explicit app-scoped turn owners; no wildcard.
 # 成功回复后由当前机器人立即私聊发起人一次，附原对话链接；默认关闭。
@@ -1136,8 +1139,8 @@ app_secret = "your-feishu-app-secret"
 #                           # 机器人名称 -> open_id 的显式映射，用于真正触发机器人间 @ 通知；
 #                           # 优先级高于群成员同名匹配，并且必须同时开启 resolve_mentions。
 # peer_bots = { cli_peer_app_id = "Reviewer-Bot" }
-#                           # Peer bot app_id -> friendly alias for quoted-reply attribution.
-#                           # 对端机器人 app_id -> 友好别名，用于引用回复归因。
+#                           # Peer app_id -> alias; context allowlist only with group_context_include_peer_bots=true.
+#                           # 对端 app_id -> 别名；只有显式开启 group_context_include_peer_bots 后才用于共享上下文。
 # respond_to_at_everyone_and_here = false # Treat @everyone/@here as a bot mention / 将 @everyone/@here 视为机器人提及
 # image_batch_window_ms = 500  # Coalesce window for consecutive images from the same session (default: 500ms).
 #                              # When the Feishu mobile client sends multiple images, each arrives as a separate

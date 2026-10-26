@@ -3216,6 +3216,65 @@ func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
 	}
 }
 
+func TestCUJ_H6_PeerBotHandoffAndEditedAnswer(t *testing.T) {
+	a, pa := newContextCUJEnv(t)
+	b, pb := newContextCUJEnv(t)
+	key := "test:shared-topic"
+	send := func(env *cujEnv, p Platform, id, text, want string) {
+		env.plat.clearSent()
+		contextReceive(env, p, key, "human", id, text)
+		s := env.engine.sessions.GetOrCreateActive(key)
+		env.waitFor(id, 2*time.Second, func() bool { return env.sentContains(want) && !s.Busy() })
+	}
+	send(a, pa, "start-a", "check deployment", "ok")
+	as := contextLatestSession(a)
+	as.mu.Lock()
+	as.reply = "Working: deployment check in progress"
+	as.mu.Unlock()
+	send(a, pa, "ask-a", "show progress", "check in progress")
+	var publicReply string
+	for _, message := range a.plat.getSent() {
+		if strings.Contains(message, "check in progress") {
+			publicReply = message
+		}
+	}
+	entry := ContextMessage{ID: "a-public-card", SenderID: "bot-a", SenderType: "app", SenderName: "Peer A", Text: publicReply, Revision: "progress"}
+	pb.setBackground(key, []ContextMessage{entry}, nil)
+	send(b, pb, "ask-b", "continue from A's update", "ok")
+	bs := contextLatestSession(b)
+	if prompt := bs.getSentPrompts()[0]; !strings.Contains(prompt, publicReply) || !strings.Contains(prompt, `"sender_type":"app"`) || !strings.Contains(prompt, "not your own actions") {
+		t.Fatalf("peer handoff lost attribution/status: %s", prompt)
+	}
+
+	entry.Text, entry.Revision = "Completed: deployment checked; next run the user acceptance check", "final"
+	pb.setBackground(key, []ContextMessage{entry}, nil)
+	send(b, pb, "finish-b", "use A's final result", "ok")
+	if !strings.Contains(bs.getSentPrompts()[1], entry.Text) {
+		t.Fatal("edited final answer never reached B")
+	}
+	send(b, pb, "continue-b", "continue", "ok")
+	if strings.Contains(bs.getSentPrompts()[2], entry.Text) {
+		t.Fatal("same final result accumulated twice")
+	}
+	if len(as.getSentPrompts()) != 2 {
+		t.Fatal("B's user turn triggered A")
+	}
+	contextReceive(b, pb, key, "human", "new-b", "/new")
+	send(b, pb, "fresh-b", "catch up here", "ok")
+	if !strings.Contains(contextLatestSession(b).getSentPrompts()[0], entry.Text) {
+		t.Fatal("fresh session failed to catch up")
+	}
+	for _, other := range []string{"test:other-group", "test:other-topic", "private"} {
+		b.plat.clearSent()
+		contextReceive(b, pb, other, "human", other, "continue here")
+		s := b.engine.sessions.GetOrCreateActive(other)
+		b.waitFor(other, 2*time.Second, func() bool { return b.sentContains("ok") && !s.Busy() })
+		if strings.Contains(contextLatestSession(b).getSentPrompts()[0], entry.Text) {
+			t.Fatal("peer context crossed group/topic/private boundary")
+		}
+	}
+}
+
 func TestCUJ_B6_LateSessionIDSurvivesFailureRetryAndHistory(t *testing.T) {
 	backend := &failOnceCodexLikeSession{threadID: "durable-thread", events: make(chan Event, 4)}
 	backend.alive.Store(true)
