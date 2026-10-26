@@ -944,3 +944,21 @@ func TestGroupContextConfigurationIsSearchableAndBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestPeerBotContextIntentRequiresExplicitOptIn(t *testing.T) {
+	for _, owner := range []string{"feishu", "lark"} {
+		option := findCatalogOption(t, core.PlatformConfigOptions(owner), "group_context_include_peer_bots")
+		if option.Default != "false" || option.Type != "boolean" || len(option.Requires) != 2 || option.ApplyMode != core.ConfigApplyRestart {
+			t.Fatalf("missing explicit sharing contract: %+v", option)
+		}
+	}
+	for _, query := range []string{"机器人上下文互通", "shared bot context", "同群同话题"} {
+		var out bytes.Buffer
+		if err := writeConfigCapabilities(&out, []string{"--platform", "feishu", "--search", query, "--format", "json"}); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "group_context_include_peer_bots") || !strings.Contains(out.String(), "peer_bots") {
+			t.Fatalf("intent lost sharing configuration: %s", out.String())
+		}
+	}
+}
