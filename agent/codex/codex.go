@@ -265,16 +265,18 @@ func (a *Agent) configuredModels() []core.ModelOption {
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
-	if models := readCodexModelCatalog(); len(models) > 0 {
+	// Explicit provider choices own the menu, including custom model IDs and order.
+	if models := a.configuredModels(); len(models) > 0 {
 		return models
 	}
-	if models := a.configuredModels(); len(models) > 0 {
+	codexHome := a.modelDiscoveryHome()
+	if models := readCodexModelCatalog(codexHome); len(models) > 0 {
 		return models
 	}
 	if models := a.fetchModelsFromAPI(ctx); len(models) > 0 {
 		return models
 	}
-	if models := readCodexCachedModels(); len(models) > 0 {
+	if models := readCodexCachedModels(codexHome); len(models) > 0 {
 		return models
 	}
 	return []core.ModelOption{
@@ -285,6 +287,25 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 		{Name: "gpt-4.1-nano", Desc: "GPT-4.1 Nano (fastest)"},
 		{Name: "codex-mini-latest", Desc: "Codex Mini (code-optimized)"},
 	}
+}
+
+// modelDiscoveryHome follows the same environment precedence as StartSession.
+func (a *Agent) modelDiscoveryHome() string {
+	a.mu.RLock()
+	home := a.codexHome
+	env := append([]string(nil), a.configEnv...)
+	env = append(env, a.providerEnvLocked()...)
+	env = append(env, a.sessionEnv...)
+	a.mu.RUnlock()
+	if home != "" {
+		env = append(env, "CODEX_HOME="+home)
+	}
+	home, err := resolveCodexHome(env)
+	if err != nil {
+		slog.Debug("codex: failed to resolve model discovery home", "error", err)
+		return ""
+	}
+	return home
 }
 
 // nonChatSubstrings identifies non chat/completion modalities returned by
@@ -385,8 +406,7 @@ func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
 	return models
 }
 
-func readCodexCachedModels() []core.ModelOption {
-	codexHome, _ := resolveCodexHome(nil)
+func readCodexCachedModels(codexHome string) []core.ModelOption {
 	if codexHome == "" {
 		return nil
 	}
@@ -443,12 +463,11 @@ func parseCodexModelsJSON(data []byte) []core.ModelOption {
 	return models
 }
 
-// readCodexModelCatalog reads $CODEX_HOME/config.toml to find the
+// readCodexModelCatalog reads the agent's resolved Codex home config.toml to find the
 // model_catalog_json setting, then reads and parses that JSON file.
 // This is the authoritative source of model metadata for Codex CLI,
 // maintained by the Codex distribution itself.
-func readCodexModelCatalog() []core.ModelOption {
-	codexHome, _ := resolveCodexHome(nil)
+func readCodexModelCatalog(codexHome string) []core.ModelOption {
 	if codexHome == "" {
 		return nil
 	}
