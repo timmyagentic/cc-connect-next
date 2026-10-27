@@ -229,9 +229,17 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 	if id == rctx.messageID {
 		return core.ContextMessage{}, false, false
 	}
-	senderType, senderID := "", ""
+	senderType, senderID, senderName := "", "", ""
 	if item.Sender != nil {
 		senderType, senderID = stringValue(item.Sender.SenderType), stringValue(item.Sender.Id)
+		senderName = stringValue(item.Sender.SenderName)
+	}
+	// Feishu system events (group creation, invitations, role changes) have
+	// no user/app sender. Attribute them explicitly instead of treating a
+	// perfectly readable new group's history as a failed read.
+	systemMessage := stringValue(item.MsgType) == "system"
+	if systemMessage {
+		senderType, senderID, senderName = "system", "system", "System"
 	}
 	if senderType == "app" && (!p.groupContext.includePeerBots || senderID == p.appID || p.peerBots[senderID] == "") {
 		return core.ContextMessage{}, false, false
@@ -244,8 +252,8 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 		return core.ContextMessage{}, false, false
 	}
 	ms, err := strconv.ParseInt(stringValue(item.CreateTime), 10, 64)
-	if err != nil || id == "" || item.Sender == nil ||
-		(senderType != "user" && senderType != "app") || senderID == "" {
+	if err != nil || id == "" ||
+		(!systemMessage && (item.Sender == nil || (senderType != "user" && senderType != "app") || senderID == "")) {
 		return core.ContextMessage{}, false, true
 	}
 	at := time.UnixMilli(ms).UTC()
@@ -269,7 +277,7 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 	if strings.TrimSpace(text) == "" {
 		return core.ContextMessage{}, false, false
 	}
-	entry := core.ContextMessage{ID: id, SenderID: senderID, SenderName: stringValue(item.Sender.SenderName), SenderType: senderType, Time: at, ReplyTo: stringValue(item.ParentId), Resources: parsed.Resources, Incomplete: parsed.Incomplete}
+	entry := core.ContextMessage{ID: id, SenderID: senderID, SenderName: senderName, SenderType: senderType, Time: at, ReplyTo: stringValue(item.ParentId), Resources: parsed.Resources, Incomplete: parsed.Incomplete}
 	if senderType == "app" {
 		entry.SenderName = p.peerBots[senderID]
 		// Hash the complete readable snapshot before truncation. Streaming

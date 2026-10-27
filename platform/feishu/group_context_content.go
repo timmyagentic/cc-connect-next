@@ -103,7 +103,19 @@ func parseGroupContextContent(kind, raw, messageID string) core.ContextMessage {
 	case "location":
 		setContextMetadata(&entry, "location", body, "name", "address", "latitude", "longitude")
 	case "system":
-		setContextMetadata(&entry, "system", body, "text", "content", "template", "type")
+		template := field("template")
+		if template != "" {
+			var replacements []string
+			for _, key := range []string{"from_user", "to_chatters"} {
+				var names []string
+				if json.Unmarshal(body[key], &names) == nil && len(names) > 0 {
+					replacements = append(replacements, "{"+key+"}", strings.Join(names, ", "))
+				}
+			}
+			entry.Text = "[system: " + strings.NewReplacer(replacements...).Replace(template) + "]"
+		} else {
+			setContextMetadata(&entry, "system", body, "text", "content", "type")
+		}
 	default:
 		contextContentUnavailable(&entry, kind, "unsupported message type")
 	}
