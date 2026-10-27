@@ -135,6 +135,9 @@ func TestGroupModelScopeOnMessageDispatch(t *testing.T) {
 							if msg.GroupID != tc.group || msg.ReplyCtx.(replyContext).groupID != tc.group {
 								t.Errorf("GroupID = %q, reply groupID = %q, want %q", msg.GroupID, msg.ReplyCtx.(replyContext).groupID, tc.group)
 							}
+							if msg.IsDirect != (tc.chatType == "p2p") {
+								t.Errorf("IsDirect = %v for chat type %q", msg.IsDirect, tc.chatType)
+							}
 							if msg.ChannelKey != tc.channel || msg.LegacyChannelKey != tc.legacy {
 								t.Errorf("workspace keys = (%q, %q), want (%q, %q)", msg.ChannelKey, msg.LegacyChannelKey, tc.channel, tc.legacy)
 							}
@@ -168,10 +171,47 @@ func TestGroupModelScopeCardCallbackWithoutChatTypeStaysEmpty(t *testing.T) {
 				if msg.SessionKey != sessionKey || !msg.IsCardAction || msg.Content != "/model" {
 					t.Fatalf("callback changed command/session: %+v", msg)
 				}
-				if msg.GroupID != "" || msg.ReplyCtx.(replyContext).groupID != "" {
+				if msg.GroupID != "" || msg.IsDirect || msg.ReplyCtx.(replyContext).groupID != "" {
 					t.Fatalf("callback inferred group from chat/session: %+v", msg)
 				}
 			}
+		})
+	}
+}
+
+func TestPrivateChatSettingsCardCallbacksPreserveIdentity(t *testing.T) {
+	for _, name := range []string{"feishu", "lark"} {
+		t.Run(name, func(t *testing.T) {
+			p, received := newGroupModelScopeTestPlatform(t, name)
+			p.BindProject("private-settings")
+			p.cardNavHandler = func(string, string) *core.Card {
+				t.Error("settings navigation bypassed verified chat context")
+				return nil
+			}
+			for _, action := range []string{"nav:/model", "nav:/reasoning", "cmd:/model chat group-B", "cmd:/reasoning chat high"} {
+				event := cardActionEvent("ou_alice", action)
+				event.Event.Context.OpenChatID = "oc_chat"
+				event.Event.Action.Value[cardActionProjectKey] = "private-settings"
+				event.Event.Action.Value[cardActionDirectUserKey] = "ou_alice"
+				if _, err := p.onCardAction(event); err != nil {
+					t.Fatal(err)
+				}
+				msg := waitAnyMessage(t, received, 3*time.Second, action)
+				if !msg.IsDirect || !msg.IsCardAction || msg.UserID != "ou_alice" || msg.GroupID != "" || msg.SessionKey != name+":oc_chat:ou_alice" || msg.Content != action[4:] {
+					t.Fatalf("private settings callback lost identity: %+v", msg)
+				}
+			}
+			// Even a permitted chat/operator cannot reuse someone else's private
+			// card and thereby change the saved settings of that conversation.
+			event := cardActionEvent("ou_bob", "cmd:/reasoning chat low")
+			event.Event.Context.OpenChatID = "oc_chat"
+			event.Event.Action.Value["session_key"] = name + ":oc_chat:ou_alice"
+			event.Event.Action.Value[cardActionProjectKey] = "private-settings"
+			event.Event.Action.Value[cardActionDirectUserKey] = "ou_alice"
+			if _, err := p.onCardAction(event); err != nil {
+				t.Fatal(err)
+			}
+			waitNoMessage(t, received, 100*time.Millisecond, "another user's private settings")
 		})
 	}
 }

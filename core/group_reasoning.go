@@ -114,14 +114,14 @@ func (e *Engine) groupReasoningCard(cb *CardBuilder, sessionKey string, agent Ag
 	} else {
 		cb.Markdown(e.i18n.T(MsgReasoningGroupDefault))
 	}
-	choices := []CardSelectOption{{Text: e.i18n.T(MsgModelGroupResetButton), Value: "cmd:/reasoning group reset"}}
+	choices := []CardSelectOption{{Text: e.i18n.T(MsgModelGroupResetButton), Value: "cmd:/reasoning chat reset"}}
 	selected := choices[0].Value
 	if bound {
 		selected = ""
 	}
 	if supportsGroupReasoning(agent) {
 		for _, effort := range agent.(ReasoningEffortSwitcher).AvailableReasoningEfforts() {
-			value := "cmd:/reasoning group " + effort
+			value := "cmd:/reasoning chat " + effort
 			choices = append(choices, CardSelectOption{Text: effort, Value: value})
 			if bound && binding.Effort == effort {
 				selected = value

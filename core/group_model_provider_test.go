@@ -159,7 +159,7 @@ func TestGroupModel_RichCardsKeepSafeRecoveryInstructions(t *testing.T) {
 		t.Fatal("test did not enter rich-card rendering")
 	}
 	texts := append(p.getPreviewEdits(), p.getSent()...)
-	if got := strings.Join(texts, "\n"); !strings.Contains(got, "/model group reset") {
+	if got := strings.Join(texts, "\n"); !strings.Contains(got, "/model chat reset") {
 		t.Fatalf("missing group recovery hint: %s", got)
 	}
 	calls, _, _ := a.snapshot()

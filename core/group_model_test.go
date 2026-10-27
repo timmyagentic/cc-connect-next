@@ -139,10 +139,10 @@ func TestGroupModel_RestartAndNewSessionKeepBinding(t *testing.T) {
 func TestGroupModel_InvalidChoiceProviderAndStorageFailClosed(t *testing.T) {
 	e, p, a := newGroupModelEngine(t, "")
 	private := groupModelMessage("private", "", "private", "/model group group-B")
-	private.GroupID, private.IsDirect = "", true
+	private.GroupID, private.IsDirect, private.UserID = "", true, ""
 	e.ReceiveMessage(p, private)
 	if _, ok := e.groupModelBinding(private.SessionKey); ok {
-		t.Fatal("private chat acquired group binding")
+		t.Fatal("unverified private chat acquired binding")
 	}
 	e.ReceiveMessage(p, groupModelMessage("A", "", "bind", "/model group group-B"))
 	for _, choice := range []string{"typo", "group-B extra"} {
@@ -227,7 +227,7 @@ func TestGroupModel_CardActionsUseCommandScopeAndStableModelIdentity(t *testing.
 		}
 		selectors++
 		for _, option := range selectBox.Options {
-			if option.Value == "cmd:/model group group-B" {
+			if option.Value == "cmd:/model chat group-B" {
 				selectCommand = strings.TrimPrefix(option.Value, "cmd:")
 			}
 			if !strings.HasPrefix(option.Value, "cmd:/model ") {

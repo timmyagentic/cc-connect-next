@@ -134,10 +134,10 @@ func TestGroupReasoning_InvalidContextBackendProviderAndStorageFailClosed(t *tes
 		}
 	}
 	private := groupModelMessage("private", "", "private", "/reasoning group low")
-	private.GroupID, private.IsDirect = "", true
+	private.GroupID, private.IsDirect, private.UserID = "", true, ""
 	e.ReceiveMessage(p, private)
 	if _, bound := e.groupReasoningBinding(private.SessionKey); bound {
-		t.Fatal("private chat bound effort")
+		t.Fatal("unverified private chat bound effort")
 	}
 	backend, _ := a.StartSession(context.Background(), "")
 	session := e.sessions.GetOrCreateActive("test:A")
@@ -195,7 +195,7 @@ func TestGroupReasoning_CardActionsAndManifest(t *testing.T) {
 	for _, element := range card.Elements {
 		if box, ok := element.(CardSelect); ok {
 			for _, option := range box.Options {
-				if option.Value == "cmd:/reasoning group high" {
+				if option.Value == "cmd:/reasoning chat high" {
 					command = strings.TrimPrefix(option.Value, "cmd:")
 				}
 			}
@@ -209,7 +209,7 @@ func TestGroupReasoning_CardActionsAndManifest(t *testing.T) {
 	e.ReceiveMessage(p, callback)
 	reasoningChat(t, e, p, a, groupModelMessage("A", "another", "after", "hello"), "high")
 	meta := findManifestCommand(t, e.QueryAgentCapabilityManifest("", "", false).Commands, "reasoning")
-	if !strings.Contains(meta.Usage, "group") || !hasManifestEffect(meta.SideEffects, "persistent_state") || meta.Permission != CapabilityPermissionMember {
+	if !strings.Contains(meta.Usage, "chat") || !hasManifestEffect(meta.SideEffects, "persistent_state") || meta.Permission != CapabilityPermissionMember {
 		t.Fatalf("incorrect manifest: %+v", meta)
 	}
 }

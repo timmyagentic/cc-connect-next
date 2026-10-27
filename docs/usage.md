@@ -43,10 +43,10 @@ Each user gets an independent session with full conversation context. Manage ses
 | `/history [n]` | Show last n messages (default 10; each entry follows `[display].history_max_len`, default 1000) |
 | `/usage` | Show account/model quota usage (if supported) |
 | `/provider [...]` | Manage API providers |
-| `/model [switch <name>\|group [<name>\|reset]]` | View models, change the project/workspace default, or set this group's model |
+| `/model [switch <name>\|chat [<name>\|reset]]` | View models, change the project/workspace default, or set this chat's model |
 | `/dir [path]` | Show or switch the agent work directory |
 | `/allow <tool>` | Pre-allow a tool (next session) |
-| `/reasoning [level]` | View or switch reasoning effort (Codex) |
+| `/reasoning [<level>\|chat [<level>\|reset]]` | View reasoning effort, change the default, or set this chat's effort (`/effort` alias) |
 | `/mode [name]` | View or switch permission mode |
 | `/stop` | Stop current execution |
 | `/help` | Show available commands |
@@ -73,7 +73,7 @@ The built-in default is `0`, which always continues the previous session.
 
 ### Model switch preserves history
 
-`/model switch <name>` preserves conversation history and changes the project default, or the current workspace's default in multi-workspace mode. Private chats and groups without a fixed model follow that default within its scope. Groups with a fixed model keep their selection. Use `/model group <name>` to change only this group's model; it applies to the next new request without interrupting the current reply. See [Model Selection](#model-selection) for scope and precedence.
+`/model switch <name>` preserves conversation history and changes the project default, or the current workspace's default in multi-workspace mode. Chats without a fixed model follow that default within its scope; pinned private chats and groups keep their selection. Use `/model chat <name>` to change only this chat's model; it applies to the next new request without interrupting the current reply. See [Model Selection](#model-selection) for scope and precedence.
 
 ---
 
@@ -426,42 +426,52 @@ alias = "spark"
 /model switch <alias>     Set the project/workspace default by alias
 /model switch <name>      Set the project/workspace default by full name
 /model <alias>            Legacy default-switching syntax, still supported
-/model group              View this group's model selection
-/model group <name>       Pin a listed model for this group (name, alias, or number)
-/model group reset        Restore following the workspace/project default
+/model chat               View this chat's model selection
+/model chat <name>        Pin a listed model for this chat (name, alias, or number)
+/model chat reset         Follow the workspace/project default; keep chat effort
 ```
 
 When `models` is configured, `/model` shows exactly that list without making an API round-trip. When omitted, models are fetched from the provider API or fall back to a built-in list.
 
-### Defaults and fixed group models
+### Defaults and fixed chat models
 
-Feishu/Lark supplies verified group identity in this release. The group model list also includes models explicitly configured for the active Provider, even when a native catalog omits them.
+Feishu/Lark supplies verified private-chat and group identity. The chat model list also includes models explicitly configured for the active Provider, even when a native catalog omits them.
 
-`/model switch` changes the project default, or the workspace default when using multi-workspace mode. This affects private chats and groups that follow that default; it does not replace a group's fixed selection. The model card labels the default's scope and, in a verified group, separately identifies the actual model source for ordinary messages as either **fixed for this group** or **following the workspace/project default**.
+`/model switch` changes the project default, or the workspace default in multi-workspace mode. This affects chats without a fixed model; pinned private chats and groups keep their selection. The model card labels the default's scope and, in a verified chat, separately identifies the model source for ordinary messages as either **fixed for this chat** or **following the workspace/project default**.
 
-`/model group <name>` requires a verified group chat and per-turn model support from the configured backend (currently Codex `exec` and `app_server`). It uses the current backend and Provider; it does not change Provider. Choose from the current `/model` list. Direct messages and unverified group identities cannot create a group binding. If the group is not yet recognized, send `/model` in that group first. Backends that support legacy model switching retain `/model switch` even when they cannot pin a group model. Group commands retain the existing `/model` member-access and disabled-command policies.
+`/model chat <name>` requires verified private-chat or group identity and per-turn model support from the configured backend (currently Codex `exec` and `app_server`). It uses the current backend and Provider; it does not change Provider. Choose from the current `/model` list. An unverified chat cannot create a binding. If the chat is not yet recognized, send `/model` there first. Verified direct-user card callbacks can also establish private-chat identity without a fresh text message. Backends that support legacy model switching retain `/model switch` even when they cannot pin a chat model. Chat commands retain the existing `/model` member-access and disabled-command policies.
 
-The binding covers **all members and all existing or new topics in that group**. It is isolated by project and keyed by platform plus stable group ID, not by topic, conversation, or workspace directory. Other groups and projects are unaffected. It persists across `/reset`, `/new`, and bridge restarts; use `/model group reset` to remove the binding and follow defaults again. Persistent storage must be available; failed saves are reported without claiming success.
+The legacy `/model group [<name>|reset]` subcommand remains an alias for `chat`, including in verified DMs. New card selections use `chat`.
 
-Group selections are resolved when each new request executes, including queued requests. A change or reset takes effect on the next new request; an already running reply keeps its model. An explicit one-shot model from `/fast`, another answer profile, or a task takes precedence for that request; subsequent ordinary messages return to the group's selection. A profile without an explicit model still inherits the group model.
+Bindings are isolated within each bot/project:
 
-A fixed group never silently falls back to the default when per-turn support is unavailable, the backend/Provider no longer matches the binding, or applying/running the model fails. The request reports the error. After a backend/Provider change, explicitly select an available group model again or use `/model group reset`.
+- **Groups:** the existing `platform:groupID` key is unchanged. A binding covers **all members and all existing or new topics in that group**.
+- **Private chats:** the key is `platform:dm:userID`, using the verified direct-message user's ID. Each user's selection is separate from other users, groups, platforms, and bots/projects, even when they share a workspace directory.
 
-An existing conversation still connected to a different Provider is also rejected. Use `/provider switch <name>` in that conversation to reconnect it, or start `/new`, then retry. Rich-card failures retain these recovery instructions.
+Bindings are not tied to a topic, conversation, or workspace directory. They persist across `/reset`, `/new`, and bridge restarts. `/model chat reset` removes only the model binding and restores default-model inheritance; this chat's reasoning effort stays unchanged. Selections use persistent project state and require no new `config.toml` fields. Failed saves are reported without claiming success.
 
-### Group reasoning effort
+Chat selections are resolved when each new request executes, including queued requests. A change or reset takes effect on the next new request; an already running reply keeps its model. An explicit one-shot model from `/fast`, another answer profile, or a task takes precedence for that request; subsequent ordinary messages return to the chat's selection. A profile without an explicit model still inherits the chat model. Model and reasoning effort are resolved independently: overriding one field does not discard the other field's chat setting.
+
+A pinned chat never silently falls back to the default when per-turn support is unavailable, the backend/Provider no longer matches the binding, or applying/running the model fails. The request reports the error. After a backend/Provider change, explicitly select an available model with `/model chat <name>` or use `/model chat reset`.
+
+If an existing conversation is still connected to a different Provider, sending is also rejected. Reconnect it with `/provider switch <name>` or start `/new`, then retry. Rich-card failures preserve these recovery instructions.
+
+### Chat reasoning effort
 
 ```
-/reasoning group          View this group's effort
-/reasoning group high     Pin effort independently of the model
-/reasoning group reset    Restore default effort; keep the group model
+/reasoning chat           View this chat's effort
+/reasoning chat high      Pin effort independently of the model
+/reasoning chat reset     Restore default effort; keep the chat model
+/effort chat high         Alias for /reasoning chat high
 ```
 
-Choose a level from the current Agent's `/reasoning` catalog. Group effort requires verified group identity and per-turn reasoning support (currently Codex exec/app_server). It uses the same project/platform/group scope as group models and covers all members and topics across `/new`, `/reset`, and restarts. Model and effort bindings are independent; resetting either leaves the other unchanged.
+Choose a level from the current Agent's `/reasoning` catalog. Chat effort requires verified private-chat or group identity and per-turn reasoning support (currently Codex `exec` and `app_server`). It uses the same project/platform/chat scope as chat models: all members and topics of a group share it, while DMs are isolated by verified user within each bot/project. It persists across `/new`, `/reset`, and restarts. Model and effort bindings are saved independently; resetting either leaves the other unchanged.
 
-An explicit task or answer-profile effort takes precedence for that request; a profile with only a model still inherits group effort. Queued requests read the latest setting when they start; a running reply is not interrupted or steered into another effort. Unsupported effort, backend/Provider mismatches, and persistence failures are reported without silent fallback.
+`/effort` is an alias for `/reasoning`. The legacy `group` subcommand also remains an alias for `chat`, so `/reasoning group [<level>|reset]` and `/effort group [<level>|reset]` still work in both verified DMs and groups.
 
-Bare `/reasoning <level>` retains its existing behavior: it changes the project/workspace Agent default and resets the current conversation. Use `group` to preserve history and avoid changing defaults for other groups.
+An explicit task or answer-profile effort takes precedence for that request; a profile with only a model still inherits chat effort. Conversely, an effort-only profile still inherits the chat model. Queued requests read the latest settings when they start; a running reply is not interrupted or steered into a turn with different effort. Unsupported effort, backend/Provider or session mismatches, and persistence failures are reported without silent fallback. Reselect with `/reasoning chat <level>` or use `/reasoning chat reset`; reconnect the conversation or start `/new` if its Provider connection is stale.
+
+Bare `/reasoning <level>` retains its existing behavior: it changes the project/workspace Agent default and resets the current conversation. Chats with fixed effort keep their selection. Use `chat` to preserve history and avoid changing the default for other chats.
 
 ---
 

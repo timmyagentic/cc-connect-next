@@ -11850,7 +11850,7 @@ func (e *Engine) cmdModel(p Platform, msg *Message, args []string) {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgWsResolutionError, err))
 		return
 	}
-	if len(args) > 0 && strings.EqualFold(args[0], "group") {
+	if len(args) > 0 && (strings.EqualFold(args[0], "group") || strings.EqualFold(args[0], "chat")) {
 		e.cmdGroupModel(p, msg, agent, args[1:])
 		return
 	}
@@ -12074,7 +12074,7 @@ func (e *Engine) cmdReasoning(p Platform, msg *Message, args []string) {
 		return
 	}
 
-	if len(args) > 0 && strings.EqualFold(args[0], "group") {
+	if len(args) > 0 && (strings.EqualFold(args[0], "group") || strings.EqualFold(args[0], "chat")) {
 		e.cmdGroupReasoning(p, msg, agent, args[1:])
 		return
 	}
@@ -12086,18 +12086,14 @@ func (e *Engine) cmdReasoning(p Platform, msg *Message, args []string) {
 	}
 
 	if len(args) == 0 {
+		if e.groupModelKey(msg.SessionKey) != "" {
+			e.replyWithCard(p, msg.ReplyCtx, e.renderReasoningCardForAgent(msg.SessionKey, agent))
+			return
+		}
 		if !supportsCards(p) {
 			efforts := switcher.AvailableReasoningEfforts()
 
 			var sb strings.Builder
-			if e.groupModelKey(msg.SessionKey) != "" {
-				if binding, ok := e.groupReasoningBinding(msg.SessionKey); ok {
-					sb.WriteString(e.i18n.Tf(MsgReasoningGroupCurrent, binding.Effort))
-				} else {
-					sb.WriteString(e.i18n.T(MsgReasoningGroupDefault))
-				}
-				sb.WriteString("\n\n")
-			}
 			current := switcher.GetReasoningEffort()
 			if current == "" {
 				sb.WriteString(e.i18n.T(MsgReasoningDefault))

@@ -311,7 +311,7 @@ type UserMeta struct {
 	UserName    string                 `json:"user_name,omitempty"`
 	ChatName    string                 `json:"chat_name,omitempty"`
 	ReplyTarget *PersistentReplyTarget `json:"reply_target,omitempty"`
-	// GroupModelKey is routing metadata verified by the platform, independent
+	// GroupModelKey is chat routing verified by the platform, independent
 	// of the active agent session, topic, and workspace.
 	GroupModelKey string `json:"group_model_key,omitempty"`
 }
@@ -552,7 +552,7 @@ func (sm *SessionManager) UpdateUserMeta(sessionKey, userName, chatName string) 
 	}
 }
 
-// UpdateGroupModelKey saves verified group routing before commands/cards can
+// UpdateGroupModelKey saves verified chat routing before commands/cards can
 // use it. Unknown routing must not be inferred from a session key's shape.
 func (sm *SessionManager) UpdateGroupModelKey(sessionKey, key string) error {
 	sm.mu.Lock()

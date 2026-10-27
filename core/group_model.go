@@ -17,13 +17,24 @@ func (e *Engine) groupModelFailure(key MsgKey) error {
 	return &groupModelError{message: e.i18n.T(key)}
 }
 
-// rememberGroupModelScope accepts only platform-verified group identity. The
-// project owns this metadata, so two bots sharing a directory remain isolated.
+// rememberGroupModelScope accepts only platform-verified chat identity. Keep
+// existing group keys unchanged; direct messages use a separate user namespace.
+// The project owns this metadata, so bots sharing a directory remain isolated.
+// The persisted field retains its original name for backward compatibility.
 func (e *Engine) rememberGroupModelScope(p Platform, msg *Message) error {
 	if msg.IsDirect {
-		return e.sessions.UpdateGroupModelKey(msg.SessionKey, "")
+		key := ""
+		if strings.TrimSpace(msg.UserID) != "" {
+			key = p.Name() + ":dm:" + msg.UserID
+		}
+		return e.sessions.UpdateGroupModelKey(msg.SessionKey, key)
 	}
 	if msg.GroupID == "" {
+		// Legacy cards may lack direct-chat routing fields. Only the verified
+		// owner may reuse a persisted DM scope; a forwarded card cannot borrow it.
+		if key := e.groupModelKey(msg.SessionKey); msg.IsCardAction && strings.HasPrefix(key, p.Name()+":dm:") && key != p.Name()+":dm:"+msg.UserID {
+			return e.groupModelFailure(MsgModelGroupOnly)
+		}
 		return nil // callbacks may use previously verified, persisted routing
 	}
 	return e.sessions.UpdateGroupModelKey(msg.SessionKey, p.Name()+":"+msg.GroupID)
@@ -88,7 +99,7 @@ func (e *Engine) groupDefaultModel(agent Agent, sessionKey string, backend Agent
 	return binding.Model, nil
 }
 
-// A group selection is a default layer, not an explicit task override. Resolve
+// A chat selection is a default layer, not an explicit task override. Resolve
 // it for each dequeued turn, preserving explicit task/profile model precedence.
 func (e *Engine) prepareSessionTurnOverrides(agent Agent, sessions *SessionManager, session *Session, backend AgentSession, sessionKey string, profile AnswerProfileName, model, reasoning, tier string) (agentTurnOverrides, error) {
 	profileModel, profileReasoning := "", ""
@@ -218,7 +229,7 @@ func (e *Engine) cmdGroupModel(p Platform, msg *Message, agent Agent, args []str
 	e.replyWithCard(p, msg.ReplyCtx, card)
 }
 
-// groupModelCard adds an explicit group section while leaving the legacy
+// groupModelCard adds an explicit chat section while leaving the legacy
 // default selection available and clearly labelled on the same card.
 func (e *Engine) groupModelCard(cb *CardBuilder, sessionKey string, agent Agent, models []ModelOption) {
 	if e.groupModelKey(sessionKey) == "" {
@@ -233,14 +244,14 @@ func (e *Engine) groupModelCard(cb *CardBuilder, sessionKey string, agent Agent,
 		cb.Markdown(e.i18n.T(MsgModelGroupDefault))
 	}
 	if supportsGroupModel(agent) {
-		choices := []CardSelectOption{{Text: e.i18n.T(MsgModelGroupResetButton), Value: "cmd:/model group reset"}}
+		choices := []CardSelectOption{{Text: e.i18n.T(MsgModelGroupResetButton), Value: "cmd:/model chat reset"}}
 		selected := choices[0].Value
 		binding, bound := e.groupModelBinding(sessionKey)
 		if bound {
 			selected = "" // a removed model must never look like inheritance
 		}
 		for _, model := range models {
-			value := "cmd:/model group " + model.Name
+			value := "cmd:/model chat " + model.Name
 			choices = append(choices, CardSelectOption{Text: model.Name, Value: value})
 			if binding.Model == model.Name {
 				selected = value
@@ -249,7 +260,7 @@ func (e *Engine) groupModelCard(cb *CardBuilder, sessionKey string, agent Agent,
 		cb.Select(e.i18n.T(MsgModelGroupSelect), choices, selected)
 	} else {
 		cb.Markdown(e.i18n.T(MsgModelGroupUnsupported))
-		cb.Buttons(CardButton{Text: e.i18n.T(MsgModelGroupResetButton), Value: "cmd:/model group reset"})
+		cb.Buttons(CardButton{Text: e.i18n.T(MsgModelGroupResetButton), Value: "cmd:/model chat reset"})
 	}
 	cb.Divider()
 }

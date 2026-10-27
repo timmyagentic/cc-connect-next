@@ -9,13 +9,14 @@ import (
 	"sync"
 )
 
-// GroupModelBinding selects a model and optional provider for a group.
+// GroupModelBinding selects a model and optional provider for a verified chat.
+// Group-named fields are retained for compatibility with existing state files.
 type GroupModelBinding struct {
 	Model    string `json:"model"`
 	Provider string `json:"provider,omitempty"`
 }
 
-// GroupReasoningBinding is independent of the group's model selection.
+// GroupReasoningBinding is independent of the chat's model selection.
 type GroupReasoningBinding struct {
 	Effort   string `json:"effort"`
 	Provider string `json:"provider,omitempty"`
