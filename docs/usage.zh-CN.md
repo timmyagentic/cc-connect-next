@@ -426,6 +426,20 @@ alias = "spark"
 
 如果已有对话仍连接着另一个 Provider，也会拒绝发送。请在该对话通过 `/provider switch <name>` 重新连接，或使用 `/new`，然后重试；Rich Card 失败时会保留这些恢复提示。
 
+### 群推理强度
+
+```
+/reasoning group          查看本群 effort
+/reasoning group high     固定本群强度，独立于模型
+/reasoning group reset    恢复跟随默认强度，保留群模型
+```
+
+可选等级取自当前 Agent 的 `/reasoning` 列表。群 effort 需要已验证群身份及逐回合强度能力（目前 Codex exec/app_server 支持）。隔离规则与群模型相同，按项目、平台和群绑定，覆盖全部成员及话题，跨 `/new`、`/reset` 和重启保留。模型和强度分别保存、分别重置。
+
+任务或回答预设显式指定的单次 effort 优先；仅指定模型的预设仍继承群 effort。排队请求开始执行时读取最新设置，进行中的回复不被打断，也不合入另一个 effort 的回合。不支持的强度、后端/Provider 不匹配及保存失败均明确报错，不静默回退。
+
+直接使用 `/reasoning <等级>` 保留原行为：更改项目/工作区 Agent 默认强度并重置当前对话。需要保留历史和其他群的默认值时，应使用 `group`。
+
 ---
 
 ## 工作目录切换（`/dir`、`/cd`）

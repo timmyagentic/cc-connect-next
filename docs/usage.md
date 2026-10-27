@@ -449,6 +449,20 @@ A fixed group never silently falls back to the default when per-turn support is 
 
 An existing conversation still connected to a different Provider is also rejected. Use `/provider switch <name>` in that conversation to reconnect it, or start `/new`, then retry. Rich-card failures retain these recovery instructions.
 
+### Group reasoning effort
+
+```
+/reasoning group          View this group's effort
+/reasoning group high     Pin effort independently of the model
+/reasoning group reset    Restore default effort; keep the group model
+```
+
+Choose a level from the current Agent's `/reasoning` catalog. Group effort requires verified group identity and per-turn reasoning support (currently Codex exec/app_server). It uses the same project/platform/group scope as group models and covers all members and topics across `/new`, `/reset`, and restarts. Model and effort bindings are independent; resetting either leaves the other unchanged.
+
+An explicit task or answer-profile effort takes precedence for that request; a profile with only a model still inherits group effort. Queued requests read the latest setting when they start; a running reply is not interrupted or steered into another effort. Unsupported effort, backend/Provider mismatches, and persistence failures are reported without silent fallback.
+
+Bare `/reasoning <level>` retains its existing behavior: it changes the project/workspace Agent default and resets the current conversation. Use `group` to preserve history and avoid changing defaults for other groups.
+
 ---
 
 ## Work Directory Switching (`/dir`, `/cd`)

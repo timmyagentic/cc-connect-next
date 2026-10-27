@@ -200,7 +200,7 @@ var builtinCommands = []builtinCommandDefinition{
 			DescriptionZH: "群固定会拒绝未验证群身份、不可用存储、不支持逐回合模型或不在当前列表的选择。固定群的普通回合遇到后端/Provider 不匹配、模型或应用设置错误时失败，不会静默回退或切换 Provider；请显式重新设置群模型或 reset。原项目/工作区模型切换仍只需 ModelSwitcher。",
 		},
 	},
-	{id: "reasoning", aliases: []string{"effort"}, category: "agent", usage: "/reasoning [level]", parameters: []CapabilityParameter{capabilityParam("level", "string", false, "Reasoning effort supported by the active Agent.", "当前 Agent 支持的推理强度。")}, effects: []string{"configuration", "agent_process"}, probe: "reasoning"},
+	{id: "reasoning", aliases: []string{"effort"}, category: "agent", usage: "/reasoning [<level>|group [<level>|reset]]", parameters: []CapabilityParameter{capabilityParam("level-or-group", "string", false, "A bare level changes the project/workspace Agent default and resets this conversation. group queries, pins, or resets only this verified group effort for all members and topics, independently of the group model.", "直接指定等级修改项目/工作区 Agent 默认值并重置本对话；group 查询、固定或重置已验证本群全部成员和话题的 effort，独立于群模型。"), capabilityParam("level", "string", false, "Group level from the Agent effort catalog, or reset to inherit. Persists across /new, /reset and restarts. Explicit one-shot/profile/task effort takes precedence; queued requests resolve the latest binding without interrupting a running reply. Requires per-turn reasoning support and matching backend/Provider; invalid or unsupported settings fail without fallback.", "群等级取自 Agent 强度列表，reset 恢复继承。跨 /new、/reset 和重启保留；显式单次/配置档/任务 effort 优先；排队请求执行时读取最新绑定，不打断当前回复。需逐回合强度支持且后端/Provider 一致；无效或不支持的设置明确失败，不回退。")}, effects: []string{"configuration", "agent_process", "persistent_state"}, probe: "reasoning"},
 	{id: "speed", category: "agent", usage: "/speed [tier]", parameters: []CapabilityParameter{capabilityParam("tier", "string", false, "Omit to query. Choose default, fast, or another tier declared by the active model catalog. Saved for this conversation; affects subsequent turns without changing model/effort or interrupting a running turn. One-shot answer profiles take precedence.", "省略时只查询。选择 default、fast 或当前模型目录声明的其他档位。选择保存到当前会话；后续回合生效，不改变模型/推理强度或打断当前回合；单次回答预设优先。")}, effects: []string{"session_state", "persistent_state"}, probe: "speed"},
 	{id: "mode", category: "agent", usage: "/mode [name]", parameters: []CapabilityParameter{capabilityParam("name", "string", false, "Permission mode supported by the active Agent.", "当前 Agent 支持的权限模式。")}, effects: []string{"configuration", "agent_permission_state"}, probe: "mode"},
 	{id: "lang", category: "agent", usage: "/lang [en|zh|zh-TW|ja|es|auto]", parameters: []CapabilityParameter{capabilityParam("language", "string", false, "Reply language.", "回复语言。", "en", "zh", "zh-TW", "ja", "es", "auto")}, effects: []string{"configuration"}},
@@ -552,7 +552,10 @@ func (e *Engine) commandCapabilityAvailability(id, probe string, snapshot capabi
 		return unavailable("The active Agent does not implement model switching.", "当前 Agent 未实现模型切换。")
 	case "reasoning":
 		if _, ok := e.agent.(ReasoningEffortSwitcher); ok {
-			return available("The active Agent supports reasoning-effort switching.", "当前 Agent 支持推理强度切换。")
+			if supportsGroupReasoning(e.agent) {
+				return available("Legacy project/workspace effort switching is available. Group effort additionally supports per-turn reasoning; verified group identity, persistent storage, effort catalog and concrete session/provider compatibility are checked at invocation/execution time.", "支持原项目/工作区推理强度切换；群 effort 另具备逐回合强度能力，已验证群身份、持久化存储、强度列表和实际会话/Provider 兼容性在调用/执行时检查。")
+			}
+			return available("Legacy project/workspace effort switching is available. Group effort is unavailable because per-turn reasoning support or a non-empty effort catalog is missing. A saved group binding can still be reset.", "支持原项目/工作区推理强度切换；缺少逐回合强度支持或非空强度列表，群 effort 不可用；仍可重置已有群绑定。")
 		}
 		return unavailable("The active Agent does not implement reasoning-effort switching.", "当前 Agent 未实现推理强度切换。")
 	case "speed":

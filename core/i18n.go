@@ -369,6 +369,17 @@ const (
 	MsgSpeedScopeSaved                  MsgKey = "speed_scope_saved"
 	MsgSpeedScopeMemory                 MsgKey = "speed_scope_memory"
 	MsgBuiltinCmdSpeed                  MsgKey = "speed"
+	MsgReasoningGroupOnly               MsgKey = "reasoning_group_only"
+	MsgReasoningGroupStorageUnavailable MsgKey = "reasoning_group_storage_unavailable"
+	MsgReasoningGroupUnsupported        MsgKey = "reasoning_group_unsupported"
+	MsgReasoningGroupProviderChanged    MsgKey = "reasoning_group_provider_changed"
+	MsgReasoningGroupUsage              MsgKey = "reasoning_group_usage"
+	MsgReasoningGroupFailed             MsgKey = "reasoning_group_failed"
+	MsgReasoningGroupReset              MsgKey = "reasoning_group_reset"
+	MsgReasoningGroupChanged            MsgKey = "reasoning_group_changed"
+	MsgReasoningGroupCurrent            MsgKey = "reasoning_group_current"
+	MsgReasoningGroupDefault            MsgKey = "reasoning_group_default"
+	MsgReasoningGroupSelect             MsgKey = "reasoning_group_select"
 	MsgReasoningCurrent                 MsgKey = "reasoning_current"
 	MsgReasoningChanged                 MsgKey = "reasoning_changed"
 	MsgReasoningNotSupported            MsgKey = "reasoning_not_supported"
@@ -2984,12 +2995,89 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese:           "会話の速度を表示/保存、引数: [default|fast|対応速度]。次のターンから適用",
 		LangSpanish:            "Ver/cambiar la velocidad guardada, arg: [default|fast|opción del catálogo]; se aplica a los próximos turnos",
 	},
+	MsgReasoningGroupOnly: {
+		LangEnglish:            "Group reasoning requires a verified group chat. Send `/reasoning` in the group first.",
+		LangChinese:            "仅已验证的群聊可设置群推理强度，请先在群里发送 `/reasoning`。",
+		LangTraditionalChinese: "僅已驗證的群組可設定群組推理強度，請先在群組傳送 `/reasoning`。",
+		LangJapanese:           "グループ推論強度には確認済みグループが必要です。まずグループで `/reasoning` を送信してください。",
+		LangSpanish:            "El esfuerzo de grupo requiere un grupo verificado. Envía `/reasoning` primero en el grupo.",
+	},
+	MsgReasoningGroupStorageUnavailable: {
+		LangEnglish:            "Persistent storage for group reasoning is unavailable; the setting was not changed.",
+		LangChinese:            "群推理强度持久化存储不可用，设置未改变。",
+		LangTraditionalChinese: "群組推理強度持久化儲存無法使用，設定未變更。",
+		LangJapanese:           "グループ推論強度の永続ストレージを利用できず、設定は変更されませんでした。",
+		LangSpanish:            "El almacenamiento del esfuerzo de grupo no está disponible; no se cambió el ajuste.",
+	},
+	MsgReasoningGroupUnsupported: {
+		LangEnglish:            "This backend or effort does not support group reasoning. Reselect `/reasoning group <level>` or reset it; no fallback will be used.",
+		LangChinese:            "当前后端或强度不支持群推理设置。请重新设置 `/reasoning group <等级>` 或 reset；不会静默回退。",
+		LangTraditionalChinese: "目前後端或強度不支援群組推理設定。請重新設定 `/reasoning group <等級>` 或 reset；不會默默退回預設值。",
+		LangJapanese:           "現在のバックエンドまたは強度はグループ設定に非対応です。`/reasoning group <level>` で再選択または reset してください。自動フォールバックは行いません。",
+		LangSpanish:            "El backend o nivel no admite esfuerzo de grupo. Usa `/reasoning group <level>` o reset; no habrá sustitución automática.",
+	},
+	MsgReasoningGroupProviderChanged: {
+		LangEnglish:            "The backend/Provider or conversation connection differs from the saved group effort. Reselect `/reasoning group <level>` and start `/new` if needed, or use `/reasoning group reset`.",
+		LangChinese:            "当前后端/Provider 或对话连接与群 effort 绑定不符。请重新执行 `/reasoning group <等级>`，必要时 `/new`；或 `/reasoning group reset`。",
+		LangTraditionalChinese: "目前後端/Provider 或對話連線與群組 effort 綁定不符。請重新執行 `/reasoning group <等級>`，必要時 `/new`；或 `/reasoning group reset`。",
+		LangJapanese:           "バックエンド/Provider または会話の接続が保存済みグループ強度と異なります。`/reasoning group <level>` で再設定し、必要なら `/new`、または `/reasoning group reset` を実行してください。",
+		LangSpanish:            "El backend/Provider o conexión difiere del esfuerzo guardado. Configura `/reasoning group <level>` y `/new` si es necesario, o `/reasoning group reset`.",
+	},
+	MsgReasoningGroupUsage: {
+		LangEnglish:            "Usage: `/reasoning group [<level>|reset]`; choose a level from `/reasoning`.",
+		LangChinese:            "用法：`/reasoning group [<等级>|reset]`；可选等级见 `/reasoning`。",
+		LangTraditionalChinese: "用法：`/reasoning group [<等級>|reset]`；可選等級見 `/reasoning`。",
+		LangJapanese:           "使い方: `/reasoning group [<level>|reset]`。選択可能な強度は `/reasoning` で確認できます。",
+		LangSpanish:            "Uso: `/reasoning group [<level>|reset]`; consulta los niveles en `/reasoning`.",
+	},
+	MsgReasoningGroupFailed: {
+		LangEnglish:            "Group reasoning setting failed: %v",
+		LangChinese:            "群推理强度设置失败：%v",
+		LangTraditionalChinese: "群組推理強度設定失敗：%v",
+		LangJapanese:           "グループ推論強度の設定に失敗しました: %v",
+		LangSpanish:            "Error al configurar el esfuerzo de grupo: %v",
+	},
+	MsgReasoningGroupReset: {
+		LangEnglish:            "This group follows the default reasoning effort again. The group model is unchanged.",
+		LangChinese:            "本群已恢复跟随默认推理强度，群模型保持原设置。",
+		LangTraditionalChinese: "本群組已恢復跟隨預設推理強度，群組模型保持原設定。",
+		LangJapanese:           "グループは既定の推論強度に戻りました。グループモデルは変更されません。",
+		LangSpanish:            "El grupo vuelve al esfuerzo predeterminado. Su modelo no cambia.",
+	},
+	MsgReasoningGroupChanged: {
+		LangEnglish:            "Group reasoning effort set to `%s` for subsequent new turns; other groups and history are unchanged.",
+		LangChinese:            "本群推理强度已设为 `%s`，从后续新请求生效；其他群和历史不受影响。",
+		LangTraditionalChinese: "本群組推理強度已設為 `%s`，從後續新請求生效；其他群組和歷史不受影響。",
+		LangJapanese:           "以後の新規ターンのグループ推論強度を `%s` に設定しました。他のグループと履歴は変更されません。",
+		LangSpanish:            "Esfuerzo del grupo: `%s` para los siguientes turnos; otros grupos y el historial no cambian.",
+	},
+	MsgReasoningGroupCurrent: {
+		LangEnglish:            "Fixed group reasoning effort: `%s`",
+		LangChinese:            "本群固定推理强度：`%s`",
+		LangTraditionalChinese: "本群組固定推理強度：`%s`",
+		LangJapanese:           "グループ固定推論強度: `%s`",
+		LangSpanish:            "Esfuerzo fijo del grupo: `%s`",
+	},
+	MsgReasoningGroupDefault: {
+		LangEnglish:            "Group reasoning effort: following the workspace/project default",
+		LangChinese:            "本群推理强度：跟随工作区/项目默认值",
+		LangTraditionalChinese: "本群組推理強度：跟隨工作區/專案預設值",
+		LangJapanese:           "グループ推論強度: ワークスペース/プロジェクトの既定値を使用",
+		LangSpanish:            "Esfuerzo del grupo: valor predeterminado del espacio/proyecto",
+	},
+	MsgReasoningGroupSelect: {
+		LangEnglish:            "Reasoning effort for this group",
+		LangChinese:            "选择本群推理强度",
+		LangTraditionalChinese: "選擇本群組推理強度",
+		LangJapanese:           "このグループの推論強度",
+		LangSpanish:            "Esfuerzo de este grupo",
+	},
 	MsgReasoningCurrent: {
-		LangEnglish:            "Current reasoning effort: %s",
-		LangChinese:            "当前推理强度: %s",
-		LangTraditionalChinese: "當前推理強度: %s",
-		LangJapanese:           "現在の推論強度: %s",
-		LangSpanish:            "Esfuerzo de razonamiento actual: %s",
+		LangEnglish:            "Project/workspace default reasoning effort: %s",
+		LangChinese:            "项目/工作区默认推理强度: %s",
+		LangTraditionalChinese: "專案/工作區預設推理強度: %s",
+		LangJapanese:           "プロジェクト/ワークスペースの既定推論強度: %s",
+		LangSpanish:            "Esfuerzo predeterminado del proyecto/espacio: %s",
 	},
 	MsgReasoningChanged: {
 		LangEnglish:            "Reasoning effort switched to `%s`. New sessions will use this setting.",
@@ -3210,11 +3298,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Uso: `/model switch <número>` o `/model switch <nombre_modelo>` cambia el valor predeterminado del proyecto/espacio de trabajo; los grupos con modelo fijo conservan su selección. Usa `/model group <name|reset>` para este grupo.",
 	},
 	MsgReasoningDefault: {
-		LangEnglish:            "Current reasoning effort: (not set, using Codex default)\n",
-		LangChinese:            "当前推理强度: (未设置，使用 Codex 默认值)\n",
-		LangTraditionalChinese: "當前推理強度: (未設置，使用 Codex 預設值)\n",
-		LangJapanese:           "現在の推論強度: (未設定、Codex のデフォルトを使用)\n",
-		LangSpanish:            "Esfuerzo de razonamiento actual: (no configurado, usando el valor predeterminado de Codex)\n",
+		LangEnglish:            "Project/workspace default reasoning effort: inherited\n",
+		LangChinese:            "项目/工作区默认推理强度: 继承\n",
+		LangTraditionalChinese: "專案/工作區預設推理強度: 繼承\n",
+		LangJapanese:           "プロジェクト/ワークスペースの既定推論強度: 継承\n",
+		LangSpanish:            "Esfuerzo predeterminado del proyecto/espacio: heredado\n",
 	},
 	MsgReasoningListTitle: {
 		LangEnglish:            "Available reasoning levels:\n",
@@ -3224,11 +3312,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Niveles de razonamiento disponibles:\n",
 	},
 	MsgReasoningUsage: {
-		LangEnglish:            "Usage: `/reasoning <number>` or `/reasoning <low|medium|high|xhigh>`",
-		LangChinese:            "用法: `/reasoning <序号>` 或 `/reasoning <low|medium|high|xhigh>`",
-		LangTraditionalChinese: "用法: `/reasoning <序號>` 或 `/reasoning <low|medium|high|xhigh>`",
-		LangJapanese:           "使い方: `/reasoning <番号>` または `/reasoning <low|medium|high|xhigh>`",
-		LangSpanish:            "Uso: `/reasoning <número>` o `/reasoning <low|medium|high|xhigh>`",
+		LangEnglish:            "`/reasoning <number>` or `/reasoning <level>` changes the project/workspace default and resets this conversation; fixed groups keep their effort. Use `/reasoning group [<level>|reset]` for this group.",
+		LangChinese:            "`/reasoning <等级>` 修改项目/工作区默认值并重置本对话，固定群不跟随。设置本群使用 `/reasoning group [<等级>|reset]`。",
+		LangTraditionalChinese: "`/reasoning <等級>` 修改專案/工作區預設值並重置本對話，固定群組不跟隨。設定本群組使用 `/reasoning group [<等級>|reset]`。",
+		LangJapanese:           "`/reasoning <level>` はプロジェクト/ワークスペースの既定値を変更し、この会話をリセットします。固定グループは維持します。このグループには `/reasoning group [<level>|reset]` を使用してください。",
+		LangSpanish:            "`/reasoning <level>` cambia el valor del proyecto/espacio y reinicia esta conversación; los grupos fijos mantienen su esfuerzo. Usa `/reasoning group [<level>|reset]` para este grupo.",
 	},
 	MsgModeUsage: {
 		LangEnglish:            "\nUse `/mode <name>` to switch.\nAvailable: %s",
@@ -3249,8 +3337,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Predeterminado del proyecto/espacio (grupos con modelo fijo sin cambios)",
 	},
 	MsgReasoningSelectPlaceholder: {
-		LangEnglish: "Select reasoning level", LangChinese: "选择推理强度", LangTraditionalChinese: "選擇推理強度",
-		LangJapanese: "推論強度を選択", LangSpanish: "Seleccionar nivel de razonamiento",
+		LangEnglish:            "Project/workspace default (fixed groups unchanged)",
+		LangChinese:            "项目/工作区默认强度（固定群不跟随）",
+		LangTraditionalChinese: "專案/工作區預設強度（固定群組不跟隨）",
+		LangJapanese:           "プロジェクト/ワークスペースの既定値（固定グループは対象外）",
+		LangSpanish:            "Predeterminado del proyecto/espacio (grupos fijos sin cambios)",
 	},
 	MsgModeSelectPlaceholder: {
 		LangEnglish: "Select mode", LangChinese: "选择模式", LangTraditionalChinese: "選擇模式",
@@ -4777,11 +4868,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Ver modelos; fijar predeterminado del proyecto/espacio o modelo del grupo",
 	},
 	MsgBuiltinCmdReasoning: {
-		LangEnglish:            "View/switch reasoning effort, arg: [level]",
-		LangChinese:            "查看/切换推理强度，参数: [等级]",
-		LangTraditionalChinese: "查看/切換推理強度，參數: [等級]",
-		LangJapanese:           "推論強度の表示/切り替え、引数: [レベル]",
-		LangSpanish:            "Ver/cambiar esfuerzo de razonamiento, arg: [nivel]",
+		LangEnglish:            "View reasoning effort; set default or group effort",
+		LangChinese:            "查看推理强度；设置默认值或本群强度",
+		LangTraditionalChinese: "查看推理強度；設定預設值或本群組強度",
+		LangJapanese:           "推論強度を表示し、既定値またはグループ強度を設定",
+		LangSpanish:            "Ver esfuerzo; ajustar valor predeterminado o de grupo",
 	},
 	MsgBuiltinCmdMode: {
 		LangEnglish:            "View/switch permission mode, arg: [name]",
