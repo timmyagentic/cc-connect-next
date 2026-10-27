@@ -260,11 +260,12 @@ func TestGroupContextHydrateCountAndTotalByteBudgets(t *testing.T) {
 				}
 			}
 			want := groupContextMaxResources
-			if mode == "bytes" {
+			switch mode {
+			case "bytes":
 				want = 2
-			} else if mode == "failed-bytes" {
+			case "failed-bytes":
 				want = 1
-			} else if mode == "existing-max" {
+			case "existing-max":
 				want = 0
 			}
 			if successes != want || total > groupContextMediaBytes || calls.Load() > groupContextMaxResources {
@@ -311,9 +312,10 @@ func TestGroupContextForwardBoundedAndNoExtraScopeReads(t *testing.T) {
 				}
 				children := []any{root}
 				n, parent := 1, id
-				if mode == "count" {
+				switch mode {
+				case "count":
 					n = groupContextForwardMessages + 2
-				} else if mode == "depth" {
+				case "depth":
 					n = groupContextForwardDepth + 2
 				}
 				for i := 0; i < n; i++ {
