@@ -1,268 +1,145 @@
 <div align="center">
 
-<img src="docs/images/banner-next.svg" alt="cc-connect-next" width="720">
+# CC Connect Next
 
-**The Feishu-native remote for the AI coding agents on your machine — plus Telegram, Slack, Discord and 11 more platforms.**
+**Codex, tuned for Feishu and Lark.**
 
-A privacy-first successor to [CC Connect](https://github.com/chenhg5/cc-connect) with a native Feishu Card 2.0 answer lifecycle, mid-turn steering, and an auditable one-command migration.
+Built around Codex and Feishu / Lark. Run tasks on your computer; follow progress, add instructions, handle approvals, and receive results in chat.
 
 [![Release](https://img.shields.io/github/v/release/timmyagentic/cc-connect-next?color=0284c7&label=release)](https://github.com/timmyagentic/cc-connect-next/releases/latest)
 [![npm](https://img.shields.io/npm/v/cc-connect-next?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/cc-connect-next)
 [![License: MIT](https://img.shields.io/github/license/timmyagentic/cc-connect-next?color=blue)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](go.mod)
-[![Agents](https://img.shields.io/badge/agents-14-7c3aed)](#-supported-agents--platforms)
-[![Platforms](https://img.shields.io/badge/platforms-15-0ea5e9)](#-supported-agents--platforms)
 
-[中文文档](README.md) · [Install](INSTALL.md) · [Usage guide](docs/usage.md) · [Feishu setup](docs/feishu.md) · [Migration](docs/migration.md)
-
-**First time here? [Copy the install prompt for your agent](#first-installation-let-your-agent-do-it).**
-
-<img src="docs/images/turn-demo.svg" alt="One agent turn in Feishu: message, streaming card lifecycle, mid-turn steer handoff, exactly one Done card" width="820">
+**[Get started](#first-installation-let-your-agent-do-it)** · [Website](https://cc-connect-next.timmyagentic.si/) · [Feishu setup](docs/feishu.md) · [中文](README.md)
 
 </div>
 
----
+## ✨ Built for Feishu and Codex
 
-Run Claude Code, Codex, Cursor, or any of 14 coding agents on your own machine — then drive them from the chat app already in your pocket. cc-connect-next is a single Go binary: no MCP server, no proxy, no companion plugin, and no modification to official CC Connect. It owns its command, data directory, daemon, and npm package, and coexists with an official install side by side.
+- **Add a requirement while the task is running.** Codex's native steering feeds instructions such as “keep the layout; only fix validation” into the active task.
+- **Follow progress in native Feishu cards.** Thinking, tool execution, answering, and completion update in place. Intermediate reasoning and tool details stay hidden; handle approval requests in chat when needed.
+- **Organize Codex work by topic.** Separate Feishu topics have independent sessions and can bind to their own workspaces, keeping concurrent tasks focused.
 
-## ✨ Highlights
+These experiences target **Codex app-server + Feishu / Lark**. New configurations default to app-server over stdio. Codex's `exec` backend does not support native steering; messages sent while it is busy are queued.
 
-- 🔒 **Privacy-first Feishu Card 2.0 lifecycle** — one agent turn stays in one quoted native card: `⏳ thinking` → `⏳ calling tools` → `✍️ answering` (CardKit typewriter streaming) → `✅ done`. During progress, only anonymous counts are rendered; reasoning text, tool names, inputs, results, model, token, and workdir details are dropped at **two** layers and the card has no expandable panel. The final answer body is delivered through Feishu, so any code or patch quoted in that answer also passes through Feishu.
-- 🎛️ **Steer the running turn** — messages that arrive while the agent is busy join the task **already running** (the default) via Codex's native `turn/steer`, with the live card handing over to the newest message; agents without the capability fall back to the FIFO queue transparently, and `busy_message_mode = "queue"` restores queue-always. `/ps` steers explicitly on any mode.
-- 🚚 **Auditable one-command migration** — `cc-connect-next migrate` inventories the official install, hashes every source file, stages, verifies, and activates atomically with timestamped backups and a full SHA-256 manifest. It fails closed rather than ever activating an incomplete target.
-- 🪶 **One bot, an official lark-cli ready to use** — new installs and migrations can install the official `lark-cli`, reuse the Feishu bot Next already verified, create or reuse an isolated profile, and make it the default bot profile while preserving old profiles, user OAuth, and the secret boundary.
-- 🔔 **Self-maintaining installs** — `cc-connect-next update [stable|beta]` selects an explicit channel while `stable` remains the default. Standalone binaries keep an immutable Plan, same-release checksum, two version probes, lock, backup, and rollback. The daemon follows `update_channel`, announces each version once, and shows the exact channel, release type, and artifact before confirmation—approval can never drift to a different latest release.
-- 🤖 **14 agents × 15 platforms** — one process hosts multiple projects, each binding a code directory to its own agent and platforms, with per-project permissions, providers, models, and display settings.
-- 🌍 **Production niceties** — `doctor` diagnostics, launchd/systemd/Windows daemon, web admin (beta), cron (optional prompt-job models without changing project defaults) & webhooks, bot-to-bot relay, voice in/out (STT/TTS), multi-workspace routing, and full i18n in five languages (en, zh, zh-TW, ja, es).
-
-- **One-action chat feedback.** An explicit `/feedback <description>` command or Feedback card action immediately submits a complete Foundation-redacted Draft with only recent adjacent, typed, bounded, redacted user/Agent diagnostic context—there is no preview or second confirmation. Automatic error/capability-gap offers make zero requests until clicked, and the final card shows only success or failure with no Issue link. The Manifest-declared Agent CLI still uses a live HMAC turn credential and one-time approval token for the same kind of Draft, never needs Feishu `send_as_user`, and fails closed on identity/schema mismatch or replay. The author-side Relay owns the repository and Issue rendering, so no GitHub account is needed.
-
-## 🎬 What it looks like
+## 🎬 How a conversation flows
 
 <div align="center">
-<img src="docs/images/card-lifecycle.svg" alt="Card lifecycle and steer handoff" width="820">
+<img src="docs/images/turn-demo.svg" alt="Feishu and Codex message-flow illustration: start a task, add instructions, receive the result" width="820">
 </div>
 
-When a supplement arrives mid-turn in steer mode (or via `/ps`), the input joins the **same** agent turn — no new turn, no concurrent process. The previous card freezes in a neutral grey *"Continued in a newer message"* state that keeps everything already visible, and all further progress plus the final answer render only in the card replying to the newest message. Exactly one card reaches Done per turn.
-
-## 🥇 Feishu as a first-class platform
-
-Most bridges port a Telegram bot to Feishu and stop at "it sends messages". cc-connect-next is built the other way around: Feishu is the reference platform, the integration is specified by an executable [answer-card contract](docs/feishu-card-contract.md), and it exercises the platform's advanced surface end to end. If your team lives in Feishu, this is the difference you feel daily:
-
-- **Answer cards, engineered** — CardKit typewriter streaming with monotonic sequencing (a delayed frame can never overwrite newer content) and a ≥900 ms answering dwell so even one-shot answers visibly animate. CardKit unavailable? Automatic fallback to in-place card updates. Tables beyond Feishu's component budget render as fenced text in the same card instead of overflowing into extra messages; a failed terminal update falls back to one tracked replacement card — never untracked multi-part replies. `NO_REPLY` recalls the optimistic card; recalling your question deletes the card and keeps partial output out of assistant history; `done_emoji` reacts to your message only after a visible successful answer.
-- **Mentions that actually notify** — `@DisplayName` in answers resolves to native Feishu at tags (lazy member fetch, 1-hour cache, longest-name-first matching; `mention_map` targets other bots with validated `ou_` IDs). Because at tags inside cards display but never notify, a final answer containing a resolved mention is delivered as a tracked quoted text message that genuinely notifies — then the lifecycle card is removed.
-- **Topics and groups done right** — `thread_isolation = "topics_only"` gives every platform-marked real topic, including P2P topics, its own session and workspace binding; a direct @mention in the main group chat and an ordinary non-topic private message still reply in place. Teams that want one topic per top-level group message can select `topic_per_message`. The first @ in an existing group topic backfills the triggering message's bounded parent/reply chain in order (up to 5 messages, not complete topic or sibling history). Per-chat no-@ allowlists (`group_reply_all_chats`) ship with the exact `im:message.group_msg` permission boundary documented. Quoted-file downloads are double-gated: the bot must be explicitly @-ed *and* the quoted file's uploader must be the requester. Agent-relay prompts stay inside the topic they started in.
-- **Operations that stay out of your way** — WebSocket long connection (no public IP, domain, or certificate) with automatic reconnection; permission confirmations and provider/model switching as interactive cards; remote markdown images uploaded once and reused by URL with a one-minute failure backoff, plus multi-image batching; `cc-connect-next feishu setup` interactive onboarding with a recommended app profile and optional official `lark-cli` binding; per-turn locale snapshots across five languages.
-
-Every item above is a documented config key in the [Feishu guide](docs/feishu.md) or a tested guarantee in the [card contract](docs/feishu-card-contract.md) — not marketing copy.
+*Message-flow illustration, not a screen recording.* After a mid-turn supplement, the old card keeps its visible content; progress and the final result continue in the card replying to the newest message.
 
 ## 🚀 Quick start
 
+The recommended setup is **an installed, authenticated Codex CLI + a Feishu / Lark bot**. Feishu uses a persistent connection, with no public IP, domain, or certificate required. macOS, Linux, and Windows are supported; npm installation requires Node.js/npm.
+
 ### First installation: let your agent do it
 
-If you have never used CC Connect and do not have a bot, paste this into a coding agent with local terminal access:
+Give the prompt below to a coding agent with local terminal access. It handles installation, configuration, and verification; you complete login, QR scanning, or app publication when needed.
+
+<details>
+<summary><strong>Expand and copy: install Codex + Feishu / Lark</strong></summary>
 
 ```text
 Install the published stable cc-connect-next from https://github.com/timmyagentic/cc-connect-next
-for a first-time Feishu/Lark setup. Verify OS/architecture, the agent CLI and its login state,
-and the absolute project directory; prefer my current agent/project and ask only for missing
-information. Preserve existing CC Connect/Next configurations and services; do not migrate or overwrite.
+and connect Codex to Feishu/Lark. Verify OS/architecture, Node.js/npm, the Codex CLI and its login state,
+and the absolute project directory. Help install Codex if missing; I will complete login.
+Prefer my current project and ask only for missing information.
+Preserve existing CC Connect/Next configurations and services; do not migrate or overwrite.
 Choose an explicit absolute config path. If it does not exist, run `cc-connect-next --config <config-path>`
-to create it, then fill in the real work_dir, agent type, and its options yourself. Keep one project name.
-Run `cc-connect-next feishu setup --config <config-path> --project <project-name>`, show the QR code,
-and keep the process waiting while I scan it. Accept the recommended settings and confirm the official
-lark-cli companion; use `--recommended --lark-cli` for non-interactive execution, preserve existing
-profiles, and make the same bot the default bot profile.
+to create it. Fill in the real work_dir, use agent type codex, backend app_server, and app_server_url stdio.
+Keep one project name and edit the configuration yourself.
+Run `cc-connect-next feishu setup --config <config-path> --project <project-name> --recommended --no-lark-cli`.
+Show the QR code, keep the process waiting while I scan it, and finish the bot setup.
 Run `cc-connect-next doctor --config <config-path>`, then start in the foreground with
 `cc-connect-next --config <config-path>`. Ask me to send /version, /whoami, and an ordinary prompt
-in a private chat; verify replies and configure access
-using the actual user ID. Stop the foreground process you started, then run
-`cc-connect-next daemon install --config <config-path>`. Check service status, Runtime, and platform readiness in
-`cc-connect-next daemon status` and verify replies still work in the background. Report version,
-config path, work_dir, and verification results. Call on me for login, QR scanning, or app publication;
-mark any incomplete real-message verification UNVERIFIED.
+in a private chat; verify replies and configure access using the actual user ID.
+Stop the foreground process you started, then run `cc-connect-next daemon install --config <config-path>`.
+Check service status, Runtime, and platform readiness with `cc-connect-next daemon status`,
+and verify replies still work in the background. Report version, config path, work_dir, and results.
+Call on me for login, QR scanning, or app publication; mark incomplete real-message verification UNVERIFIED.
 ```
 
-[First-install notes](docs/getting-started.md) · [Migration prompt for official users](docs/migration.md#agent-readable-install-task)
+</details>
+
+[First-install notes](docs/getting-started.md) · Already using official CC Connect? Use the [migration prompt](docs/migration.md#agent-readable-install-task).
 
 ### Manual installation
 
-Prepare an installed, authenticated agent CLI first. After generating the config, set `work_dir` to
-an existing absolute project path; `feishu setup` configures the bot but does not fill an existing project's directory.
+Install and authenticate the Codex CLI first, then install the stable release and generate a configuration:
 
 ```bash
-# 1. Install (macOS / Linux / Windows, amd64 & arm64)
-npm install -g cc-connect-next
-
-# 2. Create the starter config and fill in the REPLACE values
-cc-connect-next            # writes ~/.cc-connect-next/config.toml, then guides you
-cc-connect-next feishu setup   # configure Feishu and optionally bind the bot to official lark-cli
-
-# 3. Verify and run
-cc-connect-next doctor
-cc-connect-next
+npm install -g cc-connect-next@latest
+cc-connect-next --config ~/.cc-connect-next/config.toml
 ```
 
-Startup refuses to run while any `REPLACE` placeholder remains, naming the key and the step that resolves it — instead of reporting healthy and then failing to connect. `doctor` checks config, agent CLI login state, platforms, dependencies, and network without opening a platform connection.
+The first run creates a configuration and provides guidance. Set `projects.agent.options.work_dir` to a real absolute project path and keep Codex's `app_server` / `stdio` settings. The next step, `feishu setup`, fills in the bot credentials.
 
-When you are unsure what the active project can do, how to invoke it, whether it
-is available, or whether it is configurable, ask the connected Agent in natural
-language. It queries the version/project/session-matched, read-only
-[Agent Capability Manifest](docs/agent-capability-manifest.md), which unifies
-configuration, CLI tools, chat commands, Skills, runtime adapters, parameters,
-permissions, side effects, fallbacks, and availability reasons. You can also run
-`cc-connect-next capabilities --search "keywords"`. For configuration-only lookup,
-`cc-connect-next config capabilities --search "keywords"` remains available; see the
-[configuration capability reference](docs/configuration.md) for every option.
-The Feedback/Update Foundation mapping, exact Plan flow, and Relay boundary are
-documented in [Awesome Agent App Features integration](docs/agent-app-features.md).
+```bash
+cc-connect-next feishu setup --config ~/.cc-connect-next/config.toml --recommended --no-lark-cli
+cc-connect-next doctor --config ~/.cc-connect-next/config.toml
+cc-connect-next --config ~/.cc-connect-next/config.toml
+```
 
-Install as a service once things work:
+Send `/version`, `/whoami`, and an ordinary prompt in a private bot chat. Confirm Codex can answer and configure access using the actual user ID. A successful `doctor` check does not replace real-message verification. Once this works, stop the foreground process, install the background service, and test again:
 
 ```bash
 cc-connect-next daemon install --config ~/.cc-connect-next/config.toml
-```
-
-See [INSTALL.md](INSTALL.md) for standalone binaries, building from source, and update details.
-
-## 🎛️ Queue vs steer
-
-Two intents exist for a message that arrives while the agent is busy — and they are different features:
-
-| | `steer` (default) | `queue` |
-|---|---|---|
-| Meaning | "incorporate this correction into the task **already running**" | "finish this task, then handle my message as a new request" |
-| Mechanism | native `turn/steer` pinned to the active turn (`expectedTurnId`) | per-session FIFO, new turn after the current one |
-| Card behavior | live card hands over to the newest message | new card when its turn starts |
-| Requirements | Codex (the default app-server/stdio backend; others fall back to queue) | any agent |
-
-```toml
-[queue]
-busy_message_mode = "steer"     # "steer" (default) or "queue"
-
-[projects.agent.options]
-backend = "app_server"
-app_server_url = "stdio"
-```
-
-`/ps <message>` (alias `/btw`) always steers explicitly regardless of the configured mode. Definitive failures fall back safely; an unknown outcome is never re-queued, so your input can never be delivered twice. Details in the [usage guide](docs/usage.md#busy-messages-queue-vs-steer).
-
-## 🧩 Supported agents & platforms
-
-| | |
-|---|---|
-| **Agents** | Claude Code · Codex · Cursor · Gemini CLI · GitHub Copilot CLI · Kimi Code · OpenCode · iFlow · Qoder · Pi · Devin · Antigravity · generic ACP · tmux |
-| **Platforms** | Feishu/Lark · Telegram · Slack · Discord · DingTalk · WeCom · Weixin (personal) · QQ · QQ Bot · LINE · Weibo · Matrix · Webex · MAX · WPS 协作 — plus a WebSocket [bridge](docs/bridge-protocol.md) for external adapters |
-
-Every agent and platform compiles in by default and can be excluded with build tags (`make build EXCLUDE=discord,qq`).
-
-## 🏗️ Architecture
-
-```
-┌───────────────────────────────────────────────┐
-│                cmd/cc-connect                 │  CLI · daemon · migrate · update · doctor
-├───────────────────────────────────────────────┤
-│                    core/                      │  engine · sessions · cards · steer ·
-│      (imports stdlib only — never plugins)    │  queue · i18n · cron · webhook · relay
-├──────────────────────┬────────────────────────┤
-│       agent/*        │      platform/*        │  self-contained adapters, registered
-│  claudecode codex …  │  feishu telegram …     │  via capability interfaces
-└──────────────────────┴────────────────────────┘
-```
-
-Core never hardcodes an agent or platform name; optional capabilities (rich cards, steering, model switching, …) are interface assertions that adapters opt into. One process can host any number of `[[projects]]`.
-
-## 🔄 Migrating from official CC Connect
-
-```bash
-cc-connect-next migrate --dry-run   # inspect the full plan first
-cc-connect-next migrate --switch    # stop official, final-sync, start Next, and offer lark-cli
 cc-connect-next daemon status
 ```
 
-No second Feishu app is required. Run `--switch` from a terminal outside the official daemon lifecycle; a connected CC Agent invocation is rejected before service mutation. The command requires no installed Next service, then stops and disables official, final-syncs, and installs/starts Next with the migrated config and original work directory. It waits for the local API and every configured platform to report real readiness before the CLI privately tells one unique or explicit Feishu/Lark operator that migration completed. On activation failure, official is restored only after Next is unregistered, its runtime socket no longer answers, and the migrated config lock is free; otherwise official stays disabled to prevent duplicate consumers. Ambiguous targets and send failures never fall back to a group or roll back a successful migration. `daemon status` reports Service separately from Runtime/Platforms. An interactive terminal then offers the official `lark-cli` companion; scripts opt in with `--lark-cli`, multiple bots are selected with `--lark-cli-project`, and migration dry-runs never write to lark-cli. Official binaries and data remain intact.
+These commands use macOS/Linux paths; on Windows, use an absolute path to the configuration file. See [INSTALL.md](INSTALL.md) for standalone binaries, source builds, and updates.
 
-Dual-daemon conflicts are prevented by the product, not just documented: cc-connect-next **refuses to start** while the official daemon is running with the same Feishu credentials, and `doctor` reports coexistence state. Copy-only `cc-connect-next migrate` remains available for backups and advanced parallel trials.
+<a id="-supported-agents--platforms"></a>
 
-📖 **[Full migration & coexistence guide](docs/migration.md)** — including custom paths, the compatibility matrix, service switchover, rollback, and a paste-into-your-agent task block.
+## 🧩 Compatibility
 
-## ⚙️ Recommended Feishu configuration
+Feishu / Lark with Codex is the primary focus. You can also connect agents such as Claude Code, Cursor, Gemini CLI, and OpenCode, and platforms such as Telegram, Slack, and Discord. See the [configuration reference](docs/configuration.md) and [platform guides](docs/) for the full options.
 
-New configs already use these defaults (also applied by `cc-connect-next feishu setup`):
+Cards, approvals, and steering support vary by combination. Ordinary busy messages fall back to a queue when native steering is unavailable; see [queue and steering behavior](docs/usage.md#busy-messages-queue-vs-steer).
 
-```toml
-[display]
-mode = "compact"
-card_mode = "rich"          # "legacy" opts back into inherited CC Connect rendering
-thinking_messages = false
-tool_messages = false
-show_context_indicator = false
-reply_footer = true
-hide_agent_footer = true
+Scheduled tasks, the web dashboard (beta), voice, feedback, and the official lark-cli integration are covered in the documentation below.
 
-[[projects]]
-name = "my-project"
+## 🔄 Migrating from official CC Connect
 
-[projects.agent]
-type = "codex"
+Next has its own command, data directory, and service. Migration can reuse your Feishu bot while preserving the official installation and data. Inspect the plan first:
 
-[projects.agent.options]
-work_dir = "/absolute/path/to/project"
-mode = "yolo"
-
-[[projects.platforms]]
-type = "feishu"
-
-[projects.platforms.options]
-app_id = "${FEISHU_APP_ID}"
-app_secret = "${FEISHU_APP_SECRET}"
-reply_to_trigger = true
-share_session_in_channel = true
-thread_isolation = "topics_only"
-done_emoji = "Done"
+```bash
+cc-connect-next migrate --dry-run
 ```
 
-The exact lifecycle, privacy boundary, fallback behavior, and verification commands are defined in the [Feishu answer-card contract](docs/feishu-card-contract.md).
+To switch services, follow the [migration guide](docs/migration.md) for `migrate --switch`. This stops and disables the official service before starting Next. See [Coming from CC Connect](docs/coming-from-cc-connect.md) and the [migration matrix](docs/migration-compatibility.md) for differences, supported versions, and rollback instructions.
 
-## 🆚 Versus official CC Connect
+## 🔒 Data and permissions
 
-cc-connect-next forked from CC Connect v1.4.1 and tracks upstream through per-change audits instead of merges ([policy & history](docs/upstream-v1.5.0-beta.3-audit.md)). Coming from the official version? The long-form walkthrough — what's actually different, direct migration, and safe rollback — is **[Coming from official CC Connect](docs/coming-from-cc-connect.md)**.
+Codex executes in your local workspace. Messages and final answers pass through Feishu / Lark, and model requests go to your configured provider. Native answer cards hide intermediate reasoning and tool details; code quoted in a final answer is still sent with that reply.
 
-| | CC Connect | cc-connect-next |
-|---|---|---|
-| Feishu answers | message stream / legacy cards | single Card 2.0 lifecycle with typewriter streaming |
-| Reasoning & tool details in chat | rendered | anonymous counts only, enforced at two layers |
-| Busy-session messages | FIFO queue; `/ps` raw send | native steer with card handoff by default, queue configurable |
-| Updates | manual | explicit Stable/Beta channels + once-per-release daemon notice |
-| Migration path | — | audited one-command migration with manifest and rollback |
-| Runtime identity | `cc-connect` · `~/.cc-connect` | independent everything; both coexist |
+Configuration controls access and Codex's permission mode. See [permission modes](docs/usage.md#permission-modes) and the [card privacy boundary](docs/feishu-card-contract.md#privacy-boundary).
 
-## 📚 Documentation
+## 📚 Detailed documentation
 
 | Guide | What's inside |
 |---|---|
-| [INSTALL.md](INSTALL.md) | npm / standalone / source install, updates, daemon setup |
-| [Usage guide](docs/usage.md) | sessions, queue vs steer, permissions, providers, models, cron, relay, TTS/STT |
-| [Agent Capability Manifest](docs/agent-capability-manifest.md) | unified Agent-queryable capabilities, permissions, side effects, fallbacks, and runtime availability |
-| [Feishu setup](docs/feishu.md) | app creation, permissions, event subscription |
-| [Answer-card contract](docs/feishu-card-contract.md) | the exact card lifecycle and privacy guarantees |
-| [Coming from CC Connect](docs/coming-from-cc-connect.md) | honest comparison, direct migration, and safe rollback |
-| [Migration guide](docs/migration.md) | full migration, coexistence, and switchover reference |
-| [Migration matrix](docs/migration-compatibility.md) | which official versions and settings migrate |
-| [Bridge protocol](docs/bridge-protocol.md) | build your own platform adapter over WebSocket |
-| [Management API](docs/management-api.md) | local HTTP control surface |
-| Platform guides | [Telegram](docs/telegram.md) · [Slack](docs/slack.md) · [Discord](docs/discord.md) · [DingTalk](docs/dingtalk.md) · [WeCom](docs/wecom.md) · [QQ](docs/qq.md) · [Matrix](docs/matrix.md) · [more](docs/) |
+| [First installation](docs/getting-started.md) · [Installation reference](INSTALL.md) | Installation, a real reply, background service, and updates |
+| [Feishu setup](docs/feishu.md) | Apps, permissions, topics, groups, and optional lark-cli integration |
+| [Usage guide](docs/usage.md) | Sessions, models, permissions, scheduled tasks, voice, and feedback |
+| [Configuration reference](docs/configuration.md) | Codex backends, recommended settings, and other adapter options |
+| [Capability discovery](docs/agent-capability-manifest.md) | Let your agent query what the current project supports and how to use it |
+| [Management API](docs/management-api.md) · [Bridge protocol](docs/bridge-protocol.md) | External control and custom platform adapters |
+| [Card contract](docs/feishu-card-contract.md) · [Feedback and update contracts](docs/agent-app-features.md) | Lifecycle, privacy boundaries, and implementation details |
+| [Release notes](https://github.com/timmyagentic/cc-connect-next/releases) | Stable and beta features and their requirements |
 
 ## 🛠️ Development
 
-```bash
-make web            # build web admin assets once
-go test ./...       # full suite
-make build-noweb    # fast binary without the web dashboard
-```
+See [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, adapter interfaces, and verification requirements. Core does not depend on agent or platform adapters; extensions register through capability interfaces.
 
-Focused suites: `go test ./platform/feishu -run TestBuildRichCard`, `go test ./core -run TestCUJ_Steer`, `go test -tags no_web ./cmd/cc-connect -run TestMigrateLegacyData`. Contributions follow the layering rules in [AGENTS.md](AGENTS.md): core never imports agents or platforms, adapters register capabilities, every user-facing string ships in five languages, and new features come with regression tests.
+```bash
+make web
+go test ./... -count=1
+make build-noweb
+```
 
 ## 🙏 Attribution & license
 
-cc-connect-next starts from CC Connect v1.4.1 and preserves its full Git history — thanks to [@chenhg5](https://github.com/chenhg5) and every upstream contributor. Upstream changes are adopted through reviewed, per-change audits with credit in the audit log. See [NOTICE](NOTICE) for attribution and [LICENSE](LICENSE) for MIT terms.
+cc-connect-next is an independent project derived from [CC Connect](https://github.com/chenhg5/cc-connect) v1.4.1. It preserves the full Git history and adopts upstream changes through [per-change audits](docs/upstream-v1.5.0-beta.3-audit.md). Thanks to [@chenhg5](https://github.com/chenhg5) and every upstream contributor. See [NOTICE](NOTICE) for attribution and [LICENSE](LICENSE) for MIT terms.
