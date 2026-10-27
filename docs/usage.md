@@ -1465,27 +1465,35 @@ or PR so you can dig further if needed.
 
 Group session sharing does not automatically include unmentioned chat messages.
 Set `group_context = true` in that platform's `[projects.platforms.options]` to
-read recent human text when explicitly mentioned. Set `group_reply_all = false`,
-clear `group_reply_all_chats`, and disable `respond_to_at_everyone_and_here`;
-`require_mention` must stay true. Starter/recommended profiles may have enabled
-mention-free replies, so update those settings together. Restart to apply.
+read recent discussion before an accepted group request. This works with the
+configured mention-free and opt-in @all reply rules; enabling context does not
+change which messages trigger replies. Restart to apply configuration changes.
 
-The independent feature defaults off. Defaults are 20 human messages within
-30 minutes before the trigger, up to 8000 Unicode characters including JSON
-attribution. Tune `group_context_max_messages` (1–100),
-`group_context_window_minutes` (1–1440), and `group_context_max_chars` (512–32000).
-Reads are limited to four 50-record pages and four seconds, using existing
-access only. Actual topics use their own history container; private chats and
-other topics are excluded. Unmentioned attachments stay silent too.
+The feature defaults off. Defaults are 20 messages within 30 minutes before the
+trigger, up to 8000 Unicode characters including JSON attribution. Tune
+`group_context_max_messages` (1–100), `group_context_window_minutes` (1–1440),
+and `group_context_max_chars` (512–32000). History listing is limited to four
+50-record pages and four seconds, using existing access only. Actual topics
+use their own history container; private chats and other topics are excluded.
 
-Text/rich-text background replaces automatic quote-chain/root downloads for
-these group turns; attachments and cards are not fetched. Unreadable/truncated
-context is disclosed. Sender, time, and reply metadata remain quoted untrusted
-data after command/permission routing. Only IDs from successful turns are
-persisted for deduplication; background text still enters the Agent's native
-conversation. Failed turns can retry; `/new` starts a fresh cursor. Busy
-mentions queue as distinct turns, with their original time window. This adds
-no polling, new permissions, or separate chat archive.
+Text, rich text, readable cards and forwarded conversations retain their
+sender/time attribution. Images and downloadable attachments from selected
+history are passed through the Agent's existing image/file input paths, including
+images inside forwarded messages. Downloads happen after deduplication and text
+selection, under a separate 15-second preparation budget. Feishu downloads at
+most 12 resources and 20 MiB within 12 seconds, also respecting the existing
+per-resource limit.
+Sticker and other platform-only content is represented with explicit metadata
+or an unavailable marker; audio/video files are attachments, not a claim that
+every Agent can transcribe or play them. No extra permissions are requested.
+
+Read failures, history limits and unavailable attachments have separate notices.
+The model also receives markers at the missing content. Background and its media
+remain untrusted quoted data, never commands or approval. Successful entries are
+deduplicated by native Agent conversation; failed resource reads remain retryable.
+`/new` starts a fresh cursor. Busy requests queue with their original time window.
+There is no polling or separate chat archive. Peer-bot inclusion remains opt-in
+through `group_context_include_peer_bots` and its exact `peer_bots` allowlist.
 
 ### Codex asks you to sign in again
 

@@ -133,7 +133,7 @@ func TestMessageContextRevisionReceiptsSurviveRestart(t *testing.T) {
 	state := &interactiveState{}
 	entry := ContextMessage{ID: "editable", SenderID: "bot-a", SenderName: "Peer A", SenderType: "app", Text: "Working: checking", Revision: "partial"}
 	p.setBackground(key, []ContextMessage{entry}, nil)
-	first := env.engine.prepareMessageContext(p, key, session, state, "continue", "first")
+	first := env.engine.prepareMessageContext(p, key, session, state, "continue", "first").Text
 	if !strings.Contains(first, "Working: checking") || strings.Contains(first, `"Revision"`) {
 		t.Fatalf("wrong snapshot encoding: %s", first)
 	}
@@ -143,32 +143,32 @@ func TestMessageContextRevisionReceiptsSurviveRestart(t *testing.T) {
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatal(err)
 	}
-	if got := env.engine.prepareMessageContext(p, key, &restored, state, "again", "second"); strings.Contains(got, "Working: checking") {
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "again", "second").Text; strings.Contains(got, "Working: checking") {
 		t.Fatal("restart lost revision receipt")
 	}
 	entry.Text, entry.Revision = "Completed: checking", "completed"
 	p.setBackground(key, []ContextMessage{entry}, nil)
-	if got := env.engine.prepareMessageContext(p, key, &restored, state, "continue", "third"); !strings.Contains(got, "Completed: checking") {
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "continue", "third").Text; !strings.Contains(got, "Completed: checking") {
 		t.Fatal("final snapshot with same ID was lost")
 	}
 	// A failed attempt does not call completeMessageContext.
-	if got := env.engine.prepareMessageContext(p, key, &restored, state, "retry", "fourth"); !strings.Contains(got, "Completed: checking") {
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "retry", "fourth").Text; !strings.Contains(got, "Completed: checking") {
 		t.Fatal("failed attempt consumed final revision")
 	}
 	completeMessageContext(state, &restored, env.engine.sessions)
-	if got := env.engine.prepareMessageContext(p, key, &restored, state, "continue", "fifth"); strings.Contains(got, "Completed: checking") {
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "continue", "fifth").Text; strings.Contains(got, "Completed: checking") {
 		t.Fatal("unchanged final snapshot repeated")
 	}
 	entry.Text, entry.Revision = "Working: checking", "partial"
 	p.setBackground(key, []ContextMessage{entry}, nil)
-	if got := env.engine.prepareMessageContext(p, key, &restored, state, "corrected status", "reverted"); !strings.Contains(got, "Working: checking") {
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "corrected status", "reverted").Text; !strings.Contains(got, "Working: checking") {
 		t.Fatal("A -> B -> A edit was mistaken for an already delivered snapshot")
 	}
 	completeMessageContext(state, &restored, env.engine.sessions)
 	entry.Text, entry.Revision = "Completed: checking", "completed"
 	p.setBackground(key, []ContextMessage{entry}, nil)
 	restored.SetAgentSessionID("fresh-native", "agent")
-	if got := env.engine.prepareMessageContext(p, key, &restored, state, "catch up", "sixth"); !strings.Contains(got, "Completed: checking") {
+	if got := env.engine.prepareMessageContext(p, key, &restored, state, "catch up", "sixth").Text; !strings.Contains(got, "Completed: checking") {
 		t.Fatal("new native session inherited old receipts")
 	}
 }
@@ -318,4 +318,91 @@ func TestMessageContextFailedResultDoesNotConsumeBackground(t *testing.T) {
 	if len(prompts) != 3 || !strings.Contains(prompts[1], "retryable discussion") || !strings.Contains(prompts[2], "retryable discussion") {
 		t.Fatalf("failed result consumed the background: %v", prompts)
 	}
+}
+
+type mediaContextPlatform struct {
+	*contextTestPlatform
+	hydrated []string
+	fail     bool
+}
+
+func (p *mediaContextPlatform) HydrateMessageContext(_ context.Context, _ any, entries []ContextMessage) ([]ContextMessage, error) {
+	p.contextMu.Lock()
+	defer p.contextMu.Unlock()
+	for i := range entries {
+		if len(entries[i].Resources) == 0 {
+			continue
+		}
+		p.hydrated = append(p.hydrated, entries[i].ID)
+		if p.fail {
+			entries[i].Incomplete = true
+			entries[i].Text += " [image unavailable]"
+			continue
+		}
+		entries[i].Images = []ImageAttachment{{MimeType: "image/png", Data: []byte("image bytes"), FileName: entries[i].ID + ".png"}}
+		entries[i].Files = []FileAttachment{{MimeType: "text/plain", Data: []byte("file bytes"), FileName: "notes.txt", MessageID: entries[i].ID}}
+	}
+	return entries, nil
+}
+
+func TestMessageContextMediaSelectionDeduplicationAndRetry(t *testing.T) {
+	env, base := newContextCUJEnv(t)
+	p := &mediaContextPlatform{contextTestPlatform: base}
+	key := "test:group"
+	s := &Session{}
+	s.SetAgentSessionID("native", "test")
+	state := &interactiveState{}
+	entry := ContextMessage{ID: "photo", SenderID: "alice", Text: "shared image", Resources: []ContextResource{{Kind: "image", Key: "opaque"}}}
+	p.setBackground(key, []ContextMessage{entry}, nil)
+	p.fail = true
+	first := env.engine.prepareMessageContext(p, key, s, state, "look", "first")
+	if len(first.Images) != 0 || !strings.Contains(first.Text, "image unavailable") {
+		t.Fatalf("missing failure disclosure: %+v", first)
+	}
+	completeMessageContext(state, s, env.engine.sessions)
+	p.fail = false
+	second := env.engine.prepareMessageContext(p, key, s, state, "retry", "second")
+	if len(second.Images) != 1 || len(second.Files) != 1 || !strings.Contains(second.Text, `"history_image_indexes":[1]`) || strings.Contains(second.Text, "image bytes") || strings.Contains(second.Text, "opaque") {
+		t.Fatalf("missing or unsafe media delivery: %+v", second)
+	}
+	completeMessageContext(state, s, env.engine.sessions)
+	third := env.engine.prepareMessageContext(p, key, s, state, "again", "third")
+	if len(third.Images) != 0 || len(p.hydrated) != 2 {
+		t.Fatalf("successful history was downloaded again: %+v calls=%v", third, p.hydrated)
+	}
+	// Older history outside the text budget must not download any media.
+	old := entry
+	old.ID = "old"
+	p.setBackground(key, []ContextMessage{old, {ID: "new", Text: strings.Repeat("n", 16000)}}, nil)
+	env.engine.prepareMessageContext(p, key, s, state, "bounded", "fourth")
+	if len(p.hydrated) != 2 {
+		t.Fatalf("out-of-budget resource downloaded: %v", p.hydrated)
+	}
+}
+
+type mediaContextAgent struct {
+	stubAgent
+	session *mediaContextAgentSession
+}
+
+func (a *mediaContextAgent) StartSession(context.Context, string) (AgentSession, error) {
+	return a.session, nil
+}
+
+type mediaContextAgentSession struct {
+	*cujAgentSession
+}
+
+func (s *mediaContextAgentSession) Send(prompt string, images []ImageAttachment, files []FileAttachment) error {
+	var names []string
+	for _, image := range images {
+		names = append(names, image.FileName)
+	}
+	for _, file := range files {
+		names = append(names, file.MessageID+"/"+file.FileName)
+	}
+	s.mu.Lock()
+	s.reply = "attachments=" + strings.Join(names, ",")
+	s.mu.Unlock()
+	return s.cujAgentSession.Send(prompt, images, files)
 }

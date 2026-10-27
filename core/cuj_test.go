@@ -67,6 +67,46 @@ type cujAgent struct {
 	failStartErr   error
 }
 
+func TestCUJ_H10_HistoryMediaReachesForegroundAndQueuedTurns(t *testing.T) {
+	env, base := newContextCUJEnv(t)
+	p := &mediaContextPlatform{contextTestPlatform: base}
+	as := &mediaContextAgentSession{newCUJAgentSession()}
+	env.engine.agent = &mediaContextAgent{session: as}
+	key := "test:media-group"
+	history := func(id string) {
+		p.setBackground(key, []ContextMessage{{ID: id, SenderID: "alice", Text: "Alice's history image", Resources: []ContextResource{{Kind: "image", Key: "opaque"}}}}, nil)
+	}
+	history("photo1")
+	env.engine.ReceiveMessage(p, &Message{SessionKey: key, Platform: p.Name(), MessageID: "first", UserID: "bob", Content: "compare", ReplyCtx: key, Images: []ImageAttachment{{FileName: "current.png", Data: []byte("current")}}})
+	session := env.engine.sessions.GetOrCreateActive(key)
+	env.waitFor("foreground images", 2*time.Second, func() bool {
+		return env.sentContains("attachments=current.png,photo1.png,photo1/notes.txt") && !session.Busy()
+	})
+	history("photo2")
+	as.mu.Lock()
+	as.delayMs = 100
+	as.mu.Unlock()
+	contextReceive(env, p, key, "bob", "second", "wait")
+	env.waitFor("second in flight", time.Second, func() bool { return len(as.getSentPrompts()) == 2 })
+	// The queued request should receive newly arrived history attachments.
+	history("photo3")
+	contextReceive(env, p, key, "alice", "third", "queued")
+	env.waitFor("queued images", 3*time.Second, func() bool {
+		return env.sentContains("attachments=photo3.png,photo3/notes.txt") && !session.Busy()
+	})
+	env.plat.clearSent()
+	contextReceive(env, p, key, "alice", "fourth", "already seen")
+	env.waitFor("deduplicated answer", 2*time.Second, func() bool {
+		return env.sentContains("attachments=") && !session.Busy()
+	})
+	if env.sentContains("photo3") {
+		t.Fatalf("history sent again: %v", env.plat.getSent())
+	}
+	if env.sentContains("incomplete") {
+		t.Fatalf("readable media triggered a false warning: %v", env.plat.getSent())
+	}
+}
+
 func TestCUJ_H7_GroupModelBindingIsolatesTopicsAndDefaultChanges(t *testing.T) {
 	e, p, a := newGroupModelEngine(t, "")
 	e.ReceiveMessage(p, groupModelMessage("A", "one", "bind", "/model group group-B"))
