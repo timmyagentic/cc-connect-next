@@ -7,6 +7,15 @@
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
+## v0.3.5-beta.5 (2026-10-27)
+
+See `changelogs/v0.3.5-beta.5.md` for bilingual highlights and verification boundaries.
+
+- Persist independent model and reasoning-effort choices for verified private and group chats.
+- Preserve per-chat settings across new sessions and restarts, with independent resets and per-turn override precedence.
+- Bind Feishu/Lark private settings cards to their verified owner, including private threads and image batches.
+- Stable GitHub Latest and npm `latest` remain v0.3.4.
+
 ## v0.3.5-beta.4 (2026-10-27)
 
 See `changelogs/v0.3.5-beta.4.md` for bilingual highlights and verification boundaries.
