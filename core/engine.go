@@ -15180,10 +15180,6 @@ func (e *Engine) renderModelSwitchResultCard(target string, err error) *Card {
 		Build()
 }
 
-func (e *Engine) renderReasoningCard() *Card {
-	return e.renderReasoningCardForAgent("", e.agent)
-}
-
 func (e *Engine) renderReasoningCardForAgent(sessionKey string, agent Agent) *Card {
 	switcher, ok := agent.(ReasoningEffortSwitcher)
 	if !ok {
