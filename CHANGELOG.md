@@ -7,6 +7,13 @@
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
+## v0.3.5-beta.7 (2026-10-27)
+
+- Expand forwarded group history and deliver selected images/files through existing Agent inputs with bounded downloads.
+- Preserve sender attribution, chat/topic boundaries, retryable failures and cancellation during history preparation.
+- Accept senderless system events in newly created Feishu/Lark groups and distinguish budget limits from unreadable content.
+- See `changelogs/v0.3.5-beta.7.md` for bilingual notes and verification boundaries.
+
 ## v0.3.5-beta.6 (2026-10-27)
 
 - Remove the obsolete reasoning-card wrapper after all callers moved to the chat-aware renderer, fixing the release-tag unused lint failure.
