@@ -659,7 +659,10 @@ type interactiveState struct {
 	agentSession             AgentSession
 	startError               error              // immutable outcome when backend startup failed
 	contextMessageIDs        []string           // candidate background IDs; committed only on successful completion
+	contextCompleted         bool               // this turn completed successfully, including any accepted steer
 	contextPreparationCancel context.CancelFunc // cancels history/media preparation before Send
+	steerContextCancel       context.CancelFunc // cancels background read for an in-flight steer
+	turnSenderID             string             // sender that started the running turn
 	platform                 Platform
 	replyCtx                 any
 	currentMessageID         string
@@ -3514,6 +3517,27 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 	return newSession
 }
 
+// steerNeedsGroupContext reports whether a busy group message should carry a
+// bounded background read before it is appended to the running turn. The read
+// exists to rebuild discussion the Agent never saw (issue #129); a same-sender
+// follow-up to work already in flight does not depend on it, and skipping it
+// keeps steer free of the read's latency.
+func (e *Engine) steerNeedsGroupContext(p Platform, msg *Message, turnSenderID string, receipts int) bool {
+	if !hasMessageContext(p, msg.ReplyCtx) {
+		return false
+	}
+	// First trigger in this session (or after /new): the Agent has no
+	// background yet, so the read is the whole point.
+	if receipts == 0 {
+		return true
+	}
+	if turnSenderID == "" || msg.UserID == "" {
+		// Unknown identity: keep the conservative read.
+		return true
+	}
+	return msg.UserID != turnSenderID
+}
+
 // trySteerBusyMessage attempts to append a busy-session message to the turn
 // already in flight (busy_message_mode = "steer"). Returns true when the
 // message was fully handled — either delivered into the current turn, dropped
@@ -3534,8 +3558,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	// turn/steer cannot carry model, reasoning-effort, or service-tier
 	// overrides. A profiled message must remain a distinct queued turn or the
 	// user would be told a profile was applied when it was not.
-	if msg.AnswerProfile != "" || msg.ModelOverride != "" || msg.ReasoningEffortOverride != "" || hasMessageContext(p, msg.ReplyCtx) {
-		// Background reads need an ordered turn and a successful completion receipt.
+	if msg.AnswerProfile != "" || msg.ModelOverride != "" || msg.ReasoningEffortOverride != "" {
 		return false
 	}
 	e.interactiveMu.Lock()
@@ -3549,6 +3572,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	defer state.steerMu.Unlock()
 	state.mu.Lock()
 	as := state.agentSession
+	turnSenderID := state.turnSenderID
 	if state.restartAdmissionFenced {
 		state.mu.Unlock()
 		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRestarting, msg.Content))
@@ -3580,10 +3604,27 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	// their own message (issue #27 card handoff).
 	cardHandle, cardCopy := e.beginSteerPresentation(p, msg.ReplyCtx, msg.Content)
 
-	prompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(msg.Content, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
-	err := steerable.Steer(prompt, msg.Images, msg.Files)
+	historyContext := preparedMessageContext{Text: msg.Content}
+	if e.steerNeedsGroupContext(p, msg, turnSenderID, len(session.seenContextMessages())) {
+		// The read must finish before the RPC so background and the steered
+		// request reach the Agent in one ordered input. Receipts accumulate on
+		// the running turn and are committed by its single completion.
+		historyContext = e.prepareSteerMessageContext(p, msg.ReplyCtx, session, state, msg.Content, msg.MessageID)
+		if historyContext.Err != nil {
+			// The turn or this message was cancelled while reading; nothing was
+			// delivered, so the caller may safely queue it instead.
+			e.removeSteerPendingCard(p, cardHandle)
+			return false
+		}
+	}
+
+	prompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(historyContext.Text, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
+	steerImages := append(append([]ImageAttachment(nil), msg.Images...), historyContext.Images...)
+	steerFiles := append(scopeFileAttachments(msg.Files, msg.MessageID), historyContext.Files...)
+	err := steerable.Steer(prompt, steerImages, steerFiles)
 	switch {
 	case err == nil:
+		acceptSteerMessageContext(state, session, sessions, historyContext.ReceiptIDs)
 		e.noteUserMessageAccepted(interactiveKey, msg.UserMessageTimeMs)
 		session.TouchUserActivity()
 		session.AddHistory("user", msg.Content)
@@ -4482,6 +4523,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.steerMu.Lock()
 	state.mu.Lock()
 	state.currentMessageID = msg.MessageID
+	state.turnSenderID = msg.UserID
 	state.fromVoice = msg.FromVoice
 	state.sideText = ""
 	state.activeAnswerProfile = msg.AnswerProfile
@@ -7230,6 +7272,7 @@ func (queue *turnQueue) handle() {
 		state.currentReplyUserID = queued.userID
 		state.fromVoice = queued.fromVoice
 		state.currentUserID = queued.userID
+		state.turnSenderID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		state.activeModelOverride = queued.modelOverride
@@ -8847,6 +8890,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.currentReplyUserID = queued.userID
 		state.fromVoice = queued.fromVoice
 		state.currentUserID = queued.userID
+		state.turnSenderID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		state.activeModelOverride = queued.modelOverride
@@ -12450,9 +12494,13 @@ func (e *Engine) stopInteractiveSessionWithOptions(sessionKey string, notifyQueu
 	closeTarget := sessionCloseTarget{platform: state.platform, replyCtx: state.replyCtx, userStop: true}
 	currentMessageID := state.currentMessageID
 	cancelPreparation := state.contextPreparationCancel
+	cancelSteerPreparation := state.steerContextCancel
 	state.mu.Unlock()
 	if cancelPreparation != nil {
 		cancelPreparation()
+	}
+	if cancelSteerPreparation != nil {
+		cancelSteerPreparation()
 	}
 	if !notifyQueued {
 		state.cancelTurnSilently(currentMessageID)
