@@ -7,6 +7,12 @@
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
+## v0.3.5-beta.6 (2026-10-27)
+
+- Remove the obsolete reasoning-card wrapper after all callers moved to the chat-aware renderer, fixing the release-tag unused lint failure.
+- Retain the private/group model and reasoning settings from beta.5.
+- See `changelogs/v0.3.5-beta.6.md` for release notes and verification boundaries.
+
 ## v0.3.5-beta.5 (2026-10-27)
 
 See `changelogs/v0.3.5-beta.5.md` for bilingual highlights and verification boundaries.
