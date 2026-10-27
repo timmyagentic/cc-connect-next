@@ -5,7 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/timmyagentic/cc-connect-next/core"
 )
 
 func TestAvailableModels_FallbackToModelsCache(t *testing.T) {
@@ -43,7 +47,7 @@ func TestAvailableModels_FallbackToModelsCache(t *testing.T) {
 
 // TestAvailableModels_UsesModelCatalog tests that when CODEX_HOME/config.toml
 // contains model_catalog_json, readCodexModelCatalog reads and parses that file
-// as the highest-priority model source.
+// when no explicit provider model list is configured.
 func TestAvailableModels_UsesModelCatalog(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -108,5 +112,72 @@ func TestReadCodexModelCatalog_NoConfigFile(t *testing.T) {
 	// → no OPENAI_API_KEY → all the way to hardcoded fallback (6 models)
 	if len(models) != 6 {
 		t.Fatalf("expected 6 hardcoded fallback models, got %d: %v", len(models), models)
+	}
+}
+
+func TestAvailableModels_ConfiguredListOverridesDesktopCatalog(t *testing.T) {
+	home := t.TempDir()
+	writeModelDiscoveryFixture(t, home, true, "desktop-model")
+	t.Setenv("CODEX_HOME", home)
+	want := []core.ModelOption{
+		{Name: "custom-z", Alias: "First", Desc: "Custom provider model"},
+		{Name: "custom-a", Alias: "Second"},
+	}
+	a := &Agent{}
+	a.SetProviders([]core.ProviderConfig{{Name: "custom", Models: want}})
+	a.SetActiveProvider("custom")
+	if got := a.AvailableModels(context.Background()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("models = %#v, want configured models in order %#v", got, want)
+	}
+}
+
+func TestAvailableModels_DiscoveryUsesSessionHomePrecedence(t *testing.T) {
+	for _, catalog := range []bool{true, false} {
+		for _, source := range []string{"config", "provider", "session", "codex_home"} {
+			name := source + "/cache"
+			if catalog {
+				name = source + "/catalog"
+			}
+			t.Run(name, func(t *testing.T) {
+				desktop, bot := t.TempDir(), t.TempDir()
+				writeModelDiscoveryFixture(t, desktop, true, "desktop-model")
+				writeModelDiscoveryFixture(t, bot, catalog, "bot-model")
+				t.Setenv("CODEX_HOME", desktop)
+				t.Setenv("OPENAI_API_KEY", "")
+				a := &Agent{configEnv: []string{"CODEX_HOME=" + bot}}
+				if source != "config" {
+					a.configEnv = []string{"CODEX_HOME=" + desktop}
+					a.SetProviders([]core.ProviderConfig{{Name: "custom", Env: map[string]string{"CODEX_HOME": bot}}})
+					a.SetActiveProvider("custom")
+				}
+				if source == "session" || source == "codex_home" {
+					a.SetProviders([]core.ProviderConfig{{Name: "custom", Env: map[string]string{"CODEX_HOME": desktop}}})
+					a.sessionEnv = []string{"CODEX_HOME=" + bot}
+				}
+				if source == "codex_home" {
+					a.sessionEnv = []string{"CODEX_HOME=" + desktop}
+					a.codexHome = bot
+				}
+				got := a.AvailableModels(context.Background())
+				if len(got) != 1 || got[0].Name != "bot-model" {
+					t.Fatalf("models = %#v, want only bot-model", got)
+				}
+			})
+		}
+	}
+}
+
+func writeModelDiscoveryFixture(t *testing.T, home string, catalog bool, model string) {
+	t.Helper()
+	name := "models_cache.json"
+	if catalog {
+		name = "catalog.json"
+		if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte("model_catalog_json = \"catalog.json\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data := `{"models":[{"slug":"` + model + `","visibility":"list","supported_in_api":true}]}`
+	if err := os.WriteFile(filepath.Join(home, name), []byte(data), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

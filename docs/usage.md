@@ -397,6 +397,8 @@ cc-connect-next provider import --project my-backend  # from cc-switch
 
 Pre-configure a list of selectable models per provider using `[[providers.models]]`. Each entry has a `model` identifier and an optional `alias` (short name shown in `/model`).
 
+For Codex, a non-empty model list on the active provider takes precedence over automatic discovery and preserves the configured order and aliases, including custom model IDs. Without an explicit list, Codex falls back to its catalog, the provider API, and its cache. Local catalog and cache discovery use the same `codex_home` and environment precedence as the agent session, so a separate desktop Codex installation does not override the bot's model menu.
+
 ### Configure Models
 
 ```toml

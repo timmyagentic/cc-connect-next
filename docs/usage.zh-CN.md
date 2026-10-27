@@ -374,6 +374,8 @@ cc-connect-next provider import --project my-backend  # 从 cc-switch 导入
 
 通过 `[[providers.models]]` 为每个 Provider 预配置可选模型列表。每个条目包含 `model`（模型标识符）和可选的 `alias`（别名，显示在 `/model` 中）。
 
+对于 Codex，当前 Provider 的非空模型列表优先于自动发现，保留配置顺序、别名和自定义模型 ID。未显式配置列表时，才依次回退到 Codex 目录、Provider API 和缓存。本地目录与缓存的读取遵循 Agent 会话相同的 `codex_home` 和环境变量优先级，避免独立的桌面 Codex 配置覆盖机器人的模型菜单。
+
 ### 配置模型
 
 ```toml
