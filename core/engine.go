@@ -659,6 +659,7 @@ type interactiveState struct {
 	agentSession             AgentSession
 	startError               error              // immutable outcome when backend startup failed
 	contextMessageIDs        []string           // candidate background IDs; committed only on successful completion
+	contextCompleted         bool               // this turn completed successfully, including any accepted steer
 	contextPreparationCancel context.CancelFunc // cancels history/media preparation before Send
 	steerContextCancel       context.CancelFunc // cancels background read for an in-flight steer
 	turnSenderID             string             // sender that started the running turn
@@ -3623,6 +3624,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	err := steerable.Steer(prompt, steerImages, steerFiles)
 	switch {
 	case err == nil:
+		acceptSteerMessageContext(state, session, sessions, historyContext.ReceiptIDs)
 		e.noteUserMessageAccepted(interactiveKey, msg.UserMessageTimeMs)
 		session.TouchUserActivity()
 		session.AddHistory("user", msg.Content)

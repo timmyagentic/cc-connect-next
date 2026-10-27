@@ -283,6 +283,88 @@ func TestMessageContextSteerFallsBackWhenTurnEnded(t *testing.T) {
 	if env.engine.trySteerBusyMessage(p, &Message{SessionKey: key, UserID: "bob", Content: "follow up", ReplyCtx: key}, key, session, env.engine.sessions) {
 		t.Fatal("definitive steer failure must fall back to the queue")
 	}
+	completeMessageContext(env.engine.interactiveStates[key], session, env.engine.sessions)
+	if session.seenContextMessages()[key+":fresh"] {
+		t.Fatal("rejected steer marked undelivered background as seen")
+	}
+}
+
+type contextSteerRPCSession struct {
+	*steerableAgentSession
+	onSteer func([]ImageAttachment, []FileAttachment)
+}
+
+func (s *contextSteerRPCSession) Steer(prompt string, images []ImageAttachment, files []FileAttachment) error {
+	err := s.steerableAgentSession.Steer(prompt, images, files)
+	if s.onSteer != nil {
+		s.onSteer(images, files)
+	}
+	return err
+}
+
+func TestMessageContextSteerCompletionBeforeRPCResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		err         error
+		wantSeen    bool
+		wantHandled bool
+	}{
+		{"accepted", nil, true, true},
+		{"rejected", ErrSteerTurnMismatch, false, false},
+		{"unknown", ErrSteerOutcomeUnknown, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key := "test:group"
+			env, p, as, session := newContextSteerEnv(t, key, "alice", []string{key + ":old"})
+			p.setBackground(key, []ContextMessage{{ID: "fresh", SenderID: "carol", Text: "new fact"}}, nil)
+			state := env.engine.interactiveStates[key]
+			as.steerErr = tc.err
+			state.agentSession = &contextSteerRPCSession{steerableAgentSession: as, onSteer: func(_ []ImageAttachment, _ []FileAttachment) {
+				completed := make(chan struct{})
+				go func() {
+					completeMessageContext(state, session, env.engine.sessions)
+					close(completed)
+				}()
+				select {
+				case <-completed:
+				case <-time.After(time.Second):
+					t.Fatal("turn completion blocked on the steer RPC")
+				}
+				if session.seenContextMessages()[key+":fresh"] {
+					t.Fatal("background consumed before the steer response")
+				}
+			}}
+			msg := &Message{SessionKey: key, UserID: "bob", Content: "continue", ReplyCtx: key}
+			if got := env.engine.trySteerBusyMessage(p, msg, key, session, env.engine.sessions); got != tc.wantHandled {
+				t.Fatalf("handled = %v, want %v", got, tc.wantHandled)
+			}
+			if got := session.seenContextMessages()[key+":fresh"]; got != tc.wantSeen {
+				t.Fatalf("background seen = %v, want %v", got, tc.wantSeen)
+			}
+		})
+	}
+}
+
+func TestMessageContextSteerPreservesCurrentAndHistoryAttachments(t *testing.T) {
+	key := "test:group"
+	env, p, as, session := newContextSteerEnv(t, key, "alice", []string{key + ":old"})
+	p.setBackground(key, []ContextMessage{{ID: "fresh", Text: "history media",
+		Images: []ImageAttachment{{FileName: "history.png"}},
+		Files:  []FileAttachment{{FileName: "history.txt"}},
+	}}, nil)
+	env.engine.interactiveStates[key].agentSession = &contextSteerRPCSession{steerableAgentSession: as, onSteer: func(images []ImageAttachment, files []FileAttachment) {
+		if len(images) != 2 || images[0].FileName != "current.png" || images[1].FileName != "history.png" {
+			t.Fatalf("unexpected images: %+v", images)
+		}
+		if len(files) != 2 || files[0].MessageID != "current" || files[1].MessageID != "fresh" {
+			t.Fatalf("unexpected file attribution: %+v", files)
+		}
+	}}
+	msg := &Message{SessionKey: key, UserID: "bob", Content: "compare", ReplyCtx: key, MessageID: "current",
+		Images: []ImageAttachment{{FileName: "current.png"}}, Files: []FileAttachment{{FileName: "current.txt"}}}
+	if !env.engine.trySteerBusyMessage(p, msg, key, session, env.engine.sessions) {
+		t.Fatal("media steer was not handled")
+	}
 }
 
 func TestMessageContextQueuedTurnsDeduplicateAfterPreviousSuccess(t *testing.T) {

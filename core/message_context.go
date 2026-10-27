@@ -131,16 +131,17 @@ func hasMessageContext(p Platform, replyCtx any) bool {
 }
 
 type preparedMessageContext struct {
-	Text   string
-	Images []ImageAttachment
-	Files  []FileAttachment
-	Err    error
+	Text       string
+	Images     []ImageAttachment
+	Files      []FileAttachment
+	Err        error
+	ReceiptIDs []string // steer receipts remain local until the RPC accepts them
 }
 
 // contextPrepMode distinguishes background read for a turn that has not been
 // sent yet from background read for input appended to a turn already running.
-// Only the receipt bookkeeping and the cancellation handle differ: a steer must
-// add its receipts to the running turn instead of replacing them.
+// Steer preparation retains receipts locally until the RPC accepts the input.
+// It also uses a separate cancellation handle from the original turn's read.
 type contextPrepMode int
 
 const (
@@ -155,8 +156,8 @@ func (e *Engine) prepareMessageContext(p Platform, replyCtx any, session *Sessio
 }
 
 // prepareSteerMessageContext reads bounded background for a message that will
-// be appended to the in-flight turn. Receipts accumulate on the running turn so
-// the same completion commit covers both the turn's own read and this one.
+// be appended to the in-flight turn. The caller accepts its receipts only after
+// a successful RPC, so rejected or uncertain input remains retryable.
 func (e *Engine) prepareSteerMessageContext(p Platform, replyCtx any, session *Session, state *interactiveState, content, messageID string) preparedMessageContext {
 	return e.prepareMessageContextFor(contextPrepSteer, p, replyCtx, session, state, content, messageID)
 }
@@ -166,6 +167,7 @@ func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, repl
 	if mode == contextPrepTurn {
 		state.mu.Lock()
 		state.contextMessageIDs = nil
+		state.contextCompleted = false
 		state.mu.Unlock()
 	}
 	if !hasMessageContext(p, replyCtx) {
@@ -262,17 +264,18 @@ func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, repl
 			receipt = append(receipt, background.Scope+":"+messageID)
 		}
 	}
-	state.mu.Lock()
-	if mode == contextPrepSteer {
-		state.contextMessageIDs = append(state.contextMessageIDs, receipt...)
-	} else {
+	if mode == contextPrepTurn {
+		state.mu.Lock()
 		state.contextMessageIDs = receipt
+		state.mu.Unlock()
 	}
-	state.mu.Unlock()
-	if serialized == "" && !incomplete {
-		return prepared
+	if serialized != "" || incomplete {
+		prepared = buildMessageContextPrompt(content, serialized, incomplete, delivered)
 	}
-	return buildMessageContextPrompt(content, serialized, incomplete, delivered)
+	if mode == contextPrepSteer {
+		prepared.ReceiptIDs = receipt
+	}
+	return prepared
 }
 
 func buildMessageContextPrompt(content, serialized string, incomplete bool, delivered []ContextMessage) preparedMessageContext {
@@ -335,8 +338,28 @@ func selectContextMessages(entries []ContextMessage, ids []string) []ContextMess
 	return result
 }
 
+// acceptSteerMessageContext also handles successful completion racing the RPC
+// response. Turn admission holds steerMu until the RPC returns, so the state
+// cannot be reused for a later turn while these receipts are being accepted.
+func acceptSteerMessageContext(state *interactiveState, session *Session, sessions *SessionManager, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	state.mu.Lock()
+	completed := state.contextCompleted
+	if !completed {
+		state.contextMessageIDs = append(state.contextMessageIDs, ids...)
+	}
+	state.mu.Unlock()
+	if completed {
+		session.recordContextMessages(ids)
+		sessions.Save()
+	}
+}
+
 func completeMessageContext(state *interactiveState, session *Session, sessions *SessionManager) {
 	state.mu.Lock()
+	state.contextCompleted = true
 	ids := state.contextMessageIDs
 	state.contextMessageIDs = nil
 	state.mu.Unlock()

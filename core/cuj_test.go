@@ -3215,6 +3215,50 @@ func waitAnswerProfileCUJ(t *testing.T, reason string, condition func() bool) {
 // CUJ-H5: shared discussion is background only; failed turns retry it, and a
 // new conversation gets its own cursor. The model and platform are boundaries.
 func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
+	t.Run("busy same-sender and cross-sender follow-ups", func(t *testing.T) {
+		env, p := newContextCUJEnv(t)
+		as := newSteerableSession("group-steer")
+		env.engine.agent = &controllableAgent{nextSession: as}
+		env.engine.SetBusyMessageMode(BusyMessageModeSteer)
+		key := "test:group-steer"
+		p.setBackground(key, []ContextMessage{{ID: "old", Text: "initial discussion"}}, nil)
+		contextReceive(env, p, key, "alice", "warmup", "catch up")
+		session := env.engine.sessions.GetOrCreateActive(key)
+		env.waitFor("warmup reaches agent", time.Second, func() bool { return len(as.getSendCalls()) == 1 })
+		as.events <- Event{Type: EventResult, Content: "caught up", Done: true}
+		env.waitFor("warmup answer", time.Second, func() bool { return env.sentContains("caught up") && !session.Busy() })
+
+		contextReceive(env, p, key, "alice", "work", "draft the plan")
+		env.waitFor("running task", time.Second, func() bool { return len(as.getSendCalls()) == 2 })
+		p.setBackground(key, []ContextMessage{{ID: "fresh", SenderID: "carol", Text: "approved budget 20"}}, nil)
+		beforeLoads := p.loadCount()
+		env.plat.clearSent()
+		contextReceive(env, p, key, "alice", "same", "include a timeline")
+		env.waitFor("same-sender acknowledgement", time.Second, func() bool { return len(env.plat.getSent()) > 0 })
+		if len(as.getSteerCalls()) != 1 || p.loadCount() != beforeLoads {
+			t.Fatal("same-sender continuation queued or re-read background")
+		}
+		env.plat.clearSent()
+		contextReceive(env, p, key, "bob", "other", "use the agreed budget")
+		env.waitFor("cross-sender acknowledgement", time.Second, func() bool { return len(env.plat.getSent()) > 0 })
+		calls := as.getSteerCalls()
+		if len(calls) != 2 || !strings.Contains(calls[1], "approved budget 20") || p.loadCount() != beforeLoads+1 {
+			t.Fatalf("cross-sender background missing: %v", calls)
+		}
+		as.events <- Event{Type: EventResult, Content: "Plan includes a timeline and budget 20", Done: true}
+		env.waitFor("combined answer", time.Second, func() bool {
+			return env.sentContains("Plan includes a timeline and budget 20") && !session.Busy()
+		})
+		env.plat.clearSent()
+		contextReceive(env, p, key, "bob", "history", "/history")
+		if !env.sentContains("include a timeline") || !env.sentContains("use the agreed budget") || !env.sentContains("Plan includes a timeline and budget 20") {
+			t.Fatalf("shared history lost follow-ups or final answer: %v", env.plat.getSent())
+		}
+		if len(as.getSendCalls()) != 2 {
+			t.Fatal("steered follow-ups also ran as queued turns")
+		}
+	})
+
 	env, p := newContextCUJEnv(t)
 	key := "test:group"
 	send := func(user, id, content string) {
