@@ -60,12 +60,12 @@ func TestGroupModelCapability_LegacySwitchingRemainsAvailable(t *testing.T) {
 				t.Fatalf("legacy switching not explained: %s", command.Availability.Reason)
 			}
 			if tc.groupReady {
-				for _, condition := range []string{"verified group identity", "persistent storage", "current model list", "concrete session support"} {
+				for _, condition := range []string{"verified chat identity", "persistent storage", "current model list", "concrete session support"} {
 					if !strings.Contains(command.Availability.Reason, condition) {
 						t.Errorf("group availability omits %q: %s", condition, command.Availability.Reason)
 					}
 				}
-			} else if !strings.Contains(command.Availability.Reason, "Group pinning is unavailable") {
+			} else if !strings.Contains(command.Availability.Reason, "Chat pinning is unavailable") {
 				t.Fatalf("unsupported group pinning not distinguished from legacy switching: %s", command.Availability.Reason)
 			}
 		})
@@ -75,7 +75,7 @@ func TestGroupModelCapability_LegacySwitchingRemainsAvailable(t *testing.T) {
 func TestGroupModelCapability_ScopePersistenceAndPrecedence(t *testing.T) {
 	e := NewEngine("demo", &groupModelManifestAgent{supported: true}, nil, "", LangEnglish)
 	command := findManifestCommand(t, e.QueryAgentCapabilityManifest("", "", false).Commands, "model")
-	if command.Usage != "/model [switch <name>|group [<name>|reset]]" {
+	if command.Usage != "/model [switch <name>|chat [<name>|reset]]" {
 		t.Fatalf("usage = %q", command.Usage)
 	}
 	if command.ReadOnly || !hasManifestEffect(command.SideEffects, "persistent_state") || !hasManifestEffect(command.SideEffects, "configuration") || !hasManifestEffect(command.SideEffects, "agent_process") {
@@ -88,12 +88,12 @@ func TestGroupModelCapability_ScopePersistenceAndPrecedence(t *testing.T) {
 			t.Fatalf("incomplete optional model parameter: %#v", parameter)
 		}
 	}
-	if !slices.Equal(parameters["action"].AllowedValues, []string{"switch", "group"}) {
+	if !slices.Equal(parameters["action"].AllowedValues, []string{"switch", "chat", "group"}) {
 		t.Fatalf("model actions = %v", parameters["action"].AllowedValues)
 	}
 	for name, fragments := range map[string][]string{
-		"action": {"verified group", "all members", "existing/new topics", "ModelSwitcher", "PerTurnModelSupporter", "no Provider change", "legacy /model <name>"},
-		"name":   {"current model list", "reset", "within the project", "platform + stable group ID", "not topic or workspace", "/reset", "/new", "restarts", "execution on all three send paths", "queued requests", "next new turn", "without interrupting", "explicit one-shot /fast or task model takes precedence"},
+		"action": {"verified private or group chat", "group remains an alias", "DMs are isolated by user and bot/project", "all members", "existing/new topics", "ModelSwitcher", "PerTurnModelSupporter", "no Provider change", "legacy /model <name>"},
+		"name":   {"current model list", "reset", "within the project", "platform + stable group ID", "platform:dm:userID", "not topic or workspace", "/reset", "/new", "restarts", "execution on all three send paths", "queued requests", "next new turn", "without interrupting", "explicit one-shot /fast or task model takes precedence"},
 	} {
 		for _, fragment := range fragments {
 			if !strings.Contains(parameters[name].Description, fragment) {
@@ -109,7 +109,7 @@ func TestGroupModelCapability_ScopePersistenceAndPrecedence(t *testing.T) {
 			t.Errorf("fallback omits %q: %s", fragment, command.Fallback.Description)
 		}
 	}
-	for _, args := range [][]string{nil, {"switch", "example"}, {"group"}, {"group", "example"}, {"group", "reset"}} {
+	for _, args := range [][]string{nil, {"switch", "example"}, {"chat"}, {"chat", "example"}, {"chat", "reset"}, {"group"}, {"group", "example"}, {"group", "reset"}} {
 		if isPrivilegedCommandInvocation("model", args) {
 			t.Errorf("/model %v unexpectedly requires admin", args)
 		}

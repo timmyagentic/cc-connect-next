@@ -1239,6 +1239,11 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	if !p.acceptsCardActionOwner(values, chatID) {
 		return nil, nil
 	}
+	// A private settings card must never be usable by another operator, even
+	// when allow_chat permits the callback's chat. Its saved scope is per user.
+	if cardActionString(values, cardActionDirectUserKey) != "" && !p.isBoundDirectUserCardAction(values, userID) {
+		return nil, nil
+	}
 
 	// Ordinary cards retain the same allow_chat boundary as inbound messages.
 	// A direct-user card may originate from a P2P chat outside a group-only
@@ -1274,10 +1279,10 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	if chatID == "" {
 		chatID = userID
 	}
-	// Model navigation must carry the real message/topic context through the
+	// Model/effort navigation must carry the real message/topic context through the
 	// same resolver as text commands, including old help/back cards.
-	if actionVal == "nav:/model" {
-		actionVal = "cmd:/model"
+	if actionVal == "nav:/model" || actionVal == "nav:/reasoning" {
+		actionVal = "cmd:" + strings.TrimPrefix(actionVal, "nav:")
 	}
 	sessionKey := p.sessionKeyFromCardAction(chatID, userID, values)
 	directUserID := cardActionString(values, cardActionDirectUserKey)
@@ -1673,6 +1678,7 @@ func (p *Platform) dispatchCoreMessage(msg *core.Message) bool {
 	}
 	if rctx, ok := msg.ReplyCtx.(replyContext); ok {
 		msg.GroupID = rctx.groupID
+		msg.IsDirect = rctx.directUserID != "" && msg.UserID == rctx.directUserID
 	}
 	p.populateWorkspaceChannelKeys(msg)
 	if p.isMessageRecalled(msg.MessageID) {
@@ -2068,7 +2074,7 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 		}
 		rctx.contextRootID = stringValue(msg.RootId)
 	}
-	if chatType == "p2p" && stringValue(msg.ThreadId) == "" {
+	if chatType == "p2p" {
 		rctx.directUserID = userID
 	}
 	slog.Debug(p.tag()+": routed inbound message",
@@ -2183,7 +2189,6 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 		if msg.ExtraContent == "" {
 			msg.ExtraContent = quoted.text
 		}
-		msg.IsDirect = rctx.directUserID != "" && msg.UserID == rctx.directUserID
 		if len(quoted.images) > 0 {
 			images := make([]core.ImageAttachment, 0, len(quoted.images)+len(msg.Images))
 			images = append(images, quoted.images...)

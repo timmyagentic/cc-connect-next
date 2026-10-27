@@ -369,6 +369,17 @@ const (
 	MsgSpeedScopeSaved                  MsgKey = "speed_scope_saved"
 	MsgSpeedScopeMemory                 MsgKey = "speed_scope_memory"
 	MsgBuiltinCmdSpeed                  MsgKey = "speed"
+	MsgReasoningGroupOnly               MsgKey = "reasoning_group_only"
+	MsgReasoningGroupStorageUnavailable MsgKey = "reasoning_group_storage_unavailable"
+	MsgReasoningGroupUnsupported        MsgKey = "reasoning_group_unsupported"
+	MsgReasoningGroupProviderChanged    MsgKey = "reasoning_group_provider_changed"
+	MsgReasoningGroupUsage              MsgKey = "reasoning_group_usage"
+	MsgReasoningGroupFailed             MsgKey = "reasoning_group_failed"
+	MsgReasoningGroupReset              MsgKey = "reasoning_group_reset"
+	MsgReasoningGroupChanged            MsgKey = "reasoning_group_changed"
+	MsgReasoningGroupCurrent            MsgKey = "reasoning_group_current"
+	MsgReasoningGroupDefault            MsgKey = "reasoning_group_default"
+	MsgReasoningGroupSelect             MsgKey = "reasoning_group_select"
 	MsgReasoningCurrent                 MsgKey = "reasoning_current"
 	MsgReasoningChanged                 MsgKey = "reasoning_changed"
 	MsgReasoningNotSupported            MsgKey = "reasoning_not_supported"
@@ -1507,8 +1518,8 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  Manage API providers\n\n" +
 			"/memory [add|global|global add]\n  View/edit agent memory files\n\n" +
 			"/allow <tool>\n  Pre-allow a tool (next session)\n\n" +
-			"/model [switch <name>|group [<name>|reset]]\n  View models; set project/workspace default or group model\n\n" +
-			"/reasoning [level]\n  View/switch reasoning effort\n\n" +
+			"/model [switch <name>|chat [<name>|reset]]\n  View models; set project/workspace default or this chat's model\n\n" +
+			"/reasoning [<level>|chat [<level>|reset]] (/effort)\n  View reasoning effort; set default or this chat's effort\n\n" +
 			"/speed [default|fast|tier]\n  View/switch saved conversation speed (next turn)\n\n" +
 			"/mode [name]\n  View/switch permission mode\n\n" +
 			"/lang [en|zh|zh-TW|ja|es|auto]\n  View/switch language\n\n" +
@@ -1552,8 +1563,8 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  管理 API Provider\n\n" +
 			"/memory [add|global|global add]\n  查看/编辑 Agent 记忆文件\n\n" +
 			"/allow <工具名>\n  预授权工具（下次会话生效）\n\n" +
-			"/model [switch <名称>|group [<名称>|reset]]\n  查看模型；设置项目/工作区默认或群模型\n\n" +
-			"/reasoning [级别]\n  查看/切换推理强度\n\n" +
+			"/model [switch <名称>|chat [<名称>|reset]]\n  查看模型；设置项目/工作区默认或本聊天模型\n\n" +
+			"/reasoning [<级别>|chat [<级别>|reset]] (/effort)\n  查看推理强度；设置默认值或本聊天强度\n\n" +
 			"/speed [default|fast|tier]\n  查看/切换会话速度并保存（后续回合生效）\n\n" +
 			"/mode [名称]\n  查看/切换权限模式\n\n" +
 			"/lang [en|zh|zh-TW|ja|es|auto]\n  查看/切换语言\n\n" +
@@ -1597,8 +1608,8 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  管理 API Provider\n\n" +
 			"/memory [add|global|global add]\n  查看/編輯 Agent 記憶檔案\n\n" +
 			"/allow <工具名>\n  預授權工具（下次會話生效）\n\n" +
-			"/model [switch <名稱>|group [<名稱>|reset]]\n  查看模型；設定專案/工作區預設或群組模型\n\n" +
-			"/reasoning [級別]\n  查看/切換推理強度\n\n" +
+			"/model [switch <名稱>|chat [<名稱>|reset]]\n  查看模型；設定專案/工作區預設或本聊天模型\n\n" +
+			"/reasoning [<級別>|chat [<級別>|reset]] (/effort)\n  查看推理強度；設定預設值或本聊天強度\n\n" +
 			"/speed [default|fast|tier]\n  查看/切換會話速度並儲存（後續回合生效）\n\n" +
 			"/mode [名稱]\n  查看/切換權限模式\n\n" +
 			"/lang [en|zh|zh-TW|ja|es|auto]\n  查看/切換語言\n\n" +
@@ -1640,8 +1651,8 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  API プロバイダ管理\n\n" +
 			"/memory [add|global|global add]\n  エージェントメモリの表示/編集\n\n" +
 			"/allow <ツール名>\n  ツールを事前許可（次のセッションで有効）\n\n" +
-			"/model [switch <名前>|group [<名前>|reset]]\n  モデル表示・プロジェクト/ワークスペースの既定値またはグループモデルを設定\n\n" +
-			"/reasoning [レベル]\n  推論レベルの表示/切り替え\n\n" +
+			"/model [switch <名前>|chat [<名前>|reset]]\n  モデル表示・プロジェクト/ワークスペースの既定値またはこのチャットのモデルを設定\n\n" +
+			"/reasoning [<レベル>|chat [<レベル>|reset]] (/effort)\n  推論強度を表示し、既定値またはこのチャットの強度を設定\n\n" +
 			"/speed [default|fast|tier]\n  会話の速度を表示/保存（次のターンから）\n\n" +
 			"/mode [名前]\n  権限モードの表示/切り替え\n\n" +
 			"/lang [en|zh|zh-TW|ja|es|auto]\n  言語の表示/切り替え\n\n" +
@@ -1683,8 +1694,8 @@ var messages = map[MsgKey]map[Language]string{
 			"/provider [list|add|remove|switch|clear]\n  Gestionar proveedores API\n\n" +
 			"/memory [add|global|global add]\n  Ver/editar archivos de memoria del agente\n\n" +
 			"/allow <herramienta>\n  Pre-autorizar herramienta (próxima sesión)\n\n" +
-			"/model [switch <nombre>|group [<nombre>|reset]]\n  Ver modelos; fijar predeterminado del proyecto/espacio o modelo del grupo\n\n" +
-			"/reasoning [nivel]\n  Ver/cambiar nivel de razonamiento\n\n" +
+			"/model [switch <nombre>|chat [<nombre>|reset]]\n  Ver modelos; fijar predeterminado del proyecto/espacio o modelo de este chat\n\n" +
+			"/reasoning [<nivel>|chat [<nivel>|reset]] (/effort)\n  Ver esfuerzo; ajustar valor predeterminado o de este chat\n\n" +
 			"/speed [default|fast|tier]\n  Ver/cambiar velocidad guardada (próximo turno)\n\n" +
 			"/mode [nombre]\n  Ver/cambiar modo de permisos\n\n" +
 			"/lang [en|zh|zh-TW|ja|es|auto]\n  Ver/cambiar idioma\n\n" +
@@ -1772,35 +1783,35 @@ var messages = map[MsgKey]map[Language]string{
 	},
 	MsgHelpAgentSection: {
 		LangEnglish: "**Agent Configuration**\n" +
-			"/model [switch <name>|group [<name>|reset]] — View models; set project/workspace default or group model\n" +
+			"/model [switch <name>|chat [<name>|reset]] — View models; set project/workspace default or this chat's model\n" +
 			"/mode [name] — View/switch permission mode\n" +
 			"/provider [list|add|...] — Manage API providers\n" +
 			"/memory [add|global|...] — View/edit memory files\n" +
 			"/allow <tool> — Pre-allow a tool\n" +
 			"/lang [en|zh|...] — View/switch language",
 		LangChinese: "**Agent 配置**\n" +
-			"/model [switch <名称>|group [<名称>|reset]] — 查看模型；设置项目/工作区默认或群模型\n" +
+			"/model [switch <名称>|chat [<名称>|reset]] — 查看模型；设置项目/工作区默认或本聊天模型\n" +
 			"/mode [名称] — 查看/切换权限模式\n" +
 			"/provider [list|add|...] — 管理 API Provider\n" +
 			"/memory [add|global|...] — 查看/编辑记忆文件\n" +
 			"/allow <工具名> — 预授权工具\n" +
 			"/lang [en|zh|...] — 查看/切换语言",
 		LangTraditionalChinese: "**Agent 配置**\n" +
-			"/model [switch <名稱>|group [<名稱>|reset]] — 查看模型；設定專案/工作區預設或群組模型\n" +
+			"/model [switch <名稱>|chat [<名稱>|reset]] — 查看模型；設定專案/工作區預設或本聊天模型\n" +
 			"/mode [名稱] — 查看/切換權限模式\n" +
 			"/provider [list|add|...] — 管理 API Provider\n" +
 			"/memory [add|global|...] — 查看/編輯記憶檔案\n" +
 			"/allow <工具名> — 預授權工具\n" +
 			"/lang [en|zh|...] — 查看/切換語言",
 		LangJapanese: "**エージェント設定**\n" +
-			"/model [switch <名前>|group [<名前>|reset]] — モデル表示・プロジェクト/ワークスペースの既定値またはグループモデルを設定\n" +
+			"/model [switch <名前>|chat [<名前>|reset]] — モデル表示・プロジェクト/ワークスペースの既定値またはこのチャットのモデルを設定\n" +
 			"/mode [名前] — 権限モードの表示/切り替え\n" +
 			"/provider [list|add|...] — API プロバイダ管理\n" +
 			"/memory [add|global|...] — メモリの表示/編集\n" +
 			"/allow <ツール名> — ツールを事前許可\n" +
 			"/lang [en|zh|...] — 言語の表示/切り替え",
 		LangSpanish: "**Configuración del agente**\n" +
-			"/model [switch <nombre>|group [<nombre>|reset]] — Ver modelos; fijar predeterminado del proyecto/espacio o modelo del grupo\n" +
+			"/model [switch <nombre>|chat [<nombre>|reset]] — Ver modelos; fijar predeterminado del proyecto/espacio o modelo de este chat\n" +
 			"/mode [nombre] — Ver/cambiar modo de permisos\n" +
 			"/provider [list|add|...] — Gestionar proveedores\n" +
 			"/memory [add|global|...] — Ver/editar memoria\n" +
@@ -2761,11 +2772,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Modelo actual: %s",
 	},
 	MsgModelChanged: {
-		LangEnglish:            "Model switched to `%s`. Project/workspace default updated; groups with a fixed model keep their selection.",
-		LangChinese:            "模型已切换为 `%s`。已更新项目/工作区默认模型；固定模型的群不跟随此变更。",
-		LangTraditionalChinese: "模型已切換為 `%s`。已更新專案/工作區預設模型；固定模型的群組不跟隨此變更。",
-		LangJapanese:           "モデルを `%s` に切り替えました。プロジェクト/ワークスペースの既定値を更新しました。モデルを固定したグループには反映されません。",
-		LangSpanish:            "Modelo cambiado a `%s`. Se actualizó el valor predeterminado del proyecto/espacio de trabajo; los grupos con un modelo fijo conservan su selección.",
+		LangEnglish:            "Model switched to `%s`. Project/workspace default updated; chats with a fixed model keep their selection.",
+		LangChinese:            "模型已切换为 `%s`。已更新项目/工作区默认模型；固定模型的聊天不跟随此变更。",
+		LangTraditionalChinese: "模型已切換為 `%s`。已更新專案/工作區預設模型；固定模型的聊天不跟隨此變更。",
+		LangJapanese:           "モデルを `%s` に切り替えました。プロジェクト/ワークスペースの既定値を更新しました。モデルを固定したチャットには反映されません。",
+		LangSpanish:            "Modelo cambiado a `%s`. Se actualizó el valor predeterminado del proyecto/espacio de trabajo; los chats con un modelo fijo conservan su selección.",
 	},
 	MsgModelChangeFailed: {
 		LangEnglish:            "❌ Failed to change model: %v",
@@ -2775,18 +2786,18 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "❌ Error al cambiar el modelo: %v",
 	},
 	MsgModelCardSwitching: {
-		LangEnglish:            "Switching project/workspace default model to `%s`... Groups with a fixed model keep their selection.",
-		LangChinese:            "正在将项目/工作区默认模型切换为 `%s`... 固定模型的群不跟随此变更。",
-		LangTraditionalChinese: "正在將專案/工作區預設模型切換為 `%s`... 固定模型的群組不跟隨此變更。",
-		LangJapanese:           "プロジェクト/ワークスペースの既定モデルを `%s` に切り替えています... モデルを固定したグループには反映されません。",
-		LangSpanish:            "Cambiando el modelo predeterminado del proyecto/espacio de trabajo a `%s`... Los grupos con un modelo fijo conservan su selección.",
+		LangEnglish:            "Switching project/workspace default model to `%s`... Chats with a fixed model keep their selection.",
+		LangChinese:            "正在将项目/工作区默认模型切换为 `%s`... 固定模型的聊天不跟随此变更。",
+		LangTraditionalChinese: "正在將專案/工作區預設模型切換為 `%s`... 固定模型的聊天不跟隨此變更。",
+		LangJapanese:           "プロジェクト/ワークスペースの既定モデルを `%s` に切り替えています... モデルを固定したチャットには反映されません。",
+		LangSpanish:            "Cambiando el modelo predeterminado del proyecto/espacio de trabajo a `%s`... Los chats con un modelo fijo conservan su selección.",
 	},
 	MsgModelCardSwitched: {
-		LangEnglish:            "Model switched to `%s`. Project/workspace default updated; groups with a fixed model keep their selection.",
-		LangChinese:            "模型已切换为 `%s`。已更新项目/工作区默认模型；固定模型的群不跟随此变更。",
-		LangTraditionalChinese: "模型已切換為 `%s`。已更新專案/工作區預設模型；固定模型的群組不跟隨此變更。",
-		LangJapanese:           "モデルを `%s` に切り替えました。プロジェクト/ワークスペースの既定値を更新しました。モデルを固定したグループには反映されません。",
-		LangSpanish:            "Modelo cambiado a `%s`. Se actualizó el valor predeterminado del proyecto/espacio de trabajo; los grupos con un modelo fijo conservan su selección.",
+		LangEnglish:            "Model switched to `%s`. Project/workspace default updated; chats with a fixed model keep their selection.",
+		LangChinese:            "模型已切换为 `%s`。已更新项目/工作区默认模型；固定模型的聊天不跟随此变更。",
+		LangTraditionalChinese: "模型已切換為 `%s`。已更新專案/工作區預設模型；固定模型的聊天不跟隨此變更。",
+		LangJapanese:           "モデルを `%s` に切り替えました。プロジェクト/ワークスペースの既定値を更新しました。モデルを固定したチャットには反映されません。",
+		LangSpanish:            "Modelo cambiado a `%s`. Se actualizó el valor predeterminado del proyecto/espacio de trabajo; los chats con un modelo fijo conservan su selección.",
 	},
 	MsgModelCardSwitchFailed: {
 		LangEnglish:            "Failed to switch model: %v",
@@ -2803,81 +2814,81 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Este agente no soporta el cambio de modelo.",
 	},
 	MsgModelGroupOnly: {
-		LangEnglish:            "Group model selection requires a verified group chat. If the group is not yet recognized, send `/model` in the group first.",
-		LangChinese:            "仅已验证的群聊可设置群模型。若尚未识别本群，请先在群里发送 `/model`。",
-		LangTraditionalChinese: "僅已驗證的群組可設定群組模型。若尚未識別本群組，請先在群組中傳送 `/model`。",
-		LangJapanese:           "グループモデルは確認済みのグループチャットでのみ設定できます。まだ認識されていない場合は、まずグループ内で `/model` を送信してください。",
-		LangSpanish:            "Solo se puede fijar un modelo en un grupo verificado. Si el grupo aún no se reconoce, envía primero `/model` en el grupo.",
+		LangEnglish:            "Setting a model for this chat requires verified private or group chat identity. Send `/model` in this chat first.",
+		LangChinese:            "设置本聊天模型需要已验证的私聊或群聊身份。请先在本聊天发送 `/model`。",
+		LangTraditionalChinese: "設定本聊天模型需要已驗證的私人聊天或群組身分。請先在本聊天傳送 `/model`。",
+		LangJapanese:           "このチャットのモデル設定には、個別チャットまたはグループチャットの確認済み識別情報が必要です。まずこのチャットで `/model` を送信してください。",
+		LangSpanish:            "Para fijar el modelo de este chat se necesita la identidad verificada del chat privado o de grupo. Envía primero `/model` en este chat.",
 	},
 	MsgModelGroupStorageUnavailable: {
-		LangEnglish:            "Persistent storage for group models is unavailable. The group model setting was not changed.",
-		LangChinese:            "群模型持久化存储不可用，未更改本群模型设置。",
-		LangTraditionalChinese: "群組模型持久化儲存無法使用，未變更本群組模型設定。",
-		LangJapanese:           "グループモデルの永続ストレージを利用できないため、設定は変更されませんでした。",
-		LangSpanish:            "El almacenamiento persistente de modelos de grupo no está disponible. No se cambió la configuración del grupo.",
+		LangEnglish:            "Persistent storage for this chat's model is unavailable. The setting was not changed.",
+		LangChinese:            "本聊天模型的持久化存储不可用，设置未改变。",
+		LangTraditionalChinese: "本聊天模型的持久化儲存無法使用，設定未變更。",
+		LangJapanese:           "このチャットのモデルの永続ストレージを利用できないため、設定は変更されませんでした。",
+		LangSpanish:            "El almacenamiento persistente del modelo de este chat no está disponible. No se cambió el ajuste.",
 	},
 	MsgModelGroupUnsupported: {
-		LangEnglish:            "Group models require per-turn model support from the current backend. This backend does not support it; no fallback model will be used.",
-		LangChinese:            "群模型需要当前后端支持逐回合指定模型（per-turn model）。当前后端不支持，不会回退到其他模型。",
-		LangTraditionalChinese: "群組模型需要目前後端支援逐回合指定模型（per-turn model）。目前後端不支援，不會退回其他模型。",
-		LangJapanese:           "グループモデルには現在のバックエンドのターンごとのモデル指定機能が必要です。このバックエンドは非対応のため、別のモデルへのフォールバックは行いません。",
-		LangSpanish:            "Los modelos de grupo requieren que el backend actual admita modelos por turno. Este backend no los admite; no se usará otro modelo como alternativa.",
+		LangEnglish:            "A fixed model for this chat requires per-turn model support from the current backend. This backend does not support it; no fallback model will be used.",
+		LangChinese:            "固定本聊天模型需要当前后端支持逐回合指定模型（per-turn model）。当前后端不支持，不会回退到其他模型。",
+		LangTraditionalChinese: "固定本聊天模型需要目前後端支援逐回合指定模型（per-turn model）。目前後端不支援，不會退回其他模型。",
+		LangJapanese:           "このチャットのモデル固定には現在のバックエンドのターンごとのモデル指定機能が必要です。このバックエンドは非対応のため、別のモデルへのフォールバックは行いません。",
+		LangSpanish:            "Fijar el modelo de este chat requiere que el backend actual admita modelos por turno. Este backend no los admite; no se usará otro modelo como alternativa.",
 	},
 	MsgModelGroupProviderChanged: {
-		LangEnglish:            "The current backend/provider does not match this group's saved binding. Set `/model group <name>` again or run `/model group reset`; no automatic fallback will be used.",
-		LangChinese:            "当前后端/Provider 与本群保存的绑定不符。请重新执行 `/model group <name>` 设置，或执行 `/model group reset`；不会静默回退。",
-		LangTraditionalChinese: "目前後端/Provider 與本群組儲存的綁定不符。請重新執行 `/model group <name>` 設定，或執行 `/model group reset`；不會默默退回預設模型。",
-		LangJapanese:           "現在のバックエンド/Provider は保存済みのグループ設定と一致しません。`/model group <name>` で設定し直すか、`/model group reset` を実行してください。自動フォールバックは行いません。",
-		LangSpanish:            "El backend/Provider actual no coincide con la vinculación guardada del grupo. Configura de nuevo `/model group <name>` o ejecuta `/model group reset`; no habrá una sustitución automática.",
+		LangEnglish:            "The current backend/provider does not match this chat's saved binding. Set `/model chat <name>` again or run `/model chat reset`; no automatic fallback will be used.",
+		LangChinese:            "当前后端/Provider 与本聊天保存的绑定不符。请重新执行 `/model chat <name>` 设置，或执行 `/model chat reset`；不会静默回退。",
+		LangTraditionalChinese: "目前後端/Provider 與本聊天儲存的綁定不符。請重新執行 `/model chat <name>` 設定，或執行 `/model chat reset`；不會默默退回預設模型。",
+		LangJapanese:           "現在のバックエンド/Provider はこのチャットの保存済み設定と一致しません。`/model chat <name>` で設定し直すか、`/model chat reset` を実行してください。自動フォールバックは行いません。",
+		LangSpanish:            "El backend/Provider actual no coincide con la selección guardada de este chat. Configura de nuevo `/model chat <name>` o ejecuta `/model chat reset`; no habrá una sustitución automática.",
 	},
 	MsgModelGroupSessionProviderChanged: {
-		LangEnglish:            "This conversation is still connected to a different Provider. Reconnect it with `/provider switch <name>` or start `/new`, then retry. The group binding was not changed.",
-		LangChinese:            "本对话仍连接着另一个 Provider。请在本对话通过 `/provider switch <name>` 重新连接，或使用 `/new`，然后重试。群绑定未改变。",
-		LangTraditionalChinese: "本對話仍連接另一個 Provider。請在本對話透過 `/provider switch <name>` 重新連接，或使用 `/new`，然後重試。群組綁定未變更。",
-		LangJapanese:           "この会話は別の Provider に接続したままです。`/provider switch <name>` で再接続するか `/new` を開始して再試行してください。グループ設定は変更されていません。",
-		LangSpanish:            "Esta conversación sigue conectada a otro Provider. Reconéctala con `/provider switch <name>` o inicia `/new` y vuelve a intentarlo. La selección del grupo no cambió.",
+		LangEnglish:            "This conversation is still connected to a different Provider. Reconnect it with `/provider switch <name>` or start `/new`, then retry. This chat's binding was not changed.",
+		LangChinese:            "本对话仍连接着另一个 Provider。请在本对话通过 `/provider switch <name>` 重新连接，或使用 `/new`，然后重试。本聊天绑定未改变。",
+		LangTraditionalChinese: "本對話仍連接另一個 Provider。請在本對話透過 `/provider switch <name>` 重新連接，或使用 `/new`，然後重試。本聊天綁定未變更。",
+		LangJapanese:           "この会話は別の Provider に接続したままです。`/provider switch <name>` で再接続するか `/new` を開始して再試行してください。このチャットの設定は変更されていません。",
+		LangSpanish:            "Esta conversación sigue conectada a otro Provider. Reconéctala con `/provider switch <name>` o inicia `/new` y vuelve a intentarlo. La selección de este chat no cambió.",
 	},
 	MsgModelGroupUnknown: {
-		LangEnglish:            "`%s` is not selectable from the current model list. Send `/model` to view the available group model choices.",
-		LangChinese:            "`%s` 不在当前模型列表的可选项中。请发送 `/model` 查看本群可选模型。",
-		LangTraditionalChinese: "`%s` 不在目前模型清單的可選項目中。請傳送 `/model` 查看本群組可選模型。",
-		LangJapanese:           "`%s` は現在のモデル一覧から選択できません。`/model` でグループに設定できるモデルを確認してください。",
-		LangSpanish:            "`%s` no se puede seleccionar en la lista actual de modelos. Envía `/model` para ver los modelos disponibles para el grupo.",
+		LangEnglish:            "`%s` is not selectable from the current model list. Send `/model` to view the available model choices for this chat.",
+		LangChinese:            "`%s` 不在当前模型列表的可选项中。请发送 `/model` 查看本聊天可选模型。",
+		LangTraditionalChinese: "`%s` 不在目前模型清單的可選項目中。請傳送 `/model` 查看本聊天可選模型。",
+		LangJapanese:           "`%s` は現在のモデル一覧から選択できません。`/model` でこのチャットに設定できるモデルを確認してください。",
+		LangSpanish:            "`%s` no se puede seleccionar en la lista actual de modelos. Envía `/model` para ver los modelos disponibles para este chat.",
 	},
 	MsgModelGroupUsage: {
-		LangEnglish:            "Usage: `/model group <name|reset>`",
-		LangChinese:            "用法：`/model group <name|reset>`",
-		LangTraditionalChinese: "用法：`/model group <name|reset>`",
-		LangJapanese:           "使い方: `/model group <name|reset>`",
-		LangSpanish:            "Uso: `/model group <name|reset>`",
+		LangEnglish:            "Usage: `/model chat [<name>|reset]` (`group` remains an alias).",
+		LangChinese:            "用法：`/model chat [<name>|reset]`（`group` 仍可作为别名）。",
+		LangTraditionalChinese: "用法：`/model chat [<name>|reset]`（`group` 仍可作為別名）。",
+		LangJapanese:           "使い方: `/model chat [<name>|reset]`（`group` も別名として使用可能）。",
+		LangSpanish:            "Uso: `/model chat [<name>|reset]` (`group` sigue siendo un alias).",
 	},
 	MsgModelGroupReset: {
-		LangEnglish:            "This group now follows the workspace/project default model. Applies from the next request.",
-		LangChinese:            "本群已恢复跟随工作区/项目默认模型，从下次请求生效。",
-		LangTraditionalChinese: "本群組已恢復跟隨工作區/專案預設模型，從下次請求生效。",
-		LangJapanese:           "このグループはワークスペース/プロジェクトの既定モデルを使用する設定に戻りました。次のリクエストから適用されます。",
-		LangSpanish:            "El grupo vuelve a usar el modelo predeterminado del espacio de trabajo/proyecto. Se aplicará a partir de la próxima solicitud.",
+		LangEnglish:            "This chat now follows the workspace/project default model. Applies from the next request; this chat's reasoning effort is unchanged.",
+		LangChinese:            "本聊天已恢复跟随工作区/项目默认模型，从下次请求生效；本聊天推理强度保持原设置。",
+		LangTraditionalChinese: "本聊天已恢復跟隨工作區/專案預設模型，從下次請求生效；本聊天推理強度保持原設定。",
+		LangJapanese:           "このチャットはワークスペース/プロジェクトの既定モデルを使用する設定に戻りました。次のリクエストから適用され、推論強度は変更されません。",
+		LangSpanish:            "Este chat vuelve al modelo predeterminado del espacio de trabajo/proyecto desde la próxima solicitud. Su esfuerzo de razonamiento no cambia.",
 	},
 	MsgModelGroupChanged: {
-		LangEnglish:            "Group model set to `%s` for all members and all topics. Applies to the next new request without interrupting the current reply.",
-		LangChinese:            "本群模型已固定为 `%s`，适用于全部成员和全部话题。从下次新请求生效，不打断当前回复。",
-		LangTraditionalChinese: "本群組模型已固定為 `%s`，適用於所有成員和所有話題。從下次新請求生效，不中斷目前回覆。",
-		LangJapanese:           "グループモデルを `%s` に固定しました。全メンバー・全トピックが対象です。現在の応答を中断せず、次の新しいリクエストから適用されます。",
-		LangSpanish:            "Modelo del grupo fijado en `%s` para todos los miembros y temas. Se aplicará a la próxima solicitud nueva sin interrumpir la respuesta actual.",
+		LangEnglish:            "Model for this chat set to `%s`. Applies to the next new request without interrupting the current reply.",
+		LangChinese:            "本聊天模型已固定为 `%s`。从下次新请求生效，不打断当前回复。",
+		LangTraditionalChinese: "本聊天模型已固定為 `%s`。從下次新請求生效，不中斷目前回覆。",
+		LangJapanese:           "このチャットのモデルを `%s` に固定しました。現在の応答を中断せず、次の新しいリクエストから適用されます。",
+		LangSpanish:            "Modelo de este chat fijado en `%s`. Se aplicará a la próxima solicitud nueva sin interrumpir la respuesta actual.",
 	},
 	MsgModelGroupCurrent: {
-		LangEnglish:            "Ordinary-message model: `%s` (source: fixed for this group).",
-		LangChinese:            "普通消息实际使用模型：`%s`（来源：本群固定）。",
-		LangTraditionalChinese: "一般訊息實際使用模型：`%s`（來源：本群組固定）。",
-		LangJapanese:           "通常メッセージで使用するモデル: `%s`（設定元: このグループの固定モデル）。",
-		LangSpanish:            "Modelo para mensajes normales: `%s` (origen: modelo fijo de este grupo).",
+		LangEnglish:            "Ordinary-message model: `%s` (source: fixed for this chat).",
+		LangChinese:            "普通消息实际使用模型：`%s`（来源：本聊天固定）。",
+		LangTraditionalChinese: "一般訊息實際使用模型：`%s`（來源：本聊天固定）。",
+		LangJapanese:           "通常メッセージで使用するモデル: `%s`（設定元: このチャットの固定モデル）。",
+		LangSpanish:            "Modelo para mensajes normales: `%s` (origen: modelo fijo de este chat).",
 	},
 	MsgModelGroupDefault: {
-		LangEnglish:            "Ordinary-message model source: follows the workspace/project default.",
-		LangChinese:            "普通消息模型来源：跟随工作区/项目默认。",
-		LangTraditionalChinese: "一般訊息模型來源：跟隨工作區/專案預設。",
-		LangJapanese:           "通常メッセージのモデル設定元: ワークスペース/プロジェクトの既定値に従います。",
-		LangSpanish:            "Origen del modelo para mensajes normales: valor predeterminado del espacio de trabajo/proyecto.",
+		LangEnglish:            "Ordinary-message model source for this chat: follows the workspace/project default.",
+		LangChinese:            "本聊天普通消息模型来源：跟随工作区/项目默认。",
+		LangTraditionalChinese: "本聊天一般訊息模型來源：跟隨工作區/專案預設。",
+		LangJapanese:           "このチャットの通常メッセージのモデル設定元: ワークスペース/プロジェクトの既定値に従います。",
+		LangSpanish:            "Origen del modelo para mensajes normales de este chat: valor predeterminado del espacio de trabajo/proyecto.",
 	},
 	MsgModelGroupResetButton: {
 		LangEnglish:            "Follow default",
@@ -2887,25 +2898,25 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Usar predeterminado",
 	},
 	MsgModelGroupSelect: {
-		LangEnglish:            "Set this group's model",
-		LangChinese:            "设置本群模型",
-		LangTraditionalChinese: "設定本群組模型",
-		LangJapanese:           "このグループのモデルを設定",
-		LangSpanish:            "Configurar modelo del grupo",
+		LangEnglish:            "Set this chat's model",
+		LangChinese:            "设置本聊天模型",
+		LangTraditionalChinese: "設定本聊天模型",
+		LangJapanese:           "このチャットのモデルを設定",
+		LangSpanish:            "Configurar modelo de este chat",
 	},
 	MsgModelScopeProject: {
-		LangEnglish:            "Project default: affects private chats and groups without a fixed model.",
-		LangChinese:            "项目默认：影响未固定模型的群和私聊。",
-		LangTraditionalChinese: "專案預設：影響未固定模型的群組和私人聊天。",
-		LangJapanese:           "プロジェクトの既定値: 個別チャットとモデル未固定のグループに適用。",
-		LangSpanish:            "Predeterminado del proyecto: afecta a chats privados y grupos sin un modelo fijo.",
+		LangEnglish:            "Project default: affects chats without a fixed model.",
+		LangChinese:            "项目默认：影响未固定模型的聊天。",
+		LangTraditionalChinese: "專案預設：影響未固定模型的聊天。",
+		LangJapanese:           "プロジェクトの既定値: モデルを固定していないチャットに適用。",
+		LangSpanish:            "Predeterminado del proyecto: afecta a los chats sin un modelo fijo.",
 	},
 	MsgModelScopeWorkspace: {
-		LangEnglish:            "Workspace default: affects conversations without a fixed group model in this workspace.",
-		LangChinese:            "工作区默认：影响该工作区未固定群模型的对话。",
-		LangTraditionalChinese: "工作區預設：影響該工作區未固定群組模型的對話。",
-		LangJapanese:           "ワークスペースの既定値: このワークスペース内でグループモデルを固定していない会話に適用。",
-		LangSpanish:            "Predeterminado del espacio de trabajo: afecta a las conversaciones de este espacio sin un modelo de grupo fijo.",
+		LangEnglish:            "Workspace default: affects chats without a fixed model in this workspace.",
+		LangChinese:            "工作区默认：影响该工作区未固定模型的聊天。",
+		LangTraditionalChinese: "工作區預設：影響該工作區未固定模型的聊天。",
+		LangJapanese:           "ワークスペースの既定値: このワークスペース内でモデルを固定していないチャットに適用。",
+		LangSpanish:            "Predeterminado del espacio de trabajo: afecta a los chats de este espacio sin un modelo fijo.",
 	},
 	MsgSpeedNotSupported: {
 		LangEnglish:            "This agent/session does not support speed switching.",
@@ -2984,19 +2995,96 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese:           "会話の速度を表示/保存、引数: [default|fast|対応速度]。次のターンから適用",
 		LangSpanish:            "Ver/cambiar la velocidad guardada, arg: [default|fast|opción del catálogo]; se aplica a los próximos turnos",
 	},
+	MsgReasoningGroupOnly: {
+		LangEnglish:            "Setting reasoning effort for this chat requires verified private or group chat identity. Send `/reasoning` in this chat first.",
+		LangChinese:            "设置本聊天推理强度需要已验证的私聊或群聊身份。请先在本聊天发送 `/reasoning`。",
+		LangTraditionalChinese: "設定本聊天推理強度需要已驗證的私人聊天或群組身分。請先在本聊天傳送 `/reasoning`。",
+		LangJapanese:           "このチャットの推論強度設定には、個別チャットまたはグループチャットの確認済み識別情報が必要です。まずこのチャットで `/reasoning` を送信してください。",
+		LangSpanish:            "Para fijar el esfuerzo de este chat se necesita la identidad verificada del chat privado o de grupo. Envía primero `/reasoning` en este chat.",
+	},
+	MsgReasoningGroupStorageUnavailable: {
+		LangEnglish:            "Persistent storage for this chat's reasoning effort is unavailable; the setting was not changed.",
+		LangChinese:            "本聊天推理强度的持久化存储不可用，设置未改变。",
+		LangTraditionalChinese: "本聊天推理強度的持久化儲存無法使用，設定未變更。",
+		LangJapanese:           "このチャットの推論強度の永続ストレージを利用できず、設定は変更されませんでした。",
+		LangSpanish:            "El almacenamiento persistente del esfuerzo de este chat no está disponible; no se cambió el ajuste.",
+	},
+	MsgReasoningGroupUnsupported: {
+		LangEnglish:            "This backend or effort does not support a fixed reasoning effort for this chat. Reselect `/reasoning chat <level>` or use `/reasoning chat reset`; no fallback will be used.",
+		LangChinese:            "当前后端或强度不支持本聊天固定推理设置。请重新设置 `/reasoning chat <等级>` 或执行 `/reasoning chat reset`；不会静默回退。",
+		LangTraditionalChinese: "目前後端或強度不支援本聊天固定推理設定。請重新設定 `/reasoning chat <等級>` 或執行 `/reasoning chat reset`；不會默默退回預設值。",
+		LangJapanese:           "現在のバックエンドまたは強度はこのチャットの固定設定に非対応です。`/reasoning chat <level>` で再選択するか `/reasoning chat reset` を実行してください。自動フォールバックは行いません。",
+		LangSpanish:            "El backend o nivel no permite fijar el esfuerzo de este chat. Usa `/reasoning chat <level>` o `/reasoning chat reset`; no habrá sustitución automática.",
+	},
+	MsgReasoningGroupProviderChanged: {
+		LangEnglish:            "The backend/Provider or conversation connection differs from this chat's saved effort. Reselect `/reasoning chat <level>` and start `/new` if needed, or use `/reasoning chat reset`; no fallback will be used.",
+		LangChinese:            "当前后端/Provider 或对话连接与本聊天 effort 绑定不符。请重新执行 `/reasoning chat <等级>`，必要时 `/new`；或 `/reasoning chat reset`。不会静默回退。",
+		LangTraditionalChinese: "目前後端/Provider 或對話連線與本聊天 effort 綁定不符。請重新執行 `/reasoning chat <等級>`，必要時 `/new`；或 `/reasoning chat reset`。不會默默退回預設值。",
+		LangJapanese:           "バックエンド/Provider または会話の接続がこのチャットの保存済み強度と異なります。`/reasoning chat <level>` で再設定し、必要なら `/new`、または `/reasoning chat reset` を実行してください。自動フォールバックは行いません。",
+		LangSpanish:            "El backend/Provider o conexión difiere del esfuerzo guardado de este chat. Configura `/reasoning chat <level>` y `/new` si es necesario, o `/reasoning chat reset`; no habrá sustitución automática.",
+	},
+	MsgReasoningGroupUsage: {
+		LangEnglish:            "Usage: `/reasoning chat [<level>|reset]`; choose a level from `/reasoning`. `/effort` and the `group` subcommand remain aliases.",
+		LangChinese:            "用法：`/reasoning chat [<等级>|reset]`；可选等级见 `/reasoning`。`/effort` 和 `group` 子命令仍可作为别名。",
+		LangTraditionalChinese: "用法：`/reasoning chat [<等級>|reset]`；可選等級見 `/reasoning`。`/effort` 和 `group` 子命令仍可作為別名。",
+		LangJapanese:           "使い方: `/reasoning chat [<level>|reset]`。選択可能な強度は `/reasoning` で確認できます。`/effort` とサブコマンド `group` も別名として使用可能です。",
+		LangSpanish:            "Uso: `/reasoning chat [<level>|reset]`; consulta los niveles en `/reasoning`. `/effort` y el subcomando `group` siguen siendo alias.",
+	},
+	MsgReasoningGroupFailed: {
+		LangEnglish:            "Setting reasoning effort for this chat failed: %v",
+		LangChinese:            "本聊天推理强度设置失败：%v",
+		LangTraditionalChinese: "本聊天推理強度設定失敗：%v",
+		LangJapanese:           "このチャットの推論強度の設定に失敗しました: %v",
+		LangSpanish:            "Error al configurar el esfuerzo de este chat: %v",
+	},
+	MsgReasoningGroupReset: {
+		LangEnglish:            "This chat follows the default reasoning effort again. This chat's model is unchanged.",
+		LangChinese:            "本聊天已恢复跟随默认推理强度，本聊天模型保持原设置。",
+		LangTraditionalChinese: "本聊天已恢復跟隨預設推理強度，本聊天模型保持原設定。",
+		LangJapanese:           "このチャットは既定の推論強度に戻りました。このチャットのモデルは変更されません。",
+		LangSpanish:            "Este chat vuelve al esfuerzo predeterminado. Su modelo no cambia.",
+	},
+	MsgReasoningGroupChanged: {
+		LangEnglish:            "Reasoning effort for this chat set to `%s` for subsequent new turns; other chats and history are unchanged.",
+		LangChinese:            "本聊天推理强度已设为 `%s`，从后续新请求生效；其他聊天和历史不受影响。",
+		LangTraditionalChinese: "本聊天推理強度已設為 `%s`，從後續新請求生效；其他聊天和歷史不受影響。",
+		LangJapanese:           "このチャットの推論強度を `%s` に設定しました。以後の新規ターンから適用され、他のチャットと履歴は変更されません。",
+		LangSpanish:            "Esfuerzo de este chat: `%s` para los siguientes turnos; otros chats y el historial no cambian.",
+	},
+	MsgReasoningGroupCurrent: {
+		LangEnglish:            "Fixed reasoning effort for this chat: `%s`",
+		LangChinese:            "本聊天固定推理强度：`%s`",
+		LangTraditionalChinese: "本聊天固定推理強度：`%s`",
+		LangJapanese:           "このチャットの固定推論強度: `%s`",
+		LangSpanish:            "Esfuerzo fijo de este chat: `%s`",
+	},
+	MsgReasoningGroupDefault: {
+		LangEnglish:            "Reasoning effort for this chat: following the workspace/project default",
+		LangChinese:            "本聊天推理强度：跟随工作区/项目默认值",
+		LangTraditionalChinese: "本聊天推理強度：跟隨工作區/專案預設值",
+		LangJapanese:           "このチャットの推論強度: ワークスペース/プロジェクトの既定値を使用",
+		LangSpanish:            "Esfuerzo de este chat: valor predeterminado del espacio/proyecto",
+	},
+	MsgReasoningGroupSelect: {
+		LangEnglish:            "Reasoning effort for this chat",
+		LangChinese:            "选择本聊天推理强度",
+		LangTraditionalChinese: "選擇本聊天推理強度",
+		LangJapanese:           "このチャットの推論強度",
+		LangSpanish:            "Esfuerzo de este chat",
+	},
 	MsgReasoningCurrent: {
-		LangEnglish:            "Current reasoning effort: %s",
-		LangChinese:            "当前推理强度: %s",
-		LangTraditionalChinese: "當前推理強度: %s",
-		LangJapanese:           "現在の推論強度: %s",
-		LangSpanish:            "Esfuerzo de razonamiento actual: %s",
+		LangEnglish:            "Project/workspace default reasoning effort: %s",
+		LangChinese:            "项目/工作区默认推理强度: %s",
+		LangTraditionalChinese: "專案/工作區預設推理強度: %s",
+		LangJapanese:           "プロジェクト/ワークスペースの既定推論強度: %s",
+		LangSpanish:            "Esfuerzo predeterminado del proyecto/espacio: %s",
 	},
 	MsgReasoningChanged: {
-		LangEnglish:            "Reasoning effort switched to `%s`. New sessions will use this setting.",
-		LangChinese:            "推理强度已切换为 `%s`，新会话将使用此设置。",
-		LangTraditionalChinese: "推理強度已切換為 `%s`，新會話將使用此設定。",
-		LangJapanese:           "推論強度を `%s` に切り替えました。新しいセッションで使用されます。",
-		LangSpanish:            "Esfuerzo de razonamiento cambiado a `%s`. Las nuevas sesiones usarán esta configuración.",
+		LangEnglish:            "Project/workspace default reasoning effort set to `%s`. Chats without a fixed effort use this setting for new sessions.",
+		LangChinese:            "项目/工作区默认推理强度已设为 `%s`。未固定强度的聊天在新会话中使用此设置。",
+		LangTraditionalChinese: "專案/工作區預設推理強度已設為 `%s`。未固定強度的聊天在新會話中使用此設定。",
+		LangJapanese:           "プロジェクト/ワークスペースの既定推論強度を `%s` に設定しました。強度を固定していないチャットの新しいセッションで使用されます。",
+		LangSpanish:            "Esfuerzo predeterminado del proyecto/espacio: `%s`. Los chats sin esfuerzo fijo lo usarán en las nuevas sesiones.",
 	},
 	MsgReasoningNotSupported: {
 		LangEnglish:            "This agent does not support reasoning effort switching.",
@@ -3203,18 +3291,18 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Modelos disponibles:\n",
 	},
 	MsgModelUsage: {
-		LangEnglish:            "Usage: `/model switch <number>` or `/model switch <model_name>` changes the project/workspace default; groups with a fixed model keep their selection. Use `/model group <name|reset>` for this group.",
-		LangChinese:            "用法：`/model switch <序号>` 或 `/model switch <模型名>` 更改项目/工作区默认模型；固定模型的群不跟随。使用 `/model group <name|reset>` 设置本群。",
-		LangTraditionalChinese: "用法：`/model switch <序號>` 或 `/model switch <模型名>` 變更專案/工作區預設模型；固定模型的群組不跟隨。使用 `/model group <name|reset>` 設定本群組。",
-		LangJapanese:           "使い方: `/model switch <番号>` または `/model switch <モデル名>` でプロジェクト/ワークスペースの既定値を変更します。固定モデルのグループには反映されません。このグループには `/model group <name|reset>` を使用してください。",
-		LangSpanish:            "Uso: `/model switch <número>` o `/model switch <nombre_modelo>` cambia el valor predeterminado del proyecto/espacio de trabajo; los grupos con modelo fijo conservan su selección. Usa `/model group <name|reset>` para este grupo.",
+		LangEnglish:            "Usage: `/model switch <number>` or `/model switch <model_name>` changes the project/workspace default; chats with a fixed model keep their selection. Use `/model chat [<name>|reset]` for this chat; `group` remains an alias.",
+		LangChinese:            "用法：`/model switch <序号>` 或 `/model switch <模型名>` 更改项目/工作区默认模型；固定模型的聊天不跟随。使用 `/model chat [<name>|reset]` 设置本聊天，`group` 仍可作为别名。",
+		LangTraditionalChinese: "用法：`/model switch <序號>` 或 `/model switch <模型名>` 變更專案/工作區預設模型；固定模型的聊天不跟隨。使用 `/model chat [<name>|reset]` 設定本聊天，`group` 仍可作為別名。",
+		LangJapanese:           "使い方: `/model switch <番号>` または `/model switch <モデル名>` でプロジェクト/ワークスペースの既定値を変更します。固定モデルのチャットには反映されません。このチャットには `/model chat [<name>|reset]` を使用してください。`group` も別名として使用可能です。",
+		LangSpanish:            "Uso: `/model switch <número>` o `/model switch <nombre_modelo>` cambia el valor predeterminado del proyecto/espacio de trabajo; los chats con modelo fijo conservan su selección. Usa `/model chat [<name>|reset]` para este chat; `group` sigue siendo un alias.",
 	},
 	MsgReasoningDefault: {
-		LangEnglish:            "Current reasoning effort: (not set, using Codex default)\n",
-		LangChinese:            "当前推理强度: (未设置，使用 Codex 默认值)\n",
-		LangTraditionalChinese: "當前推理強度: (未設置，使用 Codex 預設值)\n",
-		LangJapanese:           "現在の推論強度: (未設定、Codex のデフォルトを使用)\n",
-		LangSpanish:            "Esfuerzo de razonamiento actual: (no configurado, usando el valor predeterminado de Codex)\n",
+		LangEnglish:            "Project/workspace default reasoning effort: inherited\n",
+		LangChinese:            "项目/工作区默认推理强度: 继承\n",
+		LangTraditionalChinese: "專案/工作區預設推理強度: 繼承\n",
+		LangJapanese:           "プロジェクト/ワークスペースの既定推論強度: 継承\n",
+		LangSpanish:            "Esfuerzo predeterminado del proyecto/espacio: heredado\n",
 	},
 	MsgReasoningListTitle: {
 		LangEnglish:            "Available reasoning levels:\n",
@@ -3224,11 +3312,11 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Niveles de razonamiento disponibles:\n",
 	},
 	MsgReasoningUsage: {
-		LangEnglish:            "Usage: `/reasoning <number>` or `/reasoning <low|medium|high|xhigh>`",
-		LangChinese:            "用法: `/reasoning <序号>` 或 `/reasoning <low|medium|high|xhigh>`",
-		LangTraditionalChinese: "用法: `/reasoning <序號>` 或 `/reasoning <low|medium|high|xhigh>`",
-		LangJapanese:           "使い方: `/reasoning <番号>` または `/reasoning <low|medium|high|xhigh>`",
-		LangSpanish:            "Uso: `/reasoning <número>` o `/reasoning <low|medium|high|xhigh>`",
+		LangEnglish:            "`/reasoning <number>` or `/reasoning <level>` changes the project/workspace default and resets this conversation; chats with fixed effort keep it. Use `/reasoning chat [<level>|reset]` for this chat. `/effort` and the `group` subcommand remain aliases.",
+		LangChinese:            "`/reasoning <等级>` 修改项目/工作区默认值并重置本对话，固定强度的聊天不跟随。设置本聊天使用 `/reasoning chat [<等级>|reset]`；`/effort` 和 `group` 子命令仍可作为别名。",
+		LangTraditionalChinese: "`/reasoning <等級>` 修改專案/工作區預設值並重置本對話，固定強度的聊天不跟隨。設定本聊天使用 `/reasoning chat [<等級>|reset]`；`/effort` 和 `group` 子命令仍可作為別名。",
+		LangJapanese:           "`/reasoning <level>` はプロジェクト/ワークスペースの既定値を変更し、この会話をリセットします。強度を固定したチャットには反映されません。このチャットには `/reasoning chat [<level>|reset]` を使用してください。`/effort` とサブコマンド `group` も別名として使用可能です。",
+		LangSpanish:            "`/reasoning <level>` cambia el valor del proyecto/espacio y reinicia esta conversación; los chats con esfuerzo fijo lo mantienen. Usa `/reasoning chat [<level>|reset]` para este chat. `/effort` y el subcomando `group` siguen siendo alias.",
 	},
 	MsgModeUsage: {
 		LangEnglish:            "\nUse `/mode <name>` to switch.\nAvailable: %s",
@@ -3242,15 +3330,18 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese: "言語を選択", LangSpanish: "Seleccionar idioma",
 	},
 	MsgModelSelectPlaceholder: {
-		LangEnglish:            "Project/workspace default (fixed groups unchanged)",
-		LangChinese:            "选择项目/工作区默认模型（固定群不跟随）",
-		LangTraditionalChinese: "選擇專案/工作區預設模型（固定群組不跟隨）",
-		LangJapanese:           "プロジェクト/ワークスペースの既定値（固定グループは対象外）",
-		LangSpanish:            "Predeterminado del proyecto/espacio (grupos con modelo fijo sin cambios)",
+		LangEnglish:            "Project/workspace default (chats without a fixed model)",
+		LangChinese:            "项目/工作区默认模型（未固定模型的聊天）",
+		LangTraditionalChinese: "專案/工作區預設模型（未固定模型的聊天）",
+		LangJapanese:           "プロジェクト/ワークスペースの既定値（モデル未固定のチャット）",
+		LangSpanish:            "Predeterminado del proyecto/espacio (chats sin modelo fijo)",
 	},
 	MsgReasoningSelectPlaceholder: {
-		LangEnglish: "Select reasoning level", LangChinese: "选择推理强度", LangTraditionalChinese: "選擇推理強度",
-		LangJapanese: "推論強度を選択", LangSpanish: "Seleccionar nivel de razonamiento",
+		LangEnglish:            "Project/workspace default (chats without fixed effort)",
+		LangChinese:            "项目/工作区默认强度（未固定强度的聊天）",
+		LangTraditionalChinese: "專案/工作區預設強度（未固定強度的聊天）",
+		LangJapanese:           "プロジェクト/ワークスペースの既定値（強度未固定のチャット）",
+		LangSpanish:            "Predeterminado del proyecto/espacio (chats sin esfuerzo fijo)",
 	},
 	MsgModeSelectPlaceholder: {
 		LangEnglish: "Select mode", LangChinese: "选择模式", LangTraditionalChinese: "選擇模式",
@@ -4770,18 +4861,18 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Pre-autorizar herramienta (próxima sesión), arg: <herramienta>",
 	},
 	MsgBuiltinCmdModel: {
-		LangEnglish:            "View models; set project/workspace default or group model",
-		LangChinese:            "查看模型；设置项目/工作区默认或群模型",
-		LangTraditionalChinese: "查看模型；設定專案/工作區預設或群組模型",
-		LangJapanese:           "モデル表示・プロジェクト/ワークスペースの既定値またはグループモデルを設定",
-		LangSpanish:            "Ver modelos; fijar predeterminado del proyecto/espacio o modelo del grupo",
+		LangEnglish:            "View models; set project/workspace default or this chat's model",
+		LangChinese:            "查看模型；设置项目/工作区默认或本聊天模型",
+		LangTraditionalChinese: "查看模型；設定專案/工作區預設或本聊天模型",
+		LangJapanese:           "モデル表示・プロジェクト/ワークスペースの既定値またはこのチャットのモデルを設定",
+		LangSpanish:            "Ver modelos; fijar predeterminado del proyecto/espacio o modelo de este chat",
 	},
 	MsgBuiltinCmdReasoning: {
-		LangEnglish:            "View/switch reasoning effort, arg: [level]",
-		LangChinese:            "查看/切换推理强度，参数: [等级]",
-		LangTraditionalChinese: "查看/切換推理強度，參數: [等級]",
-		LangJapanese:           "推論強度の表示/切り替え、引数: [レベル]",
-		LangSpanish:            "Ver/cambiar esfuerzo de razonamiento, arg: [nivel]",
+		LangEnglish:            "View reasoning effort; set default or this chat's effort",
+		LangChinese:            "查看推理强度；设置默认值或本聊天强度",
+		LangTraditionalChinese: "查看推理強度；設定預設值或本聊天強度",
+		LangJapanese:           "推論強度を表示し、既定値またはこのチャットの強度を設定",
+		LangSpanish:            "Ver esfuerzo; ajustar valor predeterminado o de este chat",
 	},
 	MsgBuiltinCmdMode: {
 		LangEnglish:            "View/switch permission mode, arg: [name]",

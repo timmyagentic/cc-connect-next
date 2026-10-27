@@ -7976,7 +7976,7 @@ func TestCmdReasoning_SwitchesEffortAndResetsSession(t *testing.T) {
 	if len(s.History) != 0 {
 		t.Fatalf("history length = %d, want 0", len(s.History))
 	}
-	if len(p.sent) != 1 || !strings.Contains(p.sent[0], "Reasoning effort switched to `high`") {
+	if len(p.sent) != 1 || p.sent[0] != e.i18n.Tf(MsgReasoningChanged, "high") {
 		t.Fatalf("sent = %v, want reasoning changed message", p.sent)
 	}
 }

@@ -85,45 +85,97 @@ Agent command files may publish only an explicit frontmatter `description`. Thei
 
 Existence is not presented as executable availability: model/provider switching, TTS, multi-workspace, schedulers, Relay, Web setup, and in-flight-turn operations probe their corresponding runtime interfaces or components.
 
-## Project/workspace defaults and group models
+## Project/workspace defaults and chat models
 
-The `model` command publishes `/model [switch <name>|group [<name>|reset]]`.
+The `model` command publishes `/model [switch <name>|chat [<name>|reset]]`.
+Its action metadata includes `switch`, `chat`, and the legacy `group` alias.
 It retains `member` permission and existing role/disabled-command policies.
 `switch` and legacy `/model <name>` change the project/workspace default for
-private chats and groups without a fixed model. `ModelSwitcher` alone keeps
-these legacy operations available, including on non-Codex backends.
+chats without a fixed model; pinned DMs and groups keep their selection.
+`ModelSwitcher` alone keeps these legacy operations available, including on
+non-Codex backends.
 
-`group` queries, pins, or resets the verified group's selection. Pinning also
-requires the configured backend's `PerTurnModelSupporter` to return true
-(currently Codex `exec` and `app_server`), a current selectable model, and
+`chat` queries, pins, or resets a verified private or group chat's selection.
+The legacy `group` subcommand has the same behavior, including in verified DMs.
+Pinning also requires the configured backend's `PerTurnModelSupporter` to return
+true (currently Codex `exec` and `app_server`), a current selectable model, and
 available persistent storage. It never switches Provider. Invocation verifies
-group identity; a session-key shape alone is not proof. Unknown groups must
-first send `/model` in the group. Reset can clear an existing binding even if
-the backend no longer supports pinning, provided identity and storage exist.
-The command-level availability reason distinguishes legacy switching from
-these group prerequisites instead of disabling the entire command.
+chat identity; a session-key shape alone is not proof. An unrecognized chat
+can first send `/model` there. Feishu/Lark card callbacks bound to a verified
+direct user can establish private-chat routing even for older or outbound
+cards, without requiring a fresh text event. Reset can clear an existing
+binding even if the backend no longer supports pinning, provided verified
+identity and storage exist. The command-level availability reason distinguishes
+legacy switching from these chat prerequisites.
 
-The parameter contract describes project isolation and the binding key:
-platform + stable group ID, never topic or workspace. All members and existing
-or new topics inherit it across `/reset`, `/new`, and restarts. Group writes
-declare `persistent_state`; the command's existing `configuration` and
-`agent_process` effects still describe default switching. Querying without
-a model is read-only; the overall command remains mutating because it also
-exposes setters.
+The parameter contract describes isolation within each bot/project:
 
-All three send paths resolve the binding at execution, including queued work.
+- Groups retain the existing `platform:groupID` key (platform + stable group
+  ID). All members and existing or new topics share the binding.
+- Verified DMs use `platform:dm:userID`. Each direct user's selection is
+  isolated from other users, groups, platforms, and bots/projects, including
+  bots that share a workspace directory.
+
+Neither binding is scoped to a topic, conversation, or workspace directory.
+Both survive `/reset`, `/new`, and restarts. Chat writes declare
+`persistent_state`; the command's existing `configuration` and `agent_process`
+effects still describe default switching. Querying without a model is
+read-only; the overall command remains mutating because it also exposes
+setters. Model and reasoning effort persist independently; `/model chat reset`
+clears only the model binding. No new configuration fields or generated
+configuration references are needed.
+
+All three send paths resolve each field at execution, including queued work.
 Changes affect the next new turn and leave a running reply alone. An explicit
-one-shot `/fast`/answer-profile or task model takes precedence; without one,
-ordinary messages use the fixed group model, then the workspace/project default
-only when no binding exists. The `reject` fallback contract covers unsupported
-per-turn settings, backend/Provider mismatch, unknown selections, storage and
-model/application errors: a pinned request must not silently use another model.
-Reselect the group model or explicitly reset the binding to recover.
+one-shot `/fast`/answer-profile or task model takes precedence for its own field;
+without one, ordinary messages use the fixed chat model, then the
+workspace/project default only when no model binding exists. A profile without
+an explicit model still inherits the chat model. The `reject` fallback contract
+covers unsupported per-turn settings, backend/Provider mismatch, unknown
+selections, storage and model/application errors: a pinned request must not
+silently use another model. Reselect with `/model chat <name>` or explicitly
+clear the model binding with `/model chat reset` to recover.
 
 The read-only session capability `model_provider_identity` checks
 `ModelProviderSession` without publishing its captured provider name. A
-provider-switching Agent must expose this identity for pinned group turns;
-the engine validates the concrete session as well as the current Agent.
+provider-switching Agent must expose this identity for pinned chat turns;
+the engine validates the concrete session as well as the current Agent. A
+stale conversation connection must be reconnected with `/provider switch <name>`
+or replaced with `/new` before retrying.
+
+Model and reasoning card selections use `cmd:/model chat ...` and
+`cmd:/reasoning chat ...`, including their `reset` actions. Feishu/Lark's
+`nav:/model` and `nav:/reasoning` open the corresponding command menus.
+Chat-neutral labels distinguish the saved chat selection from the default for
+unpinned chats; legacy Group-named i18n constants retain their names for
+compatibility.
+
+## Chat reasoning effort
+
+The `reasoning`/`effort` command publishes
+`/reasoning [<level>|chat [<level>|reset]]`. `/effort` aliases `/reasoning`, and
+`group` remains a subcommand alias for `chat` in both verified DMs and groups.
+Legacy default switching stays available via `ReasoningEffortSwitcher`; a bare
+level changes the project/workspace Agent default and resets this conversation,
+while chats with fixed effort keep their setting. Chat pinning additionally
+requires `PerTurnReasoningEffortSupporter`, a non-empty effort catalog, verified
+chat identity, durable storage and compatible per-turn session/provider support.
+The `member` permission is unchanged and `persistent_state` is declared.
+Unsupported effort, missing identity/storage, or backend/Provider and session
+mismatches fail explicitly without silent fallback. Reselect with
+`/reasoning chat <level>` or clear the effort with `/reasoning chat reset`;
+reset remains available with verified identity and storage even when pinning
+is unsupported.
+
+Chat effort is stored independently of the model, using the same project-local
+group or DM key. Groups share it across all members/topics; private chats are
+isolated by verified user and bot/project. It persists across `/new`, `/reset`,
+and restarts. Each queued turn resolves model and effort separately: an
+explicit task/profile value wins only for its own field. A model-only profile
+still inherits chat effort, and an effort-only profile still inherits the chat
+model. Resetting either binding preserves the other; a running reply is not
+interrupted. The command metadata distinguishes default switching's
+conversation reset from a chat-scoped operation that preserves history.
 
 ## Cron task models
 

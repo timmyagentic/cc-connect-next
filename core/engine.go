@@ -719,6 +719,7 @@ type interactiveState struct {
 	// so a busy message that would cross this boundary must start a queued turn.
 	activeAnswerProfile           AnswerProfileName
 	activeModelOverride           string // task model of the in-flight turn; never inherited by queued input
+	activeGroupReasoning          bool   // effort bindings also require distinct queued turns
 	activeGroupModel              bool   // keeps a bound turn out of steering even if its binding is reset
 	activeReasoningEffortOverride string
 	activeServiceTier             string // session override captured at turn admission
@@ -3526,6 +3527,9 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		// Resolve it when the queued turn starts, never steer into an old model.
 		return false
 	}
+	if _, bound := e.groupReasoningBinding(msg.SessionKey); bound {
+		return false
+	}
 	// turn/steer cannot carry model, reasoning-effort, or service-tier
 	// overrides. A profiled message must remain a distinct queued turn or the
 	// user would be told a profile was applied when it was not.
@@ -3553,7 +3557,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		state.mu.Unlock()
 		return false
 	}
-	if state.activeAnswerProfile != "" || state.activeModelOverride != "" || state.activeGroupModel || state.activeReasoningEffortOverride != "" || state.activeServiceTier != sessions.ServiceTier(session) {
+	if state.activeAnswerProfile != "" || state.activeModelOverride != "" || state.activeGroupModel || state.activeGroupReasoning || state.activeReasoningEffortOverride != "" || state.activeServiceTier != sessions.ServiceTier(session) {
 		state.mu.Unlock()
 		return false
 	}
@@ -4478,6 +4482,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.activeAnswerProfile = msg.AnswerProfile
 	state.activeModelOverride = msg.ModelOverride
 	_, state.activeGroupModel = e.groupModelBinding(msg.SessionKey)
+	_, state.activeGroupReasoning = e.groupReasoningBinding(msg.SessionKey)
 	state.activeReasoningEffortOverride = msg.ReasoningEffortOverride
 	speedTier := sessions.ServiceTier(session)
 	state.activeServiceTier = speedTier
@@ -5712,6 +5717,7 @@ func (t *turnProcessor) run() {
 		state.activeAnswerProfile = ""
 		state.activeModelOverride = ""
 		state.activeGroupModel = false
+		state.activeGroupReasoning = false
 		state.activeReasoningEffortOverride = ""
 		state.mu.Unlock()
 	}()
@@ -7223,6 +7229,7 @@ func (queue *turnQueue) handle() {
 		state.activeAnswerProfile = queued.answerProfile
 		state.activeModelOverride = queued.modelOverride
 		_, state.activeGroupModel = e.groupModelBinding(queued.msgSessionKey)
+		_, state.activeGroupReasoning = e.groupReasoningBinding(queued.msgSessionKey)
 		state.activeReasoningEffortOverride = queued.reasoningEffortOverride
 		speedTier := sessions.ServiceTier(session)
 		state.activeServiceTier = speedTier
@@ -8835,6 +8842,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.activeAnswerProfile = queued.answerProfile
 		state.activeModelOverride = queued.modelOverride
 		_, state.activeGroupModel = e.groupModelBinding(queued.msgSessionKey)
+		_, state.activeGroupReasoning = e.groupReasoningBinding(queued.msgSessionKey)
 		state.activeReasoningEffortOverride = queued.reasoningEffortOverride
 		speedTier := sessions.ServiceTier(session)
 		state.activeServiceTier = speedTier
@@ -11842,7 +11850,7 @@ func (e *Engine) cmdModel(p Platform, msg *Message, args []string) {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgWsResolutionError, err))
 		return
 	}
-	if len(args) > 0 && strings.EqualFold(args[0], "group") {
+	if len(args) > 0 && (strings.EqualFold(args[0], "group") || strings.EqualFold(args[0], "chat")) {
 		e.cmdGroupModel(p, msg, agent, args[1:])
 		return
 	}
@@ -12066,6 +12074,11 @@ func (e *Engine) cmdReasoning(p Platform, msg *Message, args []string) {
 		return
 	}
 
+	if len(args) > 0 && (strings.EqualFold(args[0], "group") || strings.EqualFold(args[0], "chat")) {
+		e.cmdGroupReasoning(p, msg, agent, args[1:])
+		return
+	}
+
 	switcher, ok := agent.(ReasoningEffortSwitcher)
 	if !ok {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgReasoningNotSupported))
@@ -12073,6 +12086,10 @@ func (e *Engine) cmdReasoning(p Platform, msg *Message, args []string) {
 	}
 
 	if len(args) == 0 {
+		if e.groupModelKey(msg.SessionKey) != "" {
+			e.replyWithCard(p, msg.ReplyCtx, e.renderReasoningCardForAgent(msg.SessionKey, agent))
+			return
+		}
 		if !supportsCards(p) {
 			efforts := switcher.AvailableReasoningEfforts()
 
@@ -12113,7 +12130,7 @@ func (e *Engine) cmdReasoning(p Platform, msg *Message, args []string) {
 			e.replyWithButtons(p, msg.ReplyCtx, sb.String(), buttons)
 			return
 		}
-		e.replyWithCard(p, msg.ReplyCtx, e.renderReasoningCard())
+		e.replyWithCard(p, msg.ReplyCtx, e.renderReasoningCardForAgent(msg.SessionKey, agent))
 		return
 	}
 
@@ -12587,6 +12604,7 @@ func (e *Engine) runCompress(state *interactiveState, session *Session, sessions
 	state.activeAnswerProfile = ""
 	state.activeModelOverride = ""
 	state.activeGroupModel = false
+	state.activeGroupReasoning = false
 	state.activeReasoningEffortOverride = ""
 	state.mu.Unlock()
 	state.steerMu.Unlock()
@@ -14152,7 +14170,8 @@ func (e *Engine) handleCardNav(action string, sessionKey string) *Card {
 	case "/model":
 		return e.renderModelCard(sessionKey)
 	case "/reasoning":
-		return e.renderReasoningCard()
+		agent, _ := e.sessionContextForKey(sessionKey)
+		return e.renderReasoningCardForAgent(sessionKey, agent)
 	case "/mode":
 		return e.renderModeCard()
 	case "/lang":
@@ -15162,7 +15181,11 @@ func (e *Engine) renderModelSwitchResultCard(target string, err error) *Card {
 }
 
 func (e *Engine) renderReasoningCard() *Card {
-	switcher, ok := e.agent.(ReasoningEffortSwitcher)
+	return e.renderReasoningCardForAgent("", e.agent)
+}
+
+func (e *Engine) renderReasoningCardForAgent(sessionKey string, agent Agent) *Card {
+	switcher, ok := agent.(ReasoningEffortSwitcher)
 	if !ok {
 		return e.simpleCard(e.i18n.T(MsgCardTitleReasoning), "orange", e.i18n.T(MsgReasoningNotSupported))
 	}
@@ -15179,16 +15202,17 @@ func (e *Engine) renderReasoningCard() *Card {
 
 	var opts []CardSelectOption
 	initVal := ""
-	for i, effort := range efforts {
-		val := fmt.Sprintf("act:/reasoning %d", i+1)
+	for _, effort := range efforts {
+		val := "cmd:/reasoning " + effort
 		opts = append(opts, CardSelectOption{Text: effort, Value: val})
 		if effort == current {
 			initVal = val
 		}
 	}
 
-	cb := NewCard().Title(e.i18n.T(MsgCardTitleReasoning), "orange").
-		Markdown(sb.String()).
+	cb := NewCard().Title(e.i18n.T(MsgCardTitleReasoning), "orange")
+	e.groupReasoningCard(cb, sessionKey, agent)
+	cb.Markdown(sb.String()).
 		Select(e.i18n.T(MsgReasoningSelectPlaceholder), opts, initVal).
 		Buttons(e.cardBackButton())
 	cb.Note(e.i18n.T(MsgReasoningUsage))

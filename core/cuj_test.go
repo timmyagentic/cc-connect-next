@@ -85,6 +85,26 @@ func TestCUJ_H7_GroupModelBindingIsolatesTopicsAndDefaultChanges(t *testing.T) {
 	}
 }
 
+func TestCUJ_H8_PrivateChatModelAndEffortResetIndependently(t *testing.T) {
+	e, p, _ := newGroupReasoningEngine(t, "")
+	chat := func(user, id, want string) {
+		t.Helper()
+		p.clearSent()
+		e.ReceiveMessage(p, privateChatMessage(user, id, "hello"))
+		waitAnswerProfileTest(t, id, func() bool {
+			return strings.Contains(strings.Join(p.getSent(), "\n"), want)
+		})
+	}
+	e.ReceiveMessage(p, privateChatMessage("alice", "model", "/model chat group-B"))
+	e.ReceiveMessage(p, privateChatMessage("alice", "effort", "/effort chat high"))
+	chat("alice", "alice-pinned", "effort=high model=group-B")
+	chat("bob", "bob-default", "effort=medium model=project-A")
+	e.ReceiveMessage(p, privateChatMessage("alice", "effort-reset", "/effort chat reset"))
+	chat("alice", "model-kept", "effort=medium model=group-B")
+	e.ReceiveMessage(p, privateChatMessage("alice", "model-reset", "/model chat reset"))
+	chat("alice", "both-inherited", "effort=medium model=project-A")
+}
+
 func TestCUJ_H4_FeishuTopicsKeepWorkspaceBindingsIsolated(t *testing.T) {
 	baseDir := t.TempDir()
 	defaultWorkspace := normalizeWorkspacePath(filepath.Join(baseDir, "workspace-default"))

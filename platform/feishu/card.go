@@ -57,7 +57,7 @@ func (p *interactivePlatform) ReplyCard(ctx context.Context, rctx any, card *cor
 		return fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
 	}
 
-	cardJSON := p.renderBoundCard(card, rc.sessionKey, "")
+	cardJSON := p.renderBoundCard(card, rc.sessionKey, rc.directUserID)
 	if !p.shouldUseThreadOrReplyAPI(rc) {
 		if rc.chatID == "" {
 			return fmt.Errorf("%s: chatID is empty, cannot send card", p.tag())
@@ -81,7 +81,7 @@ func (p *interactivePlatform) SendCard(ctx context.Context, rctx any, card *core
 		return p.ReplyCard(ctx, rctx, card)
 	}
 
-	cardJSON := p.renderBoundCard(card, rc.sessionKey, "")
+	cardJSON := p.renderBoundCard(card, rc.sessionKey, rc.directUserID)
 	return p.createMessage(ctx, rc.chatID, larkim.MsgTypeInteractive, cardJSON, "send card")
 }
 
