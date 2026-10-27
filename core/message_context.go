@@ -137,26 +137,58 @@ type preparedMessageContext struct {
 	Err    error
 }
 
+// contextPrepMode distinguishes background read for a turn that has not been
+// sent yet from background read for input appended to a turn already running.
+// Only the receipt bookkeeping and the cancellation handle differ: a steer must
+// add its receipts to the running turn instead of replacing them.
+type contextPrepMode int
+
+const (
+	contextPrepTurn contextPrepMode = iota
+	contextPrepSteer
+)
+
 // prepareMessageContext runs while this conversation owns its turn. Queued
 // requests see receipts from previous successful turns. Failed content remains retryable.
 func (e *Engine) prepareMessageContext(p Platform, replyCtx any, session *Session, state *interactiveState, content, messageID string) preparedMessageContext {
+	return e.prepareMessageContextFor(contextPrepTurn, p, replyCtx, session, state, content, messageID)
+}
+
+// prepareSteerMessageContext reads bounded background for a message that will
+// be appended to the in-flight turn. Receipts accumulate on the running turn so
+// the same completion commit covers both the turn's own read and this one.
+func (e *Engine) prepareSteerMessageContext(p Platform, replyCtx any, session *Session, state *interactiveState, content, messageID string) preparedMessageContext {
+	return e.prepareMessageContextFor(contextPrepSteer, p, replyCtx, session, state, content, messageID)
+}
+
+func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, replyCtx any, session *Session, state *interactiveState, content, messageID string) preparedMessageContext {
 	prepared := preparedMessageContext{Text: content}
-	state.mu.Lock()
-	state.contextMessageIDs = nil
-	state.mu.Unlock()
+	if mode == contextPrepTurn {
+		state.mu.Lock()
+		state.contextMessageIDs = nil
+		state.mu.Unlock()
+	}
 	if !hasMessageContext(p, replyCtx) {
 		return prepared
 	}
 	ctx, cancel := context.WithCancel(e.ctx)
 	state.mu.Lock()
-	state.contextPreparationCancel = cancel
+	if mode == contextPrepSteer {
+		state.steerContextCancel = cancel
+	} else {
+		state.contextPreparationCancel = cancel
+	}
 	if state.stopped || (messageID != "" && state.discardTurnMessageID == messageID) {
 		cancel()
 	}
 	state.mu.Unlock()
 	defer func() {
 		state.mu.Lock()
-		state.contextPreparationCancel = nil
+		if mode == contextPrepSteer {
+			state.steerContextCancel = nil
+		} else {
+			state.contextPreparationCancel = nil
+		}
 		state.mu.Unlock()
 		cancel()
 	}()
@@ -231,7 +263,11 @@ func (e *Engine) prepareMessageContext(p Platform, replyCtx any, session *Sessio
 		}
 	}
 	state.mu.Lock()
-	state.contextMessageIDs = receipt
+	if mode == contextPrepSteer {
+		state.contextMessageIDs = append(state.contextMessageIDs, receipt...)
+	} else {
+		state.contextMessageIDs = receipt
+	}
 	state.mu.Unlock()
 	if serialized == "" && !incomplete {
 		return prepared

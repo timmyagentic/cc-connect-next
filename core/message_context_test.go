@@ -173,18 +173,115 @@ func TestMessageContextRevisionReceiptsSurviveRestart(t *testing.T) {
 	}
 }
 
-func TestMessageContextUsesQueueInsteadOfSteering(t *testing.T) {
+func newContextSteerEnv(t *testing.T, key, turnSender string, receipts []string) (*cujEnv, *contextTestPlatform, *steerableAgentSession, *Session) {
+	t.Helper()
 	env, p := newContextCUJEnv(t)
-	key := "test:group"
 	as := newSteerableSession("native")
 	cleanup := installBusySteerableState(t, env.engine, p, key, as)
-	defer cleanup()
+	t.Cleanup(cleanup)
+	env.engine.interactiveMu.Lock()
+	state := env.engine.interactiveStates[key]
+	env.engine.interactiveMu.Unlock()
+	state.mu.Lock()
+	state.turnSenderID = turnSender
+	state.mu.Unlock()
 	session := env.engine.sessions.GetOrCreateActive(key)
-	if env.engine.trySteerBusyMessage(p, &Message{SessionKey: key, Content: "follow up", ReplyCtx: key}, key, session, env.engine.sessions) {
-		t.Fatal("context-bearing request steered without an ordered receipt")
+	session.SetAgentSessionID("native", "agent")
+	session.recordContextMessages(receipts)
+	return env, p, as, session
+}
+
+func TestSteerNeedsGroupContextMatrix(t *testing.T) {
+	p := &contextTestPlatform{stubPlatformEngine: &stubPlatformEngine{n: "test"}, backgrounds: map[string]MessageContext{}, loadErrors: map[string]error{}}
+	e := &Engine{}
+	msg := &Message{SessionKey: "test:group", UserID: "bob", ReplyCtx: "test:group"}
+	cases := []struct {
+		name        string
+		platform    Platform
+		turnSender  string
+		receipts    int
+		want        bool
+		explanation string
+	}{
+		{"first trigger reads", p, "alice", 0, true, "no receipts yet"},
+		{"same sender skips", p, "bob", 3, false, "continuation of the running turn"},
+		{"other sender reads", p, "alice", 3, true, "issue #129 discussion"},
+		{"unknown sender reads", p, "", 3, true, "conservative"},
+		{"no platform context", &stubPlatformEngine{n: "test"}, "alice", 0, false, "private or plain target"},
 	}
-	if len(as.getSteerCalls()) != 0 || p.loadCount() != 0 {
-		t.Fatal("busy admission performed IO before dequeue")
+	for _, tc := range cases {
+		if got := e.steerNeedsGroupContext(tc.platform, msg, tc.turnSender, tc.receipts); got != tc.want {
+			t.Fatalf("%s: got %v want %v (%s)", tc.name, got, tc.want, tc.explanation)
+		}
+	}
+}
+
+func TestMessageContextSameSenderSteerSkipsRead(t *testing.T) {
+	key := "test:group"
+	env, p, as, _ := newContextSteerEnv(t, key, "alice", []string{key + ":old"})
+	p.setBackground(key, []ContextMessage{{ID: "old", SenderID: "alice", Text: "already seen", Time: time.Now()}}, nil)
+
+	if !env.engine.trySteerBusyMessage(p, &Message{SessionKey: key, UserID: "alice", Content: "also update the docs", ReplyCtx: key}, key, env.engine.sessions.GetOrCreateActive(key), env.engine.sessions) {
+		t.Fatal("same-sender follow-up should steer")
+	}
+	if calls := as.getSteerCalls(); len(calls) != 1 || strings.Contains(calls[0], "quoted_conversation_data") {
+		t.Fatalf("unexpected steer prompt: %v", calls)
+	}
+	if p.loadCount() != 0 {
+		t.Fatalf("same-sender steer must not read group history, loads=%d", p.loadCount())
+	}
+}
+
+func TestMessageContextOtherSenderSteersWithBackground(t *testing.T) {
+	key := "test:group"
+	env, p, as, session := newContextSteerEnv(t, key, "alice", []string{key + ":old"})
+	p.setBackground(key, []ContextMessage{{ID: "fresh", SenderID: "carol", SenderName: "Carol", Text: "shared decision changed", Time: time.Now()}}, nil)
+
+	msg := &Message{SessionKey: key, UserID: "bob", UserName: "Bob", Content: "what do you think", ReplyCtx: key, MessageID: "bob-1"}
+	if !env.engine.trySteerBusyMessage(p, msg, key, session, env.engine.sessions) {
+		t.Fatal("other-sender message should steer with background")
+	}
+	calls := as.getSteerCalls()
+	if len(calls) != 1 || !strings.Contains(calls[0], "shared decision changed") {
+		t.Fatalf("steer prompt missing background: %v", calls)
+	}
+	if p.loadCount() != 1 {
+		t.Fatalf("expected exactly one bounded read, got %d", p.loadCount())
+	}
+	state := env.engine.interactiveStates[key]
+	state.mu.Lock()
+	pendingReceipts := append([]string(nil), state.contextMessageIDs...)
+	state.mu.Unlock()
+	if len(pendingReceipts) == 0 {
+		t.Fatal("steer background receipts were not queued for the running turn")
+	}
+	completeMessageContext(state, session, env.engine.sessions)
+	if !session.seenContextMessages()[key+":fresh"] {
+		t.Fatal("steer background receipt was not committed with the turn")
+	}
+}
+
+func TestMessageContextBootstrapSteerReadsBeforeRPC(t *testing.T) {
+	key := "test:group"
+	env, p, as, session := newContextSteerEnv(t, key, "", nil)
+	p.setBackground(key, []ContextMessage{{ID: "boot", SenderID: "alice", Text: "topic background", Time: time.Now()}}, nil)
+
+	if !env.engine.trySteerBusyMessage(p, &Message{SessionKey: key, UserID: "alice", Content: "continue", ReplyCtx: key}, key, session, env.engine.sessions) {
+		t.Fatal("bootstrap steer should read then steer")
+	}
+	if p.loadCount() != 1 || len(as.getSteerCalls()) != 1 {
+		t.Fatalf("read/steer mismatch: loads=%d steers=%d", p.loadCount(), len(as.getSteerCalls()))
+	}
+}
+
+func TestMessageContextSteerFallsBackWhenTurnEnded(t *testing.T) {
+	key := "test:group"
+	env, p, as, session := newContextSteerEnv(t, key, "alice", []string{key + ":old"})
+	p.setBackground(key, []ContextMessage{{ID: "fresh", SenderID: "carol", Text: "new fact", Time: time.Now()}}, nil)
+	as.steerErr = fmt.Errorf("turn gone: %w", ErrSteerTurnMismatch)
+
+	if env.engine.trySteerBusyMessage(p, &Message{SessionKey: key, UserID: "bob", Content: "follow up", ReplyCtx: key}, key, session, env.engine.sessions) {
+		t.Fatal("definitive steer failure must fall back to the queue")
 	}
 }
 
