@@ -116,6 +116,12 @@ Manifest 不把“命令存在”误写成“当前一定能执行”：模型�
 
 只读会话能力 `model_provider_identity` 检查 `ModelProviderSession`，不公开其记录的 Provider 名称。可切换 Provider 的 Agent 执行群固定模型请求时需要此能力；引擎同时校验实际会话和当前 Agent 的身份。
 
+## 群推理强度
+
+`reasoning`/`effort` 命令公布 `/reasoning [<level>|group [<level>|reset]]`。`ReasoningEffortSwitcher` 保留原默认值切换；群固定另需 `PerTurnReasoningEffortSupporter`、非空强度列表、已验证群身份、持久化存储及实际会话/Provider 的逐回合兼容性。保持 `member` 权限，声明 `persistent_state`；无效群操作明确失败。
+
+群 effort 独立于群模型保存，使用相同的项目/平台/群隔离和重启恢复规则。排队请求执行时分别解析模型和强度，任务/预设显式指定的字段分别优先。重置一项保留另一项，进行中的回复不被打断。命令元数据明确默认值切换会重置对话，群操作则作用于独立范围。
+
 ## Cron 任务模型
 
 `cron` Agent CLI 工具契约包含可选 `model` 参数：仅 Prompt 任务可设置，省略继承，`cron edit <job-id> model ""` 恢复继承。注册/编辑写入任务持久状态；执行产生 Agent 回合及网络请求，但不切换 Provider、不修改项目或 Agent 默认模型。Shell 任务和不支持的 Agent 会拒绝显式模型，不能自动退回默认模型。

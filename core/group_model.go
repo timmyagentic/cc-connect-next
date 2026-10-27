@@ -91,13 +91,21 @@ func (e *Engine) groupDefaultModel(agent Agent, sessionKey string, backend Agent
 // A group selection is a default layer, not an explicit task override. Resolve
 // it for each dequeued turn, preserving explicit task/profile model precedence.
 func (e *Engine) prepareSessionTurnOverrides(agent Agent, sessions *SessionManager, session *Session, backend AgentSession, sessionKey string, profile AnswerProfileName, model, reasoning, tier string) (agentTurnOverrides, error) {
-	profileModel := ""
+	profileModel, profileReasoning := "", ""
 	if configured, ok := e.answerProfile(profile); ok {
 		profileModel = strings.TrimSpace(configured.Model)
+		profileReasoning = strings.TrimSpace(configured.ReasoningEffort)
 	}
 	if strings.TrimSpace(model) == "" && profileModel == "" {
 		var err error
 		model, err = e.groupDefaultModel(agent, sessionKey, backend)
+		if err != nil {
+			return agentTurnOverrides{}, err
+		}
+	}
+	if strings.TrimSpace(reasoning) == "" && profileReasoning == "" {
+		var err error
+		reasoning, err = e.groupDefaultReasoning(agent, sessionKey, backend)
 		if err != nil {
 			return agentTurnOverrides{}, err
 		}
@@ -115,6 +123,7 @@ func (e *Engine) prepareInteractiveTurnOverrides(state *interactiveState, agent 
 	if err == nil {
 		state.mu.Lock()
 		state.activeModelOverride = overrides.model
+		state.activeReasoningEffortOverride = overrides.reasoningEffort
 		state.mu.Unlock()
 	}
 	return overrides, err

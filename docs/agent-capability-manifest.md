@@ -125,6 +125,12 @@ The read-only session capability `model_provider_identity` checks
 provider-switching Agent must expose this identity for pinned group turns;
 the engine validates the concrete session as well as the current Agent.
 
+## Group reasoning effort
+
+The `reasoning`/`effort` command publishes `/reasoning [<level>|group [<level>|reset]]`. Legacy default switching stays available via `ReasoningEffortSwitcher`; group pinning additionally requires `PerTurnReasoningEffortSupporter`, a non-empty effort catalog, verified group identity, durable storage and compatible per-turn session/provider support. The `member` permission is unchanged and `persistent_state` is declared. Invalid group operations fail explicitly.
+
+Group effort is stored independently of the model, with the same project/platform/group scope and restart persistence. Each queued turn resolves model and effort separately: an explicit task/profile value wins for its own field. Resetting one binding preserves the other; a running reply is not interrupted. The command metadata describes default switching's conversation reset and the group operation's separate scope.
+
 ## Cron task models
 
 The `cron` Agent CLI tool contract includes optional `model`: prompt jobs only, omitted means inherit, and `cron edit <job-id> model ""` restores inheritance. Creating/editing writes persistent job state; execution starts an Agent turn and network requests without switching providers or changing project/Agent model defaults. Shell jobs and unsupported Agents reject explicit models rather than silently reverting to a default.

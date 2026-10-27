@@ -15,11 +15,18 @@ type GroupModelBinding struct {
 	Provider string `json:"provider,omitempty"`
 }
 
+// GroupReasoningBinding is independent of the group's model selection.
+type GroupReasoningBinding struct {
+	Effort   string `json:"effort"`
+	Provider string `json:"provider,omitempty"`
+}
+
 type projectStateData struct {
-	WorkDirOverride         string                       `json:"work_dir_override,omitempty"`
-	WorkspaceDirOverrides   map[string]string            `json:"workspace_dir_overrides,omitempty"`
-	WorkspaceModelOverrides map[string]string            `json:"workspace_model_overrides,omitempty"`
-	GroupModelBindings      map[string]GroupModelBinding `json:"group_model_bindings,omitempty"`
+	WorkDirOverride         string                           `json:"work_dir_override,omitempty"`
+	WorkspaceDirOverrides   map[string]string                `json:"workspace_dir_overrides,omitempty"`
+	WorkspaceModelOverrides map[string]string                `json:"workspace_model_overrides,omitempty"`
+	GroupModelBindings      map[string]GroupModelBinding     `json:"group_model_bindings,omitempty"`
+	GroupReasoningBindings  map[string]GroupReasoningBinding `json:"group_reasoning_bindings,omitempty"`
 }
 
 // ProjectStateStore persists lightweight runtime state for one project.
@@ -145,6 +152,38 @@ func (ps *ProjectStateStore) SaveGroupModelBinding(key string, binding GroupMode
 		next.GroupModelBindings[key] = binding
 	}
 
+	if err := ps.saveLocked(next); err != nil {
+		return err
+	}
+	ps.state = next
+	return nil
+}
+
+func (ps *ProjectStateStore) GroupReasoningBinding(key string) (GroupReasoningBinding, bool) {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	binding, ok := ps.state.GroupReasoningBindings[key]
+	return binding, ok
+}
+
+// SaveGroupReasoningBinding publishes only after a successful durable write.
+// Empty effort removes only the effort binding, preserving any model binding.
+func (ps *ProjectStateStore) SaveGroupReasoningBinding(key string, binding GroupReasoningBinding) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	next := ps.state
+	next.GroupReasoningBindings = make(map[string]GroupReasoningBinding, len(ps.state.GroupReasoningBindings)+1)
+	for k, v := range ps.state.GroupReasoningBindings {
+		next.GroupReasoningBindings[k] = v
+	}
+	if binding.Effort == "" {
+		delete(next.GroupReasoningBindings, key)
+		if len(next.GroupReasoningBindings) == 0 {
+			next.GroupReasoningBindings = nil
+		}
+	} else {
+		next.GroupReasoningBindings[key] = binding
+	}
 	if err := ps.saveLocked(next); err != nil {
 		return err
 	}
