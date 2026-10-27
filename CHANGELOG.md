@@ -7,6 +7,16 @@
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
+## v0.3.5-beta.4 (2026-10-27)
+
+See `changelogs/v0.3.5-beta.4.md` for bilingual highlights and verification boundaries.
+
+- Restore priority for explicitly configured Provider model lists, including their
+  order, aliases and descriptions.
+- Resolve Codex model catalog and cache paths using the effective configuration
+  home for each session and Provider.
+- Stable GitHub Latest and npm `latest` remain v0.3.4.
+
 ## v0.3.5-beta.3 (2026-10-27)
 
 See `changelogs/v0.3.5-beta.3.md` for bilingual highlights and usage notes.
