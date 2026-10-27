@@ -419,40 +419,42 @@ const (
 	MsgReasoningUsage             MsgKey = "reasoning_usage"
 	MsgReasoningSelectPlaceholder MsgKey = "reasoning_select_placeholder"
 
-	MsgModeUsage                    MsgKey = "mode_usage"
-	MsgLangSelectPlaceholder        MsgKey = "lang_select_placeholder"
-	MsgModelSelectPlaceholder       MsgKey = "model_select_placeholder"
-	MsgModeSelectPlaceholder        MsgKey = "mode_select_placeholder"
-	MsgProviderSelectPlaceholder    MsgKey = "provider_select_placeholder"
-	MsgProviderClearOption          MsgKey = "provider_clear_option"
-	MsgCardBack                     MsgKey = "card_back"
-	MsgCardPrev                     MsgKey = "card_prev"
-	MsgCardNext                     MsgKey = "card_next"
-	MsgCardTitleStatus              MsgKey = "card_title_status"
-	MsgCardTitleLanguage            MsgKey = "card_title_language"
-	MsgRichCardThinking             MsgKey = "rich_card_thinking"
-	MsgRichCardCallingTools         MsgKey = "rich_card_calling_tools"
-	MsgRichCardAnswering            MsgKey = "rich_card_answering"
-	MsgRichCardDone                 MsgKey = "rich_card_done"
-	MsgRichCardError                MsgKey = "rich_card_error"
-	MsgRichCardCompletedBody        MsgKey = "rich_card_completed_body"
-	MsgRichCardErrorBody            MsgKey = "rich_card_error_body"
-	MsgRichCardPrivacyNotice        MsgKey = "rich_card_privacy_notice"
-	MsgRichCardProgressFormat       MsgKey = "rich_card_progress_format"
-	MsgRichCardThinkingSummary      MsgKey = "rich_card_thinking_summary"
-	MsgRichCardToolSummary          MsgKey = "rich_card_tool_summary"
-	MsgRichCardAnswerSummary        MsgKey = "rich_card_answer_summary"
-	MsgRichCardErrorSummary         MsgKey = "rich_card_error_summary"
-	MsgRichCardUsageLimit           MsgKey = "rich_card_usage_limit"
-	MsgRichCardUsageLimitBody       MsgKey = "rich_card_usage_limit_body"
-	MsgRichCardUsageLimitSummary    MsgKey = "rich_card_usage_limit_summary"
-	MsgRichCardModelCapacity        MsgKey = "rich_card_model_capacity"
-	MsgRichCardModelCapacityBody    MsgKey = "rich_card_model_capacity_body"
-	MsgRichCardModelCapacitySummary MsgKey = "rich_card_model_capacity_summary"
-	MsgRecentContextIncomplete      MsgKey = "recent_context_incomplete"
-	MsgRichCardAuthRequired         MsgKey = "rich_card_authentication_required"
-	MsgRichCardAuthRequiredBody     MsgKey = "rich_card_authentication_required_body"
-	MsgRichCardAuthRequiredSummary  MsgKey = "rich_card_authentication_required_summary"
+	MsgModeUsage                     MsgKey = "mode_usage"
+	MsgLangSelectPlaceholder         MsgKey = "lang_select_placeholder"
+	MsgModelSelectPlaceholder        MsgKey = "model_select_placeholder"
+	MsgModeSelectPlaceholder         MsgKey = "mode_select_placeholder"
+	MsgProviderSelectPlaceholder     MsgKey = "provider_select_placeholder"
+	MsgProviderClearOption           MsgKey = "provider_clear_option"
+	MsgCardBack                      MsgKey = "card_back"
+	MsgCardPrev                      MsgKey = "card_prev"
+	MsgCardNext                      MsgKey = "card_next"
+	MsgCardTitleStatus               MsgKey = "card_title_status"
+	MsgCardTitleLanguage             MsgKey = "card_title_language"
+	MsgRichCardThinking              MsgKey = "rich_card_thinking"
+	MsgRichCardCallingTools          MsgKey = "rich_card_calling_tools"
+	MsgRichCardAnswering             MsgKey = "rich_card_answering"
+	MsgRichCardDone                  MsgKey = "rich_card_done"
+	MsgRichCardError                 MsgKey = "rich_card_error"
+	MsgRichCardCompletedBody         MsgKey = "rich_card_completed_body"
+	MsgRichCardErrorBody             MsgKey = "rich_card_error_body"
+	MsgRichCardPrivacyNotice         MsgKey = "rich_card_privacy_notice"
+	MsgRichCardProgressFormat        MsgKey = "rich_card_progress_format"
+	MsgRichCardThinkingSummary       MsgKey = "rich_card_thinking_summary"
+	MsgRichCardToolSummary           MsgKey = "rich_card_tool_summary"
+	MsgRichCardAnswerSummary         MsgKey = "rich_card_answer_summary"
+	MsgRichCardErrorSummary          MsgKey = "rich_card_error_summary"
+	MsgRichCardUsageLimit            MsgKey = "rich_card_usage_limit"
+	MsgRichCardUsageLimitBody        MsgKey = "rich_card_usage_limit_body"
+	MsgRichCardUsageLimitSummary     MsgKey = "rich_card_usage_limit_summary"
+	MsgRichCardModelCapacity         MsgKey = "rich_card_model_capacity"
+	MsgRichCardModelCapacityBody     MsgKey = "rich_card_model_capacity_body"
+	MsgRichCardModelCapacitySummary  MsgKey = "rich_card_model_capacity_summary"
+	MsgRecentContextIncomplete       MsgKey = "recent_context_incomplete"
+	MsgRecentContextLimited          MsgKey = "recent_context_limited"
+	MsgRecentContextMediaUnavailable MsgKey = "recent_context_media_unavailable"
+	MsgRichCardAuthRequired          MsgKey = "rich_card_authentication_required"
+	MsgRichCardAuthRequiredBody      MsgKey = "rich_card_authentication_required_body"
+	MsgRichCardAuthRequiredSummary   MsgKey = "rich_card_authentication_required_summary"
 	// Steer / presentation handoff (issue #27)
 	MsgRichCardSteering          MsgKey = "rich_card_steering"
 	MsgRichCardRedirected        MsgKey = "rich_card_redirected"
@@ -3458,13 +3460,26 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese: "選択したモデルは現在容量の上限に達しています", LangSpanish: "El modelo seleccionado no tiene capacidad disponible",
 	},
 	MsgRecentContextIncomplete: {
-		LangEnglish:            "Recent discussion context is incomplete: some messages could not be read or exceeded the configured window or size limits. I will answer using the available context.",
-		LangChinese:            "近期讨论上下文不完整：部分消息未能读取，或超出了配置的窗口与长度限制。我会基于可用内容回答。",
-		LangTraditionalChinese: "近期討論上下文不完整：部分訊息未能讀取，或超出了設定的時間範圍與長度限制。我會根據可用內容回答。",
-		LangJapanese:           "最近の会話の文脈は不完全です。一部のメッセージを取得できなかったか、設定された期間やサイズの上限を超えました。取得できた内容に基づいて回答します。",
-		LangSpanish:            "El contexto reciente está incompleto: no se pudieron leer algunos mensajes o se superaron los límites de tiempo o tamaño configurados. Responderé con el contexto disponible.",
+		LangEnglish:            "Recent discussion context is incomplete: the history request failed or timed out. I will answer using the available messages.",
+		LangChinese:            "近期讨论读取未完成：历史消息请求失败或超时。我会基于已读到的内容回答。",
+		LangTraditionalChinese: "近期討論讀取未完成：歷史訊息請求失敗或逾時。我會根據已讀到的內容回答。",
+		LangJapanese:           "最近の履歴の取得が失敗またはタイムアウトしました。取得済みの内容に基づいて回答します。",
+		LangSpanish:            "El contexto reciente está incompleto: la consulta del historial falló o agotó el tiempo. Responderé con los mensajes disponibles.",
 	},
-	MsgRichCardAuthRequired: {
+	MsgRecentContextLimited: {
+		LangEnglish:            "Recent discussion was limited by the history page, message or text budget. I will answer using the selected recent messages.",
+		LangChinese:            "近期讨论较多，已按历史页数、消息条数或文字长度限制保留最近内容。",
+		LangTraditionalChinese: "近期討論較多，已按歷史頁數、訊息條數或文字長度限制保留最近內容。",
+		LangJapanese:           "履歴のページ数・件数・文字数の上限に従い、最近の内容を選択しました。",
+		LangSpanish:            "Se seleccionaron los mensajes más recientes dentro de los límites de páginas, mensajes y texto.",
+	},
+	MsgRecentContextMediaUnavailable: {
+		LangEnglish:            "Some recent message content or attachments could not be read or exceeded the resource budget. Unavailable parts are marked in the context; other text and images remain available.",
+		LangChinese:            "部分近期消息内容或附件读取失败，或超出资源限额；缺失位置已在上下文中标注，其他文字和图片可正常参考。",
+		LangTraditionalChinese: "部分近期訊息內容或附件讀取失敗，或超出資源限額；缺失位置已在上下文中標註，其他文字和圖片可正常參考。",
+		LangJapanese:           "一部の内容や添付を取得できなかったか、リソース上限を超えました。欠落箇所を明示し、取得できた文字と画像を使用します。",
+		LangSpanish:            "No se pudo leer parte del contenido o los adjuntos, o se excedió el límite de recursos. Las partes no disponibles están marcadas; el resto del texto y las imágenes sigue disponible.",
+	}, MsgRichCardAuthRequired: {
 		LangEnglish: "Sign-in required", LangChinese: "需要重新登录", LangTraditionalChinese: "需要重新登入",
 		LangJapanese: "再ログインが必要です", LangSpanish: "Es necesario iniciar sesión",
 	},

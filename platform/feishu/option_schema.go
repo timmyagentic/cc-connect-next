@@ -112,8 +112,8 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 		case "group_context":
 			option.Type = "boolean"
 			option.Default = "false"
-			option.Description = "Before a group turn accepted by the configured reply rules, read bounded recent discussion as untrusted background. Compatible with mention-free replies and opt-in @all replies. Ordinary groups and real topics are isolated. Uses existing read access only; does not download background attachments or poll."
-			option.DescriptionZH = "符合回复规则的群聊回合开始前，补读有界近期讨论作为不可信背景；兼容无需 @ 回复和显式开启的 @全体 回复。普通群和真实话题分别隔离；仅使用已有读取权限，不下载背景附件、不轮询。"
+			option.Description = "Before a group turn accepted by the configured reply rules, read bounded recent discussion and expanded forwarded messages as untrusted background. Download images/files only for unseen entries selected within the text budget, with count, byte and timeout limits. Ordinary groups and real topics are isolated. Uses existing read access only; no polling. Unavailable content is explicitly marked."
+			option.DescriptionZH = "符合回复规则的群聊回合开始前，补读有界近期讨论并展开合并转发，作为不可信背景。仅为文本预算内选中的未读条目下载图片和文件，并限制数量、字节数和耗时。普通群和真实话题分别隔离；仅使用已有读取权限，不轮询；不可用内容明确标记。"
 			option.Keywords = []string{"recent discussion", "group context", "catch up", "补读近期讨论", "群聊上下文", "未@讨论", "群聊补读"}
 		case "group_context_include_peer_bots":
 			option.Type = "boolean"

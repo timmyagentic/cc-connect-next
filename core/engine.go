@@ -657,8 +657,9 @@ type interactiveState struct {
 	// prepended to a prompt for this state (guarded by mu).
 	capabilityBriefSent      bool
 	agentSession             AgentSession
-	startError               error    // immutable outcome when backend startup failed
-	contextMessageIDs        []string // candidate background IDs; committed only on successful completion
+	startError               error              // immutable outcome when backend startup failed
+	contextMessageIDs        []string           // candidate background IDs; committed only on successful completion
+	contextPreparationCancel context.CancelFunc // cancels history/media preparation before Send
 	platform                 Platform
 	replyCtx                 any
 	currentMessageID         string
@@ -4470,8 +4471,12 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// turn ended abnormally (eventsNeedResync=true, the default).
 	e.stopUnsolicitedReader(state)
 
-	promptContent := e.prepareMessageContext(p, msg.ReplyCtx, session, state, msg.Content, msg.MessageID)
-	promptContent = e.buildCapabilityPrompt(state, e.buildSenderPrompt(promptContent, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
+	historyContext := e.prepareMessageContext(p, msg.ReplyCtx, session, state, msg.Content, msg.MessageID)
+	if historyContext.Err != nil {
+		msg.scheduledResult.complete(historyContext.Err)
+		return
+	}
+	promptContent := e.buildCapabilityPrompt(state, e.buildSenderPrompt(historyContext.Text, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
 
 	sendStart := time.Now()
 	state.steerMu.Lock()
@@ -4510,7 +4515,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			sendDone <- err
 			return
 		}
-		sendDone <- e.sendAgentTurnWithOverrides(agent, as, promptContent, msg.Images, scopeFileAttachments(msg.Files, msg.MessageID), overrides)
+		sendDone <- e.sendAgentTurnWithOverrides(agent, as, promptContent, append(append([]ImageAttachment(nil), msg.Images...), historyContext.Images...), append(scopeFileAttachments(msg.Files, msg.MessageID), historyContext.Files...), overrides)
 	}()
 
 	e.processInteractiveEvents(state, session, sessions, interactiveKey, msg.MessageID, turnStart, stopTyping, sendDone, msg.ReplyCtx, msg.scheduledResult)
@@ -7258,8 +7263,12 @@ func (queue *turnQueue) handle() {
 			}
 		}
 
-		queuedPrompt := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
-		queuedPrompt = e.buildCapabilityPrompt(state, e.buildSenderPrompt(queuedPrompt, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
+		historyContext := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
+		if historyContext.Err != nil {
+			queue.control = turnReadStop
+			return
+		}
+		queuedPrompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(historyContext.Text, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
 
 		state.mu.Lock()
 		as := state.agentSession // capture under lock to avoid race with cleanup
@@ -7285,7 +7294,7 @@ func (queue *turnQueue) handle() {
 				nextSend <- err
 				return
 			}
-			nextSend <- e.sendAgentTurnWithOverrides(turnAgent, as, queuedPrompt, queued.images, queued.files, overrides)
+			nextSend <- e.sendAgentTurnWithOverrides(turnAgent, as, queuedPrompt, append(append([]ImageAttachment(nil), queued.images...), historyContext.Images...), append(append([]FileAttachment(nil), queued.files...), historyContext.Files...), overrides)
 		}()
 		pendingSend = nextSend
 
@@ -8854,8 +8863,11 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		queuedRichCardCopy := e.i18n.RichCardCopyForText(queued.content)
 		e.i18n.DetectAndSet(queued.content)
 		state.setTurnRichCardCopy(queued.messageID, queuedRichCardCopy)
-		prompt := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
-		prompt = e.buildCapabilityPrompt(state, e.buildSenderPrompt(prompt, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
+		historyContext := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
+		if historyContext.Err != nil {
+			return false
+		}
+		prompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(historyContext.Text, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
 
 		state.mu.Lock()
 		as := state.agentSession // capture under lock to avoid race with cleanup (mirrors #1436)
@@ -8890,7 +8902,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 				sendDone <- err
 				return
 			}
-			sendDone <- e.sendAgentTurnWithOverrides(turnAgent, as, prompt, queued.images, queued.files, overrides)
+			sendDone <- e.sendAgentTurnWithOverrides(turnAgent, as, prompt, append(append([]ImageAttachment(nil), queued.images...), historyContext.Images...), append(append([]FileAttachment(nil), queued.files...), historyContext.Files...), overrides)
 		}()
 
 		var stopTyping func()
@@ -12437,7 +12449,11 @@ func (e *Engine) stopInteractiveSessionWithOptions(sessionKey string, notifyQueu
 	agentSession := state.agentSession
 	closeTarget := sessionCloseTarget{platform: state.platform, replyCtx: state.replyCtx, userStop: true}
 	currentMessageID := state.currentMessageID
+	cancelPreparation := state.contextPreparationCancel
 	state.mu.Unlock()
+	if cancelPreparation != nil {
+		cancelPreparation()
+	}
 	if !notifyQueued {
 		state.cancelTurnSilently(currentMessageID)
 	}

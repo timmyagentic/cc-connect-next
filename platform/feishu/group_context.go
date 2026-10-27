@@ -2,7 +2,6 @@ package feishu
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -134,9 +133,11 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any) (result c
 		Scope:    p.Name() + ":" + p.appID + ":" + rctx.chatID + ":" + rctx.threadID,
 		MaxChars: p.groupContext.maxChars,
 	}
+	forwardIDs := make(map[string]bool)
 	defer func() {
 		result.Incomplete = result.Incomplete || readErr != nil
 		finishGroupContext(&result, p.groupContext.maxMessages)
+		p.expandGroupContextForwards(ctx, rctx, result.Messages, forwardIDs)
 	}()
 	cutoff := time.UnixMilli(rctx.contextTimeMs)
 	if rctx.contextTimeMs <= 0 {
@@ -151,10 +152,8 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any) (result c
 	pageToken := ""
 	for page := 0; page < groupContextMaxPages; page++ {
 		builder := larkim.NewListMessageReqBuilder().ContainerIdType(containerType).ContainerId(containerID).
-			SortType("ByCreateTimeDesc").PageSize(groupContextPageSize).WithSenderName(true)
-		if p.groupContext.includePeerBots {
-			builder.CardMsgContentType("user_card_content")
-		}
+			SortType("ByCreateTimeDesc").PageSize(groupContextPageSize).WithSenderName(true).
+			CardMsgContentType("user_card_content")
 		if pageToken != "" {
 			builder.PageToken(pageToken)
 		}
@@ -176,8 +175,10 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any) (result c
 		}
 		pastWindow := false
 		for _, item := range resp.Data.Items {
-			entry, usable, incomplete := p.contextMessage(item, rctx, start, cutoff)
-			result.Incomplete = result.Incomplete || incomplete
+			entry, usable, unreadable := p.contextMessage(item, rctx, start, cutoff)
+			if !usable && unreadable {
+				result.Unreadable = true
+			}
 			if item != nil {
 				if ms, err := strconv.ParseInt(stringValue(item.CreateTime), 10, 64); err == nil && ms < start.UnixMilli() {
 					pastWindow = true
@@ -187,6 +188,7 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any) (result c
 				continue
 			}
 			seen[entry.ID] = true
+			forwardIDs[entry.ID] = stringValue(item.MsgType) == "merge_forward"
 			result.Messages = append(result.Messages, entry)
 		}
 		hasMore := resp.Data.HasMore != nil && *resp.Data.HasMore
@@ -227,9 +229,17 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 	if id == rctx.messageID {
 		return core.ContextMessage{}, false, false
 	}
-	senderType, senderID := "", ""
+	senderType, senderID, senderName := "", "", ""
 	if item.Sender != nil {
 		senderType, senderID = stringValue(item.Sender.SenderType), stringValue(item.Sender.Id)
+		senderName = stringValue(item.Sender.SenderName)
+	}
+	// Feishu system events (group creation, invitations, role changes) have
+	// no user/app sender. Attribute them explicitly instead of treating a
+	// perfectly readable new group's history as a failed read.
+	systemMessage := stringValue(item.MsgType) == "system"
+	if systemMessage {
+		senderType, senderID, senderName = "system", "system", "System"
 	}
 	if senderType == "app" && (!p.groupContext.includePeerBots || senderID == p.appID || p.peerBots[senderID] == "") {
 		return core.ContextMessage{}, false, false
@@ -242,8 +252,8 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 		return core.ContextMessage{}, false, false
 	}
 	ms, err := strconv.ParseInt(stringValue(item.CreateTime), 10, 64)
-	if err != nil || id == "" || item.Sender == nil || item.Body == nil ||
-		(senderType != "user" && senderType != "app") || senderID == "" {
+	if err != nil || id == "" ||
+		(!systemMessage && (item.Sender == nil || (senderType != "user" && senderType != "app") || senderID == "")) {
 		return core.ContextMessage{}, false, true
 	}
 	at := time.UnixMilli(ms).UTC()
@@ -252,55 +262,32 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 	}
 	// A queued trigger cannot read the old version of a card edited after it
 	// arrived. Omit that snapshot visibly; the next trigger can pick it up.
-	if senderType == "app" && stringValue(item.UpdateTime) != "" {
+	if stringValue(item.UpdateTime) != "" {
 		updated, err := strconv.ParseInt(*item.UpdateTime, 10, 64)
 		if err != nil || updated > cutoff.UnixMilli() {
 			return core.ContextMessage{}, false, true
 		}
 	}
-	content := stringValue(item.Body.Content)
-	var text string
-	incomplete := false
-	switch stringValue(item.MsgType) {
-	case "text":
-		var body struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal([]byte(content), &body); err != nil {
-			return core.ContextMessage{}, false, true
-		}
-		text = replaceMentions(body.Text, item.Mentions)
-	case "post":
-		text = replaceMentions(extractPostPlainText(content), item.Mentions)
-	case "interactive":
-		if senderType != "app" {
-			return core.ContextMessage{}, false, true
-		}
-		text = extractGroupContextCardText(content)
-		if text == "" {
-			return core.ContextMessage{}, false, true
-		}
-	default:
-		// Never download another participant's attachments implicitly.
-		return core.ContextMessage{}, false, true
+	content := ""
+	if item.Body != nil {
+		content = stringValue(item.Body.Content)
 	}
+	parsed := parseGroupContextContent(stringValue(item.MsgType), content, id)
+	text := replaceContextMentions(parsed.Text, item.Mentions)
 	if strings.TrimSpace(text) == "" {
 		return core.ContextMessage{}, false, false
 	}
-	entry := core.ContextMessage{ID: id, SenderID: senderID, SenderName: stringValue(item.Sender.SenderName), SenderType: senderType, Time: at, ReplyTo: stringValue(item.ParentId)}
+	entry := core.ContextMessage{ID: id, SenderID: senderID, SenderName: senderName, SenderType: senderType, Time: at, ReplyTo: stringValue(item.ParentId), Resources: parsed.Resources, Incomplete: parsed.Incomplete}
 	if senderType == "app" {
 		entry.SenderName = p.peerBots[senderID]
 		// Hash the complete readable snapshot before truncation. Streaming
 		// cards keep their message ID when the final answer replaces progress.
-		entry.Revision = fmt.Sprintf("%x", sha256.Sum256([]byte(text)))
-	}
-	runes := []rune(text)
-	if len(runes) > p.groupContext.maxChars {
-		text = string(runes[:p.groupContext.maxChars])
-		incomplete = true
+		entry.Text = text
+		entry.Revision = groupContextRevision(entry)
 	}
 	entry.Text = text
-	return entry, true, incomplete
+	boundGroupContextText(&entry, p.groupContext.maxChars)
+	return entry, true, entry.Incomplete
 }
 
 // Retain the card title: in cc-connect it distinguishes working, completed,
@@ -392,7 +379,7 @@ func extractContextSourceElements(elements []json.RawMessage, parts *[]string) {
 			}
 		}
 		if node.Tag == "img" {
-			*parts = append(*parts, "[image: attachment not provided from history]")
+			*parts = append(*parts, "[card image]")
 		}
 		extractContextSourceElements(node.Elements, parts)
 		extractContextSourceElements(node.Columns, parts)

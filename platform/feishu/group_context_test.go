@@ -58,7 +58,7 @@ func TestGroupContextConfigurationBounds(t *testing.T) {
 	}
 }
 
-func contextAPIPlatform(t *testing.T, handler http.HandlerFunc) (*Platform, *atomic.Int64) {
+func contextAPIPlatform(t *testing.T, handler http.HandlerFunc, allowedPaths ...string) (*Platform, *atomic.Int64) {
 	t.Helper()
 	requests := &atomic.Int64{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -68,7 +68,11 @@ func contextAPIPlatform(t *testing.T, handler http.HandlerFunc) (*Platform, *ato
 			return
 		}
 		requests.Add(1)
-		if r.URL.Path != "/open-apis/im/v1/messages" {
+		allowed := r.URL.Path == "/open-apis/im/v1/messages"
+		for _, path := range allowedPaths {
+			allowed = allowed || r.URL.Path == path
+		}
+		if !allowed {
 			t.Errorf("context must not read contacts, other chats or attachments: %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
@@ -77,7 +81,7 @@ func contextAPIPlatform(t *testing.T, handler http.HandlerFunc) (*Platform, *ato
 	}))
 	t.Cleanup(server.Close)
 	cfg, _ := parseGroupContextConfig(map[string]any{"group_context": true})
-	p := &Platform{platformName: "feishu", appID: "cli_context", groupContext: cfg, botOpenID: "ou_bot", allowChat: "oc_group",
+	p := &Platform{platformName: "feishu", appID: "cli_context", appSecret: "synthetic-secret", groupContext: cfg, botOpenID: "ou_bot", allowChat: "oc_group", domain: server.URL, resourceDownloadHTTP: server.Client(),
 		client: lark.NewClient("cli_context", "synthetic-secret", lark.WithOpenBaseUrl(server.URL), lark.WithHttpClient(server.Client()), lark.WithEnableTokenCache(false)),
 	}
 	return p, requests
@@ -132,6 +136,9 @@ func TestGroupContextReadsOnlyMatchingChatOrRealTopic(t *testing.T) {
 			if got.Messages[0].Time != now.Add(-2*time.Minute) || calls.Load() != 1 {
 				t.Fatalf("unexpected timestamps/reads: %+v", got)
 			}
+			if !got.Unreadable {
+				t.Fatal("unexpected cross-chat record was silently discarded without disclosure")
+			}
 			for _, target := range []any{replyContext{chatID: "oc_group"}, replyContext{chatID: "oc_other", contextEligible: true}, "synthetic target"} {
 				before := calls.Load()
 				if c, err := p.LoadMessageContext(context.Background(), target); err != nil || len(c.Messages) != 0 || calls.Load() != before {
@@ -160,7 +167,7 @@ func TestGroupContextBoundsPagingAndDisclosesUnavailableText(t *testing.T) {
 	})
 	p.groupContext.maxMessages = 2
 	got, err := p.LoadMessageContext(context.Background(), replyContext{chatID: "oc_group", messageID: "trigger", contextEligible: true, contextTimeMs: now.UnixMilli()})
-	if err != nil || !got.Incomplete || len(got.Messages) != 2 || got.Messages[0].ID != "om_1" || got.Messages[1].ID != "om_0" || calls.Load() != 2 {
+	if err != nil || !got.Incomplete || len(got.Messages) != 2 || got.Messages[0].ID != "om_0" || got.Messages[1].ID != "om_file" || !got.Messages[1].Incomplete || calls.Load() != 2 {
 		t.Fatalf("bounded newest context = %+v, calls=%d, err=%v", got, calls.Load(), err)
 	}
 }

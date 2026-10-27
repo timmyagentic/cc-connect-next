@@ -3604,7 +3604,7 @@ Leave unset to consume events over WebSocket; set the event encrypt key to selec
 
 ### `projects.platforms.options.group_context` — `feishu, lark`
 
-Before a group turn accepted by the configured reply rules, read bounded recent discussion as untrusted background. Compatible with mention-free replies and opt-in @all replies. Ordinary groups and real topics are isolated. Uses existing read access only; does not download background attachments or poll.
+Before a group turn accepted by the configured reply rules, read bounded recent discussion and expanded forwarded messages as untrusted background. Download images/files only for unseen entries selected within the text budget, with count, byte and timeout limits. Ordinary groups and real topics are isolated. Uses existing read access only; no polling. Unavailable content is explicitly marked.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`

@@ -195,8 +195,12 @@ turn. It does not execute quoted commands or grant tool permissions. Its
 availability reports disabled configuration, an ineligible target, or the
 conditional need for existing history access; unavailable adapters retain the
 entry with a current-message fallback. Failed/truncated reads are disclosed.
+Selected history can include attributed forwarded text, images and files. Media is
+downloaded only after deduplication and text-budget selection, using bounded
+resource requests. Unavailable content is marked; failed media remains retryable.
+
 The associated `group_context` configuration defaults off. Reads occur only
-for accepted mentions and never by polling; ID receipts persist only after a
+for requests accepted by the configured group reply rules and never by polling; ID receipts persist only after a
 successful turn. Busy requests queue to preserve that ordering.
 
 ## Conversation speed

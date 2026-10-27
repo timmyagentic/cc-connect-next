@@ -82,7 +82,7 @@ func TestGroupContextPeersReadPublicCardsOnlyInMatchingScope(t *testing.T) {
 				peerContextCard("too-old", "oc_group", thread, "cli_peer", "Completed", "outside 30 minutes", now.Add(-31*time.Minute)),
 				peerContextCard("future", "oc_group", thread, "cli_peer", "Completed", "future", now.Add(time.Second)),
 			}
-			wantCards := false
+			wantCards := true // human cards need original content too
 			p, calls := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
 				if got := r.URL.Query().Get("card_msg_content_type"); (got == "user_card_content") != wantCards {
 					t.Errorf("card format = %q", got)
@@ -153,9 +153,33 @@ func TestGroupContextPeerCardRevisionsAndSnapshotTime(t *testing.T) {
 	item.MsgType = stringPtr("interactive")
 	for _, content := range []string{`{"unsupported":true}`, `{"header":{"title":{"content":"Completed"}},"body":{}}`} {
 		item.Body.Content = stringPtr(content)
-		if _, usable, incomplete := p.contextMessage(item, rctx, now.Add(-30*time.Minute), now); usable || !incomplete {
+		if entry, usable, incomplete := p.contextMessage(item, rctx, now.Add(-30*time.Minute), now); !usable || !incomplete || !entry.Incomplete || !strings.Contains(entry.Text, "unavailable") {
 			t.Fatal("unreadable/title-only card reported complete")
 		}
+	}
+}
+
+func TestGroupContextPeerImageOnlyEditInvalidatesReceipt(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	p := &Platform{appID: "self", peerBots: map[string]string{"peer": "Peer"}, groupContext: groupContextConfig{includePeerBots: true, maxChars: 8000}}
+	parse := func(key string) core.ContextMessage {
+		m := contextTypedMessage("same-card", "interactive", `{"body":{"elements":[{"tag":"img","img_key":"`+key+`"}]}}`, now.Add(-time.Minute))
+		m["sender"] = map[string]string{"id": "peer", "sender_type": "app"}
+		data, _ := json.Marshal(m)
+		var item larkim.Message
+		_ = json.Unmarshal(data, &item)
+		got, usable, _ := p.contextMessage(&item, replyContext{chatID: "oc_group"}, now.Add(-30*time.Minute), now)
+		if !usable || len(got.Resources) != 1 {
+			t.Fatal("image card missing")
+		}
+		return got
+	}
+	old, replacement := parse("image-old"), parse("image-new")
+	if old.Text != replacement.Text || old.Revision == replacement.Revision {
+		t.Fatal("image-only edit would be mistaken for an already delivered card")
+	}
+	if replacement.Revision != parse("image-new").Revision {
+		t.Fatal("unchanged image would be redelivered")
 	}
 }
 
