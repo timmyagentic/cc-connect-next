@@ -9,7 +9,10 @@ import (
 )
 
 func TestPrivacyGitExplicitChildAllowsAncestorTraversalOnly(t *testing.T) {
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desktop := filepath.Join(root, "Desktop")
 	repo := filepath.Join(root, "project")
 	gitdir := filepath.Join(desktop, "allowed", "gitdir")
