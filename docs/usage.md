@@ -447,9 +447,35 @@ Bindings are isolated within each bot/project:
 - **Groups:** the key is `platform:groupID`. A binding covers **all members and all existing or new topics in that group**.
 - **Private chats:** the key is `platform:dm:userID`, using the verified direct-message user's ID. Each user's selection is separate from other users, groups, platforms, and bots/projects, even when they share a workspace directory.
 
-Bindings are not tied to a topic, conversation, or workspace directory. They persist across `/reset`, `/new`, and bridge restarts. `/model reset` removes only the model binding and restores default-model inheritance; this chat's reasoning effort stays unchanged. Selections use persistent project state and require no new `config.toml` fields. Failed saves are reported without claiming success.
+Bindings are not tied to a topic, conversation, or workspace directory. They persist across `/reset`, `/new`, and bridge restarts. `/model reset` removes only the model binding and restores default-model inheritance; this chat's reasoning effort stays unchanged.
 
-Older model-state fields are not migrated. Previous chat model bindings and workspace-specific model defaults are not carried over; select the desired model again with the commands above.
+The authoritative settings are `[[projects.chat_models]]` entries in `config.toml`, under the corresponding `[[projects]]`. `/model <name>` writes the same entry that you can edit by hand; `/model reset` deletes it. Failed saves leave the running selection unchanged and report an error. Other bots/projects, comments, and unrelated settings are preserved.
+
+For example, inside an existing Codex project that has a `feishu` platform and a provider named `relay`:
+
+```toml
+[[projects.chat_models]]
+platform = "feishu"
+chat_id = "oc_example_group"
+agent = "codex"
+provider = "relay"
+model = "gpt-4.1"
+
+[[projects.chat_models]]
+platform = "feishu"
+user_id = "ou_example_user"
+agent = "codex"
+provider = "relay"
+model = "o4-mini"
+```
+
+Set exactly one of `chat_id` (group/channel ID) or `user_id` (private-chat user's ID). Duplicate bindings for the same project/platform/chat are rejected. `provider` is a provider name configured for this project, without an Agent prefix. Empty or omitted `provider` means the native provider, **not** inheritance from the currently active provider. `agent` may be omitted to use the project's Agent type; chat commands save it explicitly so a later adapter change cannot silently reuse the binding with a different Agent. The binding checks the provider identity and does not switch providers.
+
+After manually editing or deleting entries, run `/config reload` in the affected bot/project. The reload replaces its complete binding table, so deleted entries resume following the project default. It reports the number of bindings loaded. Running replies keep their model; subsequent requests, including queued ones, use the reloaded settings. An invalid configuration is reported without replacing the existing binding table.
+
+Bindings retain the expected platform and provider identity even if those are later removed. Entries for inactive platforms remain dormant; a missing or different active provider produces an error only in the affected chat, without switching provider or falling back to the default.
+
+On startup, existing `group_model_bindings` (beta.9) and `chat_model_bindings` (beta.10) in `projects/<project>.state.json` are imported into TOML. Explicit TOML entries win when both sources identify the same chat. Only after saving TOML successfully are the old model fields removed; directory and reasoning state are retained. A migration failure stops startup and preserves recoverable data for retry. The old verified `group_model_key` session metadata is also read as `chat_key`. Workspace-specific model defaults are not converted into chat bindings because a workspace does not identify a chat.
 
 Chat selections are resolved when each new request executes, including queued requests. A change or reset takes effect on the next new request; an already running reply keeps its model. An explicit one-shot model from `/fast`, another answer profile, or a task takes precedence for that request; subsequent ordinary messages return to the chat's selection. A profile without an explicit model still inherits the chat model. Model and reasoning effort are resolved independently: overriding one field does not discard the other field's chat setting.
 

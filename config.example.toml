@@ -873,6 +873,36 @@ name = "my-backend"
 #   - check background tasks
 #   - continue unfinished work
 
+# Chat model bindings — for a project with per-turn model support (Codex).
+# 聊天模型绑定 — 用于支持逐回合指定模型的项目（Codex）。
+# /model <name> writes the current chat here; /model reset removes its entry.
+# /model <name> 将当前聊天选择写入这里；/model reset 删除对应条目。
+# After manual edits/deletions, run /config reload in this bot/project.
+# 手工修改/删除后在本机器人/项目执行 /config reload，后续回合生效。
+# Group members and topics share chat_id; private chats use user_id instead.
+# 群内成员与话题共用 chat_id；私聊改用 user_id，两者必须且只能填写一个。
+# Keep expected platform/provider identities even when temporarily unavailable.
+# 平台或 Provider 暂不可用时保留其预期身份；对应聊天不会静默回退。
+# Omitted/empty provider means native, not the active provider; it does not switch providers.
+# provider 省略或为空表示原生 Provider，不表示继承当前 Provider，也不会切换 Provider。
+# agent is optional (defaults to projects.agent.type); commands save it explicitly.
+# agent 可省略（默认 projects.agent.type）；聊天命令会明确保存，供身份核对。
+# Example for a Codex project; place under its corresponding [[projects]].
+# Codex 项目示例，放在对应的 [[projects]] 内。
+# [[projects.chat_models]]
+# platform = "feishu"
+# chat_id = "oc_example_group"
+# agent = "codex"
+# provider = "relay"
+# model = "gpt-4.1"
+#
+# [[projects.chat_models]]
+# platform = "feishu"
+# user_id = "ou_example_user"
+# agent = "codex"
+# provider = "relay"
+# model = "o4-mini"
+
 [projects.agent]
 type = "claudecode"
 

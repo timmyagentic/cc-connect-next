@@ -615,6 +615,7 @@ type ProjectConfig struct {
 	BusyMessageMode string             `toml:"busy_message_mode,omitempty"`
 	Agent           AgentConfig        `toml:"agent"`
 	Platforms       []PlatformConfig   `toml:"platforms"`
+	ChatModels      []ChatModelConfig  `toml:"chat_models,omitempty"`
 	Heartbeat       HeartbeatConfig    `toml:"heartbeat"`
 	AutoCompress    AutoCompressConfig `toml:"auto_compress"`
 	// ResetOnIdleMins automatically rotates to a new cc-connect-next session after
@@ -1397,6 +1398,9 @@ func (c *Config) validateInternal(permissive bool) error {
 			if p.Type == "" {
 				return fmt.Errorf("config: %s.platforms[%d].type is required", prefix, j)
 			}
+		}
+		if err := validateChatModels(prefix, proj); err != nil {
+			return err
 		}
 		switch proj.Mode {
 		case "", "fixed", "multi-workspace":

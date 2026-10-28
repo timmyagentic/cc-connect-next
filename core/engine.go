@@ -1398,9 +1398,17 @@ func (e *Engine) SetDisplaySaveFunc(fn func(mode *string, thinkingMessages *bool
 
 // ConfigReloadResult describes what was updated by a config reload.
 type ConfigReloadResult struct {
-	DisplayUpdated   bool
-	ProvidersUpdated int
-	CommandsUpdated  int
+	DisplayUpdated    bool
+	ProvidersUpdated  int
+	CommandsUpdated   int
+	ChatModelsUpdated int
+}
+
+func (e *Engine) ReloadChatModels() (int, error) {
+	if e.projectState == nil {
+		return 0, nil
+	}
+	return e.projectState.ReloadChatModels()
 }
 
 func (e *Engine) SetConfigReloadFunc(fn func() (*ConfigReloadResult, error)) {
@@ -17339,7 +17347,7 @@ func (e *Engine) cmdConfigReload(p Platform, msg *Message) {
 		return
 	}
 	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgConfigReloaded),
-		result.DisplayUpdated, result.ProvidersUpdated, result.CommandsUpdated))
+		result.DisplayUpdated, result.ProvidersUpdated, result.CommandsUpdated, result.ChatModelsUpdated))
 }
 
 func (e *Engine) cmdRestart(p Platform, msg *Message) {

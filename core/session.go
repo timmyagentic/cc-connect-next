@@ -318,6 +318,24 @@ type UserMeta struct {
 	ChatKey string `json:"chat_key,omitempty"`
 }
 
+// beta.9 persisted the same verified identity under group_model_key. Read it
+// once without guessing identity from a session key; future saves use chat_key.
+func (m *UserMeta) UnmarshalJSON(data []byte) error {
+	type current UserMeta
+	var decoded struct {
+		current
+		LegacyChatKey string `json:"group_model_key"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*m = UserMeta(decoded.current)
+	if m.ChatKey == "" {
+		m.ChatKey = decoded.LegacyChatKey
+	}
+	return nil
+}
+
 // snapshotVersion tracks the schema version so we can detect data saved by
 // older code that didn't persist all migration flags.
 //   - 0 (missing): original format or early PastIDTracking-only format

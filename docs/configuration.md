@@ -36,6 +36,12 @@ Configure recurring defaults, one-shot task behavior, and periodic main-session 
 
 Related configuration: `cron.silent`, `cron.session_mode`, `projects.heartbeat.enabled`, `projects.heartbeat.interval_mins`, `projects.heartbeat.session_key`
 
+### Persistent models for groups and private chats (`chat-model-bindings`)
+
+Keep each chat's model in config.toml. Chat selections and manual edits use the same project-scoped settings; reload applies edits and removals to subsequent turns.
+
+Related configuration: `projects.chat_models.platform`, `projects.chat_models.chat_id`, `projects.chat_models.user_id`, `projects.chat_models.model`, `projects.chat_models.provider`, `projects.chat_models.agent`
+
 ### Commands, aliases, and content policy (`customization`)
 
 Add prompt/exec commands, natural-language aliases, banned words, and per-project command restrictions.
@@ -2571,6 +2577,94 @@ Override the process-wide busy-message policy for one project.
 - Takes effect: `restart`
 - Allowed values: `steer`, `queue`
 - Example: `busy_message_mode = "steer"`
+
+### `projects.chat_models.agent`
+
+Record the expected Agent type for the provider identity check. Omission uses this project's Agent type; chat commands save the current type explicitly.
+
+- Source: `toml`
+- Placement: `[[projects.chat_models]] (inside one [[projects]])`
+- Scope: `project`
+- Type: `string`
+- Requirement: `optional`
+- Default: `projects.agent.type`
+- Default source: `inherit`
+- Takes effect: `reload`
+- Example: `agent = "codex"`
+
+### `projects.chat_models.chat_id`
+
+Bind a group/channel ID; all its members and topics share this model. Set exactly one of chat_id or user_id.
+
+- Source: `toml`
+- Placement: `[[projects.chat_models]] (inside one [[projects]])`
+- Scope: `project`
+- Type: `string`
+- Requirement: `conditional`
+- Default: `unset`
+- Default source: `unset`
+- Takes effect: `reload`
+- Required when: `projects.chat_models.user_id is unset`
+- Conflicts with: `projects.chat_models.user_id`
+- Example: `chat_id = "oc_example_group"`
+
+### `projects.chat_models.model`
+
+Pin the model ID for this chat. /model writes this entry and /model reset removes it; manual edits apply after /config reload to subsequent turns, preserving the running turn.
+
+- Source: `toml`
+- Placement: `[[projects.chat_models]] (inside one [[projects]])`
+- Scope: `project`
+- Type: `string`
+- Requirement: `required`
+- Default: `none`
+- Default source: `none`
+- Takes effect: `reload`
+- Example: `model = "gpt-4.1"`
+
+### `projects.chat_models.platform`
+
+Name the messaging platform for a persistent chat model binding. Entries for inactive platforms remain dormant.
+
+- Source: `toml`
+- Placement: `[[projects.chat_models]] (inside one [[projects]])`
+- Scope: `project`
+- Type: `string`
+- Requirement: `required`
+- Default: `none`
+- Default source: `none`
+- Takes effect: `reload`
+- Example: `platform = "feishu"`
+
+### `projects.chat_models.provider`
+
+Name the expected project provider, without the Agent prefix. Empty or omitted means the native provider, not inheritance; this binding does not switch providers. A missing or different active provider fails only the affected chat.
+
+- Source: `toml`
+- Placement: `[[projects.chat_models]] (inside one [[projects]])`
+- Scope: `project`
+- Type: `string`
+- Requirement: `optional`
+- Default: `native provider`
+- Default source: `builtin`
+- Takes effect: `reload`
+- Example: `provider = "relay"`
+
+### `projects.chat_models.user_id`
+
+Bind a private-chat user's platform ID, rather than a private conversation ID. Set exactly one of user_id or chat_id.
+
+- Source: `toml`
+- Placement: `[[projects.chat_models]] (inside one [[projects]])`
+- Scope: `project`
+- Type: `string`
+- Requirement: `conditional`
+- Default: `unset`
+- Default source: `unset`
+- Takes effect: `reload`
+- Required when: `projects.chat_models.chat_id is unset`
+- Conflicts with: `projects.chat_models.chat_id`
+- Example: `user_id = "ou_example_user"`
 
 ### `projects.disabled_commands`
 

@@ -30,9 +30,11 @@ type projectStateData struct {
 
 // ProjectStateStore persists lightweight runtime state for one project.
 type ProjectStateStore struct {
-	mu        sync.RWMutex
-	storePath string
-	state     projectStateData
+	mu            sync.RWMutex
+	storePath     string
+	state         projectStateData
+	chatModelLoad func() (map[string]ChatModelBinding, error)
+	chatModelSave func(string, ChatModelBinding) (map[string]ChatModelBinding, error)
 }
 
 func NewProjectStateStore(path string) *ProjectStateStore {
@@ -102,6 +104,14 @@ func (ps *ProjectStateStore) ChatModelBinding(key string) (ChatModelBinding, boo
 func (ps *ProjectStateStore) SaveChatModelBinding(key string, binding ChatModelBinding) error {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
+	if ps.chatModelSave != nil {
+		bindings, err := ps.chatModelSave(key, binding)
+		if err != nil {
+			return err
+		}
+		ps.state.ChatModelBindings = bindings
+		return nil
+	}
 
 	next := ps.state
 	next.ChatModelBindings = make(map[string]ChatModelBinding, len(ps.state.ChatModelBindings)+1)
@@ -122,6 +132,39 @@ func (ps *ProjectStateStore) SaveChatModelBinding(key string, binding ChatModelB
 	}
 	ps.state = next
 	return nil
+}
+
+// ConfigureChatModels makes config the authoritative store, including when it
+// contains no bindings. Call before accepting messages. The callbacks run under
+// the same lock as commands and reload, so an older reload cannot overwrite a
+// selection that has just been saved. They must not call back into this store.
+func (ps *ProjectStateStore) ConfigureChatModels(load func() (map[string]ChatModelBinding, error), save func(string, ChatModelBinding) (map[string]ChatModelBinding, error)) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if load == nil || save == nil {
+		return fmt.Errorf("chat model configuration requires load and save callbacks")
+	}
+	bindings, err := load()
+	if err != nil {
+		return err
+	}
+	ps.chatModelLoad, ps.chatModelSave = load, save
+	ps.state.ChatModelBindings = bindings
+	return nil
+}
+
+func (ps *ProjectStateStore) ReloadChatModels() (int, error) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if ps.chatModelLoad == nil {
+		return len(ps.state.ChatModelBindings), nil
+	}
+	bindings, err := ps.chatModelLoad()
+	if err != nil {
+		return 0, err
+	}
+	ps.state.ChatModelBindings = bindings
+	return len(bindings), nil
 }
 
 func (ps *ProjectStateStore) GroupReasoningBinding(key string) (GroupReasoningBinding, bool) {
@@ -167,6 +210,11 @@ func (ps *ProjectStateStore) Save() {
 func (ps *ProjectStateStore) saveLocked(state projectStateData) error {
 	if ps.storePath == "" {
 		return nil
+	}
+	if ps.chatModelLoad != nil {
+		// Other project state (directories, reasoning) must never re-create a
+		// second source of model preferences in JSON.
+		state.ChatModelBindings = nil
 	}
 
 	data, err := json.MarshalIndent(state, "", "  ")

@@ -528,7 +528,16 @@ func main() {
 		}
 
 		workDir, _ := proj.Agent.Options["work_dir"].(string)
-		projectState := core.NewProjectStateStore(projectStatePath(cfg.DataDir, proj.Name))
+		statePath := projectStatePath(cfg.DataDir, proj.Name)
+		if err := migrateChatModels(proj.Name, statePath); err != nil {
+			slog.Error("failed to migrate chat models", "project", proj.Name, "error", err)
+			os.Exit(1)
+		}
+		projectState := core.NewProjectStateStore(statePath)
+		if err := configureChatModels(projectState, proj.Name); err != nil {
+			slog.Error("failed to load chat models", "project", proj.Name, "error", err)
+			os.Exit(1)
+		}
 		effectiveWorkDir := applyProjectStateOverride(proj.Name, agent, workDir, projectState)
 		startInitialRefreshIfReady(agent, providerWiring)
 		sessionFile := sessionStorePath(cfg.DataDir, proj.Name, effectiveWorkDir)
@@ -1898,6 +1907,13 @@ func reloadConfig(configPath, projName string, engine *core.Engine) (*core.Confi
 	}
 	if proj == nil {
 		return nil, fmt.Errorf("project %q not found in config", projName)
+	}
+
+	// Re-read under the model-store lock, shared with command persistence. Do
+	// not publish the potentially stale snapshot read before that lock.
+	result.ChatModelsUpdated, err = engine.ReloadChatModels()
+	if err != nil {
+		return nil, fmt.Errorf("reload chat models: %w", err)
 	}
 
 	// Reload display config (includes legacy quiet → display mapping)

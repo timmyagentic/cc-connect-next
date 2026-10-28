@@ -36,6 +36,12 @@
 
 相关配置： `cron.silent`, `cron.session_mode`, `projects.heartbeat.enabled`, `projects.heartbeat.interval_mins`, `projects.heartbeat.session_key`
 
+### 按群或私聊持久配置模型 (`chat-model-bindings`)
+
+在 config.toml 中保存各群或私聊模型；聊天选择与手工编辑共用项目内配置，reload 后修改及删除从后续回合生效。
+
+相关配置： `projects.chat_models.platform`, `projects.chat_models.chat_id`, `projects.chat_models.user_id`, `projects.chat_models.model`, `projects.chat_models.provider`, `projects.chat_models.agent`
+
 ### 命令、别名与内容策略 (`customization`)
 
 添加 Prompt/Exec 命令、自然语言别名、违禁词和项目级命令限制。
@@ -2571,6 +2577,94 @@ enabled = true`
 - 生效方式：`restart`
 - 允许值: `steer`, `queue`
 - 示例: `busy_message_mode = "steer"`
+
+### `projects.chat_models.agent`
+
+记录用于 Provider 身份校验的预期 Agent 类型；省略时使用本项目 Agent 类型，聊天命令会明确保存当前类型。
+
+- 来源：`toml`
+- 配置位置：`[[projects.chat_models]] (inside one [[projects]])`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`可选`
+- 默认值：`projects.agent.type`
+- 默认值来源：`inherit`
+- 生效方式：`reload`
+- 示例: `agent = "codex"`
+
+### `projects.chat_models.chat_id`
+
+绑定群/频道 ID，群内全部成员和话题共用此模型；chat_id 与 user_id 必须且只能填写一个。
+
+- 来源：`toml`
+- 配置位置：`[[projects.chat_models]] (inside one [[projects]])`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`条件必填`
+- 默认值：`unset`
+- 默认值来源：`unset`
+- 生效方式：`reload`
+- 必填条件: `projects.chat_models.user_id is unset`
+- 冲突: `projects.chat_models.user_id`
+- 示例: `chat_id = "oc_example_group"`
+
+### `projects.chat_models.model`
+
+固定本聊天模型 ID。/model 写回此条目，/model reset 删除条目；手工编辑后 /config reload 从后续回合生效，正在执行的回合保持原模型。
+
+- 来源：`toml`
+- 配置位置：`[[projects.chat_models]] (inside one [[projects]])`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`必填`
+- 默认值：`none`
+- 默认值来源：`none`
+- 生效方式：`reload`
+- 示例: `model = "gpt-4.1"`
+
+### `projects.chat_models.platform`
+
+填写聊天模型绑定的消息平台名称；未启用平台的条目保持休眠。
+
+- 来源：`toml`
+- 配置位置：`[[projects.chat_models]] (inside one [[projects]])`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`必填`
+- 默认值：`none`
+- 默认值来源：`none`
+- 生效方式：`reload`
+- 示例: `platform = "feishu"`
+
+### `projects.chat_models.provider`
+
+填写预期的项目 Provider 名称，不带 Agent 前缀。空值或省略表示原生 Provider，不表示继承；该绑定不会切换 Provider。预期 Provider 缺失或与当前值不符时，仅对应聊天报错。
+
+- 来源：`toml`
+- 配置位置：`[[projects.chat_models]] (inside one [[projects]])`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`可选`
+- 默认值：`native provider`
+- 默认值来源：`builtin`
+- 生效方式：`reload`
+- 示例: `provider = "relay"`
+
+### `projects.chat_models.user_id`
+
+绑定私聊用户的平台 ID，而非私聊会话 ID；user_id 与 chat_id 必须且只能填写一个。
+
+- 来源：`toml`
+- 配置位置：`[[projects.chat_models]] (inside one [[projects]])`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`条件必填`
+- 默认值：`unset`
+- 默认值来源：`unset`
+- 生效方式：`reload`
+- 必填条件: `projects.chat_models.chat_id is unset`
+- 冲突: `projects.chat_models.chat_id`
+- 示例: `user_id = "ou_example_user"`
 
 ### `projects.disabled_commands`
 
