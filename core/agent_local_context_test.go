@@ -1,6 +1,7 @@
 package core
 
 import (
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,6 +15,13 @@ func TestBuildCapabilityPrompt_Issue166UsesEffectiveDataDirWithoutHomeSearch(t *
 	e.SetDataDir(dir)
 	state := &interactiveState{}
 	first := e.buildCapabilityPrompt(state, "find the scheduled task")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(first, strconv.Quote(executable)) {
+		t.Fatal("Agent must know the exact executable even when a login shell replaces PATH")
+	}
 	for _, want := range []string{strconv.Quote(dir), "Do not recursively search", "~/.cc-connect", "capabilities"} {
 		if !strings.Contains(first, want) {
 			t.Errorf("local Agent context is missing %q", want)

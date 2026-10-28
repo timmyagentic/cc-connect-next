@@ -27,11 +27,14 @@ func init() {
 // Set backend="exec" explicitly to use `codex exec --json`. That backend has
 // no approval IPC and cannot append input to a running turn.
 //
-// Modes on the exec backend (maps to codex exec flags):
+// Exec mode flags when native macOS privacy is disabled:
 //   - "suggest":   --sandbox read-only       + approval_policy=never (no prompts)
 //   - "auto-edit": --sandbox workspace-write + approval_policy=never (alias of full-auto)
 //   - "full-auto": --sandbox workspace-write + approval_policy=never
 //   - "yolo":      --dangerously-bypass-approvals-and-sandbox
+//
+// With native macOS privacy enabled, named profiles preserve these access
+// tiers and apply configured privacy denies, including in yolo mode.
 type Agent struct {
 	workDir            string
 	model              string
@@ -887,7 +890,7 @@ func (a *Agent) PermissionModes() []core.PermissionModeInfo {
 			Desc:   "Workspace-write sandbox, no approval prompts",
 			DescZh: "工作区可写沙箱，不弹审批"},
 		{Key: "yolo", Name: "YOLO", NameZh: "YOLO 模式",
-			Desc:   "Bypass all approvals and sandbox (DANGEROUS)",
-			DescZh: "跳过所有审批和沙箱（危险）"},
+			Desc:   "Broad filesystem and network access without approvals; configured macOS privacy rules still apply (DANGEROUS)",
+			DescZh: "无需审批，广泛访问文件系统和网络；已配置的 macOS 隐私规则仍然生效（危险）"},
 	}
 }

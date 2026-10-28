@@ -72,6 +72,12 @@
 
 相关配置： `projects.platforms.options.group_context`, `projects.platforms.options.group_context_max_messages`, `projects.platforms.options.group_context_window_minutes`, `projects.platforms.options.group_context_max_chars`
 
+### macOS 隐私弹窗 (`macos-privacy`)
+
+阻止受支持的本地 Codex 会话意外访问无关个人目录类别，不修改 TCC 权限。
+
+相关配置： `macos_privacy.enabled`, `macos_privacy.allow_directories`
+
 ### 项目与工作区 (`multi-project`)
 
 运行多个命名项目、动态绑定工作区、隔离 OS 用户并回收空闲工作区。
@@ -1043,6 +1049,37 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 - 生效方式：`restart`
 - 允许值: `debug`, `info`, `warn`, `error`
 - 示例: `level = "debug"`
+
+### `macos_privacy.allow_directories`
+
+本地 Codex 会话中豁免的个人目录类别，例如 Documents。工作区所在类别会自动豁免以保持原生工具正常。豁免为整个类别保留原模式权限，不限于某个子目录，也不授予 TCC 权限。主目录或根目录工作区不会豁免其子目录。
+
+- 来源：`toml`
+- 配置位置：`[macos_privacy]`
+- 作用域：`global`
+- 类型：`string[]`
+- 要求：`可选`
+- 默认值：`[]`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 允许值: `Desktop`, `Documents`, `Downloads`, `Pictures`, `Music`, `Movies`, `Library/Containers`, `Library/Group Containers`, `Library/Mail`, `Library/Messages`, `Library/Safari`, `Library/Calendars`, `Library/Reminders`, `Library/HomeKit`, `Library/IdentityServices`, `Library/PersonalizationPortrait`, `Library/Metadata/CoreSpotlight`, `Library/Mobile Documents`, `Library/CloudStorage`
+- 示例: `[macos_privacy]
+allow_directories = ["Documents"]`
+
+### `macos_privacy.enabled`
+
+macOS 下向本地 Codex exec/app-server 会话应用原生文件系统拒绝规则，包括 YOLO。需要受支持的 Codex CLI；不覆盖其他 Agent、远程服务、外部工具及独立 Shell 任务。false 恢复旧版 Codex 权限选择。
+
+- 来源：`toml`
+- 配置位置：`[macos_privacy]`
+- 作用域：`global`
+- 类型：`boolean`
+- 要求：`可选`
+- 默认值：`true`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 示例: `[macos_privacy]
+enabled = true`
 
 ### `management.cors_origins`
 

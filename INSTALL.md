@@ -98,9 +98,19 @@ your task needs. Do not reset the TCC database or grant unrelated directory acce
 to work around an identity mismatch. See the [macOS signing runbook](docs/macos-signing.md)
 for release setup and the separate real-device upgrade acceptance check.
 
+Supported local Codex sessions now receive native macOS filesystem deny rules:
+accidental personal-folder reads are blocked, including in YOLO mode.
+Other Agents and standalone shell jobs are unchanged. See [macOS privacy](docs/macos-privacy.md)
+for selected-workspace exceptions, intentional access, external-process limits,
+and the clean-account release acceptance checklist. App Data consent can be
+process-lifetime even with stable signing; signing alone cannot prevent it.
+
 从旧的 ad hoc 版本首次切换到 Developer ID 签名版本时，可能需要重新授权一次。
 后续版本保持相同产品签名身份；Agent 搜索使用实际数据目录，找不到文件时不应自动
 扩大到整个用户目录。不要通过清空 TCC 或授予无关目录权限处理签名失配。
+受支持的本地 Codex 会话现在默认应用原生目录访问限制，包括 YOLO 模式。
+其他 Agent 和独立 Shell 任务保持原行为；正常开发不需要修改本机指令或授予完全磁盘访问。
+明确访问个人目录的例外、覆盖范围与验收要求见上面的 macOS privacy 文档。
 
 ## 3. Create or migrate configuration
 

@@ -414,6 +414,11 @@ func main() {
 	}
 	annotateUnknownPluginConfigKeys(cfg)
 
+	if err := configureMacOSPrivacy(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Error configuring macOS privacy guard: %v\n", err)
+		os.Exit(1)
+	}
+
 	config.ConfigPath = configPath
 	slog.Info("config loaded", "path", configPath)
 

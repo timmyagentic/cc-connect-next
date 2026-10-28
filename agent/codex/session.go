@@ -35,6 +35,7 @@ type codexSession struct {
 	providerName   string   // immutable configured provider identity, including Env-only providers
 	cmd            string   // CLI binary, default "codex"
 	cliExtraArgs   []string // extra args from cmd, prepended before exec args
+	privacy        *codexPrivacyPolicy
 	extraEnv       []string
 	promptPreamble string
 	events         chan core.Event
@@ -109,6 +110,24 @@ type codexSessionParams struct {
 }
 
 func newCodexSession(ctx context.Context, p codexSessionParams) (*codexSession, error) {
+	privacy, err := newCodexPrivacyPolicy(p.workDir, p.cliExtraArgs)
+	if err != nil {
+		return nil, err
+	}
+	if privacy != nil {
+		p.cliBin, err = resolveCodexExecutable(p.cliBin)
+		if err != nil {
+			return nil, fmt.Errorf("codex macOS privacy resolve CLI: %w", err)
+		}
+		if err := checkPrivacyRuntime(ctx, p.cliBin, p.workDir, p.extraEnv); err != nil {
+			return nil, err
+		}
+		if privacyWorkspaceMode(p.mode) {
+			if err := checkExecPrivacyWorkspaceConfig(ctx, p.cliBin, p.cliExtraArgs, p.workDir, p.extraEnv); err != nil {
+				return nil, err
+			}
+		}
+	}
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	cs := &codexSession{
@@ -123,6 +142,7 @@ func newCodexSession(ctx context.Context, p codexSessionParams) (*codexSession, 
 		providerName:   p.providerName,
 		cmd:            p.cliBin,
 		cliExtraArgs:   p.cliExtraArgs,
+		privacy:        privacy,
 		extraEnv:       p.extraEnv,
 		promptPreamble: buildCodexPromptPreamble(p.systemPrompt, p.appendPrompt),
 		events:         make(chan core.Event, 64),
@@ -194,6 +214,18 @@ func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files
 	bin, err := resolveCodexExecutable(cs.cmd)
 	if err != nil {
 		return fmt.Errorf("codexSession: resolve CLI: %w", err)
+	}
+	if cs.privacy != nil {
+		// Exec starts a new process each turn; the CLI may have been replaced
+		// since session creation, including while resuming a retained thread.
+		if err := checkPrivacyRuntime(cs.ctx, bin, cs.workDir, cs.extraEnv); err != nil {
+			return err
+		}
+		if privacyWorkspaceMode(cs.mode) {
+			if err := checkExecPrivacyWorkspaceConfig(cs.ctx, bin, cs.cliExtraArgs, cs.workDir, cs.extraEnv); err != nil {
+				return err
+			}
+		}
 	}
 
 	slog.Debug("codexSession: launching", "resume", isResume, "args", core.RedactArgs(args))
@@ -291,20 +323,26 @@ func (cs *codexSession) buildExecArgsWithTurnOptions(prompt string, imagePaths [
 	// For real interactive approvals (suggest semantics), users must opt into
 	// the `app_server` backend, which handles execCommandApproval /
 	// applyPatchApproval / permissionsApproval over JSON-RPC.
-	switch cs.mode {
-	case "auto-edit", "full-auto":
-		if isResume {
-			args = append(args, "-c", `sandbox_mode="workspace-write"`, "-c", `approval_policy="never"`)
-		} else {
-			args = append(args, "--sandbox", "workspace-write", "-c", `approval_policy="never"`)
-		}
-	case "yolo":
-		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
-	default: // "suggest"
-		if isResume {
-			args = append(args, "-c", `sandbox_mode="read-only"`, "-c", `approval_policy="never"`)
-		} else {
-			args = append(args, "--sandbox", "read-only", "-c", `approval_policy="never"`)
+	if cs.privacy != nil {
+		// Both exec and exec resume accept config overrides; resume does not
+		// accept --sandbox or -P. Never bypass Codex's native sandbox here.
+		args = append(args, cs.privacy.launchArgs(cs.mode, "never")...)
+	} else {
+		switch cs.mode {
+		case "auto-edit", "full-auto":
+			if isResume {
+				args = append(args, "-c", `sandbox_mode="workspace-write"`, "-c", `approval_policy="never"`)
+			} else {
+				args = append(args, "--sandbox", "workspace-write", "-c", `approval_policy="never"`)
+			}
+		case "yolo":
+			args = append(args, "--dangerously-bypass-approvals-and-sandbox")
+		default: // "suggest"
+			if isResume {
+				args = append(args, "-c", `sandbox_mode="read-only"`, "-c", `approval_policy="never"`)
+			} else {
+				args = append(args, "--sandbox", "read-only", "-c", `approval_policy="never"`)
+			}
 		}
 	}
 

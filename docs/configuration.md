@@ -72,6 +72,12 @@ Read bounded recent messages before an accepted group turn, including configured
 
 Related configuration: `projects.platforms.options.group_context`, `projects.platforms.options.group_context_max_messages`, `projects.platforms.options.group_context_window_minutes`, `projects.platforms.options.group_context_max_chars`
 
+### macOS privacy prompts (`macos-privacy`)
+
+Prevent accidental access to unrelated personal-directory categories in supported local Codex sessions without changing TCC permissions.
+
+Related configuration: `macos_privacy.enabled`, `macos_privacy.allow_directories`
+
 ### Projects and workspaces (`multi-project`)
 
 Run multiple named projects, dynamically bind workspaces, isolate OS users, and reap idle workspaces.
@@ -1043,6 +1049,37 @@ Set the minimum runtime log severity.
 - Takes effect: `restart`
 - Allowed values: `debug`, `info`, `warn`, `error`
 - Example: `level = "debug"`
+
+### `macos_privacy.allow_directories`
+
+Personal-directory categories to exempt in local Codex sessions, such as Documents. The category containing the selected work_dir is automatically exempt to preserve native tooling. Exemptions retain mode permissions for the whole category, not just one child; they do not grant TCC permission. Home/root workspaces do not exempt descendants.
+
+- Source: `toml`
+- Placement: `[macos_privacy]`
+- Scope: `global`
+- Type: `string[]`
+- Requirement: `optional`
+- Default: `[]`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Allowed values: `Desktop`, `Documents`, `Downloads`, `Pictures`, `Music`, `Movies`, `Library/Containers`, `Library/Group Containers`, `Library/Mail`, `Library/Messages`, `Library/Safari`, `Library/Calendars`, `Library/Reminders`, `Library/HomeKit`, `Library/IdentityServices`, `Library/PersonalizationPortrait`, `Library/Metadata/CoreSpotlight`, `Library/Mobile Documents`, `Library/CloudStorage`
+- Example: `[macos_privacy]
+allow_directories = ["Documents"]`
+
+### `macos_privacy.enabled`
+
+On macOS, apply native filesystem deny rules to local Codex exec/app-server sessions, including YOLO. Requires a supported Codex CLI; other Agents, remote servers, external tools, and standalone shell jobs are not covered. False restores legacy Codex permission selection.
+
+- Source: `toml`
+- Placement: `[macos_privacy]`
+- Scope: `global`
+- Type: `boolean`
+- Requirement: `optional`
+- Default: `true`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Example: `[macos_privacy]
+enabled = true`
 
 ### `management.cors_origins`
 
