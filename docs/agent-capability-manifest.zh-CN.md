@@ -102,6 +102,10 @@ Manifest 不把“命令存在”误写成“当前一定能执行”：模型�
 不针对工作区 Agent 或其他机器人。只需 `ModelSwitcher` 即可提供这些操作，
 不要求后端支持逐回合模型。不再有独立的工作区默认模型层：未绑定模型的聊天跟随该全局默认。
 
+聊天绑定保存于 `config.toml` 的 `[[projects.chat_models]]`。
+聊天命令写回相同条目；`/config reload` 将手工修改和删除应用于后续回合。
+旧项目 JSON 中的模型绑定在首次启动时迁移。
+
 `/model` 查询、固定或重置已验证私聊或群聊的模型。固定模型另要求配置的当前后端
 实现 `PerTurnModelSupporter` 并返回 true（目前 Codex `exec` 与 `app_server` 支持），
 模型属于当前可选列表，且持久化存储可用。操作不切换 Provider。调用时必须验证聊天身份，

@@ -141,6 +141,40 @@ func TestCapabilityCatalog_CodexDesktopCLIIntent(t *testing.T) {
 	}
 }
 
+func TestCapabilityCatalog_ChatModelsIntentAndContract(t *testing.T) {
+	catalog := CapabilityCatalog("v-test")
+	for _, query := range []string{"按群配置模型", "每个群不同模型", "私聊模型", "group model"} {
+		result := core.SearchConfigCatalog(catalog, query)
+		found := false
+		for _, option := range result.Options {
+			if option.Path == "projects.chat_models.model" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%q did not find chat model configuration", query)
+		}
+	}
+	seen := 0
+	for _, option := range catalog.Options {
+		if !strings.HasPrefix(option.Path, "projects.chat_models.") {
+			continue
+		}
+		seen++
+		if option.ApplyMode != core.ConfigApplyReload || option.Placement != "[[projects.chat_models]] (inside one [[projects]])" {
+			t.Errorf("chat model placement/reload contract = %#v", option)
+		}
+		if option.Path == "projects.chat_models.chat_id" || option.Path == "projects.chat_models.user_id" {
+			if option.Requirement != core.ConfigRequirementConditional || len(option.RequiredWhen) == 0 || len(option.ConflictsWith) == 0 {
+				t.Errorf("chat identity must document its exclusive choice: %#v", option)
+			}
+		}
+	}
+	if seen != 6 {
+		t.Fatalf("chat model fields = %d, want 6", seen)
+	}
+}
+
 func TestFilterUnavailableOwnedOptionsHonorsCompiledAdapters(t *testing.T) {
 	options := []core.ConfigOption{
 		{Path: "global", Scope: core.ConfigScopeGlobal},

@@ -103,6 +103,10 @@ bot. `ModelSwitcher` alone makes these operations available, including on
 backends without per-turn model support. There is no separate workspace model
 default: a chat without a model binding follows this global default.
 
+Chat bindings are stored in `config.toml` under `[[projects.chat_models]]`.
+Chat commands write those same entries; `/config reload` applies manual edits
+and removals to later turns. Old project JSON bindings are imported once at startup.
+
 `/model` queries, pins, or resets a verified private or group chat's selection.
 Pinning additionally requires the configured backend's `PerTurnModelSupporter`
 to return true (currently Codex `exec` and `app_server`), a current selectable
