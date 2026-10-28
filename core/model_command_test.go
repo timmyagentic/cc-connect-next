@@ -219,7 +219,8 @@ func TestModelCommand_CardsSeparateScopesAndStableNamesSurviveCatalogReorder(t *
 	}{{chatBox, "cmd:/model ", true}, {defaultBox, "cmd:/model default ", false}} {
 		for _, choice := range scope.box.Options {
 			name := strings.TrimPrefix(choice.Value, scope.prefix)
-			if !strings.HasPrefix(choice.Value, scope.prefix) || !validNames[name] && !(scope.chat && name == "reset") {
+			validChoice := validNames[name] || scope.chat && name == "reset"
+			if !strings.HasPrefix(choice.Value, scope.prefix) || !validChoice {
 				t.Fatalf("model card uses an unstable or unsafe callback: %q", choice.Value)
 			}
 		}

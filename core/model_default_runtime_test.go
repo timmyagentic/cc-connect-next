@@ -341,11 +341,12 @@ func TestModelDefaultRuntime_ExpectedUnusableBackendRetainsStateAndError(t *test
 				sessionModelProvider: modelProvider(a), modelResumeID: "saved-conversation",
 				stopCh: make(chan struct{}), pendingMessages: []queuedMessage{{platform: p, replyCtx: key, msgSessionKey: key, messageID: "keep-queued", content: "pending"}},
 			}
-			if condition == "ended" {
+			switch condition {
+			case "ended":
 				_ = backend.Close()
-			} else if condition == "nil" {
+			case "nil":
 				state.agentSession = nil
-			} else if condition == "liveness-changed" {
+			case "liveness-changed":
 				state.agentSession = &modelDefaultLivenessTransitionSession{modelDefaultProcessSession: backend}
 			}
 			stopCh := state.stopCh

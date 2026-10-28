@@ -14292,17 +14292,6 @@ func (e *Engine) handleCardNav(action string, sessionKey string) *Card {
 	return nil
 }
 
-func workspaceFromInteractiveKey(interactiveKey, sessionKey string) string {
-	if interactiveKey == "" || sessionKey == "" || interactiveKey == sessionKey {
-		return ""
-	}
-	suffix := ":" + sessionKey
-	if !strings.HasSuffix(interactiveKey, suffix) {
-		return ""
-	}
-	return strings.TrimSuffix(interactiveKey, suffix)
-}
-
 // executeCardAction performs the side-effect for act: prefixed actions
 // (e.g. switching mode/lang) before the card is re-rendered.
 func (e *Engine) executeCardAction(cmd, args, sessionKey string) {
