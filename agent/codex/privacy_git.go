@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-var errPrivacyGitDenied = errors.New("Git metadata resolves into a protected path")
+var errPrivacyGitDenied = errors.New("git metadata resolves into a protected path")
 
 func privacyPathWithin(root, path string) bool {
 	// Default macOS volumes are case-insensitive. Treat case variants
@@ -98,13 +98,13 @@ func readPrivacyGitPointer(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, 4097))
 	if err != nil {
 		return "", err
 	}
 	if len(data) > 4096 {
-		return "", fmt.Errorf("Git metadata pointer exceeds 4096 bytes")
+		return "", fmt.Errorf("git metadata pointer exceeds 4096 bytes")
 	}
 	return strings.TrimSpace(string(data)), nil
 }
