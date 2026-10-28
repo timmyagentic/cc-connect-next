@@ -2,10 +2,17 @@
 
 ## Unreleased
 
+
 - Improve the website setup guide with the complete bilingual Agent prompt, a five-step path through the first real reply and background service, and a share preview.
 
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
+
+## v0.3.5-beta.9 (2026-10-28)
+
+- Read group discussion once initially and then only new messages after delivered input.
+- Protect unrelated macOS personal directories from local Codex sessions with a native permissions profile.
+- See `changelogs/v0.3.5-beta.9.md` for compatibility and verification details.
 
 ## v0.3.5-beta.7 (2026-10-27)
 
