@@ -54,7 +54,14 @@ func TestBuiltinCommandManifestContractsCoverDispatchSurface(t *testing.T) {
 			}
 		}
 		for _, subcommand := range command.privilegedWhen {
-			if !isPrivilegedCommandInvocation(command.id, []string{subcommand}) {
+			args := []string{subcommand}
+			if command.id == "model" && subcommand == "default" {
+				if isPrivilegedCommandInvocation(command.id, args) {
+					t.Error("querying /model default must remain readable by members")
+				}
+				args = append(args, "example-model")
+			}
+			if !isPrivilegedCommandInvocation(command.id, args) {
 				t.Errorf("manifest says %s %s is privileged, but dispatch does not", command.id, subcommand)
 			}
 		}

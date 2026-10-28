@@ -9,28 +9,28 @@ import (
 	"testing"
 )
 
-func TestGroupModelBinding_SaveLoad(t *testing.T) {
+func TestChatModelBinding_SaveLoad(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "projects", "demo.state.json")
 	store := NewProjectStateStore(statePath)
-	if got, ok := store.GroupModelBinding("missing"); ok || got != (GroupModelBinding{}) {
+	if got, ok := store.ChatModelBinding("missing"); ok || got != (ChatModelBinding{}) {
 		t.Fatalf("missing binding = %+v, %v, want zero value, false", got, ok)
 	}
 
-	bindings := map[string]GroupModelBinding{
+	bindings := map[string]ChatModelBinding{
 		"platform:bot-a:group-a": {Model: "model-a", Provider: "provider-a"},
 		"platform:bot-b:group-a": {Model: "model-b"},
 		"platform:bot-a:group-b": {Model: "model-c", Provider: "provider-c"},
 	}
 	for key, binding := range bindings {
-		if err := store.SaveGroupModelBinding(key, binding); err != nil {
+		if err := store.SaveChatModelBinding(key, binding); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	reloaded := NewProjectStateStore(statePath)
 	for key, want := range bindings {
-		assertGroupModelBinding(t, store, key, want, true)
-		assertGroupModelBinding(t, reloaded, key, want, true)
+		assertChatModelBinding(t, store, key, want, true)
+		assertChatModelBinding(t, reloaded, key, want, true)
 	}
 
 	data, err := os.ReadFile(statePath)
@@ -38,7 +38,7 @@ func TestGroupModelBinding_SaveLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	var persisted struct {
-		Bindings map[string]map[string]string `json:"group_model_bindings"`
+		Bindings map[string]map[string]string `json:"chat_model_bindings"`
 	}
 	if err := json.Unmarshal(data, &persisted); err != nil {
 		t.Fatal(err)
@@ -51,49 +51,48 @@ func TestGroupModelBinding_SaveLoad(t *testing.T) {
 	}
 
 	key := "platform:bot-a:group-a"
-	updated := GroupModelBinding{Model: "updated-model"}
-	if err := reloaded.SaveGroupModelBinding(key, updated); err != nil {
+	updated := ChatModelBinding{Model: "updated-model"}
+	if err := reloaded.SaveChatModelBinding(key, updated); err != nil {
 		t.Fatal(err)
 	}
-	assertGroupModelBinding(t, NewProjectStateStore(statePath), key, updated, true)
+	assertChatModelBinding(t, NewProjectStateStore(statePath), key, updated, true)
 }
 
-func TestGroupModelBinding_Delete(t *testing.T) {
+func TestChatModelBinding_Delete(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	store := NewProjectStateStore(statePath)
-	binding := GroupModelBinding{Model: "model", Provider: "provider"}
+	binding := ChatModelBinding{Model: "model", Provider: "provider"}
 	for _, key := range []string{"group-a", "group-b"} {
-		if err := store.SaveGroupModelBinding(key, binding); err != nil {
+		if err := store.SaveChatModelBinding(key, binding); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// Deletion depends only on Model, even if Provider is still populated.
 	for _, key := range []string{"missing", "group-a", "group-a"} {
-		if err := store.SaveGroupModelBinding(key, GroupModelBinding{Provider: "provider"}); err != nil {
+		if err := store.SaveChatModelBinding(key, ChatModelBinding{Provider: "provider"}); err != nil {
 			t.Fatal(err)
 		}
-		assertGroupModelBinding(t, store, key, GroupModelBinding{}, false)
-		assertGroupModelBinding(t, NewProjectStateStore(statePath), key, GroupModelBinding{}, false)
-		assertGroupModelBinding(t, NewProjectStateStore(statePath), "group-b", binding, true)
+		assertChatModelBinding(t, store, key, ChatModelBinding{}, false)
+		assertChatModelBinding(t, NewProjectStateStore(statePath), key, ChatModelBinding{}, false)
+		assertChatModelBinding(t, NewProjectStateStore(statePath), "group-b", binding, true)
 	}
-	if err := store.SaveGroupModelBinding("group-b", GroupModelBinding{}); err != nil {
+	if err := store.SaveChatModelBinding("group-b", ChatModelBinding{}); err != nil {
 		t.Fatal(err)
 	}
-	assertGroupModelBinding(t, NewProjectStateStore(statePath), "group-b", GroupModelBinding{}, false)
+	assertChatModelBinding(t, NewProjectStateStore(statePath), "group-b", ChatModelBinding{}, false)
 }
 
-func TestGroupModelBinding_WriteFailureRollback(t *testing.T) {
+func TestChatModelBinding_WriteFailureRollback(t *testing.T) {
 	for _, failure := range []string{"create-directory", "atomic-rename"} {
 		t.Run(failure, func(t *testing.T) {
 			statePath := filepath.Join(t.TempDir(), "projects", "state.json")
 			store := NewProjectStateStore(statePath)
 			store.SetWorkDirOverride("/workdir")
 			store.SetWorkspaceDirOverride("workspace", "/override")
-			store.SetWorkspaceModelOverride("workspace", "workspace-model")
-			original := GroupModelBinding{Model: "original", Provider: "original-provider"}
+			original := ChatModelBinding{Model: "original", Provider: "original-provider"}
 			for _, key := range []string{"group", "other-group"} {
-				if err := store.SaveGroupModelBinding(key, original); err != nil {
+				if err := store.SaveChatModelBinding(key, original); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -124,19 +123,19 @@ func TestGroupModelBinding_WriteFailureRollback(t *testing.T) {
 			for _, attempt := range []struct {
 				name    string
 				key     string
-				binding GroupModelBinding
+				binding ChatModelBinding
 			}{
-				{"update", "group", GroupModelBinding{Model: "replacement", Provider: "replacement-provider"}},
-				{"insert", "new-group", GroupModelBinding{Model: "new"}},
-				{"delete", "group", GroupModelBinding{}},
+				{"update", "group", ChatModelBinding{Model: "replacement", Provider: "replacement-provider"}},
+				{"insert", "new-group", ChatModelBinding{Model: "new"}},
+				{"delete", "group", ChatModelBinding{}},
 			} {
 				t.Run(attempt.name, func(t *testing.T) {
-					if err := store.SaveGroupModelBinding(attempt.key, attempt.binding); err == nil {
-						t.Fatal("SaveGroupModelBinding should return a write error")
+					if err := store.SaveChatModelBinding(attempt.key, attempt.binding); err == nil {
+						t.Fatal("SaveChatModelBinding should return a write error")
 					}
-					assertGroupModelBinding(t, store, "group", original, true)
-					assertGroupModelBinding(t, store, "other-group", original, true)
-					assertGroupModelBinding(t, store, "new-group", GroupModelBinding{}, false)
+					assertChatModelBinding(t, store, "group", original, true)
+					assertChatModelBinding(t, store, "other-group", original, true)
+					assertChatModelBinding(t, store, "new-group", ChatModelBinding{}, false)
 				})
 			}
 			if got := store.WorkDirOverride(); got != "/workdir" {
@@ -144,9 +143,6 @@ func TestGroupModelBinding_WriteFailureRollback(t *testing.T) {
 			}
 			if got := store.WorkspaceDirOverride("workspace"); got != "/override" {
 				t.Fatalf("workspace dir after failure = %q", got)
-			}
-			if got := store.WorkspaceModelOverride("workspace"); got != "workspace-model" {
-				t.Fatalf("workspace model after failure = %q", got)
 			}
 
 			if err := os.Remove(blockedPath); err != nil {
@@ -164,28 +160,27 @@ func TestGroupModelBinding_WriteFailureRollback(t *testing.T) {
 			if string(after) != string(before) {
 				t.Fatalf("state changed after failed writes:\nbefore: %s\nafter: %s", before, after)
 			}
-			updated := GroupModelBinding{Model: "retry"}
-			if err := store.SaveGroupModelBinding("group", updated); err != nil {
+			updated := ChatModelBinding{Model: "retry"}
+			if err := store.SaveChatModelBinding("group", updated); err != nil {
 				t.Fatalf("retry after restoring path: %v", err)
 			}
-			assertGroupModelBinding(t, NewProjectStateStore(statePath), "group", updated, true)
+			assertChatModelBinding(t, NewProjectStateStore(statePath), "group", updated, true)
 		})
 	}
 }
 
-func TestGroupModelBinding_PreservesExistingState(t *testing.T) {
+func TestChatModelBinding_PreservesExistingState(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	legacy := []byte(`{
 		"work_dir_override": "/legacy",
-		"workspace_dir_overrides": {"workspace": "/legacy/override"},
-		"workspace_model_overrides": {"workspace": "legacy-model"}
+		"workspace_dir_overrides": {"workspace": "/legacy/override"}
 	}`)
 	if err := os.WriteFile(statePath, legacy, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	store := NewProjectStateStore(statePath)
-	binding := GroupModelBinding{Model: "group-model", Provider: "group-provider"}
-	if err := store.SaveGroupModelBinding("group", binding); err != nil {
+	binding := ChatModelBinding{Model: "group-model", Provider: "group-provider"}
+	if err := store.SaveChatModelBinding("group", binding); err != nil {
 		t.Fatal(err)
 	}
 	reloaded := NewProjectStateStore(statePath)
@@ -195,17 +190,13 @@ func TestGroupModelBinding_PreservesExistingState(t *testing.T) {
 	if got := reloaded.WorkspaceDirOverride("workspace"); got != "/legacy/override" {
 		t.Fatalf("legacy workspace dir = %q", got)
 	}
-	if got := reloaded.WorkspaceModelOverride("workspace"); got != "legacy-model" {
-		t.Fatalf("legacy workspace model = %q", got)
-	}
 
 	reloaded.SetWorkDirOverride("/updated")
 	reloaded.ClearWorkspaceDirOverride("workspace")
-	reloaded.SetWorkspaceModelOverride("workspace", "updated-model")
 	reloaded.Save()
 	reloaded = NewProjectStateStore(statePath)
-	assertGroupModelBinding(t, reloaded, "group", binding, true)
-	if err := reloaded.SaveGroupModelBinding("group", GroupModelBinding{}); err != nil {
+	assertChatModelBinding(t, reloaded, "group", binding, true)
+	if err := reloaded.SaveChatModelBinding("group", ChatModelBinding{}); err != nil {
 		t.Fatal(err)
 	}
 	reloaded = NewProjectStateStore(statePath)
@@ -215,27 +206,24 @@ func TestGroupModelBinding_PreservesExistingState(t *testing.T) {
 	if got := reloaded.WorkspaceDirOverride("workspace"); got != "" {
 		t.Fatalf("cleared workspace dir = %q", got)
 	}
-	if got := reloaded.WorkspaceModelOverride("workspace"); got != "updated-model" {
-		t.Fatalf("updated workspace model = %q", got)
-	}
 }
 
-func TestGroupModelBinding_ProjectIsolation(t *testing.T) {
+func TestChatModelBinding_ProjectIsolation(t *testing.T) {
 	dir := t.TempDir()
 	key := "platform:bot:group"
 	for _, project := range []string{"project-a", "project-b"} {
 		store := NewProjectStateStore(filepath.Join(dir, project+".json"))
-		if err := store.SaveGroupModelBinding(key, GroupModelBinding{Model: project}); err != nil {
+		if err := store.SaveChatModelBinding(key, ChatModelBinding{Model: project}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, project := range []string{"project-a", "project-b"} {
 		store := NewProjectStateStore(filepath.Join(dir, project+".json"))
-		assertGroupModelBinding(t, store, key, GroupModelBinding{Model: project}, true)
+		assertChatModelBinding(t, store, key, ChatModelBinding{Model: project}, true)
 	}
 }
 
-func TestGroupModelBinding_ConcurrentAccess(t *testing.T) {
+func TestChatModelBinding_ConcurrentAccess(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "state.json")
 	store := NewProjectStateStore(statePath)
 	const writers = 8
@@ -251,17 +239,17 @@ func TestGroupModelBinding_ConcurrentAccess(t *testing.T) {
 			<-start
 			for j := range iterations {
 				model := fmt.Sprintf("%s-model-%d", key, j)
-				binding := GroupModelBinding{Model: model, Provider: "provider-" + model}
-				if err := store.SaveGroupModelBinding(key, binding); err != nil {
+				binding := ChatModelBinding{Model: model, Provider: "provider-" + model}
+				if err := store.SaveChatModelBinding(key, binding); err != nil {
 					t.Errorf("save %s: %v", key, err)
 					return
 				}
-				if got, ok := store.GroupModelBinding(key); !ok || got != binding {
+				if got, ok := store.ChatModelBinding(key); !ok || got != binding {
 					t.Errorf("binding %s = %+v, %v, want %+v, true", key, got, ok, binding)
 					return
 				}
 				if j < iterations-1 {
-					if err := store.SaveGroupModelBinding(key, GroupModelBinding{}); err != nil {
+					if err := store.SaveChatModelBinding(key, ChatModelBinding{}); err != nil {
 						t.Errorf("delete %s: %v", key, err)
 						return
 					}
@@ -277,7 +265,7 @@ func TestGroupModelBinding_ConcurrentAccess(t *testing.T) {
 				case <-done:
 					return
 				default:
-					if got, ok := store.GroupModelBinding(key); ok && (got.Model == "" || got.Provider != "provider-"+got.Model) {
+					if got, ok := store.ChatModelBinding(key); ok && (got.Model == "" || got.Provider != "provider-"+got.Model) {
 						t.Errorf("partially updated binding %s = %+v", key, got)
 						return
 					}
@@ -292,7 +280,6 @@ func TestGroupModelBinding_ConcurrentAccess(t *testing.T) {
 		for range iterations {
 			store.SetWorkDirOverride("/workdir")
 			store.SetWorkspaceDirOverride("workspace", "/override")
-			store.SetWorkspaceModelOverride("workspace", "workspace-model")
 			store.Save()
 		}
 	}()
@@ -305,32 +292,32 @@ func TestGroupModelBinding_ConcurrentAccess(t *testing.T) {
 	for i := range writers {
 		key := fmt.Sprintf("bot:%d:group", i)
 		model := fmt.Sprintf("%s-model-%d", key, iterations-1)
-		want := GroupModelBinding{Model: model, Provider: "provider-" + model}
-		assertGroupModelBinding(t, store, key, want, true)
-		assertGroupModelBinding(t, reloaded, key, want, true)
+		want := ChatModelBinding{Model: model, Provider: "provider-" + model}
+		assertChatModelBinding(t, store, key, want, true)
+		assertChatModelBinding(t, reloaded, key, want, true)
 	}
-	if reloaded.WorkDirOverride() != "/workdir" || reloaded.WorkspaceDirOverride("workspace") != "/override" || reloaded.WorkspaceModelOverride("workspace") != "workspace-model" {
+	if reloaded.WorkDirOverride() != "/workdir" || reloaded.WorkspaceDirOverride("workspace") != "/override" {
 		t.Fatal("concurrent saves lost existing state")
 	}
 }
 
-func TestGroupModelBinding_MemoryOnly(t *testing.T) {
+func TestChatModelBinding_MemoryOnly(t *testing.T) {
 	store := NewProjectStateStore("")
-	binding := GroupModelBinding{Model: "model"}
-	if err := store.SaveGroupModelBinding("group", binding); err != nil {
+	binding := ChatModelBinding{Model: "model"}
+	if err := store.SaveChatModelBinding("group", binding); err != nil {
 		t.Fatal(err)
 	}
 	store.Save()
-	assertGroupModelBinding(t, store, "group", binding, true)
-	if err := store.SaveGroupModelBinding("group", GroupModelBinding{}); err != nil {
+	assertChatModelBinding(t, store, "group", binding, true)
+	if err := store.SaveChatModelBinding("group", ChatModelBinding{}); err != nil {
 		t.Fatal(err)
 	}
-	assertGroupModelBinding(t, store, "group", GroupModelBinding{}, false)
+	assertChatModelBinding(t, store, "group", ChatModelBinding{}, false)
 }
 
-func assertGroupModelBinding(t *testing.T, store *ProjectStateStore, key string, want GroupModelBinding, wantOK bool) {
+func assertChatModelBinding(t *testing.T, store *ProjectStateStore, key string, want ChatModelBinding, wantOK bool) {
 	t.Helper()
-	if got, ok := store.GroupModelBinding(key); got != want || ok != wantOK {
-		t.Fatalf("GroupModelBinding(%q) = %+v, %v, want %+v, %v", key, got, ok, want, wantOK)
+	if got, ok := store.ChatModelBinding(key); got != want || ok != wantOK {
+		t.Fatalf("ChatModelBinding(%q) = %+v, %v, want %+v, %v", key, got, ok, want, wantOK)
 	}
 }

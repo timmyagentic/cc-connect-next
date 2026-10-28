@@ -74,7 +74,7 @@ func TestPrivateSettingsCardsBindOwnerInEmittedPayload(t *testing.T) {
 			p.domain = server.URL
 			p.client = resourceTestPlatform(server).client
 			card := core.NewCard().
-				Select("Chat model", []core.CardSelectOption{{Text: "Model A", Value: "cmd:/model chat model-A"}}, "").
+				Select("Chat model", []core.CardSelectOption{{Text: "Model A", Value: "cmd:/model model-A"}}, "").
 				Select("Chat effort", []core.CardSelectOption{{Text: "High", Value: "cmd:/reasoning chat high"}}, "").
 				Build()
 			send := p.ReplyCard

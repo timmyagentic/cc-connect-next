@@ -9,9 +9,8 @@ import (
 	"sync"
 )
 
-// GroupModelBinding selects a model and optional provider for a verified chat.
-// Group-named fields are retained for compatibility with existing state files.
-type GroupModelBinding struct {
+// ChatModelBinding selects a model and optional provider for a verified chat.
+type ChatModelBinding struct {
 	Model    string `json:"model"`
 	Provider string `json:"provider,omitempty"`
 }
@@ -23,11 +22,10 @@ type GroupReasoningBinding struct {
 }
 
 type projectStateData struct {
-	WorkDirOverride         string                           `json:"work_dir_override,omitempty"`
-	WorkspaceDirOverrides   map[string]string                `json:"workspace_dir_overrides,omitempty"`
-	WorkspaceModelOverrides map[string]string                `json:"workspace_model_overrides,omitempty"`
-	GroupModelBindings      map[string]GroupModelBinding     `json:"group_model_bindings,omitempty"`
-	GroupReasoningBindings  map[string]GroupReasoningBinding `json:"group_reasoning_bindings,omitempty"`
+	WorkDirOverride        string                           `json:"work_dir_override,omitempty"`
+	WorkspaceDirOverrides  map[string]string                `json:"workspace_dir_overrides,omitempty"`
+	ChatModelBindings      map[string]ChatModelBinding      `json:"chat_model_bindings,omitempty"`
+	GroupReasoningBindings map[string]GroupReasoningBinding `json:"group_reasoning_bindings,omitempty"`
 }
 
 // ProjectStateStore persists lightweight runtime state for one project.
@@ -87,70 +85,36 @@ func (ps *ProjectStateStore) ClearWorkspaceDirOverride(workspace string) {
 	}
 }
 
-func (ps *ProjectStateStore) WorkspaceModelOverride(workspace string) string {
-	ps.mu.RLock()
-	defer ps.mu.RUnlock()
-	if ps.state.WorkspaceModelOverrides == nil {
-		return ""
-	}
-	return ps.state.WorkspaceModelOverrides[workspace]
-}
-
-func (ps *ProjectStateStore) SetWorkspaceModelOverride(workspace, model string) {
-	if model == "" {
-		ps.ClearWorkspaceModelOverride(workspace)
-		return
-	}
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-	if ps.state.WorkspaceModelOverrides == nil {
-		ps.state.WorkspaceModelOverrides = make(map[string]string)
-	}
-	ps.state.WorkspaceModelOverrides[workspace] = model
-}
-
-func (ps *ProjectStateStore) ClearWorkspaceModelOverride(workspace string) {
-	ps.mu.Lock()
-	defer ps.mu.Unlock()
-	if ps.state.WorkspaceModelOverrides == nil {
-		return
-	}
-	delete(ps.state.WorkspaceModelOverrides, workspace)
-	if len(ps.state.WorkspaceModelOverrides) == 0 {
-		ps.state.WorkspaceModelOverrides = nil
-	}
-}
-
 func (ps *ProjectStateStore) ClearWorkDirOverride() {
 	ps.SetWorkDirOverride("")
 }
 
-// GroupModelBinding looks up the caller-provided platform instance and group key.
-func (ps *ProjectStateStore) GroupModelBinding(key string) (GroupModelBinding, bool) {
+// ChatModelBinding looks up the caller-provided verified chat key.
+func (ps *ProjectStateStore) ChatModelBinding(key string) (ChatModelBinding, bool) {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	binding, ok := ps.state.GroupModelBindings[key]
+	binding, ok := ps.state.ChatModelBindings[key]
 	return binding, ok
 }
 
-// SaveGroupModelBinding persists a binding before making it visible in memory.
+// SaveChatModelBinding persists a binding before making it visible in memory.
 // An empty Model removes the binding. Stores without a path remain memory-only.
-func (ps *ProjectStateStore) SaveGroupModelBinding(key string, binding GroupModelBinding) error {
+func (ps *ProjectStateStore) SaveChatModelBinding(key string, binding ChatModelBinding) error {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
 	next := ps.state
-	next.GroupModelBindings = make(map[string]GroupModelBinding, len(ps.state.GroupModelBindings)+1)
-	for k, v := range ps.state.GroupModelBindings {
-		next.GroupModelBindings[k] = v
+	next.ChatModelBindings = make(map[string]ChatModelBinding, len(ps.state.ChatModelBindings)+1)
+	for k, v := range ps.state.ChatModelBindings {
+		next.ChatModelBindings[k] = v
 	}
 	if binding.Model == "" {
-		delete(next.GroupModelBindings, key)
-		if len(next.GroupModelBindings) == 0 {
-			next.GroupModelBindings = nil
+		delete(next.ChatModelBindings, key)
+		if len(next.ChatModelBindings) == 0 {
+			next.ChatModelBindings = nil
 		}
 	} else {
-		next.GroupModelBindings[key] = binding
+		next.ChatModelBindings[key] = binding
 	}
 
 	if err := ps.saveLocked(next); err != nil {

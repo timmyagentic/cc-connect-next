@@ -107,16 +107,17 @@ func TestCUJ_H10_HistoryMediaReachesForegroundAndQueuedTurns(t *testing.T) {
 	}
 }
 
-func TestCUJ_H7_GroupModelBindingIsolatesTopicsAndDefaultChanges(t *testing.T) {
-	e, p, a := newGroupModelEngine(t, "")
-	e.ReceiveMessage(p, groupModelMessage("A", "one", "bind", "/model group group-B"))
-	groupModelChat(t, e, p, a, groupModelMessage("A", "two", "A1", "A1"), "group-B")
-	groupModelChat(t, e, p, a, groupModelMessage("B", "", "B1", "B1"), "project-A")
-	e.ReceiveMessage(p, groupModelMessage("B", "", "default", "/model switch project-C"))
-	groupModelChat(t, e, p, a, groupModelMessage("A", "two", "A2", "A2"), "group-B")
-	groupModelChat(t, e, p, a, groupModelMessage("B", "", "B2", "B2"), "project-C")
-	e.ReceiveMessage(p, groupModelMessage("A", "one", "reset", "/model group reset"))
-	groupModelChat(t, e, p, a, groupModelMessage("A", "two", "A3", "A3"), "project-C")
+func TestCUJ_H7_ChatModelBindingIsolatesTopicsAndDefaultChanges(t *testing.T) {
+	e, p, a := newChatModelEngine(t, "")
+	e.SetAdminFrom("owner")
+	e.ReceiveMessage(p, chatModelMessage("A", "one", "bind", "/model group-B"))
+	chatModelTurn(t, e, p, a, chatModelMessage("A", "two", "A1", "A1"), "group-B")
+	chatModelTurn(t, e, p, a, chatModelMessage("B", "", "B1", "B1"), "project-A")
+	e.ReceiveMessage(p, chatModelMessage("B", "", "default", "/model default project-C"))
+	chatModelTurn(t, e, p, a, chatModelMessage("A", "two", "A2", "A2"), "group-B")
+	chatModelTurn(t, e, p, a, chatModelMessage("B", "", "B2", "B2"), "project-C")
+	e.ReceiveMessage(p, chatModelMessage("A", "one", "reset", "/model reset"))
+	chatModelTurn(t, e, p, a, chatModelMessage("A", "two", "A3", "A3"), "project-C")
 	visible := strings.Join(p.getSent(), "\n")
 	for _, reply := range []string{"model=group-B A1", "model=project-A B1", "model=group-B A2", "model=project-C B2", "model=project-C A3"} {
 		if !strings.Contains(visible, reply) {
@@ -135,13 +136,13 @@ func TestCUJ_H8_PrivateChatModelAndEffortResetIndependently(t *testing.T) {
 			return strings.Contains(strings.Join(p.getSent(), "\n"), want)
 		})
 	}
-	e.ReceiveMessage(p, privateChatMessage("alice", "model", "/model chat group-B"))
+	e.ReceiveMessage(p, privateChatMessage("alice", "model", "/model group-B"))
 	e.ReceiveMessage(p, privateChatMessage("alice", "effort", "/effort chat high"))
 	chat("alice", "alice-pinned", "effort=high model=group-B")
 	chat("bob", "bob-default", "effort=medium model=project-A")
 	e.ReceiveMessage(p, privateChatMessage("alice", "effort-reset", "/effort chat reset"))
 	chat("alice", "model-kept", "effort=medium model=group-B")
-	e.ReceiveMessage(p, privateChatMessage("alice", "model-reset", "/model chat reset"))
+	e.ReceiveMessage(p, privateChatMessage("alice", "model-reset", "/model reset"))
 	chat("alice", "both-inherited", "effort=medium model=project-A")
 }
 
@@ -2224,9 +2225,63 @@ func TestCUJ_F1_ProviderSwitchLinkedToAgent(t *testing.T) {
 	t.Log("CUJ-F1: provider switching is per-agent; covered by agent/*_test.go provider tests")
 }
 
-// CUJ-F2 · /model switches model — same pattern as F1, agent-managed.
-func TestCUJ_F2_ModelSwitchLinkedToAgent(t *testing.T) {
-	t.Log("CUJ-F2: model switching is per-agent; covered by agent/*_test.go model tests")
+// CUJ-F2 · A member pins one chat, an admin changes the shared default, and
+// resetting the pin resumes inheritance without reviving the removed commands.
+func TestCUJ_F2_ModelScopesPermissionsResetAndRemovedCommands(t *testing.T) {
+	e, p, a := newChatModelEngine(t, "")
+	e.SetAdminFrom("admin")
+	command := func(user, group, topic, id, content string) string {
+		t.Helper()
+		p.clearSent()
+		msg := chatModelMessage(group, topic, id, content)
+		msg.UserID = user
+		e.ReceiveMessage(p, msg)
+		return strings.Join(p.getSent(), "\n")
+	}
+	chat := func(group, topic, id, want string) {
+		t.Helper()
+		p.clearSent()
+		chatModelTurn(t, e, p, a, chatModelMessage(group, topic, id, id), want)
+		if visible := strings.Join(p.getSent(), "\n"); !strings.Contains(visible, "model="+want+" "+id) {
+			t.Fatalf("user did not see model=%s for %s: %s", want, id, visible)
+		}
+	}
+
+	if reply := command("member", "A", "one", "pin", "/model group-B"); !strings.Contains(reply, "group-B") {
+		t.Fatalf("member cannot pin current chat: %s", reply)
+	}
+	chat("A", "two", "same-group-new-topic", "group-B")
+	chat("B", "", "other-group", "project-A")
+	if reply := command("member", "A", "one", "read-default", "/model default"); !strings.Contains(reply, "project-A") {
+		t.Fatalf("member cannot inspect project default: %s", reply)
+	}
+	if reply := command("member", "B", "", "denied-default", "/model default project-C"); !strings.Contains(strings.ToLower(reply), "admin") {
+		t.Fatalf("member write was not visibly denied: %s", reply)
+	}
+	chat("B", "", "after-denied-write", "project-A")
+	if reply := command("admin", "B", "", "set-default", "/model default project-C"); !strings.Contains(reply, "project-C") {
+		t.Fatalf("admin cannot change default: %s", reply)
+	}
+	chat("B", "", "after-admin-write", "project-C")
+	chat("A", "two", "pin-survives-default", "group-B")
+	for i, removed := range []string{"/model switch project-A", "/model group project-A", "/model chat project-A"} {
+		if reply := command("admin", "A", "one", fmt.Sprintf("removed-%d", i), removed); !strings.Contains(reply, "/model") {
+			t.Fatalf("removed command lacks usage: %s", reply)
+		}
+	}
+	chat("A", "two", "old-commands-left-pin", "group-B")
+	chat("B", "", "old-commands-left-default", "project-C")
+	command("member", "A", "one", "reset", "/model reset")
+	chat("A", "three", "reset-follows-default", "project-C")
+
+	p.clearSent()
+	e.ReceiveMessage(p, privateChatMessage("alice", "dm-pin", "/model group-B"))
+	chatModelTurn(t, e, p, a, privateChatMessage("alice", "alice-pinned", "alice"), "group-B")
+	chatModelTurn(t, e, p, a, privateChatMessage("bob", "bob-default", "bob"), "project-C")
+	visible := strings.Join(p.getSent(), "\n")
+	if !strings.Contains(visible, "model=group-B alice") || !strings.Contains(visible, "model=project-C bob") {
+		t.Fatalf("private users did not see isolated model selections: %s", visible)
+	}
 }
 
 // CUJ-F3 · /lang switches i18n locale; next reply uses new language.

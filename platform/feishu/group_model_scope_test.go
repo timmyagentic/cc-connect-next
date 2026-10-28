@@ -188,7 +188,7 @@ func TestPrivateChatSettingsCardCallbacksPreserveIdentity(t *testing.T) {
 				t.Error("settings navigation bypassed verified chat context")
 				return nil
 			}
-			for _, action := range []string{"nav:/model", "nav:/reasoning", "cmd:/model chat group-B", "cmd:/reasoning chat high"} {
+			for _, action := range []string{"nav:/model", "nav:/reasoning", "cmd:/model group-B", "cmd:/reasoning chat high"} {
 				event := cardActionEvent("ou_alice", action)
 				event.Event.Context.OpenChatID = "oc_chat"
 				event.Event.Action.Value[cardActionProjectKey] = "private-settings"

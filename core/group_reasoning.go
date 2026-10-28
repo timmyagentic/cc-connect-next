@@ -7,10 +7,10 @@ import (
 )
 
 func (e *Engine) groupReasoningBinding(sessionKey string) (GroupReasoningBinding, bool) {
-	if e.projectState == nil || e.groupModelKey(sessionKey) == "" {
+	if e.projectState == nil || e.chatKey(sessionKey) == "" {
 		return GroupReasoningBinding{}, false
 	}
-	return e.projectState.GroupReasoningBinding(e.groupModelKey(sessionKey))
+	return e.projectState.GroupReasoningBinding(e.chatKey(sessionKey))
 }
 
 func supportsGroupReasoning(agent Agent) bool {
@@ -24,11 +24,11 @@ func (e *Engine) groupDefaultReasoning(agent Agent, sessionKey string, backend A
 	if !ok {
 		return "", nil
 	}
-	fail := func(key MsgKey) (string, error) { return "", e.groupModelFailure(key) }
+	fail := func(key MsgKey) (string, error) { return "", e.chatModelFailure(key) }
 	if !supportsGroupReasoning(agent) {
 		return fail(MsgReasoningGroupUnsupported)
 	}
-	if binding.Provider != groupModelProvider(agent) {
+	if binding.Provider != modelProvider(agent) {
 		return fail(MsgReasoningGroupProviderChanged)
 	}
 	if !slices.Contains(agent.(ReasoningEffortSwitcher).AvailableReasoningEfforts(), binding.Effort) {
@@ -50,7 +50,7 @@ func (e *Engine) groupDefaultReasoning(agent Agent, sessionKey string, backend A
 }
 
 func (e *Engine) setGroupReasoning(agent Agent, sessionKey, input string) (string, error) {
-	key := e.groupModelKey(sessionKey)
+	key := e.chatKey(sessionKey)
 	if key == "" {
 		return "", fmt.Errorf("%s", e.i18n.T(MsgReasoningGroupOnly))
 	}
@@ -67,14 +67,14 @@ func (e *Engine) setGroupReasoning(agent Agent, sessionKey, input string) (strin
 	if !slices.Contains(agent.(ReasoningEffortSwitcher).AvailableReasoningEfforts(), target) {
 		return "", fmt.Errorf("%s", e.i18n.T(MsgReasoningGroupUsage))
 	}
-	if err := e.projectState.SaveGroupReasoningBinding(key, GroupReasoningBinding{Effort: target, Provider: groupModelProvider(agent)}); err != nil {
+	if err := e.projectState.SaveGroupReasoningBinding(key, GroupReasoningBinding{Effort: target, Provider: modelProvider(agent)}); err != nil {
 		return "", err
 	}
 	return target, nil
 }
 
 func (e *Engine) cmdGroupReasoning(p Platform, msg *Message, agent Agent, args []string) {
-	if e.groupModelKey(msg.SessionKey) == "" {
+	if e.chatKey(msg.SessionKey) == "" {
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgReasoningGroupOnly))
 		return
 	}
@@ -102,19 +102,19 @@ func (e *Engine) cmdGroupReasoning(p Platform, msg *Message, agent Agent, args [
 }
 
 func (e *Engine) groupReasoningCard(cb *CardBuilder, sessionKey string, agent Agent) {
-	if e.groupModelKey(sessionKey) == "" {
+	if e.chatKey(sessionKey) == "" {
 		return
 	}
 	binding, bound := e.groupReasoningBinding(sessionKey)
 	if bound {
 		cb.Markdown(e.i18n.Tf(MsgReasoningGroupCurrent, binding.Effort))
-		if binding.Provider != groupModelProvider(agent) {
+		if binding.Provider != modelProvider(agent) {
 			cb.Markdown(e.i18n.T(MsgReasoningGroupProviderChanged))
 		}
 	} else {
 		cb.Markdown(e.i18n.T(MsgReasoningGroupDefault))
 	}
-	choices := []CardSelectOption{{Text: e.i18n.T(MsgModelGroupResetButton), Value: "cmd:/reasoning chat reset"}}
+	choices := []CardSelectOption{{Text: e.i18n.T(MsgModelChatResetButton), Value: "cmd:/reasoning chat reset"}}
 	selected := choices[0].Value
 	if bound {
 		selected = ""
@@ -130,7 +130,7 @@ func (e *Engine) groupReasoningCard(cb *CardBuilder, sessionKey string, agent Ag
 		cb.Select(e.i18n.T(MsgReasoningGroupSelect), choices, selected)
 	} else {
 		cb.Markdown(e.i18n.T(MsgReasoningGroupUnsupported))
-		cb.Buttons(CardButton{Text: e.i18n.T(MsgModelGroupResetButton), Value: choices[0].Value})
+		cb.Buttons(CardButton{Text: e.i18n.T(MsgModelChatResetButton), Value: choices[0].Value})
 	}
 	cb.Divider()
 }

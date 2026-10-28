@@ -671,6 +671,9 @@ type interactiveState struct {
 	recallProbeInFlight      bool
 	workspaceDir             string
 	agent                    Agent
+	sessionModel             string // model captured when a process-bound backend starts
+	sessionModelProvider     string
+	modelResumeID            string // failed model refresh may only retry this saved session
 	mu                       sync.Mutex
 	stopCh                   chan struct{}
 	stopped                  bool
@@ -687,7 +690,6 @@ type interactiveState struct {
 	fromVoice                bool            // true if current turn originated from voice transcription
 	sideText                 string
 	deleteMode               *deleteModeState
-	modelSwitch              *modelSwitchState
 	pendingProviderAdd       *pendingProviderAddState
 	lastAutoCompressAt       time.Time
 	lastAutoCompressTokens   int
@@ -722,7 +724,7 @@ type interactiveState struct {
 	activeAnswerProfile           AnswerProfileName
 	activeModelOverride           string // task model of the in-flight turn; never inherited by queued input
 	activeGroupReasoning          bool   // effort bindings also require distinct queued turns
-	activeGroupModel              bool   // keeps a bound turn out of steering even if its binding is reset
+	activeChatModel               bool   // keeps a bound turn out of steering even if its binding is reset
 	activeReasoningEffortOverride string
 	activeServiceTier             string // session override captured at turn admission
 
@@ -882,12 +884,6 @@ type deleteModeState struct {
 	phase       string
 	hint        string
 	result      string
-}
-
-type modelSwitchState struct {
-	phase  string
-	target string
-	result string
 }
 
 // pendingPermission represents a permission request waiting for user response.
@@ -1520,9 +1516,12 @@ func (e *Engine) SetAdminFrom(adminFrom string) {
 }
 
 // isPrivilegedCommandInvocation extends the static privileged command list to
-// subcommands that can install arbitrary shell execution at runtime. Listing
-// and prompt-only command management remain available to ordinary users.
+// subcommands that mutate shared configuration or install shell execution.
+// Read-only model queries remain available to ordinary members.
 func isPrivilegedCommandInvocation(cmdID string, args []string) bool {
+	if cmdID == "model" {
+		return len(args) > 1 && strings.EqualFold(args[0], "default")
+	}
 	definition, ok := builtinCommandByID(cmdID)
 	if !ok {
 		return false
@@ -2220,9 +2219,9 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 	ccSessionKey := sessionKey
 	var session *Session
 	if spec.newSession {
-		if scope := e.groupModelKey(sessionKey); scope != "" && runSessionKey != sessionKey {
-			if err := e.sessions.UpdateGroupModelKey(runSessionKey, scope); err != nil {
-				return fmt.Errorf("save scheduled group model scope: %w", err)
+		if scope := e.chatKey(sessionKey); scope != "" && runSessionKey != sessionKey {
+			if err := e.sessions.UpdateChatKey(runSessionKey, scope); err != nil {
+				return fmt.Errorf("save scheduled chat scope: %w", err)
 			}
 		}
 		msg.SessionKey = runSessionKey
@@ -3224,7 +3223,7 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		return
 	}
 	e.rememberReplyTarget(p, msg)
-	if err := e.rememberGroupModelScope(p, msg); err != nil {
+	if err := e.rememberChatScope(p, msg); err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgModelChangeFailed, err))
 		return
 	}
@@ -3524,7 +3523,7 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 // session lacks the steer capability, or the steer was definitively rejected
 // without delivering anything.
 func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey string, session *Session, sessions *SessionManager) bool {
-	if _, bound := e.groupModelBinding(msg.SessionKey); bound {
+	if _, bound := e.chatModelBinding(msg.SessionKey); bound {
 		// A binding may have changed while the previous turn was running.
 		// Resolve it when the queued turn starts, never steer into an old model.
 		return false
@@ -3558,7 +3557,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		state.mu.Unlock()
 		return false
 	}
-	if state.activeAnswerProfile != "" || state.activeModelOverride != "" || state.activeGroupModel || state.activeGroupReasoning || state.activeReasoningEffortOverride != "" || state.activeServiceTier != sessions.ServiceTier(session) {
+	if state.activeAnswerProfile != "" || state.activeModelOverride != "" || state.activeChatModel || state.activeGroupReasoning || state.activeReasoningEffortOverride != "" || state.activeServiceTier != sessions.ServiceTier(session) {
 		state.mu.Unlock()
 		return false
 	}
@@ -3568,7 +3567,18 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		e.logStaleUserMessageDropped("reject_before_steer", msg, interactiveKey, snap)
 		return true
 	}
+	turnAgent := state.agent
 	state.mu.Unlock()
+	if turnAgent == nil {
+		turnAgent = e.agent
+	}
+	if current, ok := as.(interface{ GetModel() string }); ok {
+		if selected := defaultTurnOptions(turnAgent).Model; selected != "" && selected != current.GetModel() {
+			// A changed global default needs a new turn; steering would keep
+			// this message on the model of the already-running turn.
+			return false
+		}
+	}
 
 	steerable, ok := as.(SteerableSession)
 	if !ok {
@@ -4503,7 +4513,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.sideText = ""
 	state.activeAnswerProfile = msg.AnswerProfile
 	state.activeModelOverride = msg.ModelOverride
-	_, state.activeGroupModel = e.groupModelBinding(msg.SessionKey)
+	_, state.activeChatModel = e.chatModelBinding(msg.SessionKey)
 	_, state.activeGroupReasoning = e.groupReasoningBinding(msg.SessionKey)
 	state.activeReasoningEffortOverride = msg.ReasoningEffortOverride
 	speedTier := sessions.ServiceTier(session)
@@ -4592,6 +4602,7 @@ func (e *Engine) getOrCreateWorkspaceAgent(workspace string) (Agent, *SessionMan
 	defer ws.mu.Unlock()
 
 	if ws.agent != nil {
+		e.syncModelDefault(ws.agent)
 		return ws.agent, ws.sessions, nil
 	}
 
@@ -4606,12 +4617,6 @@ func (e *Engine) getOrCreateWorkspaceAgent(workspace string) (Agent, *SessionMan
 
 	// workspace-specific overrides always win
 	opts["work_dir"] = workspace
-
-	if e.projectState != nil {
-		if m := e.projectState.WorkspaceModelOverride(workspace); m != "" {
-			opts["model"] = m
-		}
-	}
 
 	// Copy model from original agent if possible
 	if _, ok := opts["model"]; !ok {
@@ -4736,7 +4741,12 @@ func (e *Engine) getOrCreateInteractiveStateWith(sessionKey string, p Platform, 
 // getOrCreateInteractiveState returns a newly-created backend session
 // separately so optional title generation runs after interactiveMu is released.
 // The caller still initializes the title synchronously before the first turn.
-func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey string) (*interactiveState, AgentSession) {
+func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, replyCtx any, session *Session, sessions *SessionManager, agentOverride Agent, ccSessionKey string, expected ...*interactiveState) (*interactiveState, AgentSession) {
+	agent := e.agent
+	if agentOverride != nil {
+		agent = agentOverride
+	}
+	e.syncModelDefault(agent)
 	for {
 		if !e.awaitSessionClose(sessionKey) {
 			e.markUnsafeResume(sessionKey)
@@ -4751,7 +4761,70 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	}
 	defer e.interactiveMu.Unlock()
 
+	if len(expected) > 0 {
+		current := e.interactiveStates[sessionKey]
+		if current != expected[0] {
+			return nil, nil
+		}
+		current.mu.Lock()
+		stopped := current.stopped
+		ended := current.agentSession == nil || !current.agentSession.Alive()
+		if !stopped && ended {
+			current.startError = fmt.Errorf("agent session ended before the queued turn")
+		}
+		current.mu.Unlock()
+		if stopped {
+			return nil, nil
+		}
+		if ended {
+			return current, nil
+		}
+	}
+
+	// A default-model refresh replaces only the backend. Keep queue, stop signal,
+	// conversation history and the live state used by the event loop intact.
+	var reuseState *interactiveState
+	publish := func(next *interactiveState) *interactiveState {
+		if reuseState != nil {
+			reuseState.mu.Lock()
+			if reuseState.stopped {
+				reuseState.mu.Unlock()
+				if next.agentSession != nil {
+					e.closeAgentSessionWithTimeout(sessionKey, next.agentSession)
+				}
+				if next.restartNoncePath != "" {
+					_ = os.Remove(next.restartNoncePath)
+				}
+				return reuseState
+			}
+			reuseState.agentSession = next.agentSession
+			reuseState.agent = next.agent
+			reuseState.startError = next.startError
+			if next.agentSession != nil {
+				reuseState.modelResumeID = ""
+			}
+			reuseState.sessionModel = next.sessionModel
+			reuseState.sessionModelProvider = next.sessionModelProvider
+			reuseState.eventsNeedResync = true
+			reuseState.restartSessionSecret = next.restartSessionSecret
+			reuseState.restartNoncePath = next.restartNoncePath
+			reuseState.mu.Unlock()
+			next = reuseState
+		} else {
+			adoptPendingFromPlaceholder(e.interactiveStates[sessionKey], next)
+		}
+		e.interactiveStates[sessionKey] = next
+		return next
+	}
+
 	state, ok := e.interactiveStates[sessionKey]
+	if ok {
+		state.mu.Lock()
+		if state.agentSession == nil && state.modelResumeID != "" && state.modelResumeID == session.GetAgentSessionID() {
+			reuseState = state
+		}
+		state.mu.Unlock()
+	}
 	if ok && state.agentSession != nil && state.agentSession.Alive() {
 		// Verify the running agent session matches the current active session.
 		// After /new or /switch the active session changes, but the old agent
@@ -4765,7 +4838,16 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 		// If wantID is empty (/new, cleared session) but the process already has
 		// a concrete ID, reusing would keep --resume context — recycle (#238).
 		needRecycle := currentID != "" && (wantID == "" || wantID != currentID)
-		if !needRecycle {
+		if len(expected) > 0 && needRecycle {
+			state.mu.Lock()
+			state.startError = fmt.Errorf("conversation changed before the queued turn")
+			state.mu.Unlock()
+			return state, nil
+		}
+		state.mu.Lock()
+		modelChanged := !supportsChatModel(agent) && state.sessionModelProvider == modelProvider(agent) && state.sessionModel != defaultTurnOptions(agent).Model
+		state.mu.Unlock()
+		if !needRecycle && !modelChanged {
 			return state, nil
 		}
 		// Tear down the stale agent so we start one that matches the Session below.
@@ -4775,18 +4857,34 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 			"have_agent_session", currentID,
 		)
 		e.stopUnsolicitedReader(state)
-		state.markStopped()
+		if !needRecycle && modelChanged {
+			reuseState = state
+			state.mu.Lock()
+			state.modelResumeID = wantID
+			state.mu.Unlock()
+		} else {
+			state.markStopped()
+		}
 		clearAgentTurnCredential(state, true)
 		// Close synchronously to prevent race condition where old agent
 		// continues outputting while new agent starts (issue #327).
 		e.closeAgentSessionWithTimeout(sessionKey, state.agentSession, sessionCloseTarget{platform: state.platform, replyCtx: state.replyCtx})
-		delete(e.interactiveStates, sessionKey)
+		if reuseState != nil {
+			if !e.awaitSessionClose(sessionKey) {
+				return publish(&interactiveState{agent: agent, startError: fmt.Errorf("previous model session is still closing")}), nil
+			}
+		} else {
+			delete(e.interactiveStates, sessionKey)
+		}
 	}
 
-	// Select the agent to use for this session
-	agent := e.agent
-	if agentOverride != nil {
-		agent = agentOverride
+	if len(expected) > 0 && reuseState != expected[0] {
+		// The backend can exit between the two liveness checks above. A
+		// queued turn must never publish a replacement state with no reader.
+		state.mu.Lock()
+		state.startError = fmt.Errorf("agent session ended before the queued turn could resume")
+		state.mu.Unlock()
+		return state, nil
 	}
 
 	ccKey := sessionKey
@@ -4856,9 +4954,7 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 			_ = os.Remove(restartNoncePath)
 		}
 		newState := &interactiveState{platform: p, replyCtx: replyCtx, agent: agent, eventsNeedResync: true}
-		adoptPendingFromPlaceholder(e.interactiveStates[sessionKey], newState)
-		state = newState
-		e.interactiveStates[sessionKey] = state
+		state = publish(newState)
 		return state, nil
 	}
 
@@ -4891,6 +4987,13 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	}
 	unsafeResume := e.consumeUnsafeResume(sessionKey)
 	if startSessionID != "" && unsafeResume {
+		if reuseState != nil {
+			e.markUnsafeResume(sessionKey)
+			if restartNoncePath != "" {
+				_ = os.Remove(restartNoncePath)
+			}
+			return publish(&interactiveState{agent: agent, startError: fmt.Errorf("model refresh cannot safely resume the previous session")}), nil
+		}
 		session.SetAgentSessionID("", agent.Name())
 		sessions.Save()
 		startSessionID = ""
@@ -4898,13 +5001,14 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 	}
 	isResume := startSessionID != ""
 	createdFresh := !isResume
+	startModel, startProvider := defaultTurnOptions(agent).Model, modelProvider(agent)
 	startAt := time.Now()
 	agentSession, err := agent.StartSession(e.ctx, startSessionID)
 	startElapsed := time.Since(startAt)
 	if err != nil {
 		// A lost login does not make the saved conversation stale. Preserve its
 		// binding so the user's retry after signing in resumes the same thread.
-		if startSessionID != "" && !errors.Is(err, ErrAuthenticationRequired) {
+		if reuseState == nil && startSessionID != "" && !errors.Is(err, ErrAuthenticationRequired) {
 			slog.Error("session resume failed, falling back to fresh session",
 				"session_key", sessionKey, "failed_session_id", startSessionID,
 				"error", err, "elapsed", startElapsed)
@@ -4933,9 +5037,7 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 				Error:      fmt.Sprintf("failed to start session: %v", err),
 			})
 			newState := &interactiveState{platform: p, replyCtx: replyCtx, agent: agent, startError: err, eventsNeedResync: true}
-			adoptPendingFromPlaceholder(e.interactiveStates[sessionKey], newState)
-			state = newState
-			e.interactiveStates[sessionKey] = state
+			state = publish(newState)
 			return state, nil
 		}
 	}
@@ -4971,6 +5073,8 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 
 	newState := &interactiveState{
 		agentSession:         agentSession,
+		sessionModel:         startModel,
+		sessionModelProvider: startProvider,
 		platform:             p,
 		replyCtx:             replyCtx,
 		agent:                agent,
@@ -4978,9 +5082,7 @@ func (e *Engine) getOrCreateInteractiveState(sessionKey string, p Platform, repl
 		restartSessionSecret: restartSessionSecret,
 		restartNoncePath:     restartNoncePath,
 	}
-	adoptPendingFromPlaceholder(e.interactiveStates[sessionKey], newState)
-	state = newState
-	e.interactiveStates[sessionKey] = state
+	state = publish(newState)
 
 	slog.Info("session spawned", "session_key", sessionKey, "agent_session", session.GetAgentSessionID(), "is_resume", isResume, "elapsed", startElapsed)
 
@@ -5745,7 +5847,7 @@ func (t *turnProcessor) run() {
 		state.mu.Lock()
 		state.activeAnswerProfile = ""
 		state.activeModelOverride = ""
-		state.activeGroupModel = false
+		state.activeChatModel = false
 		state.activeGroupReasoning = false
 		state.activeReasoningEffortOverride = ""
 		state.mu.Unlock()
@@ -6353,11 +6455,11 @@ func (t *turnProcessor) run() {
 			p := state.platform
 			state.mu.Unlock()
 			safePartial := persistVisibleRichPartial(p)
-			var groupErr *groupModelError
-			if usesRichCard(p) && errors.As(err, &groupErr) {
+			var chatErr *chatModelError
+			if usesRichCard(p) && errors.As(err, &chatErr) {
 				// These errors contain only our localized recovery instructions.
 				// Preserve generic redaction for arbitrary backend failures.
-				e.send(p, replyCtx, groupErr.Error())
+				e.send(p, replyCtx, chatErr.Error())
 			}
 			phase := richCardFailurePhase(err)
 			if !markRichCardFailedWithPhase(p, cardMessageID, phase, safePartial) {
@@ -6704,6 +6806,7 @@ func (t *turnProcessor) run() {
 			isSilent := completion.isSilent
 
 			queue := turnQueue{
+				reader:                      &reader,
 				processor:                   t,
 				platform:                    p,
 				isSilent:                    isSilent,
@@ -7082,6 +7185,7 @@ func (completion *turnCompletion) runAutoCompress(trigger bool) bool {
 }
 
 type turnQueue struct {
+	reader                      *turnEventReader
 	processor                   *turnProcessor
 	platform                    Platform
 	isSilent                    bool
@@ -7253,7 +7357,7 @@ func (queue *turnQueue) handle() {
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		state.activeModelOverride = queued.modelOverride
-		_, state.activeGroupModel = e.groupModelBinding(queued.msgSessionKey)
+		_, state.activeChatModel = e.chatModelBinding(queued.msgSessionKey)
 		_, state.activeGroupReasoning = e.groupReasoningBinding(queued.msgSessionKey)
 		state.activeReasoningEffortOverride = queued.reasoningEffortOverride
 		speedTier := sessions.ServiceTier(session)
@@ -7262,7 +7366,6 @@ func (queue *turnQueue) handle() {
 		state.presentationOpen = true
 		state.mu.Unlock()
 		state.steerMu.Unlock()
-		e.activateAgentTurnCredential(state, queued.userID, queued.msgSessionKey)
 		e.adoptQueuedFeedbackTurn(state, queued, session)
 
 		// Stop the previous turn's typing indicator
@@ -7282,6 +7385,20 @@ func (queue *turnQueue) handle() {
 				slog.Debug("async send error before queued turn", "error", err)
 			}
 		}
+
+		if err := e.ensureBackendForTurn(state, sessionKey, session, sessions, queued); err != nil {
+			e.reportModelResumeFailure(state, queued, err)
+			queue.control = turnReadStop
+			return
+		}
+		e.activateAgentTurnCredential(state, queued.userID, queued.msgSessionKey)
+		state.mu.Lock()
+		if state.agentSession != nil {
+			queue.reader.events = state.agentSession.Events()
+		} else {
+			queue.reader.events = nil
+		}
+		state.mu.Unlock()
 
 		historyContext := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
 		if historyContext.Err != nil {
@@ -8878,13 +8995,17 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		state.activeModelOverride = queued.modelOverride
-		_, state.activeGroupModel = e.groupModelBinding(queued.msgSessionKey)
+		_, state.activeChatModel = e.chatModelBinding(queued.msgSessionKey)
 		_, state.activeGroupReasoning = e.groupReasoningBinding(queued.msgSessionKey)
 		state.activeReasoningEffortOverride = queued.reasoningEffortOverride
 		speedTier := sessions.ServiceTier(session)
 		state.activeServiceTier = speedTier
 		state.mu.Unlock()
 		state.steerMu.Unlock()
+		if err := e.ensureBackendForTurn(state, sessionKey, session, sessions, queued); err != nil {
+			e.reportModelResumeFailure(state, queued, err)
+			return false
+		}
 		e.activateAgentTurnCredential(state, queued.userID, queued.msgSessionKey)
 		e.adoptQueuedFeedbackTurn(state, queued, session)
 
@@ -11293,10 +11414,6 @@ func (e *Engine) cardBackButton() CardButton {
 	return DefaultBtn(e.i18n.T(MsgCardBack), "nav:/help")
 }
 
-func (e *Engine) modelCardBackButton() CardButton {
-	return DefaultBtn(e.i18n.T(MsgCardBack), "nav:/model")
-}
-
 func (e *Engine) cardPrevButton(action string) CardButton {
 	return DefaultBtn(e.i18n.T(MsgCardPrev), action)
 }
@@ -11893,117 +12010,6 @@ func sanitizeTelegramMenuCommand(cmd string) string {
 	return result
 }
 
-func (e *Engine) cmdModel(p Platform, msg *Message, args []string) {
-	agent, sessions, interactiveKey, err := e.commandContext(p, msg)
-	if err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgWsResolutionError, err))
-		return
-	}
-	if len(args) > 0 && (strings.EqualFold(args[0], "group") || strings.EqualFold(args[0], "chat")) {
-		e.cmdGroupModel(p, msg, agent, args[1:])
-		return
-	}
-
-	switcher, ok := agent.(ModelSwitcher)
-	if !ok {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgModelNotSupported))
-		return
-	}
-
-	if len(args) == 0 {
-		if e.groupModelKey(msg.SessionKey) != "" {
-			e.replyWithCard(p, msg.ReplyCtx, e.renderModelCardForAgent(msg.SessionKey, agent))
-			return
-		}
-		if !supportsCards(p) {
-			fetchCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
-			defer cancel()
-			models := switcher.AvailableModels(fetchCtx)
-
-			var sb strings.Builder
-			current := switcher.GetModel()
-			if current == "" {
-				sb.WriteString(e.i18n.T(MsgModelDefault))
-			} else {
-				sb.WriteString(e.i18n.Tf(MsgModelCurrent, current))
-				sb.WriteString("\n")
-			}
-			sb.WriteString("\n")
-			sb.WriteString(e.i18n.T(MsgModelListTitle))
-			var buttons [][]ButtonOption
-			var row []ButtonOption
-			for i, m := range models {
-				marker := "  "
-				if m.Name == current {
-					marker = "> "
-				}
-				var line string
-				if m.Alias != "" {
-					line = fmt.Sprintf("%s%d. %s - %s\n", marker, i+1, m.Alias, m.Name)
-				} else {
-					desc := m.Desc
-					if desc != "" {
-						desc = " — " + desc
-					}
-					line = fmt.Sprintf("%s%d. %s%s\n", marker, i+1, m.Name, desc)
-				}
-				sb.WriteString(line)
-
-				label := m.Name
-				if m.Alias != "" {
-					label = m.Alias
-				}
-				if m.Name == current {
-					label = "▶ " + label
-				}
-				row = append(row, ButtonOption{Text: label, Data: fmt.Sprintf("cmd:/model switch %d", i+1)})
-				if len(row) >= 3 {
-					buttons = append(buttons, row)
-					row = nil
-				}
-			}
-			if len(row) > 0 {
-				buttons = append(buttons, row)
-			}
-			sb.WriteString("\n")
-			sb.WriteString(e.i18n.T(MsgModelUsage))
-			e.replyWithButtons(p, msg.ReplyCtx, sb.String(), buttons)
-			return
-		}
-		e.replyWithCard(p, msg.ReplyCtx, e.renderModelCard(msg.SessionKey))
-		return
-	}
-
-	targetInput, ok := parseModelSwitchArgs(args)
-	if !ok {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgModelUsage))
-		return
-	}
-
-	target := strings.TrimSpace(targetInput)
-	if modelSwitchNeedsLookup(target) {
-		fetchCtx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
-		defer cancel()
-		models := switcher.AvailableModels(fetchCtx)
-		target = resolveModelSwitchTarget(target, models)
-	}
-
-	target, err = e.switchModelOnAgent(agent, target, agent == e.agent)
-	if err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgModelChangeFailed, err))
-		return
-	}
-	e.persistWorkspaceModelOverride(interactiveKey, msg.SessionKey, agent, target)
-	e.cleanupInteractiveState(interactiveKey)
-
-	// Keep the existing agent session ID so the next StartSession uses
-	// --resume <id> --model <new>, which lets the CLI agent restore context
-	// natively without replaying history (no extra token cost).
-	sessions.Save()
-
-	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgModelChanged, target))
-}
-
 // resolveModelAlias resolves a user-supplied string to a model name.
 // It first checks for an exact alias match, then falls back to the original value
 // (which may be a direct model name).
@@ -12041,22 +12047,6 @@ func modelSwitchNeedsLookup(input string) bool {
 		return true
 	}
 	return !strings.Contains(input, "/")
-}
-
-func parseModelSwitchArgs(args []string) (string, bool) {
-	if len(args) == 0 {
-		return "", false
-	}
-	if len(args) == 1 {
-		if strings.EqualFold(strings.TrimSpace(args[0]), "switch") {
-			return "", false
-		}
-		return args[0], true
-	}
-	if strings.EqualFold(strings.TrimSpace(args[0]), "switch") && len(args) >= 2 {
-		return strings.TrimSpace(args[1]), true
-	}
-	return "", false
 }
 
 // switchModel applies a runtime model selection to the global engine agent and
@@ -12135,7 +12125,7 @@ func (e *Engine) cmdReasoning(p Platform, msg *Message, args []string) {
 	}
 
 	if len(args) == 0 {
-		if e.groupModelKey(msg.SessionKey) != "" {
+		if e.chatKey(msg.SessionKey) != "" {
 			e.replyWithCard(p, msg.ReplyCtx, e.renderReasoningCardForAgent(msg.SessionKey, agent))
 			return
 		}
@@ -12660,7 +12650,7 @@ func (e *Engine) runCompress(state *interactiveState, session *Session, sessions
 	state.activeServiceTier = speedTier
 	state.activeAnswerProfile = ""
 	state.activeModelOverride = ""
-	state.activeGroupModel = false
+	state.activeChatModel = false
 	state.activeGroupReasoning = false
 	state.activeReasoningEffortOverride = ""
 	state.mu.Unlock()
@@ -14213,10 +14203,6 @@ func (e *Engine) handleCardNav(action string, sessionKey string) *Card {
 		args = strings.TrimSpace(body[i+1:])
 	}
 
-	if prefix == "act" && cmd == "/model" {
-		return e.handleModelCardAction(args, sessionKey)
-	}
-
 	if prefix == "act" {
 		e.executeCardAction(cmd, args, sessionKey)
 	}
@@ -14225,6 +14211,12 @@ func (e *Engine) handleCardNav(action string, sessionKey string) *Card {
 	case "/help":
 		return e.renderHelpGroupCard(args)
 	case "/model":
+		if prefix != "nav" {
+			return nil
+		}
+		if strings.EqualFold(args, "default") {
+			return e.renderModelDefaultCard()
+		}
 		return e.renderModelCard(sessionKey)
 	case "/reasoning":
 		agent, _ := e.sessionContextForKey(sessionKey)
@@ -14300,113 +14292,12 @@ func (e *Engine) handleCardNav(action string, sessionKey string) *Card {
 	return nil
 }
 
-func (e *Engine) handleModelCardAction(args, sessionKey string) *Card {
-	agent, sessions := e.sessionContextForKey(sessionKey)
-	switcher, ok := agent.(ModelSwitcher)
-	if !ok {
-		return e.simpleCard(e.i18n.T(MsgCardTitleModel), "indigo", e.i18n.T(MsgModelNotSupported))
-	}
-
-	target, ok := parseModelSwitchArgs(strings.Fields(args))
-	if !ok {
-		return e.renderModelCard(sessionKey)
-	}
-	target = strings.TrimSpace(target)
-	if modelSwitchNeedsLookup(target) {
-		fetchCtx, cancel := context.WithTimeout(e.ctx, 3*time.Second)
-		models := switcher.AvailableModels(fetchCtx)
-		target = resolveModelSwitchTarget(target, models)
-		cancel()
-	}
-
-	resolved, err := e.switchModelOnAgent(agent, target, agent == e.agent)
-	interactiveKey := e.interactiveKeyForSessionKey(sessionKey)
-	if err == nil {
-		e.persistWorkspaceModelOverride(interactiveKey, sessionKey, agent, resolved)
-	}
-	e.cleanupInteractiveState(interactiveKey)
-	if err == nil {
-		sessions.Save()
-	}
-
-	return e.renderModelSwitchResultCard(resolved, err)
-}
-
-func (e *Engine) persistWorkspaceModelOverride(interactiveKey, sessionKey string, agent Agent, model string) {
-	if e.projectState == nil || !e.multiWorkspace || model == "" {
-		return
-	}
-	if agent == e.agent {
-		return
-	}
-	workspace := workspaceModelOverrideKey(interactiveKey, sessionKey, agent)
-	if workspace == "" {
-		return
-	}
-	e.projectState.SetWorkspaceModelOverride(workspace, model)
-	e.projectState.Save()
-}
-
-func workspaceModelOverrideKey(interactiveKey, sessionKey string, agent Agent) string {
-	if wd, ok := agent.(interface{ GetWorkDir() string }); ok {
-		if dir := strings.TrimSpace(wd.GetWorkDir()); dir != "" {
-			return normalizeWorkspacePath(dir)
-		}
-	}
-	return workspaceFromInteractiveKey(interactiveKey, sessionKey)
-}
-
-func workspaceFromInteractiveKey(interactiveKey, sessionKey string) string {
-	if interactiveKey == "" || sessionKey == "" || interactiveKey == sessionKey {
-		return ""
-	}
-	suffix := ":" + sessionKey
-	if !strings.HasSuffix(interactiveKey, suffix) {
-		return ""
-	}
-	return strings.TrimSuffix(interactiveKey, suffix)
-}
-
 // executeCardAction performs the side-effect for act: prefixed actions
-// (e.g. switching model/mode/lang) before the card is re-rendered.
+// (e.g. switching mode/lang) before the card is re-rendered.
 func (e *Engine) executeCardAction(cmd, args, sessionKey string) {
 	interactiveKey := e.interactiveKeyForSessionKey(sessionKey)
 
 	switch cmd {
-	case "/model":
-		if args == "" {
-			return
-		}
-		agent, sessions := e.sessionContextForKey(sessionKey)
-		switcher, ok := agent.(ModelSwitcher)
-		if !ok {
-			return
-		}
-		fetchCtx, cancel := context.WithTimeout(e.ctx, 3*time.Second)
-		target, ok := parseModelSwitchArgs(strings.Fields(args))
-		if !ok {
-			cancel()
-			return
-		}
-		target = strings.TrimSpace(target)
-		if modelSwitchNeedsLookup(target) {
-			models := switcher.AvailableModels(fetchCtx)
-			target = resolveModelSwitchTarget(target, models)
-		}
-		cancel()
-		e.cleanupInteractiveState(interactiveKey)
-		e.interactiveMu.Lock()
-		state := e.interactiveStates[interactiveKey]
-		if state == nil {
-			state = &interactiveState{}
-			e.interactiveStates[interactiveKey] = state
-		}
-		e.interactiveMu.Unlock()
-		state.mu.Lock()
-		state.modelSwitch = &modelSwitchState{phase: "switching", target: target}
-		state.mu.Unlock()
-		go e.performModelSwitchAsync(sessionKey, state, agent, sessions, target)
-
 	case "/reasoning":
 		if args == "" {
 			return
@@ -14710,23 +14601,6 @@ func (e *Engine) getDeleteModeState(sessionKey string) *deleteModeState {
 	return cp
 }
 
-func (e *Engine) getModelSwitchState(sessionKey string) *modelSwitchState {
-	interactiveKey := e.interactiveKeyForSessionKey(sessionKey)
-	e.interactiveMu.Lock()
-	state := e.interactiveStates[interactiveKey]
-	e.interactiveMu.Unlock()
-	if state == nil {
-		return nil
-	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if state.modelSwitch == nil {
-		return nil
-	}
-	cp := *state.modelSwitch
-	return &cp
-}
-
 func (e *Engine) renderDeleteModeCard(sessionKey string) *Card {
 	agent, sessions := e.sessionContextForKey(sessionKey)
 	agentSessions, err := agent.ListSessions(e.ctx)
@@ -14925,62 +14799,6 @@ func (e *Engine) pushDeleteModeResultCard(sessionKey string) {
 	e.sendWithCard(targetPlatform, rctx, card)
 }
 
-func (e *Engine) performModelSwitchAsync(sessionKey string, state *interactiveState, agent Agent, sessions *SessionManager, target string) {
-	resolved, err := e.switchModelOnAgent(agent, target, agent == e.agent)
-	if err == nil {
-		interactiveKey := e.interactiveKeyForSessionKey(sessionKey)
-		e.persistWorkspaceModelOverride(interactiveKey, sessionKey, agent, resolved)
-		sessions.Save()
-	}
-
-	resultCard := e.renderModelSwitchResultCard(resolved, err)
-	if state != nil {
-		state.mu.Lock()
-		if state.modelSwitch != nil {
-			state.modelSwitch.phase = "result"
-			state.modelSwitch.target = resolved
-			if err != nil {
-				state.modelSwitch.result = e.i18n.Tf(MsgModelCardSwitchFailed, err)
-			} else {
-				state.modelSwitch.result = e.i18n.Tf(MsgModelCardSwitched, resolved)
-			}
-		}
-		state.mu.Unlock()
-	}
-	e.pushModelSwitchResultCard(sessionKey, resultCard)
-	e.cleanupInteractiveState(e.interactiveKeyForSessionKey(sessionKey), state)
-}
-
-func (e *Engine) pushModelSwitchResultCard(sessionKey string, card *Card) {
-	platformName := extractPlatformName(sessionKey)
-	var targetPlatform Platform
-	for _, p := range e.platforms {
-		if p.Name() == platformName {
-			targetPlatform = p
-			break
-		}
-	}
-	if targetPlatform == nil {
-		slog.Warn("model switch: platform not found for result card", "sessionKey", sessionKey)
-		return
-	}
-
-	if refresher, ok := targetPlatform.(CardRefresher); ok {
-		if err := refresher.RefreshCard(e.ctx, sessionKey, card); err != nil {
-			slog.Warn("model switch: refresh card failed, falling back to new message", "error", err)
-		} else {
-			return
-		}
-	}
-
-	rctx, err := e.reconstructReplyContext(targetPlatform, sessionKey)
-	if err != nil {
-		slog.Error("model switch: reconstruct reply ctx failed", "error", err)
-		return
-	}
-	e.sendWithCard(targetPlatform, rctx, card)
-}
-
 func (e *Engine) deleteModeSelectionNames(sessions *SessionManager, dm *deleteModeState, agentSessions []AgentSessionInfo) []string {
 	names := make([]string, 0, len(dm.selectedIDs))
 	for i := range agentSessions {
@@ -15143,97 +14961,6 @@ func (e *Engine) renderLangCard() *Card {
 		Markdown(e.i18n.Tf(MsgLangCurrent, name)).
 		Select(e.i18n.T(MsgLangSelectPlaceholder), opts, initVal).
 		Buttons(e.cardBackButton()).
-		Build()
-}
-
-func (e *Engine) renderModelCard(sessionKey string) *Card {
-	agent := e.agent
-	if sessionKey != "" {
-		agent, _ = e.sessionContextForKey(sessionKey)
-	}
-	return e.renderModelCardForAgent(sessionKey, agent)
-}
-
-func (e *Engine) renderModelCardForAgent(sessionKey string, agent Agent) *Card {
-	if ms := e.getModelSwitchState(sessionKey); ms != nil && ms.phase == "switching" {
-		return e.renderModelSwitchingCard(ms.target)
-	}
-
-	switcher, ok := agent.(ModelSwitcher)
-	if !ok {
-		return e.simpleCard(e.i18n.T(MsgCardTitleModel), "indigo", e.i18n.T(MsgModelNotSupported))
-	}
-
-	fetchCtx, cancel := context.WithTimeout(e.ctx, 3*time.Second)
-	defer cancel()
-	var models []ModelOption
-	if e.groupModelKey(sessionKey) != "" {
-		models = groupSelectableModels(fetchCtx, agent, switcher)
-	} else {
-		models = switcher.AvailableModels(fetchCtx)
-	}
-	current := switcher.GetModel()
-
-	var sb strings.Builder
-	if current == "" {
-		sb.WriteString(e.i18n.T(MsgModelDefault))
-	} else {
-		sb.WriteString(e.i18n.Tf(MsgModelCurrent, current))
-	}
-
-	var opts []CardSelectOption
-	initVal := ""
-	for i, m := range models {
-		label := m.Name
-		if m.Alias != "" {
-			label = m.Alias + " - " + m.Name
-		} else if m.Desc != "" {
-			label += " — " + m.Desc
-		}
-		val := fmt.Sprintf("act:/model switch %d", i+1)
-		if e.groupModelKey(sessionKey) != "" {
-			// Use the normal command context so a topic's workspace binding is
-			// resolved consistently, and retain the selected model's identity.
-			val = "cmd:/model switch " + m.Name
-		}
-		opts = append(opts, CardSelectOption{Text: label, Value: val})
-		if m.Name == current {
-			initVal = val
-		}
-	}
-
-	cb := NewCard().Title(e.i18n.T(MsgCardTitleModel), "indigo")
-	e.groupModelCard(cb, sessionKey, agent, models)
-	scope := MsgModelScopeProject
-	if agent != e.agent {
-		scope = MsgModelScopeWorkspace
-	}
-	cb.Markdown(e.i18n.T(scope)).Markdown(sb.String()).
-		Select(e.i18n.T(MsgModelSelectPlaceholder), opts, initVal).
-		Buttons(e.cardBackButton())
-	cb.Note(e.i18n.T(MsgModelUsage))
-	return cb.Build()
-}
-
-func (e *Engine) renderModelSwitchingCard(target string) *Card {
-	return NewCard().
-		Title(e.i18n.T(MsgCardTitleModel), "orange").
-		Markdown(e.i18n.Tf(MsgModelCardSwitching, target)).
-		Build()
-}
-
-func (e *Engine) renderModelSwitchResultCard(target string, err error) *Card {
-	if err != nil {
-		return NewCard().
-			Title(e.i18n.T(MsgCardTitleModel), "red").
-			Markdown(e.i18n.Tf(MsgModelCardSwitchFailed, err)).
-			Buttons(e.modelCardBackButton()).
-			Build()
-	}
-	return NewCard().
-		Title(e.i18n.T(MsgCardTitleModel), "green").
-		Markdown(e.i18n.Tf(MsgModelCardSwitched, target)).
-		Buttons(e.modelCardBackButton()).
 		Build()
 }
 

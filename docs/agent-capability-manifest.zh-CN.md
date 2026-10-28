@@ -89,51 +89,64 @@ Manifest 会保留不支持的运行态能力条目，而不是静默删除。�
 
 Manifest 不把“命令存在”误写成“当前一定能执行”：模型、Provider、TTS、多工作区、Cron/Timer、Relay、Web、活动回合等都会检查对应运行态接口或组件。
 
-## 项目/工作区默认模型与聊天模型
+## 本聊天模型与全局默认
 
-`model` 命令公布 `/model [switch <name>|chat [<name>|reset]]`，动作元数据包含
-`switch`、`chat` 及兼容别名 `group`。保持 `member` 权限及原角色/禁用命令策略。
-`switch` 和旧写法 `/model <name>` 更改项目/工作区默认模型，影响未固定模型的聊天；
-已固定模型的私聊和群聊保持原选择。只需 `ModelSwitcher` 即可保留这些旧能力，
-不能因后端不是 Codex 就把整个命令标为不可用。
+`model` 命令公布 `/model [<name|alias|number>|reset|default [<name|alias|number>]]`。
+唯一子命令是 `default`，动作允许值与 `privileged_when` 均仅包含 `default`。
+权限为 `conditional`：`/model` 和 `/model default` 是成员可用的只读查询；
+设置或重置本聊天模型也是成员操作。只有 `/model default <name|alias|number>`
+修改全局默认需要管理员权限。原有角色和禁用命令策略继续生效；分发时检查具体调用，
+因此查看默认值不要求管理员权限。
 
-`chat` 查询、固定或重置已验证私聊或群聊的模型。旧子命令 `group` 保留相同行为，
-在已验证私聊中同样有效。固定模型还要求配置的当前后端实现 `PerTurnModelSupporter`
-并返回 true（目前 Codex `exec` 与 `app_server` 支持），模型属于当前可选列表，
-且持久化存储可用。操作不切换 Provider。调用时必须验证聊天身份，不能仅凭 session key
-形式推断；尚未识别的聊天可先在此发送 `/model`。飞书/Lark 中绑定已验证私聊用户的
-卡片回调也能建立私聊路由，包括旧卡片或主动发送的卡片，无需先收到新的文字事件。
+`/model default` 查询或修改当前机器人/项目 Agent 的全局默认模型，
+不针对工作区 Agent 或其他机器人。只需 `ModelSwitcher` 即可提供这些操作，
+不要求后端支持逐回合模型。不再有独立的工作区默认模型层：未绑定模型的聊天跟随该全局默认。
+
+`/model` 查询、固定或重置已验证私聊或群聊的模型。固定模型另要求配置的当前后端
+实现 `PerTurnModelSupporter` 并返回 true（目前 Codex `exec` 与 `app_server` 支持），
+模型属于当前可选列表，且持久化存储可用。操作不切换 Provider。调用时必须验证聊天身份，
+不能仅凭 session key 形式推断；尚未识别的聊天可先在此发送 `/model`。
+飞书/Lark 中绑定已验证私聊用户的卡片回调也能建立私聊路由，无需先收到新的文字事件。
 后端不再支持固定模型时，只要聊天身份已验证且存储有效，reset 仍可清除已有绑定。
-命令级可用性原因分别说明旧切换能力与聊天操作条件。
+命令级可用性原因分别说明全局默认值操作与聊天操作条件。
 
 参数契约明确在各机器人/项目内隔离：
 
-- 群沿用原有 `platform:groupID` key（平台 + 稳定群 ID），全部成员和新旧话题共享绑定。
+- 群使用 `platform:groupID` key（平台 + 稳定群 ID），全部成员和新旧话题共享绑定。
 - 已验证私聊使用 `platform:dm:userID`，按私聊用户隔离，与其他用户、群聊、平台和
   机器人/项目互不影响，共用工作区目录的机器人也不共享绑定。
 
 两种绑定均不按话题、会话或工作区目录划分，跨 `/reset`、`/new` 及重启持久保留。
-聊天设置声明 `persistent_state` 副作用；原有 `configuration`、`agent_process`
-仍描述默认模型切换。不带模型的查询只读；整体命令因包含设置操作而保持可写。
-模型和推理强度独立持久化，`/model chat reset` 只清除模型绑定。
-不需要新增配置字段或修改生成的配置参考。
+项目状态的 `chat_model_bindings` 保存 `ChatModelBinding`；会话 `ChatKey`
+对应 JSON 字段 `chat_key`。聊天设置声明 `persistent_state` 副作用；
+`configuration`、`agent_process` 描述全局默认模型变更。整体命令因同时包含设置操作
+和只读查询而保持可写。模型和推理强度独立持久化，`/model reset` 只清除模型绑定。
+不需要新增 `config.toml` 字段。
+
+旧模型状态字段不迁移；此前保存的聊天模型绑定和工作区默认模型不会沿用，
+需要通过上述命令重新选择。
 
 全部三条发送路径在执行时分别解析各字段，包括排队请求。变更在下次新回合生效，
 不打断当前回复。`/fast`/回答预设或任务显式指定的单次模型只覆盖模型字段；
-没有显式覆盖时，普通消息使用本聊天固定模型，只有不存在模型绑定时才跟随工作区/项目默认。
+没有显式覆盖时，普通消息使用本聊天固定模型，没有绑定时跟随当前机器人/项目的全局默认。
 未显式指定模型的预设仍继承聊天模型。`reject` 契约覆盖逐回合能力不支持、
 后端/Provider 不匹配、不可选模型、存储及模型应用错误；固定模型的请求不能静默改用其他模型。
-恢复时应执行 `/model chat <name>` 显式重新选择，或执行 `/model chat reset` 清除模型绑定。
+恢复时应执行 `/model <name>` 显式重新选择，或执行 `/model reset` 清除模型绑定。
+无效参数和过期卡片操作返回当前用法，不改变设置。
 
 只读会话能力 `model_provider_identity` 检查 `ModelProviderSession`，不公开其记录的
 Provider 名称。可切换 Provider 的 Agent 执行聊天固定模型请求时需要此能力；引擎同时校验
 实际会话和当前 Agent 的身份。已有对话仍连接其他 Provider 时，应通过
 `/provider switch <name>` 重新连接，或使用 `/new`，然后重试。
 
-模型和强度卡片的选择操作分别使用 `cmd:/model chat ...` 和 `cmd:/reasoning chat ...`，
-包括各自的 `reset` 操作。飞书/Lark 的 `nav:/model` 和 `nav:/reasoning` 打开对应命令菜单。
-中立的“本聊天”标签区分聊天固定值和未固定聊天使用的默认值；为兼容保留原有
-Group 命名的 i18n 常量名称。
+本聊天卡片显示实际模型及固定/跟随默认状态，只有一个选择框，使用 `cmd:/model MODEL`
+和 `cmd:/model reset`。二级按钮 `cmd:/model default` 打开独立的全局默认卡片，
+其唯一选择框使用 `cmd:/model default MODEL`。模型值使用稳定标识，不使用列表序号。
+命令和卡片选择均返回对应卡片及结果提示；不支持卡片的平台接收文本渲染。
+`nav:/model` 打开本聊天菜单。本聊天模型状态及错误提示使用 `MsgModelChat*` i18n 键。
+
+推理强度卡片仍使用 `cmd:/reasoning chat ...`（含 `reset`），`nav:/reasoning` 仍打开
+强度菜单；`/reasoning` 和 `/effort` 的语义不变。
 
 ## 聊天推理强度
 

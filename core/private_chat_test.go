@@ -13,10 +13,10 @@ func privateChatMessage(user, id, content string) *Message {
 	return &Message{SessionKey: key, Platform: "test", UserID: user, IsDirect: true, MessageID: id, Content: content, ReplyCtx: key}
 }
 
-func privateChatTurn(t *testing.T, e *Engine, p *cronModelPlatform, a *groupModelTestAgent, msg *Message, model, effort string) {
+func privateChatTurn(t *testing.T, e *Engine, p *cronModelPlatform, a *chatModelTestAgent, msg *Message, model, effort string) {
 	t.Helper()
 	p.clearSent()
-	groupModelChat(t, e, p, a, msg, model)
+	chatModelTurn(t, e, p, a, msg, model)
 	if got, want := strings.Join(p.getSent(), "\n"), "effort="+effort+" model="+model; !strings.Contains(got, want) {
 		t.Fatalf("%s: want visible reply %q, got %s", msg.MessageID, want, got)
 	}
@@ -24,26 +24,26 @@ func privateChatTurn(t *testing.T, e *Engine, p *cronModelPlatform, a *groupMode
 
 func TestPrivateChat_VerifiedIdentityIsolatesUsersGroupsAndProjects(t *testing.T) {
 	e, p, a := newGroupReasoningEngine(t, "")
-	e.ReceiveMessage(p, groupModelMessage("alice", "topic", "group-model", "/model group group-C"))
-	e.ReceiveMessage(p, groupModelMessage("alice", "topic", "group-effort", "/reasoning group low"))
-	direct := privateChatMessage("alice", "model", "/model chat group-B")
+	e.ReceiveMessage(p, chatModelMessage("alice", "topic", "group-model", "/model group-C"))
+	e.ReceiveMessage(p, chatModelMessage("alice", "topic", "group-effort", "/reasoning group low"))
+	direct := privateChatMessage("alice", "model", "/model group-B")
 	direct.GroupID = "transport-chat" // A p2p transport chat ID must not become a group scope.
 	e.ReceiveMessage(p, direct)
 	e.ReceiveMessage(p, privateChatMessage("alice", "effort", "/effort chat high"))
 	for session, want := range map[string]string{"test:inbox:alice": "test:dm:alice", "test:alice:root:topic": "test:alice"} {
-		if got := e.groupModelKey(session); got != want {
+		if got := e.chatKey(session); got != want {
 			t.Fatalf("identity for %q = %q, want %q", session, got, want)
 		}
 	}
 	privateChatTurn(t, e, p, a, privateChatMessage("alice", "alice", "hello"), "group-B", "high")
 	reasoningChat(t, e, p, a, privateChatMessage("bob", "bob", "hello"), "medium")
-	privateChatTurn(t, e, p, a, groupModelMessage("alice", "other-topic", "group", "hello"), "group-C", "low")
+	privateChatTurn(t, e, p, a, chatModelMessage("alice", "other-topic", "group", "hello"), "group-C", "low")
 
 	// A private thread has a different session key but the same verified user.
 	thread := privateChatMessage("alice", "private-thread", "hello")
 	thread.SessionKey, thread.ReplyCtx = "test:private-thread:root:one", "private-thread"
 	privateChatTurn(t, e, p, a, thread, "group-B", "high")
-	if got := e.groupModelKey(thread.SessionKey); got != "test:dm:alice" {
+	if got := e.chatKey(thread.SessionKey); got != "test:dm:alice" {
 		t.Fatalf("private thread identity = %q", got)
 	}
 
@@ -70,14 +70,14 @@ func TestPrivateChat_MissingVerifiedIdentityCannotBind(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e, p, a := newGroupReasoningEngine(t, "")
 			msg := &Message{SessionKey: "test:dm:alice", Platform: "test", UserID: tc.user, GroupID: tc.group, IsDirect: tc.direct, IsCardAction: tc.callback, ReplyCtx: "private"}
-			for i, command := range []string{"/model chat group-B", "/effort chat high"} {
+			for i, command := range []string{"/model group-B", "/effort chat high"} {
 				msg.MessageID, msg.Content = fmt.Sprint(i), command
 				e.ReceiveMessage(p, msg)
 			}
-			if key := e.groupModelKey(msg.SessionKey); key != "" {
+			if key := e.chatKey(msg.SessionKey); key != "" {
 				t.Fatalf("inferred unverified identity %q from session key", key)
 			}
-			if _, bound := e.projectState.GroupModelBinding("test:dm:alice"); bound {
+			if _, bound := e.projectState.ChatModelBinding("test:dm:alice"); bound {
 				t.Fatal("unverified identity acquired a model binding")
 			}
 			if _, bound := e.projectState.GroupReasoningBinding("test:dm:alice"); bound {
@@ -90,15 +90,15 @@ func TestPrivateChat_MissingVerifiedIdentityCannotBind(t *testing.T) {
 	}
 }
 
-func TestPrivateChat_IndependentResetsAndLegacyAliasesPreserveHistory(t *testing.T) {
+func TestPrivateChat_IndependentResetsAndReasoningAliasesPreserveHistory(t *testing.T) {
 	e, p, a := newGroupReasoningEngine(t, "")
 	privateChatTurn(t, e, p, a, privateChatMessage("alice", "before", "remember this"), "project-A", "medium")
 	for i, step := range []struct{ command, model, effort string }{
-		{"/model chat group-B", "group-B", "medium"},
+		{"/model group-B", "group-B", "medium"},
 		{"/effort chat high", "group-B", "high"},
 		{"/reasoning chat reset", "group-B", "medium"},
 		{"/reasoning group high", "group-B", "high"},
-		{"/model group reset", "project-A", "high"},
+		{"/model reset", "project-A", "high"},
 	} {
 		session := e.sessions.GetOrCreateActive("test:inbox:alice")
 		history, backendID := session.GetHistory(0), session.GetAgentSessionID()
@@ -109,20 +109,21 @@ func TestPrivateChat_IndependentResetsAndLegacyAliasesPreserveHistory(t *testing
 		}
 		privateChatTurn(t, e, p, a, privateChatMessage("alice", fmt.Sprintf("turn-%d", i), "continue"), step.model, step.effort)
 	}
-	// Commands without chat/group retain their existing shared-default meaning.
-	e.ReceiveMessage(p, privateChatMessage("alice", "shared-model", "/model project-C"))
+	// Only the explicit model default command updates the shared model.
+	e.SetAdminFrom("alice")
+	e.ReceiveMessage(p, privateChatMessage("alice", "shared-model", "/model default project-C"))
 	e.ReceiveMessage(p, privateChatMessage("alice", "shared-effort", "/effort low"))
 	if a.GetModel() != "project-C" || a.GetReasoningEffort() != "low" {
-		t.Fatal("bare commands stopped updating shared defaults")
+		t.Fatal("explicit model default and legacy effort command stopped updating shared defaults")
 	}
 	privateChatTurn(t, e, p, a, privateChatMessage("alice", "still-pinned-effort", "hello"), "project-C", "high")
-	groupModelChat(t, e, p, a, privateChatMessage("bob", "shared-default", "hello"), "project-C")
+	chatModelTurn(t, e, p, a, privateChatMessage("bob", "shared-default", "hello"), "project-C")
 }
 
 func TestPrivateChat_RestartAndSessionResetKeepVerifiedCallbackScope(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	e, p, a := newGroupReasoningEngine(t, path)
-	e.ReceiveMessage(p, privateChatMessage("alice", "model", "/model chat group-B"))
+	e.ReceiveMessage(p, privateChatMessage("alice", "model", "/model group-B"))
 	e.ReceiveMessage(p, privateChatMessage("alice", "effort", "/effort chat high"))
 	privateChatTurn(t, e, p, a, privateChatMessage("alice", "before-new", "hello"), "group-B", "high")
 	for _, command := range []string{"/new", "/reset"} {
@@ -157,7 +158,7 @@ func TestPrivateChat_RestartAndSessionResetKeepVerifiedCallbackScope(t *testing.
 		chatPrefix, sharedPrefix       string
 		selected, sharedSelected, next string
 	}{
-		{e.renderModelCard(callback.SessionKey), "cmd:/model chat ", "cmd:/model switch ", "group-B", "project-A", "group-C"},
+		{e.renderModelCard(callback.SessionKey), "cmd:/model ", "", "group-B", "", "group-C"},
 		{e.renderReasoningCardForAgent(callback.SessionKey, a), "cmd:/reasoning chat ", "cmd:/reasoning ", "high", "medium", "low"},
 	} {
 		var chatBox, sharedBox *CardSelect
@@ -190,13 +191,20 @@ func TestPrivateChat_RestartAndSessionResetKeepVerifiedCallbackScope(t *testing.
 				t.Fatalf("chat selector lacks reset: %+v", box)
 			}
 		}
-		if selectors != 2 || chatBox == nil || sharedBox == nil || sharedBox.InitValue != tc.sharedPrefix+tc.sharedSelected || nextCommand == "" {
-			t.Fatalf("missing separate chat/shared selectors: %+v", tc.card)
+		wantSelectors := 1
+		if tc.sharedPrefix != "" {
+			wantSelectors = 2
+			if sharedBox == nil || sharedBox.InitValue != tc.sharedPrefix+tc.sharedSelected {
+				t.Fatalf("missing separate shared reasoning selector: %+v", tc.card)
+			}
+		}
+		if selectors != wantSelectors || chatBox == nil || nextCommand == "" {
+			t.Fatalf("expected %d selectors with a current-chat selection: %+v", wantSelectors, tc.card)
 		}
 		callback.MessageID, callback.Content = nextCommand, nextCommand
 		e.ReceiveMessage(p, callback)
 	}
-	if got := e.groupModelKey(callback.SessionKey); got != "test:dm:alice" {
+	if got := e.chatKey(callback.SessionKey); got != "test:dm:alice" {
 		t.Fatalf("callback replaced verified identity: %q", got)
 	}
 	privateChatTurn(t, e, p, a, privateChatMessage("alice", "after-callbacks", "hello"), "group-C", "low")
@@ -209,18 +217,18 @@ func TestPrivateChat_CallbackCannotBorrowAnotherUsersScope(t *testing.T) {
 	for _, user := range []string{"bob", ""} {
 		t.Run("operator="+user, func(t *testing.T) {
 			e, p, a := newGroupReasoningEngine(t, "")
-			e.ReceiveMessage(p, privateChatMessage("alice", "model", "/model chat group-B"))
+			e.ReceiveMessage(p, privateChatMessage("alice", "model", "/model group-B"))
 			e.ReceiveMessage(p, privateChatMessage("alice", "effort", "/effort chat high"))
-			for _, command := range []string{"/model chat group-C", "/reasoning chat low"} {
+			for _, command := range []string{"/model group-C", "/reasoning chat low"} {
 				p.clearSent()
 				e.ReceiveMessage(p, &Message{SessionKey: "test:inbox:alice", Platform: "test", UserID: user, IsCardAction: true, MessageID: command, Content: command, ReplyCtx: "forwarded-card"})
-				if got := strings.Join(p.getSent(), "\n"); !strings.Contains(got, e.i18n.T(MsgModelGroupOnly)) {
+				if got := strings.Join(p.getSent(), "\n"); !strings.Contains(got, e.i18n.T(MsgModelChatOnly)) {
 					t.Fatalf("%s did not visibly reject the mismatched operator: %s", command, got)
 				}
-				if key := e.groupModelKey("test:inbox:alice"); key != "test:dm:alice" {
+				if key := e.chatKey("test:inbox:alice"); key != "test:dm:alice" {
 					t.Fatalf("rejected callback changed verified identity: %q", key)
 				}
-				if binding, ok := e.groupModelBinding("test:inbox:alice"); !ok || binding.Model != "group-B" {
+				if binding, ok := e.chatModelBinding("test:inbox:alice"); !ok || binding.Model != "group-B" {
 					t.Fatalf("rejected callback changed the owner's model: %+v", binding)
 				}
 				if binding, ok := e.groupReasoningBinding("test:inbox:alice"); !ok || binding.Effort != "high" {
@@ -234,7 +242,7 @@ func TestPrivateChat_CallbackCannotBorrowAnotherUsersScope(t *testing.T) {
 
 func TestPrivateChat_OneShotAndScheduledOverridesResolveEachField(t *testing.T) {
 	e, p, a := newGroupReasoningEngine(t, "")
-	e.ReceiveMessage(p, privateChatMessage("alice", "model", "/model chat group-B"))
+	e.ReceiveMessage(p, privateChatMessage("alice", "model", "/model group-B"))
 	e.ReceiveMessage(p, privateChatMessage("alice", "effort", "/effort chat high"))
 	e.SetAnswerProfiles(AnswerProfiles{Fast: &AnswerProfileOptions{Model: "fast-D"}, Quality: &AnswerProfileOptions{ReasoningEffort: "low"}})
 	privateChatTurn(t, e, p, a, privateChatMessage("alice", "fast", "/fast hello"), "fast-D", "high")
