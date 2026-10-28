@@ -1107,16 +1107,16 @@ app_secret = "your-feishu-app-secret"
 #                           # Optional: only these group chats bypass @mention; all other groups
 #                           # still require @. A TOML string array is also accepted.
 #                           # 可选：仅这些群聊无需 @；其他群聊仍需 @。也支持 TOML 字符串数组。
-# group_context = false    # Read bounded recent discussion before an accepted group turn / 符合回复规则时补读有界近期讨论
+# group_context = false    # Initial catch-up, then new messages only / 首次补背景，之后只补新增
 # group_context_include_peer_bots = false # Opt in with peer_bots below / 显式开启后才共享下方 peer_bots 的公开回复
 # group_context_max_messages = 20    # 1-100 human + enabled peer messages / 人类及显式开启的对端机器人消息总数
-# group_context_window_minutes = 30  # 1-1440 minutes, by creation time / 按消息创建时间计算的分钟数
+# group_context_window_minutes = 30  # Initial catch-up: 1-1440 minutes / 首次向前补读的分钟数
 # group_context_max_chars = 8000     # 512-32000 Unicode characters, including metadata / 含元数据的字符数
-# Compatible with configured mention-free replies. No attachment downloads or extra permissions.
-# Peer sharing stays within the current group/topic and window, excludes own/unknown bots,
-# and never dispatches bot messages as requests. Native Agent sessions remain separate.
-# 兼容已配置的免 @ 回复；不自动下载附件、不申请新权限。忙时按独立回合排队。
-# 对端共享只在当前群/话题和时间窗口内生效，排除自身和未知机器人，不因机器人消息触发回复；原生 Agent 会话独立。
+# Advance the group/topic position on input delivery, including busy follow-ups.
+# Selected images/files use bounded downloads and existing permissions.
+# Peer sharing excludes own/unknown bots and does not replay edits to old cards.
+# 交付输入后推进群/话题阅读位置，忙时追加也只补新增；选中的图片和文件有界下载，使用已有权限。
+# 对端共享排除自身和未知机器人，不重放已读旧卡片的编辑，不因机器人消息触发回复；原生 Agent 会话独立。
 # completion_notify = false          # Opt in to an immediate private completion notice from this bot, with an original-conversation link.
 # completion_notify_users = ["ou_your_id_in_this_bot_app"] # Explicit app-scoped turn owners; no wildcard.
 # 成功回复后由当前机器人立即私聊发起人一次，附原对话链接；默认关闭。

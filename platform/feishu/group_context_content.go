@@ -1,7 +1,6 @@
 package feishu
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,16 +9,6 @@ import (
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
-func groupContextRevision(entry core.ContextMessage) string {
-	// Image-only card edits must invalidate receipts even when readable text
-	// is unchanged. Resource keys remain transient; only this digest persists.
-	snapshot, _ := json.Marshal(struct {
-		Text      string
-		Resources []core.ContextResource
-	}{entry.Text, entry.Resources})
-	return fmt.Sprintf("%x", sha256.Sum256(snapshot))
-}
-
 const (
 	groupContextForwardPending = "[forwarded messages: expansion pending]"
 	groupContextContentBytes   = 64 * 1024
@@ -27,7 +16,7 @@ const (
 )
 
 // Parsing never downloads resources or resolves contacts. Resource references
-// are transient and consumed only after core's receipt and text-budget filter.
+// are transient and consumed only after core's position and text-budget filter.
 func parseGroupContextContent(kind, raw, messageID string) core.ContextMessage {
 	entry := core.ContextMessage{}
 	if kind == "merge_forward" {

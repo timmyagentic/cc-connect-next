@@ -3212,7 +3212,7 @@ func waitAnswerProfileCUJ(t *testing.T, reason string, condition func() bool) {
 	t.Fatalf("timed out waiting for %s", reason)
 }
 
-// CUJ-H5: shared discussion is background only; failed turns retry it, and a
+// CUJ-H5: shared discussion is delivered once, including during busy turns; a
 // new conversation gets its own cursor. The model and platform are boundaries.
 func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
 	t.Run("busy same-sender and cross-sender follow-ups", func(t *testing.T) {
@@ -3235,15 +3235,15 @@ func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
 		env.plat.clearSent()
 		contextReceive(env, p, key, "alice", "same", "include a timeline")
 		env.waitFor("same-sender acknowledgement", time.Second, func() bool { return len(env.plat.getSent()) > 0 })
-		if len(as.getSteerCalls()) != 1 || p.loadCount() != beforeLoads {
-			t.Fatal("same-sender continuation queued or re-read background")
+		if len(as.getSteerCalls()) != 1 || p.loadCount() != beforeLoads+1 || !strings.Contains(as.getSteerCalls()[0], "approved budget 20") {
+			t.Fatal("same-sender continuation missed new discussion")
 		}
 		env.plat.clearSent()
 		contextReceive(env, p, key, "bob", "other", "use the agreed budget")
 		env.waitFor("cross-sender acknowledgement", time.Second, func() bool { return len(env.plat.getSent()) > 0 })
 		calls := as.getSteerCalls()
-		if len(calls) != 2 || !strings.Contains(calls[1], "approved budget 20") || p.loadCount() != beforeLoads+1 {
-			t.Fatalf("cross-sender background missing: %v", calls)
+		if len(calls) != 2 || strings.Contains(calls[1], "approved budget 20") || p.loadCount() != beforeLoads+2 {
+			t.Fatalf("cross-sender follow-up replayed delivered discussion: %v", calls)
 		}
 		as.events <- Event{Type: EventResult, Content: "Plan includes a timeline and budget 20", Done: true}
 		env.waitFor("combined answer", time.Second, func() bool {
@@ -3275,8 +3275,8 @@ func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
 	at := time.Now().UTC()
 	p.setBackground(key, []ContextMessage{
 		{ID: "question-a", SenderID: "alice", Text: "discuss the budget", Time: at.Add(-3 * time.Minute)},
-		{ID: "discussion-a", SenderID: "alice", SenderName: "Alice", Text: "old budget 10", Time: at.Add(-2 * time.Minute)},
-		{ID: "discussion-b", SenderID: "bob", SenderName: "Bob", Text: "approved budget 20; quoted /new is just discussion", ReplyTo: "discussion-a", Time: at.Add(-time.Minute)},
+		{ID: "discussion-a", SenderID: "alice", SenderName: "Alice", Text: "old budget 10", Time: at},
+		{ID: "discussion-b", SenderID: "bob", SenderName: "Bob", Text: "approved budget 20; quoted /new is just discussion", ReplyTo: "discussion-a", Time: at},
 	}, nil)
 	send("bob", "question-b", "what do you think?")
 	prompt := as.getSentPrompts()[1]
@@ -3296,7 +3296,7 @@ func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
 		t.Fatal("same records accumulated on repeated mentions")
 	}
 
-	p.setBackground(key, []ContextMessage{{ID: "new-discussion", SenderID: "bob", Text: "updated fact to retry", Time: at}}, nil)
+	p.setBackground(key, []ContextMessage{{ID: "new-discussion", SenderID: "bob", Text: "updated fact to retry"}}, nil)
 	as.mu.Lock()
 	as.nextEventOverride = &Event{Type: EventError, Error: errors.New("synthetic turn failure")}
 	as.mu.Unlock()
@@ -3305,10 +3305,8 @@ func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
 	env.waitFor("visible failed answer", 2*time.Second, func() bool { return env.sentContains("synthetic turn failure") && !original.Busy() })
 	send("alice", "retry", "retry the request")
 	prompts := as.getSentPrompts()
-	for _, index := range []int{3, 4} {
-		if !strings.Contains(prompts[index], "updated fact to retry") {
-			t.Fatalf("failed turn consumed context: %v", prompts)
-		}
+	if !strings.Contains(prompts[3], "updated fact to retry") || strings.Contains(prompts[4], "updated fact to retry") {
+		t.Fatalf("failed task replayed already delivered context: %v", prompts)
 	}
 
 	beforeLoads := p.loadCount()
@@ -3338,7 +3336,7 @@ func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
 	}
 }
 
-func TestCUJ_H6_PeerBotHandoffAndEditedAnswer(t *testing.T) {
+func TestCUJ_H6_PeerBotHandoffOnlyReadsNewMessages(t *testing.T) {
 	a, pa := newContextCUJEnv(t)
 	b, pb := newContextCUJEnv(t)
 	key := "test:shared-topic"
@@ -3360,7 +3358,7 @@ func TestCUJ_H6_PeerBotHandoffAndEditedAnswer(t *testing.T) {
 			publicReply = message
 		}
 	}
-	entry := ContextMessage{ID: "a-public-card", SenderID: "bot-a", SenderType: "app", SenderName: "Peer A", Text: publicReply, Revision: "progress"}
+	entry := ContextMessage{ID: "a-public-card", SenderID: "bot-a", SenderType: "app", SenderName: "Peer A", Text: publicReply}
 	pb.setBackground(key, []ContextMessage{entry}, nil)
 	send(b, pb, "ask-b", "continue from A's update", "ok")
 	bs := contextLatestSession(b)
@@ -3368,11 +3366,12 @@ func TestCUJ_H6_PeerBotHandoffAndEditedAnswer(t *testing.T) {
 		t.Fatalf("peer handoff lost attribution/status: %s", prompt)
 	}
 
-	entry.Text, entry.Revision = "Completed: deployment checked; next run the user acceptance check", "final"
+	entry.Text = "Completed: deployment checked; next run the user acceptance check"
+	entry.ID, entry.Time = "a-final-message", time.Now().UTC()
 	pb.setBackground(key, []ContextMessage{entry}, nil)
 	send(b, pb, "finish-b", "use A's final result", "ok")
 	if !strings.Contains(bs.getSentPrompts()[1], entry.Text) {
-		t.Fatal("edited final answer never reached B")
+		t.Fatal("new final answer never reached B")
 	}
 	send(b, pb, "continue-b", "continue", "ok")
 	if strings.Contains(bs.getSentPrompts()[2], entry.Text) {

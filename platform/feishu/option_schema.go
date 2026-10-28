@@ -112,29 +112,29 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 		case "group_context":
 			option.Type = "boolean"
 			option.Default = "false"
-			option.Description = "Before a group turn accepted by the configured reply rules, read bounded recent discussion and expanded forwarded messages as untrusted background. Download images/files only for unseen entries selected within the text budget, with count, byte and timeout limits. Ordinary groups and real topics are isolated. Uses existing read access only; no polling. Unavailable content is explicitly marked."
-			option.DescriptionZH = "符合回复规则的群聊回合开始前，补读有界近期讨论并展开合并转发，作为不可信背景。仅为文本预算内选中的未读条目下载图片和文件，并限制数量、字节数和耗时。普通群和真实话题分别隔离；仅使用已有读取权限，不轮询；不可用内容明确标记。"
+			option.Description = "On first participation, read bounded recent group discussion as untrusted background. Later requests and busy follow-ups read only messages since the last delivered input, regardless of sender. Save the read position on input delivery, not task completion. Images/files are downloaded only within the text and media budgets. Groups/topics stay isolated; existing access only, no polling."
+			option.DescriptionZH = "首次参与时补读有界近期群聊背景；后续请求及忙时追加只读取上次交付之后的新消息，不区分发送者。输入交付后保存阅读位置，不等待任务完成。图片和文件仅在文字与媒体预算内下载。群和话题分别隔离；仅使用已有权限，不轮询。"
 			option.Keywords = []string{"recent discussion", "group context", "catch up", "补读近期讨论", "群聊上下文", "未@讨论", "群聊补读"}
 		case "group_context_include_peer_bots":
 			option.Type = "boolean"
 			option.Default = "false"
 			option.Requires = []string{"group_context = true", "non-empty peer_bots with other bot app IDs and aliases"}
-			option.Description = "Include public text and readable card snapshots from the exact peer_bots app IDs in the same group/topic. Preserve sender and card status, re-read edited snapshots, and ignore bot-originated triggers. Own/unknown bots and private conversations are excluded. Bounded recent context only, not shared native Agent sessions or permanent memory."
-			option.DescriptionZH = "将 peer_bots 中精确 app ID 的公开文本及可读卡片快照纳入同群、同话题背景。保留发送者和卡片状态，更新后可重新补读，忽略机器人触发消息。排除自身、未知机器人和私聊。仅共享有界近期背景，不合并原生 Agent 会话或永久记忆。"
+			option.Description = "Include new public messages and readable card snapshots from the exact peer_bots app IDs in the same group/topic. Preserve sender and card status. Edits to messages behind the read position are not automatically replayed. Ignore bot-originated triggers, own/unknown bots and private conversations; native Agent sessions remain separate."
+			option.DescriptionZH = "将 peer_bots 中精确 app ID 的新增公开消息和可读卡片快照纳入同群、同话题背景，保留发送者和卡片状态。已读位置之前的消息编辑不自动重放。忽略机器人触发消息，排除自身、未知机器人和私聊；原生 Agent 会话保持独立。"
 			option.Keywords = []string{"shared bot context", "peer bot", "机器人上下文互通", "同群同话题", "接续对话"}
 		case "group_context_max_messages", "group_context_window_minutes", "group_context_max_chars":
 			option.Type = "integer"
 			option.Requires = []string{"group_context = true"}
 			minimum, maximum, fallback := 1.0, float64(maxGroupContextMessages), defaultGroupContextMessages
 			option.Unit = "messages"
-			option.Description = "Maximum recent human and explicitly enabled peer-bot messages per accepted group turn, before per-Agent-conversation deduplication. Failed or truncated reads are disclosed."
-			option.DescriptionZH = "每个符合回复规则的群聊回合最多读取的人类和显式开启的对端机器人消息条数，再按 Agent 会话去重；明确提示读取失败或截断。"
+			option.Description = "Maximum background messages per accepted input, after excluding messages at or before the delivered read position. Keep the newest messages and disclose truncation."
+			option.DescriptionZH = "每次输入最多补读的背景消息条数；先排除已读位置及之前的消息，再保留最新消息，明确提示截断。"
 			switch option.Key {
 			case "group_context_window_minutes":
 				maximum, fallback = float64(maxGroupContextMinutes), defaultGroupContextMinutes
 				option.Unit = "minutes"
-				option.Description = "Read messages created within this many minutes before the triggering message, even when queued. Cards created outside the window are excluded; peer snapshots updated after the trigger are omitted with an incomplete-context notice until a later trigger."
-				option.DescriptionZH = "仅补读触发消息之前该分钟数内创建的消息，排队时仍使用原始时间。窗口外创建的卡片不纳入；触发后更新的对端卡片会跳过并提示背景不完整，后续触发再补读。"
+				option.Description = "Initial catch-up window before the first trigger in an Agent conversation. Later inputs read from the last delivered position to their trigger timestamp, even after a longer gap. Message, page and character budgets still apply."
+				option.DescriptionZH = "Agent 会话首次参与时向前补读的分钟数。后续输入从上次已交付位置读到本次触发时间，间隔较长时也不重置为半小时窗口；仍受条数、页数和字符预算限制。"
 			case "group_context_max_chars":
 				minimum, maximum, fallback = float64(minGroupContextChars), float64(maxGroupContextChars), defaultGroupContextChars
 				option.Unit = "Unicode characters"

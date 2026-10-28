@@ -91,22 +91,22 @@ func TestGroupContextPeersReadPublicCardsOnlyInMatchingScope(t *testing.T) {
 			})
 			p.peerBots = map[string]string{"cli_peer": "Peer B", "cli_context": "Self"}
 			target := replyContext{chatID: "oc_group", threadID: thread, contextEligible: true, contextTimeMs: now.UnixMilli()}
-			result, err := p.LoadMessageContext(context.Background(), target)
+			result, err := p.LoadMessageContext(context.Background(), target, time.Time{})
 			if err != nil || len(result.Messages) != 1 || result.Messages[0].ID != "human" {
 				t.Fatalf("aliases alone shared bot output: %+v %v", result, err)
 			}
 			p.groupContext.includePeerBots, wantCards = true, true
-			result, err = p.LoadMessageContext(context.Background(), target)
+			result, err = p.LoadMessageContext(context.Background(), target, time.Time{})
 			if err != nil || len(result.Messages) != 2 {
 				t.Fatalf("wrong shared history: %+v %v", result, err)
 			}
 			got := result.Messages[1]
-			if got.ID != "peer" || got.SenderName != "Peer B" || got.SenderType != "app" || got.Revision == "" || !strings.Contains(got.Text, "Completed\nThe next step") {
+			if got.ID != "peer" || got.SenderName != "Peer B" || got.SenderType != "app" || !strings.Contains(got.Text, "Completed\nThe next step") {
 				t.Fatalf("lost public identity/status: %+v", got)
 			}
 			for _, invalid := range []any{replyContext{chatID: "oc_group", directUserID: "ou_private"}, replyContext{chatID: "oc_other", contextEligible: true}, "restored target"} {
 				before := calls.Load()
-				c, err := p.LoadMessageContext(context.Background(), invalid)
+				c, err := p.LoadMessageContext(context.Background(), invalid, time.Time{})
 				if err != nil || len(c.Messages) != 0 || calls.Load() != before {
 					t.Fatal("private/synthetic/unauthorized target caused read")
 				}
@@ -115,7 +115,7 @@ func TestGroupContextPeersReadPublicCardsOnlyInMatchingScope(t *testing.T) {
 	}
 }
 
-func TestGroupContextPeerCardRevisionsAndSnapshotTime(t *testing.T) {
+func TestGroupContextPeerCardStatusAndSnapshotTime(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	p := &Platform{appID: "cli_self", peerBots: map[string]string{"cli_peer": "Peer"}, groupContext: groupContextConfig{includePeerBots: true, maxChars: 512}}
 	rctx := replyContext{chatID: "oc_group"}
@@ -132,12 +132,8 @@ func TestGroupContextPeerCardRevisionsAndSnapshotTime(t *testing.T) {
 	}
 	partial := parse("Working", "partial reply")
 	final := parse("Completed", "partial reply")
-	if partial.Revision == final.Revision || final.Revision != parse("Completed", "partial reply").Revision {
-		t.Fatal("status revision missing or unstable")
-	}
-	long := strings.Repeat("x", 600)
-	if parse("Completed", long+"a").Revision == parse("Completed", long+"b").Revision {
-		t.Fatal("revision hashed only truncated prefix")
+	if partial.Text == final.Text || !strings.HasPrefix(final.Text, "Completed\n") {
+		t.Fatal("card status missing")
 	}
 	for _, state := range []string{"Failed", "Interrupted", "Redirected"} {
 		if !strings.HasPrefix(parse(state, "partial reply").Text, state+"\n") {
@@ -159,7 +155,7 @@ func TestGroupContextPeerCardRevisionsAndSnapshotTime(t *testing.T) {
 	}
 }
 
-func TestGroupContextPeerImageOnlyEditInvalidatesReceipt(t *testing.T) {
+func TestGroupContextPeerImageKeepsCurrentResource(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	p := &Platform{appID: "self", peerBots: map[string]string{"peer": "Peer"}, groupContext: groupContextConfig{includePeerBots: true, maxChars: 8000}}
 	parse := func(key string) core.ContextMessage {
@@ -175,11 +171,8 @@ func TestGroupContextPeerImageOnlyEditInvalidatesReceipt(t *testing.T) {
 		return got
 	}
 	old, replacement := parse("image-old"), parse("image-new")
-	if old.Text != replacement.Text || old.Revision == replacement.Revision {
-		t.Fatal("image-only edit would be mistaken for an already delivered card")
-	}
-	if replacement.Revision != parse("image-new").Revision {
-		t.Fatal("unchanged image would be redelivered")
+	if old.Text != replacement.Text || replacement.Resources[0].Key != "image-new" {
+		t.Fatal("image resource lost")
 	}
 }
 

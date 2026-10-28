@@ -36,7 +36,7 @@ func TestGroupContextNewGroupSystemEventsHaveNoIncompleteWarning(t *testing.T) {
 			})
 			got, err := p.LoadMessageContext(context.Background(), replyContext{
 				chatID: "oc_group", messageID: "trigger", contextEligible: true, contextTimeMs: now.UnixMilli(),
-			})
+			}, time.Time{})
 			if err != nil || got.Incomplete || got.Unreadable || len(got.Messages) != 4 || calls.Load() != 1 {
 				t.Fatalf("fresh group history misclassified: %+v err=%v calls=%d", got, err, calls.Load())
 			}
@@ -56,7 +56,7 @@ func TestGroupContextEmptyHistoryIsComplete(t *testing.T) {
 	p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{}, "has_more": false}})
 	})
-	got, err := p.LoadMessageContext(context.Background(), contextMediaTarget(time.Now()))
+	got, err := p.LoadMessageContext(context.Background(), contextMediaTarget(time.Now()), time.Time{})
 	if err != nil || got.Incomplete || got.Unreadable || len(got.Messages) != 0 {
 		t.Fatalf("empty history misclassified: %+v %v", got, err)
 	}
@@ -83,7 +83,7 @@ func TestGroupContextSystemSenderExceptionPreservesScopeAndUserValidation(t *tes
 			p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
 				writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{m}, "has_more": false}})
 			})
-			got, err := p.LoadMessageContext(context.Background(), contextMediaTarget(now))
+			got, err := p.LoadMessageContext(context.Background(), contextMediaTarget(now), time.Time{})
 			if err != nil || len(got.Messages) != 0 {
 				t.Fatalf("invalid record admitted by system exception: %+v %v", got, err)
 			}

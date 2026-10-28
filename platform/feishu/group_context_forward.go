@@ -81,9 +81,6 @@ func (p *Platform) expandGroupContextForwards(ctx context.Context, target replyC
 		}
 		visited := map[string]bool{entry.ID: true}
 		p.appendGroupContextForward(ctx, entry, entry.ID, children, visited, 0, &remaining)
-		if entry.SenderType == "app" {
-			entry.Revision = groupContextRevision(*entry)
-		}
 		boundGroupContextText(entry, p.groupContext.maxChars)
 	}
 }
