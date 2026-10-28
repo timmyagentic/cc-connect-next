@@ -106,7 +106,7 @@ func TestGroupContextForwardRootResourcesAndImageBinaryPayload(t *testing.T) {
 		}
 	}, "/open-apis/im/v1/messages/outer", "/open-apis/im/v1/messages/outer/resources/one", "/open-apis/im/v1/messages/outer/resources/two")
 	target := contextMediaTarget(now)
-	loaded, err := p.LoadMessageContext(context.Background(), target)
+	loaded, err := p.LoadMessageContext(context.Background(), target, time.Time{})
 	if err != nil || loaded.Incomplete || len(loaded.Messages) != 1 || downloads != 0 || gets != 1 {
 		t.Fatalf("load downloaded resources or lost forward: %+v %v downloads=%d gets=%d", loaded, err, downloads, gets)
 	}
@@ -142,7 +142,7 @@ func TestGroupContextContentFailureIsPerEntryAndStickerIsExpected(t *testing.T) 
 			contextTypedMessage("unknown", "future", `{"x":1}`, now.Add(-2*time.Minute)),
 		}}})
 	})
-	got, err := p.LoadMessageContext(context.Background(), contextMediaTarget(now))
+	got, err := p.LoadMessageContext(context.Background(), contextMediaTarget(now), time.Time{})
 	if err != nil || got.Incomplete || len(got.Messages) != 3 {
 		t.Fatalf("entry failure polluted list state: %+v %v", got, err)
 	}
@@ -179,7 +179,7 @@ func TestGroupContextHydratePartialFailuresAndResourceIsolation(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got[0], before) || !got[1].Incomplete || len(got[1].Images) != 1 || len(got[1].Files) != 1 || got[1].Files[0].FileName != "report.pdf" {
 		t.Fatalf("lost partial messages/attachments: %+v %v", got, err)
 	}
-	if got[1].Images[0].FileName != "history-image-2" || got[1].Revision != input[1].Revision {
+	if got[1].Images[0].FileName != "history-image-2" || got[1].ID != input[1].ID {
 		t.Fatal("failed image shifted stable filename or changed receipt")
 	}
 	for _, want := range []string{"image #1: unavailable", "image #2: attached image 1", "image #3: unavailable"} {
@@ -331,7 +331,7 @@ func TestGroupContextForwardBoundedAndNoExtraScopeReads(t *testing.T) {
 			}, paths...)
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			got, err := p.LoadMessageContext(ctx, contextMediaTarget(now))
+			got, err := p.LoadMessageContext(ctx, contextMediaTarget(now), time.Time{})
 			if err != nil || got.Incomplete || gets.Load() > groupContextForwardRequests {
 				t.Fatalf("list/expansion state = %+v %v gets=%d", got, err, gets.Load())
 			}

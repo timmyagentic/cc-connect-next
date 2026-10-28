@@ -105,8 +105,8 @@ func (p *Platform) MessageContextEnabled(target any) bool {
 
 func (p *Platform) RuntimeCapabilityAvailability(_ string, target any) map[string]core.CapabilityAvailability {
 	availability := core.CapabilityAvailability{
-		State: core.CapabilityConditional, Reason: "Read-only context is enabled; requires an authorized group message accepted by the configured reply rules and existing message-history access. Reads happen only before a turn; no new permissions are requested.",
-		ReasonZH: "已启用只读上下文；要求授权群中符合回复规则的消息和已有历史读取权限。仅在回合开始前读取，不申请新权限。",
+		State: core.CapabilityConditional, Reason: "Read-only context is enabled for authorized group triggers using existing history access. First participation catches up on recent discussion; later inputs read only new messages since the delivered position, including busy follow-ups.",
+		ReasonZH: "已启用只读上下文，使用授权群触发和已有历史权限。首次参与补近期背景，后续输入（包括忙时追加）只补已交付位置之后的新消息。",
 	}
 	if !p.groupContext.enabled {
 		availability = core.CapabilityAvailability{State: core.CapabilityUnavailable, Reason: "Recent conversation context is disabled in platform configuration.", ReasonZH: "平台配置未启用近期讨论上下文。"}
@@ -124,13 +124,21 @@ func (p *Platform) RuntimeCapabilityAvailability(_ string, target any) map[strin
 	return map[string]core.CapabilityAvailability{"recent_conversation_context": availability, "image_batches": batches}
 }
 
-func (p *Platform) LoadMessageContext(ctx context.Context, target any) (result core.MessageContext, readErr error) {
+func (p *Platform) MessageContextScope(target any) string {
+	if !p.MessageContextEnabled(target) {
+		return ""
+	}
+	rctx := target.(replyContext)
+	return p.Name() + ":" + p.appID + ":" + rctx.chatID + ":" + rctx.threadID
+}
+
+func (p *Platform) LoadMessageContext(ctx context.Context, target any, after time.Time) (result core.MessageContext, readErr error) {
 	if !p.MessageContextEnabled(target) {
 		return core.MessageContext{}, nil
 	}
 	rctx := target.(replyContext)
 	result = core.MessageContext{
-		Scope:    p.Name() + ":" + p.appID + ":" + rctx.chatID + ":" + rctx.threadID,
+		Scope:    p.MessageContextScope(target),
 		MaxChars: p.groupContext.maxChars,
 	}
 	forwardIDs := make(map[string]bool)
@@ -144,6 +152,13 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any) (result c
 		return result, fmt.Errorf("%s: recent context has no trigger timestamp", p.tag())
 	}
 	start := cutoff.Add(-time.Duration(p.groupContext.minutes) * time.Minute)
+	if !after.IsZero() {
+		start = after.Add(time.Millisecond)
+	}
+	result.Through = cutoff
+	if start.After(cutoff) {
+		return result, nil
+	}
 	containerType, containerID := "chat", rctx.chatID
 	if rctx.threadID != "" {
 		containerType, containerID = "thread", rctx.threadID
@@ -280,10 +295,6 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 	entry := core.ContextMessage{ID: id, SenderID: senderID, SenderName: senderName, SenderType: senderType, Time: at, ReplyTo: stringValue(item.ParentId), Resources: parsed.Resources, Incomplete: parsed.Incomplete}
 	if senderType == "app" {
 		entry.SenderName = p.peerBots[senderID]
-		// Hash the complete readable snapshot before truncation. Streaming
-		// cards keep their message ID when the final answer replaces progress.
-		entry.Text = text
-		entry.Revision = groupContextRevision(entry)
 	}
 	entry.Text = text
 	boundGroupContextText(&entry, p.groupContext.maxChars)

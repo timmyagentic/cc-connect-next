@@ -1469,8 +1469,9 @@ read recent discussion before an accepted group request. This works with the
 configured mention-free and opt-in @all reply rules; enabling context does not
 change which messages trigger replies. Restart to apply configuration changes.
 
-The feature defaults off. Defaults are 20 messages within 30 minutes before the
-trigger, up to 8000 Unicode characters including JSON attribution. Tune
+The feature defaults off. First participation reads up to 20 messages within
+30 minutes before the trigger. Later inputs read only messages after the last
+delivered position, up to 8000 Unicode characters including JSON attribution. Tune
 `group_context_max_messages` (1–100), `group_context_window_minutes` (1–1440),
 and `group_context_max_chars` (512–32000). History listing is limited to four
 50-record pages and four seconds, using existing access only. Actual topics
@@ -1489,11 +1490,21 @@ every Agent can transcribe or play them. No extra permissions are requested.
 
 Read failures, history limits and unavailable attachments have separate notices.
 The model also receives markers at the missing content. Background and its media
-remain untrusted quoted data, never commands or approval. Successful entries are
-deduplicated by native Agent conversation; failed resource reads remain retryable.
-`/new` starts a fresh cursor. Busy requests queue with their original time window.
-There is no polling or separate chat archive. Peer-bot inclusion remains opt-in
-through `group_context_include_peer_bots` and its exact `peer_bots` allowlist.
+remain untrusted quoted data, never commands or approval. A native Agent
+conversation saves its per-group/topic read position when input delivery succeeds,
+not when the task finishes. Failed tasks do not replay delivered background.
+Unconfirmed sends and failed history requests do not advance the position.
+Bounded or unavailable content is disclosed; old truncated messages and failed
+attachments are not automatically retried. `/new` or a different native
+conversation starts fresh. Busy follow-ups use the same incremental read whether
+steered or queued, regardless of sender. No new discussion means no background
+block. There is no polling or separate chat archive.
+
+Peer-bot inclusion remains opt-in through `group_context_include_peer_bots` and
+its exact `peer_bots` allowlist. New peer messages are included; edits to cards
+behind the read position are not automatically replayed. Existing conversations
+upgraded from message-ID receipts do one bounded initial catch-up, then advance
+their new position.
 
 ### Codex asks you to sign in again
 

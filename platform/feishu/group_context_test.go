@@ -126,7 +126,7 @@ func TestGroupContextReadsOnlyMatchingChatOrRealTopic(t *testing.T) {
 				writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": items, "has_more": false}})
 			})
 			rctx := replyContext{chatID: "oc_group", threadID: thread, messageID: "om_current", contextEligible: true, contextTimeMs: now.UnixMilli()}
-			got, err := p.LoadMessageContext(context.Background(), rctx)
+			got, err := p.LoadMessageContext(context.Background(), rctx, time.Time{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -141,9 +141,48 @@ func TestGroupContextReadsOnlyMatchingChatOrRealTopic(t *testing.T) {
 			}
 			for _, target := range []any{replyContext{chatID: "oc_group"}, replyContext{chatID: "oc_other", contextEligible: true}, "synthetic target"} {
 				before := calls.Load()
-				if c, err := p.LoadMessageContext(context.Background(), target); err != nil || len(c.Messages) != 0 || calls.Load() != before {
+				if c, err := p.LoadMessageContext(context.Background(), target, time.Time{}); err != nil || len(c.Messages) != 0 || calls.Load() != before {
 					t.Fatal("non-mention/private/unauthorized target caused a read")
 				}
+			}
+		})
+	}
+}
+
+func TestGroupContextReadsFromDeliveredPositionBeforeApplyingLimit(t *testing.T) {
+	for _, thread := range []string{"", "omt_topic"} {
+		t.Run("thread="+thread, func(t *testing.T) {
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			after := now.Add(-2 * time.Hour)
+			first := true
+			p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+				start := now.Add(-30 * time.Minute)
+				if !first {
+					start = after.Add(time.Millisecond)
+				}
+				if thread == "" && r.URL.Query().Get("start_time") != strconv.FormatInt(start.Unix(), 10) {
+					t.Errorf("wrong incremental start: %s", r.URL)
+				}
+				writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{
+					contextAPIMessage("new", "oc_group", thread, "alice", "Alice", "new discussion", after.Add(time.Minute)),
+					contextAPIMessage("seen", "oc_group", thread, "alice", "Alice", "already delivered", after),
+					contextAPIMessage("old", "oc_group", thread, "alice", "Alice", "older discussion", after.Add(-time.Minute)),
+				}, "has_more": false}})
+			})
+			target := replyContext{chatID: "oc_group", threadID: thread, messageID: "trigger", contextEligible: true, contextTimeMs: now.UnixMilli()}
+			bootstrap, err := p.LoadMessageContext(context.Background(), target, time.Time{})
+			if err != nil || len(bootstrap.Messages) != 0 || !bootstrap.Through.Equal(now) {
+				t.Fatalf("first read did not respect bootstrap window: %+v %v", bootstrap, err)
+			}
+			first = false
+			p.groupContext.maxMessages = 1
+			increment, err := p.LoadMessageContext(context.Background(), target, after)
+			if err != nil || len(increment.Messages) != 1 || increment.Messages[0].ID != "new" || increment.Incomplete {
+				t.Fatalf("increment missed new discussion or counted old messages against limit: %+v %v", increment, err)
+			}
+			empty, err := p.LoadMessageContext(context.Background(), target, now)
+			if err != nil || len(empty.Messages) != 0 {
+				t.Fatalf("same trigger read background again: %+v %v", empty, err)
 			}
 		})
 	}
@@ -166,7 +205,7 @@ func TestGroupContextBoundsPagingAndDisclosesUnavailableText(t *testing.T) {
 		writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": items, "has_more": page == "", "page_token": "page-2"}})
 	})
 	p.groupContext.maxMessages = 2
-	got, err := p.LoadMessageContext(context.Background(), replyContext{chatID: "oc_group", messageID: "trigger", contextEligible: true, contextTimeMs: now.UnixMilli()})
+	got, err := p.LoadMessageContext(context.Background(), replyContext{chatID: "oc_group", messageID: "trigger", contextEligible: true, contextTimeMs: now.UnixMilli()}, time.Time{})
 	if err != nil || !got.Incomplete || len(got.Messages) != 2 || got.Messages[0].ID != "om_0" || got.Messages[1].ID != "om_file" || !got.Messages[1].Incomplete || calls.Load() != 2 {
 		t.Fatalf("bounded newest context = %+v, calls=%d, err=%v", got, calls.Load(), err)
 	}
@@ -188,7 +227,7 @@ func TestGroupContextHistoryFailureAndPagingBudget(t *testing.T) {
 			})
 			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 			defer cancel()
-			got, err := p.LoadMessageContext(ctx, replyContext{chatID: "oc_group", messageID: "trigger", contextEligible: true, contextTimeMs: time.Now().UnixMilli()})
+			got, err := p.LoadMessageContext(ctx, replyContext{chatID: "oc_group", messageID: "trigger", contextEligible: true, contextTimeMs: time.Now().UnixMilli()}, time.Time{})
 			if mode == "endless" {
 				if err != nil || !got.Incomplete || calls.Load() != groupContextMaxPages {
 					t.Fatalf("unbounded paging: %+v, %v, %d", got, err, calls.Load())
@@ -250,7 +289,7 @@ func TestGroupContextPartialFailurePreservesTimeOrder(t *testing.T) {
 			contextAPIMessage("old", "oc_group", "", "ou_a", "Alice", "older", now.Add(-2*time.Minute)),
 		}, "has_more": true, "page_token": "next"}})
 	})
-	got, err := p.LoadMessageContext(context.Background(), replyContext{chatID: "oc_group", contextEligible: true, contextTimeMs: now.UnixMilli()})
+	got, err := p.LoadMessageContext(context.Background(), replyContext{chatID: "oc_group", contextEligible: true, contextTimeMs: now.UnixMilli()}, time.Time{})
 	if err == nil || !got.Incomplete || calls.Load() != 2 || len(got.Messages) != 2 || got.Messages[0].ID != "old" || got.Messages[1].ID != "new" {
 		t.Fatalf("partial context lost order/bounds: %+v err=%v", got, err)
 	}
@@ -313,7 +352,7 @@ func TestGroupContextMentionEventReachesLoaderThroughCardWrapper(t *testing.T) {
 		if !provider.MessageContextEnabled(got.ReplyCtx) {
 			t.Fatal("authorized event lost context eligibility")
 		}
-		background, err := provider.LoadMessageContext(context.Background(), got.ReplyCtx)
+		background, err := provider.LoadMessageContext(context.Background(), got.ReplyCtx, time.Time{})
 		if err != nil || len(background.Messages) != 1 || background.Messages[0].Text != "unmentioned fact" {
 			t.Fatalf("event context unavailable: %+v %v", background, err)
 		}

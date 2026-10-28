@@ -3604,7 +3604,7 @@ Leave unset to consume events over WebSocket; set the event encrypt key to selec
 
 ### `projects.platforms.options.group_context` — `feishu, lark`
 
-Before a group turn accepted by the configured reply rules, read bounded recent discussion and expanded forwarded messages as untrusted background. Download images/files only for unseen entries selected within the text budget, with count, byte and timeout limits. Ordinary groups and real topics are isolated. Uses existing read access only; no polling. Unavailable content is explicitly marked.
+On first participation, read bounded recent group discussion as untrusted background. Later requests and busy follow-ups read only messages since the last delivered input, regardless of sender. Save the read position on input delivery, not task completion. Images/files are downloaded only within the text and media budgets. Groups/topics stay isolated; existing access only, no polling.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3618,7 +3618,7 @@ Before a group turn accepted by the configured reply rules, read bounded recent 
 
 ### `projects.platforms.options.group_context_include_peer_bots` — `feishu, lark`
 
-Include public text and readable card snapshots from the exact peer_bots app IDs in the same group/topic. Preserve sender and card status, re-read edited snapshots, and ignore bot-originated triggers. Own/unknown bots and private conversations are excluded. Bounded recent context only, not shared native Agent sessions or permanent memory.
+Include new public messages and readable card snapshots from the exact peer_bots app IDs in the same group/topic. Preserve sender and card status. Edits to messages behind the read position are not automatically replayed. Ignore bot-originated triggers, own/unknown bots and private conversations; native Agent sessions remain separate.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3649,7 +3649,7 @@ Bound the complete JSON background including message text, sender, time and repl
 
 ### `projects.platforms.options.group_context_max_messages` — `feishu, lark`
 
-Maximum recent human and explicitly enabled peer-bot messages per accepted group turn, before per-Agent-conversation deduplication. Failed or truncated reads are disclosed.
+Maximum background messages per accepted input, after excluding messages at or before the delivered read position. Keep the newest messages and disclose truncation.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3665,7 +3665,7 @@ Maximum recent human and explicitly enabled peer-bot messages per accepted group
 
 ### `projects.platforms.options.group_context_window_minutes` — `feishu, lark`
 
-Read messages created within this many minutes before the triggering message, even when queued. Cards created outside the window are excluded; peer snapshots updated after the trigger are omitted with an incomplete-context notice until a later trigger.
+Initial catch-up window before the first trigger in an Agent conversation. Later inputs read from the last delivered position to their trigger timestamp, even after a longer gap. Message, page and character budgets still apply.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`

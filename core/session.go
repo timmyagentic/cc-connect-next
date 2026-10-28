@@ -36,7 +36,7 @@ type Session struct {
 	// Once a task overrides a model, later turns must explicitly restore their
 	// defaults even after an idle restart or daemon restart resumes this session.
 	RequiresTurnDefaults bool             `json:"requires_turn_defaults,omitempty"`
-	ContextReceipts      *ContextReceipts `json:"context_receipts,omitempty"`
+	ContextProgress      *ContextProgress `json:"context_progress,omitempty"`
 	History              []HistoryEntry   `json:"history"`
 	CreatedAt            time.Time        `json:"created_at"`
 	UpdatedAt            time.Time        `json:"updated_at"`
@@ -250,6 +250,7 @@ func (s *Session) SetAgentSessionID(id, agentType string) {
 	if s.AgentSessionID != id {
 		s.recordPastAgentSessionID()
 	}
+	s.bindMessageContext(id, agentType)
 	s.AgentSessionID = id
 	s.AgentType = agentType
 }
@@ -266,6 +267,7 @@ func (s *Session) CompareAndSetAgentSessionID(id, agentType string) bool {
 	if s.AgentSessionID != "" && s.AgentSessionID != ContinueSession {
 		return false
 	}
+	s.bindMessageContext(id, agentType)
 	s.AgentSessionID = id
 	s.AgentType = agentType
 	return true

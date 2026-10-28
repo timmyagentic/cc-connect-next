@@ -3604,7 +3604,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.group_context` — `feishu, lark`
 
-符合回复规则的群聊回合开始前，补读有界近期讨论并展开合并转发，作为不可信背景。仅为文本预算内选中的未读条目下载图片和文件，并限制数量、字节数和耗时。普通群和真实话题分别隔离；仅使用已有读取权限，不轮询；不可用内容明确标记。
+首次参与时补读有界近期群聊背景；后续请求及忙时追加只读取上次交付之后的新消息，不区分发送者。输入交付后保存阅读位置，不等待任务完成。图片和文件仅在文字与媒体预算内下载。群和话题分别隔离；仅使用已有权限，不轮询。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3618,7 +3618,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.group_context_include_peer_bots` — `feishu, lark`
 
-将 peer_bots 中精确 app ID 的公开文本及可读卡片快照纳入同群、同话题背景。保留发送者和卡片状态，更新后可重新补读，忽略机器人触发消息。排除自身、未知机器人和私聊。仅共享有界近期背景，不合并原生 Agent 会话或永久记忆。
+将 peer_bots 中精确 app ID 的新增公开消息和可读卡片快照纳入同群、同话题背景，保留发送者和卡片状态。已读位置之前的消息编辑不自动重放。忽略机器人触发消息，排除自身、未知机器人和私聊；原生 Agent 会话保持独立。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3649,7 +3649,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.group_context_max_messages` — `feishu, lark`
 
-每个符合回复规则的群聊回合最多读取的人类和显式开启的对端机器人消息条数，再按 Agent 会话去重；明确提示读取失败或截断。
+每次输入最多补读的背景消息条数；先排除已读位置及之前的消息，再保留最新消息，明确提示截断。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3665,7 +3665,7 @@ Agent 连续指定分钟无事件时终止回合；0 表示禁用。
 
 ### `projects.platforms.options.group_context_window_minutes` — `feishu, lark`
 
-仅补读触发消息之前该分钟数内创建的消息，排队时仍使用原始时间。窗口外创建的卡片不纳入；触发后更新的对端卡片会跳过并提示背景不完整，后续触发再补读。
+Agent 会话首次参与时向前补读的分钟数。后续输入从上次已交付位置读到本次触发时间，间隔较长时也不重置为半小时窗口；仍受条数、页数和字符预算限制。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`

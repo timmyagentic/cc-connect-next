@@ -14,7 +14,8 @@ import (
 // routing and immediately before an Agent turn, never by a background poller.
 type MessageContextProvider interface {
 	MessageContextEnabled(replyCtx any) bool
-	LoadMessageContext(ctx context.Context, replyCtx any) (MessageContext, error)
+	MessageContextScope(replyCtx any) string
+	LoadMessageContext(ctx context.Context, replyCtx any, after time.Time) (MessageContext, error)
 }
 
 // MessageContextMediaProvider fetches resources only after history has been
@@ -33,95 +34,73 @@ type ContextResource struct {
 
 // ContextMessage is quoted data, not a command or permission decision.
 type ContextMessage struct {
-	ID         string    `json:"message_id"`
-	SenderID   string    `json:"sender_id"`
-	SenderName string    `json:"sender_name,omitempty"`
-	SenderType string    `json:"sender_type,omitempty"`
-	Time       time.Time `json:"time"`
-	ReplyTo    string    `json:"reply_to,omitempty"`
-	Text       string    `json:"text"`
-	// Revision changes when an editable platform message changes. It is a
-	// receipt token only, never a replacement for the public message ID.
-	Revision   string            `json:"-"`
+	ID         string            `json:"message_id"`
+	SenderID   string            `json:"sender_id"`
+	SenderName string            `json:"sender_name,omitempty"`
+	SenderType string            `json:"sender_type,omitempty"`
+	Time       time.Time         `json:"time"`
+	ReplyTo    string            `json:"reply_to,omitempty"`
+	Text       string            `json:"text"`
 	Resources  []ContextResource `json:"-"`
 	Images     []ImageAttachment `json:"-"`
 	Files      []FileAttachment  `json:"-"`
 	Incomplete bool              `json:"-"`
 }
 
-func (m ContextMessage) receiptID() string {
-	if m.Revision != "" {
-		return m.ID + ":revision:" + m.Revision
-	}
-	return m.ID
-}
-
 type MessageContext struct {
-	Scope      string // opaque platform/app/conversation boundary for receipts
+	Scope      string    // opaque platform/app/conversation boundary
+	Through    time.Time // trigger timestamp; advance only after input delivery
 	Messages   []ContextMessage
 	MaxChars   int // total serialized background, including attribution
 	Incomplete bool
 	Unreadable bool // an entry could not be safely attributed or read
 }
 
-const maxContextReceipts = 512
-
-// ContextReceipts stores only delivered message IDs/revisions, never an archive of
-// group text. The native binding prevents a fresh backend from inheriting the
-// deduplication cursor of a different Agent conversation.
-type ContextReceipts struct {
-	AgentType      string   `json:"agent_type,omitempty"`
-	AgentSessionID string   `json:"agent_session_id,omitempty"`
-	IDs            []string `json:"ids,omitempty"`
+// ContextProgress stores where this Agent conversation has caught up, not a
+// second copy of group history.
+type ContextProgress struct {
+	AgentType      string               `json:"agent_type,omitempty"`
+	AgentSessionID string               `json:"agent_session_id,omitempty"`
+	Through        map[string]time.Time `json:"through,omitempty"`
 }
 
-func (s *Session) seenContextMessages() map[string]bool {
+// Called with s.mu held. The first native ID belongs to the conversation
+// whose input was just delivered; replacing an existing ID starts fresh.
+func (s *Session) bindMessageContext(id, agentType string) {
+	if s.ContextProgress == nil {
+		return
+	}
+	if s.AgentSessionID == "" && (s.AgentType == "" || s.AgentType == agentType) {
+		s.ContextProgress.AgentSessionID = id
+		s.ContextProgress.AgentType = agentType
+	} else if s.AgentSessionID != id || s.AgentType != agentType {
+		s.ContextProgress = nil
+	}
+}
+
+func (s *Session) messageContextPosition(scope string) time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	seen := make(map[string]bool)
-	if s.ContextReceipts == nil || s.ContextReceipts.AgentType != s.AgentType || s.ContextReceipts.AgentSessionID != s.AgentSessionID {
-		return seen
+	if s.ContextProgress == nil || s.ContextProgress.AgentType != s.AgentType || s.ContextProgress.AgentSessionID != s.AgentSessionID {
+		return time.Time{}
 	}
-	for _, id := range s.ContextReceipts.IDs {
-		seen[id] = true
-	}
-	return seen
+	return s.ContextProgress.Through[scope]
 }
 
-func (s *Session) recordContextMessages(ids []string) {
-	if len(ids) == 0 {
+func (s *Session) advanceMessageContext(scope string, through time.Time) {
+	if scope == "" || through.IsZero() {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.ContextReceipts == nil || s.ContextReceipts.AgentType != s.AgentType || s.ContextReceipts.AgentSessionID != s.AgentSessionID {
-		s.ContextReceipts = &ContextReceipts{AgentType: s.AgentType, AgentSessionID: s.AgentSessionID}
+	if s.ContextProgress == nil || s.ContextProgress.AgentType != s.AgentType || s.ContextProgress.AgentSessionID != s.AgentSessionID {
+		s.ContextProgress = &ContextProgress{AgentType: s.AgentType, AgentSessionID: s.AgentSessionID}
 	}
-	seen := make(map[string]bool, len(s.ContextReceipts.IDs))
-	for _, id := range s.ContextReceipts.IDs {
-		seen[id] = true
+	if s.ContextProgress.Through == nil {
+		s.ContextProgress.Through = make(map[string]time.Time)
 	}
-	for _, id := range ids {
-		if id != "" && !seen[id] {
-			if base, _, versioned := strings.Cut(id, ":revision:"); versioned {
-				// Keep the last delivered snapshot, not every historical hash.
-				// An edit A -> B -> A must deliver A again after B.
-				kept := s.ContextReceipts.IDs[:0]
-				for _, previous := range s.ContextReceipts.IDs {
-					if previous == base || strings.HasPrefix(previous, base+":revision:") {
-						delete(seen, previous)
-						continue
-					}
-					kept = append(kept, previous)
-				}
-				s.ContextReceipts.IDs = kept
-			}
-			s.ContextReceipts.IDs = append(s.ContextReceipts.IDs, id)
-			seen[id] = true
-		}
-	}
-	if n := len(s.ContextReceipts.IDs); n > maxContextReceipts {
-		s.ContextReceipts.IDs = append([]string(nil), s.ContextReceipts.IDs[n-maxContextReceipts:]...)
+	if through.After(s.ContextProgress.Through[scope]) {
+		s.ContextProgress.Through[scope] = through
 	}
 }
 
@@ -131,17 +110,17 @@ func hasMessageContext(p Platform, replyCtx any) bool {
 }
 
 type preparedMessageContext struct {
-	Text       string
-	Images     []ImageAttachment
-	Files      []FileAttachment
-	Err        error
-	ReceiptIDs []string // steer receipts remain local until the RPC accepts them
+	Text    string
+	Images  []ImageAttachment
+	Files   []FileAttachment
+	Err     error
+	Scope   string
+	Through time.Time
 }
 
 // contextPrepMode distinguishes background read for a turn that has not been
 // sent yet from background read for input appended to a turn already running.
-// Steer preparation retains receipts locally until the RPC accepts the input.
-// It also uses a separate cancellation handle from the original turn's read.
+// Only the cancellation handle differs; both paths use the same read position.
 type contextPrepMode int
 
 const (
@@ -150,28 +129,26 @@ const (
 )
 
 // prepareMessageContext runs while this conversation owns its turn. Queued
-// requests see receipts from previous successful turns. Failed content remains retryable.
+// requests see the position advanced by the previous delivered input.
 func (e *Engine) prepareMessageContext(p Platform, replyCtx any, session *Session, state *interactiveState, content, messageID string) preparedMessageContext {
 	return e.prepareMessageContextFor(contextPrepTurn, p, replyCtx, session, state, content, messageID)
 }
 
 // prepareSteerMessageContext reads bounded background for a message that will
-// be appended to the in-flight turn. The caller accepts its receipts only after
-// a successful RPC, so rejected or uncertain input remains retryable.
+// be appended to the in-flight turn, using the same cursor as ordinary input.
 func (e *Engine) prepareSteerMessageContext(p Platform, replyCtx any, session *Session, state *interactiveState, content, messageID string) preparedMessageContext {
 	return e.prepareMessageContextFor(contextPrepSteer, p, replyCtx, session, state, content, messageID)
 }
 
 func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, replyCtx any, session *Session, state *interactiveState, content, messageID string) preparedMessageContext {
 	prepared := preparedMessageContext{Text: content}
-	if mode == contextPrepTurn {
-		state.mu.Lock()
-		state.contextMessageIDs = nil
-		state.contextCompleted = false
-		state.mu.Unlock()
-	}
 	if !hasMessageContext(p, replyCtx) {
 		return prepared
+	}
+	if mode == contextPrepTurn {
+		state.mu.Lock()
+		state.contextSending = true
+		state.mu.Unlock()
 	}
 	ctx, cancel := context.WithCancel(e.ctx)
 	state.mu.Lock()
@@ -195,7 +172,10 @@ func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, repl
 		cancel()
 	}()
 	readCtx, stopRead := context.WithTimeout(ctx, 4*time.Second)
-	background, err := p.(MessageContextProvider).LoadMessageContext(readCtx, replyCtx)
+	provider := p.(MessageContextProvider)
+	scope := provider.MessageContextScope(replyCtx)
+	after := session.messageContextPosition(scope)
+	background, err := provider.LoadMessageContext(readCtx, replyCtx, after)
 	stopRead()
 	if ctx.Err() != nil {
 		prepared.Err = ctx.Err()
@@ -205,14 +185,13 @@ func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, repl
 		background.Incomplete = true
 		slog.Warn("recent conversation context could not be fully read", "platform", p.Name(), "error", redactFeedbackText(err.Error()))
 	}
-	seen := session.seenContextMessages()
+	seen := make(map[string]bool)
 	var unseen []ContextMessage
 	for _, entry := range background.Messages {
-		key := background.Scope + ":" + entry.receiptID()
-		if entry.ID == "" || entry.ID == messageID || seen[key] {
+		if entry.ID == "" || entry.ID == messageID || seen[entry.ID] || (!after.IsZero() && !entry.Time.After(after)) {
 			continue
 		}
-		seen[key] = true
+		seen[entry.ID] = true
 		unseen = append(unseen, entry)
 	}
 	// Do not download already delivered or out-of-budget history resources.
@@ -252,28 +231,13 @@ func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, repl
 		e.reply(p, replyCtx, strings.Join(reasons, "\n"))
 	}
 	delivered := selectContextMessages(selected, included)
-	var receipt []string
-	if background.Scope != "" {
-		for _, entry := range delivered {
-			// Failed resources remain retryable even if the Agent answers.
-			if !entry.Incomplete && mediaErr == nil {
-				receipt = append(receipt, background.Scope+":"+entry.receiptID())
-			}
-		}
-		if messageID != "" {
-			receipt = append(receipt, background.Scope+":"+messageID)
-		}
-	}
-	if mode == contextPrepTurn {
-		state.mu.Lock()
-		state.contextMessageIDs = receipt
-		state.mu.Unlock()
-	}
 	if serialized != "" || incomplete {
 		prepared = buildMessageContextPrompt(content, serialized, incomplete, delivered)
 	}
-	if mode == contextPrepSteer {
-		prepared.ReceiptIDs = receipt
+	// A failed history request did not establish a read position. Bounded
+	// snapshots and unavailable attachments are disclosed, not replayed.
+	if err == nil && background.Scope == scope {
+		prepared.Scope, prepared.Through = scope, background.Through
 	}
 	return prepared
 }
@@ -331,42 +295,24 @@ func selectContextMessages(entries []ContextMessage, ids []string) []ContextMess
 	}
 	var result []ContextMessage
 	for _, entry := range entries {
-		if selected[entry.receiptID()] {
+		if selected[entry.ID] {
 			result = append(result, entry)
 		}
 	}
 	return result
 }
 
-// acceptSteerMessageContext also handles successful completion racing the RPC
-// response. Turn admission holds steerMu until the RPC returns, so the state
-// cannot be reused for a later turn while these receipts are being accepted.
-func acceptSteerMessageContext(state *interactiveState, session *Session, sessions *SessionManager, ids []string) {
-	if len(ids) == 0 {
-		return
-	}
-	state.mu.Lock()
-	completed := state.contextCompleted
-	if !completed {
-		state.contextMessageIDs = append(state.contextMessageIDs, ids...)
-	}
-	state.mu.Unlock()
-	if completed {
-		session.recordContextMessages(ids)
+func acceptMessageContext(session *Session, sessions *SessionManager, prepared preparedMessageContext) {
+	if prepared.Scope != "" && !prepared.Through.IsZero() {
+		session.advanceMessageContext(prepared.Scope, prepared.Through)
 		sessions.Save()
 	}
 }
 
-func completeMessageContext(state *interactiveState, session *Session, sessions *SessionManager) {
+func finishMessageContextInput(state *interactiveState) {
 	state.mu.Lock()
-	state.contextCompleted = true
-	ids := state.contextMessageIDs
-	state.contextMessageIDs = nil
+	state.contextSending = false
 	state.mu.Unlock()
-	if len(ids) > 0 {
-		session.recordContextMessages(ids)
-		sessions.Save()
-	}
 }
 
 // renderMessageContext keeps the newest data that fits, then restores time
@@ -414,7 +360,7 @@ func renderMessageContext(entries []ContextMessage, maxChars int) (string, []str
 			data, _ = json.Marshal(entry)
 		}
 		rows = append(rows, string(data))
-		ids = append(ids, entry.receiptID())
+		ids = append(ids, entry.ID)
 		remaining -= utf8.RuneCount(data) + 1 // comma before the next row
 		if remaining <= 0 && i > 0 {
 			truncated = true

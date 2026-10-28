@@ -658,11 +658,8 @@ type interactiveState struct {
 	capabilityBriefSent      bool
 	agentSession             AgentSession
 	startError               error              // immutable outcome when backend startup failed
-	contextMessageIDs        []string           // candidate background IDs; committed only on successful completion
-	contextCompleted         bool               // this turn completed successfully, including any accepted steer
 	contextPreparationCancel context.CancelFunc // cancels history/media preparation before Send
 	steerContextCancel       context.CancelFunc // cancels background read for an in-flight steer
-	turnSenderID             string             // sender that started the running turn
 	platform                 Platform
 	replyCtx                 any
 	currentMessageID         string
@@ -698,7 +695,8 @@ type interactiveState struct {
 	// steerMu makes a same-turn steer decision atomic with answer-profile
 	// handoff. Code that needs both locks must acquire steerMu before mu; unlike
 	// mu, steerMu may be held across the bounded backend steer RPC.
-	steerMu sync.Mutex
+	steerMu        sync.Mutex
+	contextSending bool // ordinary input is being prepared or handed to the Agent
 
 	// Unsolicited event reader: a background goroutine that consumes agent
 	// events between user-initiated turns (e.g. background task completions).
@@ -3517,27 +3515,6 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 	return newSession
 }
 
-// steerNeedsGroupContext reports whether a busy group message should carry a
-// bounded background read before it is appended to the running turn. The read
-// exists to rebuild discussion the Agent never saw (issue #129); a same-sender
-// follow-up to work already in flight does not depend on it, and skipping it
-// keeps steer free of the read's latency.
-func (e *Engine) steerNeedsGroupContext(p Platform, msg *Message, turnSenderID string, receipts int) bool {
-	if !hasMessageContext(p, msg.ReplyCtx) {
-		return false
-	}
-	// First trigger in this session (or after /new): the Agent has no
-	// background yet, so the read is the whole point.
-	if receipts == 0 {
-		return true
-	}
-	if turnSenderID == "" || msg.UserID == "" {
-		// Unknown identity: keep the conservative read.
-		return true
-	}
-	return msg.UserID != turnSenderID
-}
-
 // trySteerBusyMessage attempts to append a busy-session message to the turn
 // already in flight (busy_message_mode = "steer"). Returns true when the
 // message was fully handled — either delivered into the current turn, dropped
@@ -3572,13 +3549,12 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	defer state.steerMu.Unlock()
 	state.mu.Lock()
 	as := state.agentSession
-	turnSenderID := state.turnSenderID
 	if state.restartAdmissionFenced {
 		state.mu.Unlock()
 		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRestarting, msg.Content))
 		return true
 	}
-	if as == nil || !as.Alive() {
+	if as == nil || !as.Alive() || state.contextSending {
 		state.mu.Unlock()
 		return false
 	}
@@ -3605,10 +3581,9 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	cardHandle, cardCopy := e.beginSteerPresentation(p, msg.ReplyCtx, msg.Content)
 
 	historyContext := preparedMessageContext{Text: msg.Content}
-	if e.steerNeedsGroupContext(p, msg, turnSenderID, len(session.seenContextMessages())) {
-		// The read must finish before the RPC so background and the steered
-		// request reach the Agent in one ordered input. Receipts accumulate on
-		// the running turn and are committed by its single completion.
+	if hasMessageContext(p, msg.ReplyCtx) {
+		// Read only discussion since the previous delivered input, regardless
+		// of who is speaking. Background and request travel together.
 		historyContext = e.prepareSteerMessageContext(p, msg.ReplyCtx, session, state, msg.Content, msg.MessageID)
 		if historyContext.Err != nil {
 			// The turn or this message was cancelled while reading; nothing was
@@ -3624,7 +3599,7 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	err := steerable.Steer(prompt, steerImages, steerFiles)
 	switch {
 	case err == nil:
-		acceptSteerMessageContext(state, session, sessions, historyContext.ReceiptIDs)
+		acceptMessageContext(session, sessions, historyContext)
 		e.noteUserMessageAccepted(interactiveKey, msg.UserMessageTimeMs)
 		session.TouchUserActivity()
 		session.AddHistory("user", msg.Content)
@@ -4514,6 +4489,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 
 	historyContext := e.prepareMessageContext(p, msg.ReplyCtx, session, state, msg.Content, msg.MessageID)
 	if historyContext.Err != nil {
+		finishMessageContextInput(state)
 		msg.scheduledResult.complete(historyContext.Err)
 		return
 	}
@@ -4523,7 +4499,6 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.steerMu.Lock()
 	state.mu.Lock()
 	state.currentMessageID = msg.MessageID
-	state.turnSenderID = msg.UserID
 	state.fromVoice = msg.FromVoice
 	state.sideText = ""
 	state.activeAnswerProfile = msg.AnswerProfile
@@ -4549,15 +4524,22 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	sendDone := make(chan error, 1)
 	go func() {
 		if as == nil {
+			finishMessageContextInput(state)
 			sendDone <- fmt.Errorf("agent session became nil")
 			return
 		}
 		overrides, err := e.prepareInteractiveTurnOverrides(state, agent, sessions, session, as, msg.SessionKey, msg.AnswerProfile, msg.ModelOverride, msg.ReasoningEffortOverride, speedTier)
 		if err != nil {
+			finishMessageContextInput(state)
 			sendDone <- err
 			return
 		}
-		sendDone <- e.sendAgentTurnWithOverrides(agent, as, promptContent, append(append([]ImageAttachment(nil), msg.Images...), historyContext.Images...), append(scopeFileAttachments(msg.Files, msg.MessageID), historyContext.Files...), overrides)
+		err = e.sendAgentTurnWithOverrides(agent, as, promptContent, append(append([]ImageAttachment(nil), msg.Images...), historyContext.Images...), append(scopeFileAttachments(msg.Files, msg.MessageID), historyContext.Files...), overrides)
+		if err == nil {
+			acceptMessageContext(session, sessions, historyContext)
+		}
+		finishMessageContextInput(state)
+		sendDone <- err
 	}()
 
 	e.processInteractiveEvents(state, session, sessions, interactiveKey, msg.MessageID, turnStart, stopTyping, sendDone, msg.ReplyCtx, msg.scheduledResult)
@@ -6673,10 +6655,6 @@ func (t *turnProcessor) run() {
 				t.persistAgentSessionID(state.agentSession.CurrentSessionID())
 			}
 
-			if event.Error == nil {
-				completeMessageContext(state, session, sessions)
-			}
-
 			// Mark clean exit so unsolicited reader preserves buffered events.
 			state.mu.Lock()
 			state.eventsNeedResync = false
@@ -7272,7 +7250,6 @@ func (queue *turnQueue) handle() {
 		state.currentReplyUserID = queued.userID
 		state.fromVoice = queued.fromVoice
 		state.currentUserID = queued.userID
-		state.turnSenderID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		state.activeModelOverride = queued.modelOverride
@@ -7308,6 +7285,7 @@ func (queue *turnQueue) handle() {
 
 		historyContext := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
 		if historyContext.Err != nil {
+			finishMessageContextInput(state)
 			queue.control = turnReadStop
 			return
 		}
@@ -7329,15 +7307,22 @@ func (queue *turnQueue) handle() {
 		nextSend := make(chan error, 1)
 		go func() {
 			if as == nil {
+				finishMessageContextInput(state)
 				nextSend <- fmt.Errorf("agent session became nil")
 				return
 			}
 			overrides, err := e.prepareInteractiveTurnOverrides(state, turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
 			if err != nil {
+				finishMessageContextInput(state)
 				nextSend <- err
 				return
 			}
-			nextSend <- e.sendAgentTurnWithOverrides(turnAgent, as, queuedPrompt, append(append([]ImageAttachment(nil), queued.images...), historyContext.Images...), append(append([]FileAttachment(nil), queued.files...), historyContext.Files...), overrides)
+			err = e.sendAgentTurnWithOverrides(turnAgent, as, queuedPrompt, append(append([]ImageAttachment(nil), queued.images...), historyContext.Images...), append(append([]FileAttachment(nil), queued.files...), historyContext.Files...), overrides)
+			if err == nil {
+				acceptMessageContext(session, sessions, historyContext)
+			}
+			finishMessageContextInput(state)
+			nextSend <- err
 		}()
 		pendingSend = nextSend
 
@@ -8890,7 +8875,6 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.currentReplyUserID = queued.userID
 		state.fromVoice = queued.fromVoice
 		state.currentUserID = queued.userID
-		state.turnSenderID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
 		state.activeModelOverride = queued.modelOverride
@@ -8909,6 +8893,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.setTurnRichCardCopy(queued.messageID, queuedRichCardCopy)
 		historyContext := e.prepareMessageContext(queued.platform, queued.replyCtx, session, state, queued.content, queued.messageID)
 		if historyContext.Err != nil {
+			finishMessageContextInput(state)
 			return false
 		}
 		prompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(historyContext.Text, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey, queued.channelKey))
@@ -8921,6 +8906,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 			turnAgent = e.agent
 		}
 		if as == nil || !as.Alive() {
+			finishMessageContextInput(state)
 			e.send(queued.platform, queued.replyCtx, fmt.Sprintf(e.i18n.TForText(MsgError, queued.content), "agent session ended"))
 			e.notifyDroppedQueuedMessages(state, fmt.Errorf("agent session ended"))
 			state.mu.Lock()
@@ -8938,15 +8924,22 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		sendDone := make(chan error, 1)
 		go func() {
 			if as == nil {
+				finishMessageContextInput(state)
 				sendDone <- fmt.Errorf("agent session became nil")
 				return
 			}
 			overrides, err := e.prepareInteractiveTurnOverrides(state, turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
 			if err != nil {
+				finishMessageContextInput(state)
 				sendDone <- err
 				return
 			}
-			sendDone <- e.sendAgentTurnWithOverrides(turnAgent, as, prompt, append(append([]ImageAttachment(nil), queued.images...), historyContext.Images...), append(append([]FileAttachment(nil), queued.files...), historyContext.Files...), overrides)
+			err = e.sendAgentTurnWithOverrides(turnAgent, as, prompt, append(append([]ImageAttachment(nil), queued.images...), historyContext.Images...), append(append([]FileAttachment(nil), queued.files...), historyContext.Files...), overrides)
+			if err == nil {
+				acceptMessageContext(session, sessions, historyContext)
+			}
+			finishMessageContextInput(state)
+			sendDone <- err
 		}()
 
 		var stopTyping func()

@@ -114,7 +114,7 @@ func TestGroupContextReplyAllEventReachesLoaderAndPreservesChatAccess(t *testing
 		if !wrapper.MessageContextEnabled(got.ReplyCtx) {
 			t.Fatal("accepted reply-all event lost context eligibility")
 		}
-		background, err := wrapper.LoadMessageContext(context.Background(), got.ReplyCtx)
+		background, err := wrapper.LoadMessageContext(context.Background(), got.ReplyCtx, time.Time{})
 		if err != nil || len(background.Messages) != 1 || background.Messages[0].Text != "Keep the chosen release date" {
 			t.Fatalf("reply-all context unavailable: %+v, %v", background, err)
 		}
