@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-func newGroupReasoningEngine(t *testing.T, path string) (*Engine, *cronModelPlatform, *groupModelTestAgent) {
+func newGroupReasoningEngine(t *testing.T, path string) (*Engine, *cronModelPlatform, *chatModelTestAgent) {
 	t.Helper()
-	e, p, a := newGroupModelEngine(t, path)
+	e, p, a := newChatModelEngine(t, path)
 	a.effort = "medium"
 	a.onSend = func(s *cronModelSession, call cronModelCall) error {
 		effort := call.options.ReasoningEffort
@@ -25,10 +25,10 @@ func newGroupReasoningEngine(t *testing.T, path string) (*Engine, *cronModelPlat
 	return e, p, a
 }
 
-func reasoningChat(t *testing.T, e *Engine, p *cronModelPlatform, a *groupModelTestAgent, msg *Message, effort string) {
+func reasoningChat(t *testing.T, e *Engine, p *cronModelPlatform, a *chatModelTestAgent, msg *Message, effort string) {
 	t.Helper()
 	p.clearSent()
-	groupModelChat(t, e, p, a, msg, "project-A")
+	chatModelTurn(t, e, p, a, msg, "project-A")
 	if got := strings.Join(p.getSent(), "\n"); !strings.Contains(got, "effort="+effort) {
 		t.Fatalf("user saw wrong effort: %s", got)
 	}
@@ -37,45 +37,45 @@ func reasoningChat(t *testing.T, e *Engine, p *cronModelPlatform, a *groupModelT
 func TestCUJ_GroupReasoning1_PersistentGroupEffortAndIndependentModel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sessions.json")
 	e, p, a := newGroupReasoningEngine(t, path)
-	e.ReceiveMessage(p, groupModelMessage("A", "one", "pin", "/reasoning group high"))
+	e.ReceiveMessage(p, chatModelMessage("A", "one", "pin", "/reasoning group high"))
 	if got := strings.Join(p.getSent(), "\n"); !strings.Contains(got, "high") {
 		t.Fatalf("missing confirmation: %s", got)
 	}
-	reasoningChat(t, e, p, a, groupModelMessage("A", "two", "a", "hello"), "high")
-	reasoningChat(t, e, p, a, groupModelMessage("B", "one", "b", "hello"), "medium")
-	private := groupModelMessage("private", "", "dm", "hello")
+	reasoningChat(t, e, p, a, chatModelMessage("A", "two", "a", "hello"), "high")
+	reasoningChat(t, e, p, a, chatModelMessage("B", "one", "b", "hello"), "medium")
+	private := chatModelMessage("private", "", "dm", "hello")
 	private.GroupID, private.IsDirect = "", true
 	reasoningChat(t, e, p, a, private, "medium")
-	e.ReceiveMessage(p, groupModelMessage("A", "one", "model", "/model group group-B"))
-	e.ReceiveMessage(p, groupModelMessage("A", "one", "model-reset", "/model group reset"))
-	e.ReceiveMessage(p, groupModelMessage("A", "two", "new", "/new"))
-	reasoningChat(t, e, p, a, groupModelMessage("A", "two", "after-new", "hello"), "high")
+	e.ReceiveMessage(p, chatModelMessage("A", "one", "model", "/model group-B"))
+	e.ReceiveMessage(p, chatModelMessage("A", "one", "model-reset", "/model reset"))
+	e.ReceiveMessage(p, chatModelMessage("A", "two", "new", "/new"))
+	reasoningChat(t, e, p, a, chatModelMessage("A", "two", "after-new", "hello"), "high")
 	if err := e.Stop(); err != nil {
 		t.Fatal(err)
 	}
 	e, p, a = newGroupReasoningEngine(t, path)
-	reasoningChat(t, e, p, a, groupModelMessage("A", "fresh", "restart", "hello"), "high")
-	e.ReceiveMessage(p, groupModelMessage("A", "fresh", "model2", "/model group group-B"))
-	e.ReceiveMessage(p, groupModelMessage("A", "fresh", "reset", "/reasoning group reset"))
-	groupModelChat(t, e, p, a, groupModelMessage("A", "fresh", "after", "hello"), "group-B")
+	reasoningChat(t, e, p, a, chatModelMessage("A", "fresh", "restart", "hello"), "high")
+	e.ReceiveMessage(p, chatModelMessage("A", "fresh", "model2", "/model group-B"))
+	e.ReceiveMessage(p, chatModelMessage("A", "fresh", "reset", "/reasoning group reset"))
+	chatModelTurn(t, e, p, a, chatModelMessage("A", "fresh", "after", "hello"), "group-B")
 	calls, _, setters := a.snapshot()
 	if calls[len(calls)-1].options.ReasoningEffort != "medium" || setters != 0 || a.GetReasoningEffort() != "medium" {
 		t.Fatalf("reset did not restore defaults without mutation: %+v", calls)
 	}
 	other, op, oa := newGroupReasoningEngine(t, "")
-	reasoningChat(t, other, op, oa, groupModelMessage("A", "fresh", "other-bot", "hello"), "medium")
+	reasoningChat(t, other, op, oa, chatModelMessage("A", "fresh", "other-bot", "hello"), "medium")
 }
 
 func TestGroupReasoning_ProfileAndTaskOverridesAreIndependentOfModel(t *testing.T) {
 	e, p, a := newGroupReasoningEngine(t, "")
-	e.ReceiveMessage(p, groupModelMessage("A", "", "pin", "/reasoning group high"))
+	e.ReceiveMessage(p, chatModelMessage("A", "", "pin", "/reasoning group high"))
 	e.SetAnswerProfiles(AnswerProfiles{Fast: &AnswerProfileOptions{ReasoningEffort: "low"}, Quality: &AnswerProfileOptions{Model: "project-A"}})
-	reasoningChat(t, e, p, a, groupModelMessage("A", "", "fast", "/fast hello"), "low")
-	explicit := groupModelMessage("A", "", "explicit", "/fast hello")
+	reasoningChat(t, e, p, a, chatModelMessage("A", "", "fast", "/fast hello"), "low")
+	explicit := chatModelMessage("A", "", "explicit", "/fast hello")
 	explicit.ReasoningEffortOverride = "xhigh"
 	reasoningChat(t, e, p, a, explicit, "xhigh")
-	reasoningChat(t, e, p, a, groupModelMessage("A", "", "quality", "/quality hello"), "high")
-	reasoningChat(t, e, p, a, groupModelMessage("A", "", "ordinary", "hello"), "high")
+	reasoningChat(t, e, p, a, chatModelMessage("A", "", "quality", "/quality hello"), "high")
+	reasoningChat(t, e, p, a, chatModelMessage("A", "", "ordinary", "hello"), "high")
 }
 
 func TestGroupReasoning_QueuedTurnResolvesChangeAndResetWithoutSteering(t *testing.T) {
@@ -93,12 +93,12 @@ func TestGroupReasoning_QueuedTurnResolvesChangeAndResetWithoutSteering(t *testi
 				s.events <- Event{Type: EventResult, Content: "ok", Done: true}
 				return nil
 			}
-			e.ReceiveMessage(p, groupModelMessage("A", "t", "pin", "/reasoning group high"))
-			e.ReceiveMessage(p, groupModelMessage("A", "t", "first", "first"))
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "pin", "/reasoning group high"))
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "first", "first"))
 			waitAnswerProfileTest(t, "turn started", func() bool { calls, _, _ := a.snapshot(); return len(calls) == 1 })
-			e.ReceiveMessage(p, groupModelMessage("A", "t", "queued", "queued"))
-			e.ReceiveMessage(p, groupModelMessage("A", "t", "change", "/reasoning group "+choice))
-			e.ReceiveMessage(p, groupModelMessage("A", "t", "queued2", "queued2"))
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "queued", "queued"))
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "change", "/reasoning group "+choice))
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "queued2", "queued2"))
 			once.Do(func() { close(release) })
 			waitAnswerProfileTest(t, "drained", func() bool {
 				calls, _, _ := a.snapshot()
@@ -126,14 +126,14 @@ func TestGroupReasoning_QueuedTurnResolvesChangeAndResetWithoutSteering(t *testi
 
 func TestGroupReasoning_InvalidContextBackendProviderAndStorageFailClosed(t *testing.T) {
 	e, p, a := newGroupReasoningEngine(t, "")
-	e.ReceiveMessage(p, groupModelMessage("A", "", "pin", "/reasoning group high"))
+	e.ReceiveMessage(p, chatModelMessage("A", "", "pin", "/reasoning group high"))
 	for _, choice := range []string{"typo", "high extra"} {
-		e.ReceiveMessage(p, groupModelMessage("A", "", "bad", "/reasoning group "+choice))
+		e.ReceiveMessage(p, chatModelMessage("A", "", "bad", "/reasoning group "+choice))
 		if binding, _ := e.groupReasoningBinding("test:A"); binding.Effort != "high" {
 			t.Fatal("invalid selection changed binding")
 		}
 	}
-	private := groupModelMessage("private", "", "private", "/reasoning group low")
+	private := chatModelMessage("private", "", "private", "/reasoning group low")
 	private.GroupID, private.IsDirect, private.UserID = "", true, ""
 	e.ReceiveMessage(p, private)
 	if _, bound := e.groupReasoningBinding(private.SessionKey); bound {
@@ -144,7 +144,7 @@ func TestGroupReasoning_InvalidContextBackendProviderAndStorageFailClosed(t *tes
 	if _, err := e.prepareSessionTurnOverrides(&stubAgent{}, e.sessions, session, backend, "test:A", "", "", "", ""); err == nil {
 		t.Fatal("unsupported backend fell back")
 	}
-	if _, err := e.groupDefaultReasoning(a, "test:A", &groupProviderSession{provider: "wrong"}); err == nil {
+	if _, err := e.groupDefaultReasoning(a, "test:A", &chatProviderSession{provider: "wrong"}); err == nil {
 		t.Fatal("conversation Provider mismatch fell back")
 	}
 	if err := e.projectState.SaveGroupReasoningBinding("test:A", GroupReasoningBinding{Effort: "high", Provider: "wrong"}); err != nil {
@@ -171,8 +171,8 @@ func TestGroupReasoning_InvalidContextBackendProviderAndStorageFailClosed(t *tes
 
 func TestGroupReasoning_ScheduledNewTopicAndExplicitTaskEffort(t *testing.T) {
 	e, p, a := newGroupReasoningEngine(t, "")
-	e.ReceiveMessage(p, groupModelMessage("A", "", "pin", "/reasoning group high"))
-	e.platforms = []Platform{&groupModelScheduledPlatform{cronModelPlatform{stubPlatformEngine{n: "test"}}}}
+	e.ReceiveMessage(p, chatModelMessage("A", "", "pin", "/reasoning group high"))
+	e.platforms = []Platform{&chatModelScheduledPlatform{cronModelPlatform{stubPlatformEngine{n: "test"}}}}
 	job := &CronJob{ID: "group", Project: "test", SessionKey: "test:A", Prompt: "scheduled", SessionMode: "new_per_run"}
 	if err := e.ExecuteCronJob(job); err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func TestGroupReasoning_ScheduledNewTopicAndExplicitTaskEffort(t *testing.T) {
 
 func TestGroupReasoning_CardActionsAndManifest(t *testing.T) {
 	e, p, a := newGroupReasoningEngine(t, "")
-	e.ReceiveMessage(p, groupModelMessage("A", "topic", "query", "/reasoning group"))
+	e.ReceiveMessage(p, chatModelMessage("A", "topic", "query", "/reasoning group"))
 	card := e.renderReasoningCardForAgent("test:A:root:topic", a)
 	var command string
 	for _, element := range card.Elements {
@@ -204,10 +204,10 @@ func TestGroupReasoning_CardActionsAndManifest(t *testing.T) {
 	if command == "" {
 		t.Fatal("group reasoning card missing")
 	}
-	callback := groupModelMessage("A", "topic", "select", command)
+	callback := chatModelMessage("A", "topic", "select", command)
 	callback.GroupID, callback.IsCardAction = "", true
 	e.ReceiveMessage(p, callback)
-	reasoningChat(t, e, p, a, groupModelMessage("A", "another", "after", "hello"), "high")
+	reasoningChat(t, e, p, a, chatModelMessage("A", "another", "after", "hello"), "high")
 	meta := findManifestCommand(t, e.QueryAgentCapabilityManifest("", "", false).Commands, "reasoning")
 	if !strings.Contains(meta.Usage, "chat") || !hasManifestEffect(meta.SideEffects, "persistent_state") || meta.Permission != CapabilityPermissionMember {
 		t.Fatalf("incorrect manifest: %+v", meta)

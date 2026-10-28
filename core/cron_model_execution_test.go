@@ -217,8 +217,10 @@ func TestCronModelOverride_ReuseRestoresDefaultsAndPreservesLegacyJobs(t *testin
 		t.Fatalf("sessions=%d calls=%+v", len(sessions), calls)
 	}
 	for i, want := range []string{"project-A", "task-B", "project-A", "project-A"} {
-		if calls[i].model != want || calls[i].explicit != (i > 0) {
-			t.Fatalf("call[%d]=%+v, want model %q explicit=%v", i, calls[i], want, i > 0)
+		// The initial default may use turn options. The explicit task and all
+		// subsequent restorations must use them to avoid sticky task overrides.
+		if calls[i].model != want || i > 0 && !calls[i].explicit {
+			t.Fatalf("call[%d]=%+v, want model %q (task/restores require turn options)", i, calls[i], want)
 		}
 	}
 	if setCalls != 0 || saved != 0 || a.GetModel() != "project-A" {

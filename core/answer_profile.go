@@ -182,6 +182,7 @@ func prepareAgentTurnOverrides(sessions *SessionManager, session *Session, backe
 }
 
 func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, prompt string, images []ImageAttachment, files []FileAttachment, overrides agentTurnOverrides) error {
+	e.syncModelDefault(agent)
 	profile := overrides.profile
 	model := strings.TrimSpace(overrides.model)
 	reasoningEffort := strings.ToLower(strings.TrimSpace(overrides.reasoningEffort))
@@ -200,10 +201,18 @@ func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, p
 		serviceTier = ""
 	}
 	hasSpeed := serviceTier != ""
+	// A configured default must reach an already-open per-turn session after
+	// /model default changes. Keep native, unresolved defaults on the Send path.
+	hasModelDefault := supportsChatModel(agent) && defaultTurnOptions(agent).Model != ""
 	needsOptions := model != "" || reasoningEffort != "" || profile != "" ||
-		supportsOptions && (overrides.restoreDefaults || hasSpeed || e.answerProfilesConfigured())
+		supportsOptions && (overrides.restoreDefaults || hasSpeed || e.answerProfilesConfigured() || hasModelDefault)
 	if !needsOptions {
 		return session.Send(prompt, images, files)
+	}
+	if identity, ok := session.(ModelProviderSession); ok {
+		if _, switchesProvider := agent.(ProviderSwitcher); switchesProvider && agent.Name()+":"+identity.ModelProviderName() != modelProvider(agent) {
+			return e.chatModelFailure(MsgModelChatSessionProviderChanged)
+		}
 	}
 	if !supportsOptions {
 		return ErrTurnOptionsUnsupported

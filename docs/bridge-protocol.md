@@ -342,27 +342,44 @@ Send a structured card to the user. Only sent if the adapter declared `"card"` c
     "elements": [
       {
         "type": "markdown",
-        "content": "Choose a model:"
+        "content": "Current model: gpt-4 · fixed for this chat."
+      },
+      {
+        "type": "select",
+        "placeholder": "Set this chat's model",
+        "options": [
+          {
+            "text": "Follow default",
+            "value": "cmd:/model reset"
+          },
+          {
+            "text": "GPT-4",
+            "value": "cmd:/model gpt-4"
+          },
+          {
+            "text": "Claude",
+            "value": "cmd:/model claude"
+          }
+        ],
+        "init_value": "cmd:/model gpt-4"
       },
       {
         "type": "actions",
         "buttons": [
-          {"text": "GPT-4", "btn_type": "primary", "value": "cmd:/model switch gpt-4"},
-          {"text": "Claude", "btn_type": "default", "value": "cmd:/model switch claude"}
+          {
+            "text": "Global default",
+            "btn_type": "default",
+            "value": "cmd:/model default"
+          }
         ],
         "layout": "row"
-      },
-      {
-        "type": "divider"
-      },
-      {
-        "type": "note",
-        "text": "Current: gpt-4"
       }
     ]
   }
 }
 ```
+
+Model menus have two scopes: the current-chat card uses `cmd:/model MODEL` or `cmd:/model reset`; its secondary `cmd:/model default` entry opens the current bot/project's global-default card with one selector using `cmd:/model default MODEL`. Members can query both scopes; only global-default changes require admin. Selections return the relevant card with a result message.
 
 See [Card Schema](#card-schema) for the full card element reference.
 
@@ -590,7 +607,7 @@ A card consists of an optional header and a list of elements:
   "text": "GPT-4 — Most capable model",
   "btn_text": "Select",
   "btn_type": "primary",
-  "btn_value": "cmd:/model switch gpt-4"
+  "btn_value": "cmd:/model gpt-4"
 }
 ```
 
@@ -600,10 +617,10 @@ A card consists of an optional header and a list of elements:
   "type": "select",
   "placeholder": "Choose a model",
   "options": [
-    {"text": "GPT-4", "value": "cmd:/model switch gpt-4"},
-    {"text": "Claude", "value": "cmd:/model switch claude"}
+    {"text": "GPT-4", "value": "cmd:/model gpt-4"},
+    {"text": "Claude", "value": "cmd:/model claude"}
   ],
-  "init_value": "cmd:/model switch gpt-4"
+  "init_value": "cmd:/model gpt-4"
 }
 ```
 

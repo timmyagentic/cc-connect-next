@@ -694,7 +694,7 @@ func TestInteractivePlatform_CardActionUsesCallbackSessionKey(t *testing.T) {
 	}
 }
 
-func TestInteractivePlatform_ModelCardActionReturnsCardUpdate(t *testing.T) {
+func TestInteractivePlatform_ModelNavigationReturnsCardUpdate(t *testing.T) {
 	platformAny, err := New(map[string]any{"app_id": "cli_xxx", "app_secret": "secret", "enable_feishu_card": true})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -708,13 +708,13 @@ func TestInteractivePlatform_ModelCardActionReturnsCardUpdate(t *testing.T) {
 	ip.cardNavHandler = func(action string, sessionKey string) *core.Card {
 		gotAction = action
 		gotSessionKey = sessionKey
-		return core.NewCard().Markdown("switching").Build()
+		return core.NewCard().Markdown("Global default model").Build()
 	}
 
 	resp, err := ip.onCardAction(&callback.CardActionTriggerEvent{
 		Event: &callback.CardActionTriggerRequest{
 			Operator: &callback.Operator{OpenID: "ou_test_user"},
-			Action:   &callback.CallBackAction{Value: map[string]any{"action": "act:/model switch 1"}},
+			Action:   &callback.CallBackAction{Value: map[string]any{"action": "nav:/model default"}},
 			Context:  &callback.Context{OpenChatID: "oc_test_chat", OpenMessageID: "om_test_message"},
 		},
 	})
@@ -724,8 +724,8 @@ func TestInteractivePlatform_ModelCardActionReturnsCardUpdate(t *testing.T) {
 	if resp == nil || resp.Card == nil {
 		t.Fatalf("expected card response, got %#v", resp)
 	}
-	if gotAction != "act:/model switch 1" {
-		t.Fatalf("action = %q, want act:/model switch 1", gotAction)
+	if gotAction != "nav:/model default" {
+		t.Fatalf("action = %q, want nav:/model default", gotAction)
 	}
 	if gotSessionKey == "" {
 		t.Fatal("expected non-empty session key")

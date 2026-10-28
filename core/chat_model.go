@@ -9,56 +9,55 @@ import (
 
 // Only trusted, localized routing failures may bypass generic backend-error
 // redaction to explain how to recover on a rich-card platform.
-type groupModelError struct{ message string }
+type chatModelError struct{ message string }
 
-func (err *groupModelError) Error() string { return err.message }
+func (err *chatModelError) Error() string { return err.message }
 
-func (e *Engine) groupModelFailure(key MsgKey) error {
-	return &groupModelError{message: e.i18n.T(key)}
+func (e *Engine) chatModelFailure(key MsgKey) error {
+	return &chatModelError{message: e.i18n.T(key)}
 }
 
-// rememberGroupModelScope accepts only platform-verified chat identity. Keep
-// existing group keys unchanged; direct messages use a separate user namespace.
+// rememberChatScope accepts only platform-verified chat identity. Keep
+// groups and direct messages in separate identity namespaces.
 // The project owns this metadata, so bots sharing a directory remain isolated.
-// The persisted field retains its original name for backward compatibility.
-func (e *Engine) rememberGroupModelScope(p Platform, msg *Message) error {
+func (e *Engine) rememberChatScope(p Platform, msg *Message) error {
 	if msg.IsDirect {
 		key := ""
 		if strings.TrimSpace(msg.UserID) != "" {
 			key = p.Name() + ":dm:" + msg.UserID
 		}
-		return e.sessions.UpdateGroupModelKey(msg.SessionKey, key)
+		return e.sessions.UpdateChatKey(msg.SessionKey, key)
 	}
 	if msg.GroupID == "" {
-		// Legacy cards may lack direct-chat routing fields. Only the verified
-		// owner may reuse a persisted DM scope; a forwarded card cannot borrow it.
-		if key := e.groupModelKey(msg.SessionKey); msg.IsCardAction && strings.HasPrefix(key, p.Name()+":dm:") && key != p.Name()+":dm:"+msg.UserID {
-			return e.groupModelFailure(MsgModelGroupOnly)
+		// Only the verified owner may reuse a persisted DM scope; a
+		// forwarded card cannot borrow it.
+		if key := e.chatKey(msg.SessionKey); msg.IsCardAction && strings.HasPrefix(key, p.Name()+":dm:") && key != p.Name()+":dm:"+msg.UserID {
+			return e.chatModelFailure(MsgModelChatOnly)
 		}
 		return nil // callbacks may use previously verified, persisted routing
 	}
-	return e.sessions.UpdateGroupModelKey(msg.SessionKey, p.Name()+":"+msg.GroupID)
+	return e.sessions.UpdateChatKey(msg.SessionKey, p.Name()+":"+msg.GroupID)
 }
 
-func (e *Engine) groupModelKey(sessionKey string) string {
+func (e *Engine) chatKey(sessionKey string) string {
 	if meta := e.sessions.GetUserMeta(sessionKey); meta != nil {
-		return meta.GroupModelKey
+		return meta.ChatKey
 	}
 	return ""
 }
 
-func (e *Engine) groupModelBinding(sessionKey string) (GroupModelBinding, bool) {
+func (e *Engine) chatModelBinding(sessionKey string) (ChatModelBinding, bool) {
 	if e.projectState == nil {
-		return GroupModelBinding{}, false
+		return ChatModelBinding{}, false
 	}
-	key := e.groupModelKey(sessionKey)
+	key := e.chatKey(sessionKey)
 	if key == "" {
-		return GroupModelBinding{}, false
+		return ChatModelBinding{}, false
 	}
-	return e.projectState.GroupModelBinding(key)
+	return e.projectState.ChatModelBinding(key)
 }
 
-func groupModelProvider(agent Agent) string {
+func modelProvider(agent Agent) string {
 	provider := ""
 	if ps, ok := agent.(ProviderSwitcher); ok {
 		if active := ps.GetActiveProvider(); active != nil {
@@ -68,32 +67,32 @@ func groupModelProvider(agent Agent) string {
 	return agent.Name() + ":" + provider
 }
 
-func supportsGroupModel(agent Agent) bool {
+func supportsChatModel(agent Agent) bool {
 	supporter, ok := agent.(PerTurnModelSupporter)
 	return ok && supporter.SupportsPerTurnModel()
 }
 
-func (e *Engine) groupDefaultModel(agent Agent, sessionKey string, backend AgentSession) (string, error) {
-	binding, ok := e.groupModelBinding(sessionKey)
+func (e *Engine) chatDefaultModel(agent Agent, sessionKey string, backend AgentSession) (string, error) {
+	binding, ok := e.chatModelBinding(sessionKey)
 	if !ok {
 		return "", nil
 	}
-	if !supportsGroupModel(agent) {
-		return "", e.groupModelFailure(MsgModelGroupUnsupported)
+	if !supportsChatModel(agent) {
+		return "", e.chatModelFailure(MsgModelChatUnsupported)
 	}
-	if binding.Provider != groupModelProvider(agent) {
-		return "", e.groupModelFailure(MsgModelGroupProviderChanged)
+	if binding.Provider != modelProvider(agent) {
+		return "", e.chatModelFailure(MsgModelChatProviderChanged)
 	}
 	if backend != nil {
 		if _, ok := backend.(TurnOptionsSession); !ok {
-			return "", e.groupModelFailure(MsgModelGroupUnsupported)
+			return "", e.chatModelFailure(MsgModelChatUnsupported)
 		}
 		if actual, ok := backend.(ModelProviderSession); ok {
 			if binding.Provider != agent.Name()+":"+actual.ModelProviderName() {
-				return "", e.groupModelFailure(MsgModelGroupSessionProviderChanged)
+				return "", e.chatModelFailure(MsgModelChatSessionProviderChanged)
 			}
 		} else if _, canSwitch := agent.(ProviderSwitcher); canSwitch {
-			return "", e.groupModelFailure(MsgModelGroupUnsupported)
+			return "", e.chatModelFailure(MsgModelChatUnsupported)
 		}
 	}
 	return binding.Model, nil
@@ -109,7 +108,7 @@ func (e *Engine) prepareSessionTurnOverrides(agent Agent, sessions *SessionManag
 	}
 	if strings.TrimSpace(model) == "" && profileModel == "" {
 		var err error
-		model, err = e.groupDefaultModel(agent, sessionKey, backend)
+		model, err = e.chatDefaultModel(agent, sessionKey, backend)
 		if err != nil {
 			return agentTurnOverrides{}, err
 		}
@@ -140,27 +139,27 @@ func (e *Engine) prepareInteractiveTurnOverrides(state *interactiveState, agent 
 	return overrides, err
 }
 
-func (e *Engine) setGroupModel(agent Agent, sessionKey, input string) (string, error) {
-	key := e.groupModelKey(sessionKey)
+func (e *Engine) setChatModel(agent Agent, sessionKey, input string) (string, error) {
+	key := e.chatKey(sessionKey)
 	if key == "" {
-		return "", fmt.Errorf("%s", e.i18n.T(MsgModelGroupOnly))
+		return "", fmt.Errorf("%s", e.i18n.T(MsgModelChatOnly))
 	}
 	if e.projectState == nil {
-		return "", fmt.Errorf("%s", e.i18n.T(MsgModelGroupStorageUnavailable))
+		return "", fmt.Errorf("%s", e.i18n.T(MsgModelChatStorageUnavailable))
 	}
 	if strings.EqualFold(input, "reset") {
-		return "", e.projectState.SaveGroupModelBinding(key, GroupModelBinding{})
+		return "", e.projectState.SaveChatModelBinding(key, ChatModelBinding{})
 	}
 	switcher, ok := agent.(ModelSwitcher)
-	if !ok || !supportsGroupModel(agent) {
-		return "", fmt.Errorf("%s", e.i18n.T(MsgModelGroupUnsupported))
+	if !ok || !supportsChatModel(agent) {
+		return "", fmt.Errorf("%s", e.i18n.T(MsgModelChatUnsupported))
 	}
 	ctx, cancel := context.WithTimeout(e.ctx, 10*time.Second)
 	defer cancel()
-	provider := groupModelProvider(agent)
-	models := groupSelectableModels(ctx, agent, switcher)
-	if provider != groupModelProvider(agent) {
-		return "", fmt.Errorf("%s", e.i18n.T(MsgModelGroupProviderChanged))
+	provider := modelProvider(agent)
+	models := selectableModels(ctx, agent, switcher)
+	if provider != modelProvider(agent) {
+		return "", fmt.Errorf("%s", e.i18n.T(MsgModelChatProviderChanged))
 	}
 	target := resolveModelSwitchTarget(input, models)
 	found := false
@@ -171,9 +170,9 @@ func (e *Engine) setGroupModel(agent Agent, sessionKey, input string) (string, e
 		}
 	}
 	if !found {
-		return "", fmt.Errorf("%s", e.i18n.Tf(MsgModelGroupUnknown, input))
+		return "", fmt.Errorf("%s", e.i18n.Tf(MsgModelChatUnknown, input))
 	}
-	if err := e.projectState.SaveGroupModelBinding(key, GroupModelBinding{Model: target, Provider: provider}); err != nil {
+	if err := e.projectState.SaveChatModelBinding(key, ChatModelBinding{Model: target, Provider: provider}); err != nil {
 		return "", err
 	}
 	return target, nil
@@ -181,7 +180,7 @@ func (e *Engine) setGroupModel(agent Agent, sessionKey, input string) (string, e
 
 // AvailableModels can be a native catalog snapshot. Include explicit provider
 // models as well, so a local catalog cannot hide configured custom models.
-func groupSelectableModels(ctx context.Context, agent Agent, switcher ModelSwitcher) []ModelOption {
+func selectableModels(ctx context.Context, agent Agent, switcher ModelSwitcher) []ModelOption {
 	var models []ModelOption
 	seen := make(map[string]bool)
 	appendModels := func(entries []ModelOption) {
@@ -202,65 +201,62 @@ func groupSelectableModels(ctx context.Context, agent Agent, switcher ModelSwitc
 	return models
 }
 
-func (e *Engine) cmdGroupModel(p Platform, msg *Message, agent Agent, args []string) {
-	if e.groupModelKey(msg.SessionKey) == "" {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgModelGroupOnly))
-		return
-	}
+func (e *Engine) cmdChatModel(p Platform, msg *Message, agent Agent, args []string) {
 	if len(args) == 0 {
-		e.replyWithCard(p, msg.ReplyCtx, e.renderModelCardForAgent(msg.SessionKey, agent))
+		e.replyModelCard(p, msg.ReplyCtx, e.renderModelCardForAgent(msg.SessionKey, agent))
 		return
 	}
 	if len(args) != 1 {
-		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgModelGroupUsage))
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgModelChatUsage))
 		return
 	}
-	model, err := e.setGroupModel(agent, msg.SessionKey, args[0])
+	model, err := e.setChatModel(agent, msg.SessionKey, args[0])
 	if err != nil {
-		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgModelChangeFailed, err))
+		e.replyModelCard(p, msg.ReplyCtx, modelResultCard(e.renderModelCardForAgent(msg.SessionKey, agent), e.i18n.Tf(MsgModelChangeFailed, err)))
 		return
 	}
-	message := e.i18n.T(MsgModelGroupReset)
+	message := e.i18n.T(MsgModelChatReset)
 	if model != "" {
-		message = e.i18n.Tf(MsgModelGroupChanged, model)
+		message = e.i18n.Tf(MsgModelChatChanged, model)
 	}
 	card := e.renderModelCardForAgent(msg.SessionKey, agent)
-	card.Elements = append([]CardElement{CardMarkdown{Content: message}}, card.Elements...)
-	e.replyWithCard(p, msg.ReplyCtx, card)
+	e.replyModelCard(p, msg.ReplyCtx, modelResultCard(card, message))
 }
 
-// groupModelCard adds an explicit chat section while leaving the legacy
-// default selection available and clearly labelled on the same card.
-func (e *Engine) groupModelCard(cb *CardBuilder, sessionKey string, agent Agent, models []ModelOption) {
-	if e.groupModelKey(sessionKey) == "" {
+// chatModelCard renders the only model selection on the current-chat card.
+func (e *Engine) chatModelCard(cb *CardBuilder, sessionKey string, agent Agent, models []ModelOption) {
+	if e.chatKey(sessionKey) == "" {
 		return
 	}
-	if binding, ok := e.groupModelBinding(sessionKey); ok {
-		cb.Markdown(e.i18n.Tf(MsgModelGroupCurrent, binding.Model))
-		if binding.Provider != groupModelProvider(agent) {
-			cb.Markdown(e.i18n.T(MsgModelGroupProviderChanged))
+	if binding, ok := e.chatModelBinding(sessionKey); ok {
+		cb.Markdown(e.i18n.Tf(MsgModelChatCurrent, binding.Model))
+		if binding.Provider != modelProvider(agent) {
+			cb.Markdown(e.i18n.T(MsgModelChatProviderChanged))
 		}
 	} else {
-		cb.Markdown(e.i18n.T(MsgModelGroupDefault))
+		current := agent.(ModelSwitcher).GetModel()
+		if current == "" {
+			current = e.i18n.T(MsgModelDefault)
+		}
+		cb.Markdown(e.i18n.Tf(MsgModelChatDefault, current))
 	}
-	if supportsGroupModel(agent) {
-		choices := []CardSelectOption{{Text: e.i18n.T(MsgModelGroupResetButton), Value: "cmd:/model chat reset"}}
+	if supportsChatModel(agent) {
+		choices := []CardSelectOption{{Text: e.i18n.T(MsgModelChatResetButton), Value: "cmd:/model reset"}}
 		selected := choices[0].Value
-		binding, bound := e.groupModelBinding(sessionKey)
+		binding, bound := e.chatModelBinding(sessionKey)
 		if bound {
 			selected = "" // a removed model must never look like inheritance
 		}
 		for _, model := range models {
-			value := "cmd:/model chat " + model.Name
+			value := "cmd:/model " + model.Name
 			choices = append(choices, CardSelectOption{Text: model.Name, Value: value})
 			if binding.Model == model.Name {
 				selected = value
 			}
 		}
-		cb.Select(e.i18n.T(MsgModelGroupSelect), choices, selected)
+		cb.Select(e.i18n.T(MsgModelChatSelect), choices, selected)
 	} else {
-		cb.Markdown(e.i18n.T(MsgModelGroupUnsupported))
-		cb.Buttons(CardButton{Text: e.i18n.T(MsgModelGroupResetButton), Value: "cmd:/model chat reset"})
+		cb.Markdown(e.i18n.T(MsgModelChatUnsupported))
+		cb.Buttons(CardButton{Text: e.i18n.T(MsgModelChatResetButton), Value: "cmd:/model reset"})
 	}
-	cb.Divider()
 }

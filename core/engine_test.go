@@ -6999,18 +6999,19 @@ func TestCmdProvider_UsesLegacyTextOnPlatformWithoutCardSupport(t *testing.T) {
 	}
 }
 
-func TestCmdModel_UsesInlineButtonsOnButtonOnlyPlatform(t *testing.T) {
+func TestCmdModelDefault_UsesStableInlineButtonsOnButtonOnlyPlatform(t *testing.T) {
 	p := &stubInlineButtonPlatform{stubPlatformEngine: stubPlatformEngine{n: "inline-only"}}
 	agent := &stubModelModeAgent{}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	e.SetAdminFrom("owner")
 
-	e.cmdModel(p, &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}, nil)
+	e.cmdModel(p, &Message{SessionKey: "test:user1", ReplyCtx: "ctx", UserID: "owner"}, []string{"default"})
 
 	if len(p.buttonRows) == 0 {
 		t.Fatal("expected /model to send inline buttons on button-only platform")
 	}
-	if got := p.buttonRows[0][0].Data; got != "cmd:/model switch 1" {
-		t.Fatalf("first /model button = %q, want %q", got, "cmd:/model switch 1")
+	if got := p.buttonRows[0][0].Data; got != "cmd:/model default gpt-4.1" {
+		t.Fatalf("first /model button = %q, want %q", got, "cmd:/model default gpt-4.1")
 	}
 }
 
@@ -7028,18 +7029,19 @@ func TestCmdModel_UpdatesActiveProviderModel(t *testing.T) {
 		active: "openai",
 	}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	e.SetAdminFrom("owner")
 	var savedProvider, savedModel string
 	e.SetProviderModelSaveFunc(func(providerName, model string) error {
 		savedProvider = providerName
 		savedModel = model
 		return nil
 	})
-	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx", UserID: "owner"}
 
 	s := e.sessions.GetOrCreateActive(msg.SessionKey)
 	s.SetAgentSessionID("existing-session", "test")
 
-	e.cmdModel(p, msg, []string{"switch", "gpt"})
+	e.cmdModel(p, msg, []string{"default", "gpt"})
 
 	if agent.model != "gpt-4.1" {
 		t.Fatalf("agent model = %q, want gpt-4.1", agent.model)
@@ -7062,15 +7064,16 @@ func TestCmdModel_DirectNameDoesNotNeedModelListMatch(t *testing.T) {
 	p := &stubPlatformEngine{n: "plain"}
 	agent := &stubStrictModelAgent{}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	e.SetAdminFrom("owner")
+	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx", UserID: "owner"}
 
-	e.cmdModel(p, msg, []string{"switch", "custom/provider-model"})
+	e.cmdModel(p, msg, []string{"default", "custom/provider-model"})
 
 	if agent.model != "custom/provider-model" {
 		t.Fatalf("agent model = %q, want custom/provider-model", agent.model)
 	}
-	if agent.calls != 0 {
-		t.Fatalf("AvailableModels calls = %d, want 0 for direct name switch", agent.calls)
+	if visible := strings.Join(p.getSent(), "\n"); !strings.Contains(visible, "custom/provider-model") {
+		t.Fatalf("direct model selection not visible: %s", visible)
 	}
 }
 
@@ -7078,15 +7081,16 @@ func TestCmdModel_AliasWithPunctuationStillResolves(t *testing.T) {
 	p := &stubPlatformEngine{n: "plain"}
 	agent := &stubStrictModelAgent{models: []ModelOption{{Name: "openai/gpt-4.1", Alias: "gpt-4.1"}}}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	e.SetAdminFrom("owner")
+	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx", UserID: "owner"}
 
-	e.cmdModel(p, msg, []string{"switch", "gpt-4.1"})
+	e.cmdModel(p, msg, []string{"default", "gpt-4.1"})
 
 	if agent.model != "openai/gpt-4.1" {
 		t.Fatalf("agent model = %q, want openai/gpt-4.1", agent.model)
 	}
-	if agent.calls != 1 {
-		t.Fatalf("AvailableModels calls = %d, want 1 for punctuated alias lookup", agent.calls)
+	if agent.calls == 0 {
+		t.Fatal("punctuated alias was not resolved against available models")
 	}
 }
 
@@ -7094,25 +7098,30 @@ func TestCmdModel_AliasStillResolvesOnColdStart(t *testing.T) {
 	p := &stubPlatformEngine{n: "plain"}
 	agent := &stubStrictModelAgent{models: []ModelOption{{Name: "gpt-4.1", Alias: "gpt"}}}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	e.SetAdminFrom("owner")
+	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx", UserID: "owner"}
 
-	e.cmdModel(p, msg, []string{"switch", "gpt"})
+	e.cmdModel(p, msg, []string{"default", "gpt"})
 
 	if agent.model != "gpt-4.1" {
 		t.Fatalf("agent model = %q, want gpt-4.1", agent.model)
 	}
 }
 
-func TestCmdModel_LegacySyntaxStillWorks(t *testing.T) {
+func TestCmdModel_UnverifiedChatDoesNotChangeSharedDefault(t *testing.T) {
 	p := &stubPlatformEngine{n: "plain"}
 	agent := &stubModelModeAgent{}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	e.SetAdminFrom("owner")
+	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx", UserID: "owner"}
 
 	e.cmdModel(p, msg, []string{"gpt"})
 
-	if agent.model != "gpt-4.1" {
-		t.Fatalf("agent model = %q, want gpt-4.1", agent.model)
+	if agent.model != "" {
+		t.Fatalf("unverified chat changed shared model to %q", agent.model)
+	}
+	if len(p.getSent()) == 0 {
+		t.Fatal("missing current-chat routing guidance")
 	}
 }
 
@@ -7129,6 +7138,7 @@ func TestCmdModel_SavesModelWhenNoActiveProvider(t *testing.T) {
 		},
 	}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	e.SetAdminFrom("owner")
 
 	var savedModel string
 	e.SetModelSaveFunc(func(model string) error {
@@ -7136,8 +7146,8 @@ func TestCmdModel_SavesModelWhenNoActiveProvider(t *testing.T) {
 		return nil
 	})
 
-	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
-	e.cmdModel(p, msg, []string{"switch", "gpt"})
+	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx", UserID: "owner"}
+	e.cmdModel(p, msg, []string{"default", "gpt"})
 
 	if agent.model != "gpt-4.1" {
 		t.Fatalf("agent model = %q, want gpt-4.1", agent.model)
@@ -7160,16 +7170,17 @@ func TestCmdModel_DoesNotClaimSuccessWhenModelSaveFails(t *testing.T) {
 		},
 	}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	e.SetAdminFrom("owner")
 	e.SetModelSaveFunc(func(model string) error {
 		return errors.New("disk full")
 	})
 
-	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx", UserID: "owner"}
 	s := e.sessions.GetOrCreateActive(msg.SessionKey)
 	s.SetAgentSessionID("existing-session", "test")
 	s.AddHistory("user", "keep me")
 
-	e.cmdModel(p, msg, []string{"switch", "gpt"})
+	e.cmdModel(p, msg, []string{"default", "gpt"})
 
 	if agent.model != "gpt-4.1-mini" {
 		t.Fatalf("agent model = %q, want unchanged gpt-4.1-mini", agent.model)
@@ -7189,10 +7200,11 @@ func TestCmdModel_DoesNotClaimSuccessWhenModelSaveFails(t *testing.T) {
 	}
 }
 
-func TestCmdModel_MultiWorkspaceUsesWorkspaceAgentAndSessions(t *testing.T) {
+func TestCmdModelDefault_MultiWorkspaceUpdatesGlobalAndFollowingAgent(t *testing.T) {
 	p := &stubPlatformEngine{n: "plain"}
 	globalAgent := &stubModelModeAgent{model: "gpt-4.1-mini"}
 	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
+	e.SetAdminFrom("owner")
 
 	baseDir := t.TempDir()
 	bindingPath := filepath.Join(t.TempDir(), "bindings.json")
@@ -7207,20 +7219,23 @@ func TestCmdModel_MultiWorkspaceUsesWorkspaceAgentAndSessions(t *testing.T) {
 	ws.agent = wsAgent
 	ws.sessions = NewSessionManager("")
 
-	msg := &Message{SessionKey: "feishu:" + channelID + ":u1", ReplyCtx: "ctx"}
+	msg := &Message{SessionKey: "feishu:" + channelID + ":u1", ReplyCtx: "ctx", UserID: "owner"}
 
 	globalSession := e.sessions.GetOrCreateActive(msg.SessionKey)
 	globalSession.SetAgentSessionID("global-session", "test")
 	wsSession := ws.sessions.GetOrCreateActive(msg.SessionKey)
 	wsSession.SetAgentSessionID("workspace-session", "test")
 
-	e.cmdModel(p, msg, []string{"switch", "gpt"})
+	e.cmdModel(p, msg, []string{"default", "gpt"})
+	if _, _, err := e.getOrCreateWorkspaceAgent(wsDir); err != nil {
+		t.Fatal(err)
+	}
 
 	if wsAgent.model != "gpt-4.1" {
 		t.Fatalf("workspace agent model = %q, want gpt-4.1", wsAgent.model)
 	}
-	if globalAgent.model != "gpt-4.1-mini" {
-		t.Fatalf("global agent model = %q, want unchanged", globalAgent.model)
+	if globalAgent.model != "gpt-4.1" {
+		t.Fatalf("global agent model = %q, want gpt-4.1", globalAgent.model)
 	}
 	if got := ws.sessions.GetOrCreateActive(msg.SessionKey).AgentSessionID; got != "workspace-session" {
 		t.Fatalf("workspace session id = %q, want preserved", got)
@@ -7230,10 +7245,11 @@ func TestCmdModel_MultiWorkspaceUsesWorkspaceAgentAndSessions(t *testing.T) {
 	}
 }
 
-func TestCmdModel_MultiWorkspaceSwitchDoesNotMutateProviderModel(t *testing.T) {
+func TestCmdModelDefault_WorkspaceProviderDoesNotCreateThirdModelScope(t *testing.T) {
 	p := &stubPlatformEngine{n: "plain"}
-	globalAgent := &stubModelModeAgent{model: "gpt-4.1-mini"}
+	globalAgent := &stubModelModeAgent{model: "gpt-4.1-mini", providers: []ProviderConfig{{Name: "openai", Model: "gpt-4.1-mini"}}, active: "openai"}
 	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
+	e.SetAdminFrom("owner")
 
 	baseDir := t.TempDir()
 	bindingPath := filepath.Join(t.TempDir(), "bindings.json")
@@ -7256,82 +7272,61 @@ func TestCmdModel_MultiWorkspaceSwitchDoesNotMutateProviderModel(t *testing.T) {
 	ws.agent = wsAgent
 	ws.sessions = NewSessionManager("")
 
-	msg := &Message{SessionKey: "feishu:" + channelID + ":u1", ReplyCtx: "ctx"}
+	msg := &Message{SessionKey: "feishu:" + channelID + ":u1", ReplyCtx: "ctx", UserID: "owner"}
 
-	e.cmdModel(p, msg, []string{"switch", "gpt"})
-
-	if wsAgent.model != "gpt-4.1" {
-		t.Fatalf("workspace agent model = %q, want gpt-4.1", wsAgent.model)
+	e.cmdModel(p, msg, []string{"default", "gpt"})
+	if _, _, err := e.getOrCreateWorkspaceAgent(wsDir); err != nil {
+		t.Fatal(err)
 	}
-	if got := wsAgent.GetActiveProvider(); got == nil || got.Model != "gpt-4.1-mini" {
-		t.Fatalf("workspace active provider = %#v, want unchanged model gpt-4.1-mini", got)
+
+	if globalAgent.model != "gpt-4.1" {
+		t.Fatalf("global agent model = %q, want gpt-4.1", globalAgent.model)
+	}
+	if wsAgent.model != "gpt-4.1" {
+		t.Fatalf("workspace model = %q, want project default gpt-4.1", wsAgent.model)
+	}
+	if got := wsAgent.GetActiveProvider(); got == nil || got.Name != "openai" || got.Model != "gpt-4.1" {
+		t.Fatalf("workspace active provider = %#v, want same provider with project model gpt-4.1", got)
 	}
 }
 
-func TestCmdModel_MultiWorkspacePersistsWorkspaceModelForRecreatedAgent(t *testing.T) {
-	agentName := "test-workspace-model-override"
+func TestCmdModelDefault_NewAndCachedWorkspacesInheritGlobalModel(t *testing.T) {
+	const agentName = "test-workspace-model-inheritance"
 	RegisterAgent(agentName, func(opts map[string]any) (Agent, error) {
 		agent := &namedStubModelModeAgent{name: agentName}
-		if model, ok := opts["model"].(string); ok {
-			agent.model = model
-		}
-		if mode, ok := opts["mode"].(string); ok {
-			agent.mode = mode
-		}
+		agent.model, _ = opts["model"].(string)
 		return agent, nil
 	})
-
 	p := &stubPlatformEngine{n: "plain"}
-	globalAgent := &namedStubModelModeAgent{
-		name: agentName,
-		stubModelModeAgent: stubModelModeAgent{
-			model: "global-old",
-			mode:  "default",
-		},
-	}
-	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
-	e.SetProjectStateStore(NewProjectStateStore(filepath.Join(t.TempDir(), "projects", "test.state.json")))
+	global := &namedStubModelModeAgent{name: agentName, stubModelModeAgent: stubModelModeAgent{model: "gpt-4.1-mini"}}
+	e := NewEngine("test", global, []Platform{p}, "", LangEnglish)
+	e.SetAdminFrom("owner")
 	e.SetMultiWorkspace(t.TempDir(), filepath.Join(t.TempDir(), "bindings.json"))
-
-	var savedModel string
-	e.SetModelSaveFunc(func(model string) error {
-		savedModel = model
-		return nil
-	})
-
-	wsDir := normalizeWorkspacePath(t.TempDir())
-	channelID := "C-model-override"
-	e.workspaceBindings.Bind("project:test", channelID, "chan", wsDir)
-	msg := &Message{SessionKey: "feishu:" + channelID + ":u1", ReplyCtx: "ctx"}
-
-	e.cmdModel(p, msg, []string{"switch", "gpt"})
-
-	if savedModel != "" {
-		t.Fatalf("global model save called with %q, want no config save for workspace switch", savedModel)
-	}
-	if globalAgent.model != "global-old" {
-		t.Fatalf("global agent model = %q, want unchanged", globalAgent.model)
-	}
-	if got := e.projectState.WorkspaceModelOverride(wsDir); got != "gpt-4.1" {
-		t.Fatalf("WorkspaceModelOverride(%q) = %q, want gpt-4.1", wsDir, got)
-	}
-
-	ws := e.workspacePool.GetOrCreate(wsDir)
-	ws.mu.Lock()
-	ws.agent = nil
-	ws.sessions = nil
-	ws.mu.Unlock()
-
-	recreatedRaw, _, err := e.getOrCreateWorkspaceAgent(wsDir)
+	var saved string
+	e.SetModelSaveFunc(func(model string) error { saved = model; return nil })
+	cachedDir, newDir := normalizeWorkspacePath(t.TempDir()), normalizeWorkspacePath(t.TempDir())
+	cached, _, err := e.getOrCreateWorkspaceAgent(cachedDir)
 	if err != nil {
-		t.Fatalf("getOrCreateWorkspaceAgent returned error: %v", err)
+		t.Fatal(err)
 	}
-	recreated, ok := recreatedRaw.(*namedStubModelModeAgent)
-	if !ok {
-		t.Fatalf("workspace agent type = %T, want *namedStubModelModeAgent", recreatedRaw)
+	if cached.(ModelSwitcher).GetModel() != "gpt-4.1-mini" {
+		t.Fatal("workspace did not inherit initial global model")
 	}
-	if recreated.model != "gpt-4.1" {
-		t.Fatalf("recreated workspace model = %q, want persisted workspace model gpt-4.1", recreated.model)
+	e.cmdModel(p, &Message{SessionKey: "test:owner", UserID: "owner", ReplyCtx: "ctx"}, []string{"default", "gpt"})
+	for _, dir := range []string{cachedDir, newDir} {
+		agent, _, err := e.getOrCreateWorkspaceAgent(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := agent.(ModelSwitcher).GetModel(); got != "gpt-4.1" {
+			t.Fatalf("workspace %s model=%q, want new project default", dir, got)
+		}
+		if dir == cachedDir && agent != cached {
+			t.Fatal("global default update recreated the cached workspace agent")
+		}
+	}
+	if global.model != "gpt-4.1" || saved != "gpt-4.1" {
+		t.Fatalf("default not applied and persisted globally: model=%s saved=%s", global.model, saved)
 	}
 }
 
@@ -7348,13 +7343,14 @@ func TestCmdModel_KeepHistoryPreservesSessionID(t *testing.T) {
 		},
 	}
 	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	e.SetAdminFrom("owner")
 
-	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx"}
+	msg := &Message{SessionKey: "test:user1", ReplyCtx: "ctx", UserID: "owner"}
 	s := e.sessions.GetOrCreateActive(msg.SessionKey)
 	s.SetAgentSessionID("existing-session-id", "test")
 	s.AddHistory("user", "hello")
 
-	e.cmdModel(p, msg, []string{"switch", "gpt"})
+	e.cmdModel(p, msg, []string{"default", "gpt"})
 
 	if got := s.GetAgentSessionID(); got != "existing-session-id" {
 		t.Fatalf("session id = %q, want existing-session-id (should be preserved)", got)
@@ -11966,128 +11962,96 @@ func TestDrainOrphanedQueue_UsesWorkspaceSessionManager(t *testing.T) {
 
 // ── executeCardAction interactiveKey tests ───────────────────
 
-func TestHandleCardNav_ModelSwitchesAndRefreshesCard(t *testing.T) {
-	p := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
-	agent := &stubModelModeAgent{model: "old"}
-	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-
-	sessionKey := "feishu:channel1:user1"
-	card := e.handleCardNav("act:/model new-model", sessionKey)
-	if card == nil {
-		t.Fatal("expected immediate result card")
-	}
-	if text := card.RenderText(); !strings.Contains(text, "Model switched to `new-model`.") {
-		t.Fatalf("result card = %q", text)
-	}
-	if agent.model != "new-model" {
-		t.Fatalf("model = %q, want new-model", agent.model)
-	}
-	if refreshed := p.getRefreshedCards(); len(refreshed) != 0 {
-		t.Fatalf("unexpected async refreshed cards: %d", len(refreshed))
-	}
-}
-
-func TestHandleCardNav_ModelUsesWorkspaceContext(t *testing.T) {
-	p := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
-	globalAgent := &stubModelModeAgent{model: "global-old"}
-	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
-
-	baseDir := t.TempDir()
-	bindingPath := filepath.Join(t.TempDir(), "bindings.json")
-	e.SetMultiWorkspace(baseDir, bindingPath)
-
-	wsDir := normalizeWorkspacePath(t.TempDir())
-	channelID := "channel1"
-	sessionKey := "feishu:" + channelID + ":user1"
-	e.workspaceBindings.Bind("project:test", channelID, "chan", wsDir)
-
-	ws := e.workspacePool.GetOrCreate(wsDir)
-	wsAgent := &stubModelModeAgent{model: "workspace-old"}
-	ws.agent = wsAgent
-	ws.sessions = NewSessionManager("")
-
-	interactiveKey := e.interactiveKeyForSessionKey(sessionKey)
-	e.interactiveMu.Lock()
-	e.interactiveStates[interactiveKey] = &interactiveState{}
-	e.interactiveMu.Unlock()
-
-	globalSession := e.sessions.GetOrCreateActive(sessionKey)
-	globalSession.SetAgentSessionID("global-session", "test")
-	wsSession := ws.sessions.GetOrCreateActive(sessionKey)
-	wsSession.SetAgentSessionID("workspace-session", "test")
-
-	card := e.handleCardNav("act:/model switch 1", sessionKey)
-	if card == nil {
-		t.Fatal("expected immediate result card")
-	}
-	if text := card.RenderText(); !strings.Contains(text, "gpt-4.1") {
-		t.Fatalf("result card = %q, want switched workspace model", text)
-	}
-
-	if wsAgent.model != "gpt-4.1" {
-		t.Fatalf("workspace agent model = %q, want gpt-4.1", wsAgent.model)
-	}
-	if globalAgent.model != "global-old" {
-		t.Fatalf("global agent model = %q, want unchanged", globalAgent.model)
-	}
-	if got := ws.sessions.GetOrCreateActive(sessionKey).AgentSessionID; got != "workspace-session" {
-		t.Fatalf("workspace session id = %q, want preserved", got)
-	}
-	if got := e.sessions.GetOrCreateActive(sessionKey).AgentSessionID; got != "global-session" {
-		t.Fatalf("global session id = %q, want untouched", got)
-	}
-	if refreshed := p.getRefreshedCards(); len(refreshed) != 0 {
-		t.Fatalf("unexpected async refreshed cards: %d", len(refreshed))
+func TestHandleCardNav_ModelActionsCannotBypassCommandAuthorization(t *testing.T) {
+	for _, action := range []string{
+		"act:/model group-B", "act:/model 3", "act:/model reset",
+		"act:/model switch 3", "act:/model switch group-B",
+		"act:/model chat group-B", "act:/model group group-B",
+		"act:/model default project-C",
+	} {
+		t.Run(action, func(t *testing.T) {
+			e, p, a := newChatModelEngine(t, "")
+			e.SetAdminFrom("owner")
+			e.ReceiveMessage(p, chatModelMessage("A", "topic", "pin", "/model group-B"))
+			var saves int
+			e.SetModelSaveFunc(func(string) error { saves++; return nil })
+			sessionKey := "test:A:root:topic"
+			session := e.sessions.GetOrCreateActive(sessionKey)
+			session.SetAgentSessionID("keep-backend", "test")
+			session.AddHistory("user", "keep history")
+			card := e.handleCardNav(action, sessionKey)
+			if card != nil {
+				t.Fatalf("raw model action must be rejected without a response card: %+v", card)
+			}
+			binding, ok := e.chatModelBinding(sessionKey)
+			if !ok || binding.Model != "group-B" || a.GetModel() != "project-A" || saves != 0 {
+				t.Fatalf("raw callback mutated models: binding=%+v default=%s saves=%d", binding, a.GetModel(), saves)
+			}
+			if session.GetAgentSessionID() != "keep-backend" || len(session.GetHistory(0)) != 1 {
+				t.Fatal("stale callback reset conversation history")
+			}
+		})
 	}
 }
 
-func TestHandleCardNav_ModelSwitchFailureRefreshesCard(t *testing.T) {
-	p := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
-	agent := &stubModelModeAgent{model: "old"}
-	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-	e.modelSaveFunc = func(string) error { return errors.New("save failed") }
-
-	sessionKey := "feishu:channel1:user1"
-	card := e.handleCardNav("act:/model broken-model", sessionKey)
-	if card == nil {
-		t.Fatal("expected immediate failure card")
+func TestExecuteCardAction_ModelActionsCannotMutate(t *testing.T) {
+	e, p, a := newChatModelEngine(t, "")
+	e.ReceiveMessage(p, chatModelMessage("A", "", "pin", "/model group-B"))
+	var saves int
+	e.SetModelSaveFunc(func(string) error { saves++; return nil })
+	for _, args := range []string{"project-C", "switch 2", "default project-C", "reset"} {
+		e.executeCardAction("/model", args, "test:A")
 	}
-	if text := card.RenderText(); !strings.Contains(text, "Failed to switch model: save model: save failed") {
-		t.Fatalf("failure card = %q", text)
-	}
-	if refreshed := p.getRefreshedCards(); len(refreshed) != 0 {
-		t.Fatalf("unexpected async refreshed cards: %d", len(refreshed))
+	if binding, ok := e.chatModelBinding("test:A"); !ok || binding.Model != "group-B" || a.GetModel() != "project-A" || saves != 0 {
+		t.Fatalf("raw action handler bypassed command dispatcher: binding=%+v default=%s saves=%d", binding, a.GetModel(), saves)
 	}
 }
 
-func TestHandleCardNav_ModelResultBackReturnsModelCard(t *testing.T) {
+func TestHandleCardNav_ModelDefaultNavigationIsReadOnly(t *testing.T) {
+	e, p, a := newChatModelEngine(t, "")
+	e.ReceiveMessage(p, chatModelMessage("A", "", "pin", "/model group-B"))
+	card := e.handleCardNav("nav:/model default", "test:A")
+	if card == nil {
+		t.Fatal("expected global-default model card")
+	}
+	selectors := 0
+	for _, element := range card.Elements {
+		if box, ok := element.(CardSelect); ok {
+			selectors++
+			if box.InitValue != "cmd:/model default project-A" {
+				t.Fatalf("default card selected %q", box.InitValue)
+			}
+			for _, option := range box.Options {
+				if !strings.HasPrefix(option.Value, "cmd:/model default ") {
+					t.Fatalf("default card bypassed command authorization: %+v", option)
+				}
+			}
+		}
+	}
+	if selectors != 1 || a.GetModel() != "project-A" {
+		t.Fatalf("read-only default card: selectors=%d default=%q", selectors, a.GetModel())
+	}
+	var back string
+	for _, row := range card.CollectButtons() {
+		for _, button := range row {
+			if button.Data == "nav:/model" || button.Data == "cmd:/model" {
+				back = button.Data
+			}
+		}
+	}
+	if back == "" {
+		t.Fatal("default card has no return-to-chat button")
+	}
+	// The navigation back renders the current chat's pinned model, not the default.
+	current := e.handleCardNav("nav:/model", "test:A")
+	if current == nil || !strings.Contains(current.RenderText(), "group-B") {
+		t.Fatalf("back navigation lost current chat selection: %+v", current)
+	}
+}
+
+func TestHandleCardNav_ModelCardInWorkspaceFollowsGlobalDefault(t *testing.T) {
 	p := &stubPlatformEngine{n: "plain"}
-	agent := &stubModelModeAgent{model: "gpt-5.4"}
-	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
-
-	sessionKey := "feishu:channel1:user1"
-	result := e.renderModelSwitchResultCard("gpt-5.4", nil)
-	buttons := result.CollectButtons()
-	if len(buttons) != 1 || len(buttons[0]) != 1 {
-		t.Fatalf("result buttons = %#v, want single back button", buttons)
-	}
-	if buttons[0][0].Data != "nav:/model" {
-		t.Fatalf("back button value = %q, want nav:/model", buttons[0][0].Data)
-	}
-
-	card := e.handleCardNav(buttons[0][0].Data, sessionKey)
-	if card == nil {
-		t.Fatal("expected /model card")
-	}
-	text := card.RenderText()
-	if !strings.Contains(text, "Current model: gpt-5.4") {
-		t.Fatalf("model card text = %q", text)
-	}
-}
-
-func TestHandleCardNav_ModelCardUsesWorkspaceAgent(t *testing.T) {
-	p := &stubPlatformEngine{n: "plain"}
-	globalAgent := &stubModelModeAgent{model: "global-model"}
+	globalAgent := &chatModelTestAgent{cronModelAgent: cronModelAgent{model: "global-model"}}
 	e := NewEngine("test", globalAgent, []Platform{p}, "", LangEnglish)
 
 	baseDir := t.TempDir()
@@ -12100,19 +12064,22 @@ func TestHandleCardNav_ModelCardUsesWorkspaceAgent(t *testing.T) {
 	e.workspaceBindings.Bind("project:test", channelID, "chan", wsDir)
 
 	ws := e.workspacePool.GetOrCreate(wsDir)
-	ws.agent = &stubModelModeAgent{model: "workspace-model"}
+	ws.agent = &chatModelTestAgent{cronModelAgent: cronModelAgent{model: "workspace-model"}}
 	ws.sessions = NewSessionManager("")
 
+	if err := e.sessions.UpdateChatKey(sessionKey, "feishu:"+channelID); err != nil {
+		t.Fatal(err)
+	}
 	card := e.handleCardNav("nav:/model", sessionKey)
 	if card == nil {
 		t.Fatal("expected /model card")
 	}
 	text := card.RenderText()
-	if !strings.Contains(text, "workspace-model") {
-		t.Fatalf("model card text = %q, want workspace model", text)
+	if !strings.Contains(text, "global-model") {
+		t.Fatalf("model card text = %q, want inherited project default", text)
 	}
-	if strings.Contains(text, "global-model") {
-		t.Fatalf("model card text = %q, should not use global model", text)
+	if strings.Contains(text, "workspace-model") {
+		t.Fatalf("model card text = %q, should not expose an independent workspace model", text)
 	}
 }
 

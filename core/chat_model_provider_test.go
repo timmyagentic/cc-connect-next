@@ -9,25 +9,25 @@ import (
 	"testing"
 )
 
-type groupProviderAgent struct {
-	groupModelTestAgent
+type chatProviderAgent struct {
+	chatModelTestAgent
 	providerMu sync.Mutex
 	providers  []ProviderConfig
 	active     string
 	startGate  func()
 }
 
-func (a *groupProviderAgent) SetProviders(values []ProviderConfig) {
+func (a *chatProviderAgent) SetProviders(values []ProviderConfig) {
 	a.providerMu.Lock()
 	defer a.providerMu.Unlock()
 	a.providers = append([]ProviderConfig(nil), values...)
 }
-func (a *groupProviderAgent) ListProviders() []ProviderConfig {
+func (a *chatProviderAgent) ListProviders() []ProviderConfig {
 	a.providerMu.Lock()
 	defer a.providerMu.Unlock()
 	return append([]ProviderConfig(nil), a.providers...)
 }
-func (a *groupProviderAgent) SetActiveProvider(name string) bool {
+func (a *chatProviderAgent) SetActiveProvider(name string) bool {
 	a.providerMu.Lock()
 	defer a.providerMu.Unlock()
 	for _, p := range a.providers {
@@ -38,7 +38,7 @@ func (a *groupProviderAgent) SetActiveProvider(name string) bool {
 	}
 	return false
 }
-func (a *groupProviderAgent) GetActiveProvider() *ProviderConfig {
+func (a *chatProviderAgent) GetActiveProvider() *ProviderConfig {
 	a.providerMu.Lock()
 	defer a.providerMu.Unlock()
 	for _, p := range a.providers {
@@ -48,7 +48,7 @@ func (a *groupProviderAgent) GetActiveProvider() *ProviderConfig {
 	}
 	return nil
 }
-func (a *groupProviderAgent) StartSession(ctx context.Context, id string) (AgentSession, error) {
+func (a *chatProviderAgent) StartSession(ctx context.Context, id string) (AgentSession, error) {
 	provider := ""
 	if p := a.GetActiveProvider(); p != nil {
 		provider = p.Name
@@ -56,39 +56,39 @@ func (a *groupProviderAgent) StartSession(ctx context.Context, id string) (Agent
 	if a.startGate != nil {
 		a.startGate()
 	}
-	backend, err := a.groupModelTestAgent.StartSession(ctx, id)
+	backend, err := a.chatModelTestAgent.StartSession(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return &groupProviderSession{cronModelSession: backend.(*cronModelSession), provider: provider}, nil
+	return &chatProviderSession{cronModelSession: backend.(*cronModelSession), provider: provider}, nil
 }
 
-type groupProviderSession struct {
+type chatProviderSession struct {
 	*cronModelSession
 	provider string
 }
 
-func (s *groupProviderSession) ModelProviderName() string { return s.provider }
+func (s *chatProviderSession) ModelProviderName() string { return s.provider }
 
-func newGroupProviderAgent() *groupProviderAgent {
-	return &groupProviderAgent{groupModelTestAgent: groupModelTestAgent{cronModelAgent{model: "project-A"}}, providers: []ProviderConfig{
+func newChatProviderAgent() *chatProviderAgent {
+	return &chatProviderAgent{chatModelTestAgent: chatModelTestAgent{cronModelAgent{model: "project-A"}}, providers: []ProviderConfig{
 		{Name: "P", Models: []ModelOption{{Name: "custom-provider-model", Alias: "custom"}}, Model: "custom-default"},
 		{Name: "Q"},
 	}, active: "P"}
 }
 
-func TestGroupModel_ExistingBackendProviderCannotFollowMutableAgent(t *testing.T) {
-	e, p, _ := newGroupModelEngine(t, "")
-	a := newGroupProviderAgent()
+func TestChatModel_ExistingBackendProviderCannotFollowMutableAgent(t *testing.T) {
+	e, p, _ := newChatModelEngine(t, "")
+	a := newChatProviderAgent()
 	e.agent = a
-	e.ReceiveMessage(p, groupModelMessage("A", "one", "bind", "/model group group-B"))
-	groupModelChat(t, e, p, &a.groupModelTestAgent, groupModelMessage("A", "one", "before", "before"), "group-B")
+	e.ReceiveMessage(p, chatModelMessage("A", "one", "bind", "/model group-B"))
+	chatModelTurn(t, e, p, &a.chatModelTestAgent, chatModelMessage("A", "one", "before", "before"), "group-B")
 	// Another topic changes the Agent provider; the first backend remains on P.
-	e.ReceiveMessage(p, groupModelMessage("A", "two", "provider", "/provider switch Q"))
-	e.ReceiveMessage(p, groupModelMessage("A", "two", "rebind", "/model group group-C"))
+	e.ReceiveMessage(p, chatModelMessage("A", "two", "provider", "/provider switch Q"))
+	e.ReceiveMessage(p, chatModelMessage("A", "two", "rebind", "/model group-C"))
 	before, sessions, _ := a.snapshot()
 	p.clearSent()
-	e.ReceiveMessage(p, groupModelMessage("A", "one", "after", "after"))
+	e.ReceiveMessage(p, chatModelMessage("A", "one", "after", "after"))
 	waitAnswerProfileTest(t, "old backend rejected", func() bool {
 		return !e.sessions.GetOrCreateActive("test:A:root:one").Busy() && strings.Contains(strings.Join(p.getSent(), "\n"), "different Provider")
 	})
@@ -98,28 +98,28 @@ func TestGroupModel_ExistingBackendProviderCannotFollowMutableAgent(t *testing.T
 	}
 }
 
-func TestGroupModel_ExplicitProviderModelsRemainSelectableWithNativeCatalog(t *testing.T) {
-	e, p, _ := newGroupModelEngine(t, "")
-	a := newGroupProviderAgent()
+func TestChatModel_ExplicitProviderModelsRemainSelectableWithNativeCatalog(t *testing.T) {
+	e, p, _ := newChatModelEngine(t, "")
+	a := newChatProviderAgent()
 	e.agent = a
 	for _, selection := range []string{"custom", "custom-default"} {
-		e.ReceiveMessage(p, groupModelMessage("A", "", "set", "/model group "+selection))
+		e.ReceiveMessage(p, chatModelMessage("A", "", "set", "/model "+selection))
 		want := selection
 		if selection == "custom" {
 			want = "custom-provider-model"
 		}
-		groupModelChat(t, e, p, &a.groupModelTestAgent, groupModelMessage("A", "", selection, selection), want)
+		chatModelTurn(t, e, p, &a.chatModelTestAgent, chatModelMessage("A", "", selection, selection), want)
 	}
 	if got := e.renderModelCard("test:A").RenderText(); !strings.Contains(got, "custom-provider-model") || !strings.Contains(got, "custom-default") {
 		t.Fatalf("configured models hidden by native catalog: %s", got)
 	}
 }
 
-func TestGroupModel_ScheduledBindingDuringStartupStillReportsFailure(t *testing.T) {
-	e, p, _ := newGroupModelEngine(t, "")
-	a := newGroupProviderAgent()
+func TestChatModel_ScheduledBindingDuringStartupStillReportsFailure(t *testing.T) {
+	e, p, _ := newChatModelEngine(t, "")
+	a := newChatProviderAgent()
 	e.agent = a
-	e.ReceiveMessage(p, groupModelMessage("A", "", "known-group", "/model"))
+	e.ReceiveMessage(p, chatModelMessage("A", "", "known-group", "/model"))
 	started, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	t.Cleanup(func() { once.Do(func() { close(release) }) })
@@ -131,7 +131,7 @@ func TestGroupModel_ScheduledBindingDuringStartupStillReportsFailure(t *testing.
 	<-started
 	// Persist directly while startup holds the engine's interactive-state lock;
 	// another group/topic's command publishes the same atomic store operation.
-	if err := e.projectState.SaveGroupModelBinding("test:A", GroupModelBinding{Model: "group-B", Provider: groupModelProvider(a)}); err != nil {
+	if err := e.projectState.SaveChatModelBinding("test:A", ChatModelBinding{Model: "group-B", Provider: modelProvider(a)}); err != nil {
 		t.Fatal(err)
 	}
 	once.Do(func() { close(release) })
@@ -140,26 +140,26 @@ func TestGroupModel_ScheduledBindingDuringStartupStillReportsFailure(t *testing.
 	}
 }
 
-func TestGroupModel_RichCardsKeepSafeRecoveryInstructions(t *testing.T) {
+func TestChatModel_RichCardsKeepSafeRecoveryInstructions(t *testing.T) {
 	p := &stubCompactProgressPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}, style: "card", supportPayload: true}
-	a := &groupModelTestAgent{cronModelAgent{model: "project-A"}}
+	a := &chatModelTestAgent{cronModelAgent{model: "project-A"}}
 	dir := t.TempDir()
 	e := NewEngine("test", a, []Platform{p}, filepath.Join(dir, "sessions.json"), LangEnglish)
 	e.SetDisplayConfig(DisplayCfg{Mode: "full", CardMode: "rich"})
 	e.SetProjectStateStore(NewProjectStateStore(filepath.Join(dir, "project.json")))
 	t.Cleanup(func() { _ = e.Stop() })
-	e.ReceiveMessage(p, groupModelMessage("A", "", "bind", "/model group group-B"))
-	if err := e.projectState.SaveGroupModelBinding("test:A", GroupModelBinding{Model: "group-B", Provider: "other"}); err != nil {
+	e.ReceiveMessage(p, chatModelMessage("A", "", "bind", "/model group-B"))
+	if err := e.projectState.SaveChatModelBinding("test:A", ChatModelBinding{Model: "group-B", Provider: "other"}); err != nil {
 		t.Fatal(err)
 	}
 	p.clearSent()
-	e.ReceiveMessage(p, groupModelMessage("A", "", "request", "hello"))
+	e.ReceiveMessage(p, chatModelMessage("A", "", "request", "hello"))
 	waitAnswerProfileTest(t, "safe group failure", func() bool { return !e.sessions.GetOrCreateActive("test:A").Busy() })
 	if len(p.getPreviewStarts()) == 0 {
 		t.Fatal("test did not enter rich-card rendering")
 	}
 	texts := append(p.getPreviewEdits(), p.getSent()...)
-	if got := strings.Join(texts, "\n"); !strings.Contains(got, "/model chat reset") {
+	if got := strings.Join(texts, "\n"); !strings.Contains(got, "/model reset") {
 		t.Fatalf("missing group recovery hint: %s", got)
 	}
 	calls, _, _ := a.snapshot()

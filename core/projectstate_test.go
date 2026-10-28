@@ -66,32 +66,24 @@ func TestWorkspaceDirOverride(t *testing.T) {
 	}
 }
 
-func TestWorkspaceModelOverride(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "projects", "demo.state.json")
-	workspaceA := "/tmp/workspace-a"
-	workspaceB := "/tmp/workspace-b"
-
-	store := NewProjectStateStore(statePath)
-	store.SetWorkspaceModelOverride(workspaceA, "opus")
-	store.SetWorkspaceModelOverride(workspaceB, "sonnet")
+func TestProjectState_ChatModelPersistsIndependentlyOfWorkspaceDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := NewProjectStateStore(path)
+	store.SetWorkspaceDirOverride("workspace", "/before")
+	pinned := ChatModelBinding{Model: "model-b", Provider: "provider"}
+	if err := store.SaveChatModelBinding("test:chat-a", pinned); err != nil {
+		t.Fatal(err)
+	}
+	store.SetWorkspaceDirOverride("workspace", "/after")
 	store.Save()
-
-	reloaded := NewProjectStateStore(statePath)
-	if got := reloaded.WorkspaceModelOverride(workspaceA); got != "opus" {
-		t.Fatalf("WorkspaceModelOverride(%q) = %q, want %q", workspaceA, got, "opus")
+	reloaded := NewProjectStateStore(path)
+	if got, ok := reloaded.ChatModelBinding("test:chat-a"); !ok || got != pinned {
+		t.Fatalf("directory change lost chat model: %+v, %v", got, ok)
 	}
-	if got := reloaded.WorkspaceModelOverride(workspaceB); got != "sonnet" {
-		t.Fatalf("WorkspaceModelOverride(%q) = %q, want %q", workspaceB, got, "sonnet")
+	if _, ok := reloaded.ChatModelBinding("test:chat-b"); ok {
+		t.Fatal("chat model leaked to another chat sharing the workspace")
 	}
-
-	reloaded.ClearWorkspaceModelOverride(workspaceA)
-	reloaded.Save()
-
-	cleared := NewProjectStateStore(statePath)
-	if got := cleared.WorkspaceModelOverride(workspaceA); got != "" {
-		t.Fatalf("WorkspaceModelOverride(%q) after clear = %q, want empty", workspaceA, got)
-	}
-	if got := cleared.WorkspaceModelOverride(workspaceB); got != "sonnet" {
-		t.Fatalf("WorkspaceModelOverride(%q) after clearing other workspace = %q, want %q", workspaceB, got, "sonnet")
+	if got := reloaded.WorkspaceDirOverride("workspace"); got != "/after" {
+		t.Fatalf("workspace directory = %q", got)
 	}
 }

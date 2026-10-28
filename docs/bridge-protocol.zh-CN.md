@@ -338,27 +338,44 @@ token = "your-secret"     # 认证密钥，必填
     "elements": [
       {
         "type": "markdown",
-        "content": "请选择一个模型："
+        "content": "当前使用：gpt-4 · 本聊天固定。"
+      },
+      {
+        "type": "select",
+        "placeholder": "设置本聊天模型",
+        "options": [
+          {
+            "text": "跟随默认",
+            "value": "cmd:/model reset"
+          },
+          {
+            "text": "GPT-4",
+            "value": "cmd:/model gpt-4"
+          },
+          {
+            "text": "Claude",
+            "value": "cmd:/model claude"
+          }
+        ],
+        "init_value": "cmd:/model gpt-4"
       },
       {
         "type": "actions",
         "buttons": [
-          {"text": "GPT-4", "btn_type": "primary", "value": "cmd:/model switch gpt-4"},
-          {"text": "Claude", "btn_type": "default", "value": "cmd:/model switch claude"}
+          {
+            "text": "全局默认",
+            "btn_type": "default",
+            "value": "cmd:/model default"
+          }
         ],
         "layout": "row"
-      },
-      {
-        "type": "divider"
-      },
-      {
-        "type": "note",
-        "text": "当前模型：gpt-4"
       }
     ]
   }
 }
 ```
+
+模型菜单只有两个范围：本聊天卡片使用 `cmd:/model MODEL` 或 `cmd:/model reset`；二级入口 `cmd:/model default` 打开当前机器人/项目的全局默认卡片，其唯一选择框使用 `cmd:/model default MODEL`。两种查询均对成员开放，只有全局默认修改需要管理员。选择完成后返回对应卡片及结果提示。
 
 完整卡片元素参见[卡片 Schema](#卡片-schema)。
 
@@ -585,7 +602,7 @@ token = "your-secret"     # 认证密钥，必填
   "text": "GPT-4 — 最强模型",
   "btn_text": "选择",
   "btn_type": "primary",
-  "btn_value": "cmd:/model switch gpt-4"
+  "btn_value": "cmd:/model gpt-4"
 }
 ```
 
@@ -595,10 +612,10 @@ token = "your-secret"     # 认证密钥，必填
   "type": "select",
   "placeholder": "选择一个模型",
   "options": [
-    {"text": "GPT-4", "value": "cmd:/model switch gpt-4"},
-    {"text": "Claude", "value": "cmd:/model switch claude"}
+    {"text": "GPT-4", "value": "cmd:/model gpt-4"},
+    {"text": "Claude", "value": "cmd:/model claude"}
   ],
-  "init_value": "cmd:/model switch gpt-4"
+  "init_value": "cmd:/model gpt-4"
 }
 ```
 

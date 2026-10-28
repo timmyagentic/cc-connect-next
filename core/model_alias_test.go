@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestResolveModelAlias_CaseInsensitive(t *testing.T) {
 	models := []ModelOption{{Name: "gpt-5.3-codex", Alias: "Codex"}}
@@ -20,28 +23,31 @@ func TestResolveModelAlias_NoMatchFallsBackToInput(t *testing.T) {
 	}
 }
 
-func TestParseModelSwitchArgs(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want string
-		ok   bool
-	}{
-		{name: "legacy syntax", args: []string{"gpt"}, want: "gpt", ok: true},
-		{name: "switch syntax", args: []string{"switch", "gpt"}, want: "gpt", ok: true},
-		{name: "missing switch target", args: []string{"switch"}, ok: false},
-		{name: "unknown subcommand", args: []string{"list", "gpt"}, ok: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, ok := parseModelSwitchArgs(tt.args)
-			if ok != tt.ok {
-				t.Fatalf("parseModelSwitchArgs() ok = %v, want %v", ok, tt.ok)
-			}
-			if got != tt.want {
-				t.Fatalf("parseModelSwitchArgs() = %q, want %q", got, tt.want)
-			}
-		})
+func TestModelCommand_NameAliasAndNumberRespectScope(t *testing.T) {
+	for _, scope := range []string{"chat", "default"} {
+		for _, selection := range []string{"group-B", "PIN", "3"} {
+			t.Run(scope+"/"+selection, func(t *testing.T) {
+				e, p, a := newChatModelEngine(t, "")
+				e.SetAdminFrom("owner")
+				var saves int
+				e.SetModelSaveFunc(func(string) error { saves++; return nil })
+				command := "/model " + selection
+				if scope == "default" {
+					command = "/model default " + selection
+				}
+				e.ReceiveMessage(p, chatModelMessage("A", "topic", "selection", command))
+				binding, pinned := e.chatModelBinding("test:A:root:topic")
+				if scope == "chat" {
+					if !pinned || binding.Model != "group-B" || a.GetModel() != "project-A" || saves != 0 {
+						t.Fatalf("chat selection changed wrong scope: binding=%+v pinned=%v default=%q saves=%d", binding, pinned, a.GetModel(), saves)
+					}
+				} else if pinned || a.GetModel() != "group-B" || saves != 1 {
+					t.Fatalf("default selection changed wrong scope: binding=%+v pinned=%v default=%q saves=%d", binding, pinned, a.GetModel(), saves)
+				}
+				if visible := strings.Join(p.getSent(), "\n"); !strings.Contains(visible, "group-B") {
+					t.Fatalf("missing selection feedback: %s", visible)
+				}
+			})
+		}
 	}
 }

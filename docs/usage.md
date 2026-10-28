@@ -43,7 +43,8 @@ Each user gets an independent session with full conversation context. Manage ses
 | `/history [n]` | Show last n messages (default 10; each entry follows `[display].history_max_len`, default 1000) |
 | `/usage` | Show account/model quota usage (if supported) |
 | `/provider [...]` | Manage API providers |
-| `/model [switch <name>\|chat [<name>\|reset]]` | View models, change the project/workspace default, or set this chat's model |
+| `/model [<name\|alias\|number>\|reset]` | View/set this chat's model; reset follows the default |
+| `/model default [<name\|alias\|number>]` | View this bot/project's global default; changes require admin |
 | `/dir [path]` | Show or switch the agent work directory |
 | `/allow <tool>` | Pre-allow a tool (next session) |
 | `/reasoning [<level>\|chat [<level>\|reset]]` | View reasoning effort, change the default, or set this chat's effort (`/effort` alias) |
@@ -73,7 +74,7 @@ The built-in default is `0`, which always continues the previous session.
 
 ### Model switch preserves history
 
-`/model switch <name>` preserves conversation history and changes the project default, or the current workspace's default in multi-workspace mode. Chats without a fixed model follow that default within its scope; pinned private chats and groups keep their selection. Use `/model chat <name>` to change only this chat's model; it applies to the next new request without interrupting the current reply. See [Model Selection](#model-selection) for scope and precedence.
+`/model <name>` preserves conversation history and changes only this chat's model, starting with the next new request without interrupting the current reply. `/model reset` restores default-model inheritance. Use `/model default <name>` to change the global default for the current bot/project; this requires admin and leaves fixed chat models and other bots unchanged. See [Model Selection](#model-selection) for scope and precedence.
 
 ---
 
@@ -422,37 +423,37 @@ alias = "spark"
 ### Chat Commands
 
 ```
-/model                    View models and the ordinary-message model source
-/model switch <alias>     Set the project/workspace default by alias
-/model switch <name>      Set the project/workspace default by full name
-/model <alias>            Legacy default-switching syntax, still supported
-/model chat               View this chat's model selection
-/model chat <name>        Pin a listed model for this chat (name, alias, or number)
-/model chat reset         Follow the workspace/project default; keep chat effort
+/model                              View this chat's actual model and whether it follows the default
+/model <name|alias|number>           Pin a listed model for this chat
+/model reset                        Follow the default; keep this chat's reasoning effort
+/model default                      View the global default for this bot/project
+/model default <name|alias|number>   Change that global default (admin only)
 ```
 
 When `models` is configured, `/model` shows exactly that list without making an API round-trip. When omitted, models are fetched from the provider API or fall back to a built-in list.
 
 ### Defaults and fixed chat models
 
+`/model` opens the current-chat card: one line shows the actual model and **fixed for this chat** or **following the default**. Its single selector contains the available models and **Follow default**. A secondary **Global default** button opens `/model default`, whose separate card has one selector for the current bot/project's global default. Commands and card selections return the relevant card with a result message; platforms without cards receive its text rendering.
+
+Members can view both scopes and change or reset the current chat's model. Only `/model default <name|alias|number>` requires admin. The global command operates on the current bot/project's Agent default, even in multi-workspace mode; it does not change another bot or a fixed chat model. A chat without a binding follows this global default, which the current-chat card displays. There is no separate workspace model default. Existing role and disabled-command policies still apply.
+
 Feishu/Lark supplies verified private-chat and group identity. The chat model list also includes models explicitly configured for the active Provider, even when a native catalog omits them.
 
-`/model switch` changes the project default, or the workspace default in multi-workspace mode. This affects chats without a fixed model; pinned private chats and groups keep their selection. The model card labels the default's scope and, in a verified chat, separately identifies the model source for ordinary messages as either **fixed for this chat** or **following the workspace/project default**.
-
-`/model chat <name>` requires verified private-chat or group identity and per-turn model support from the configured backend (currently Codex `exec` and `app_server`). It uses the current backend and Provider; it does not change Provider. Choose from the current `/model` list. An unverified chat cannot create a binding. If the chat is not yet recognized, send `/model` there first. Verified direct-user card callbacks can also establish private-chat identity without a fresh text message. Backends that support legacy model switching retain `/model switch` even when they cannot pin a chat model. Chat commands retain the existing `/model` member-access and disabled-command policies.
-
-The legacy `/model group [<name>|reset]` subcommand remains an alias for `chat`, including in verified DMs. New card selections use `chat`.
+`/model <name|alias|number>` requires verified private-chat or group identity and per-turn model support from the configured backend (currently Codex `exec` and `app_server`). It uses the current backend and Provider; it does not change Provider. Choose from the current `/model` list. An unverified chat cannot create a binding. If the chat is not yet recognized, send `/model` there first. Verified direct-user card callbacks can also establish private-chat identity without a fresh text message. Backends with `ModelSwitcher` retain `/model default` even when they cannot pin a chat model. `/model reset` can clear a saved binding when verified identity and storage are available, even if per-turn support is no longer available.
 
 Bindings are isolated within each bot/project:
 
-- **Groups:** the existing `platform:groupID` key is unchanged. A binding covers **all members and all existing or new topics in that group**.
+- **Groups:** the key is `platform:groupID`. A binding covers **all members and all existing or new topics in that group**.
 - **Private chats:** the key is `platform:dm:userID`, using the verified direct-message user's ID. Each user's selection is separate from other users, groups, platforms, and bots/projects, even when they share a workspace directory.
 
-Bindings are not tied to a topic, conversation, or workspace directory. They persist across `/reset`, `/new`, and bridge restarts. `/model chat reset` removes only the model binding and restores default-model inheritance; this chat's reasoning effort stays unchanged. Selections use persistent project state and require no new `config.toml` fields. Failed saves are reported without claiming success.
+Bindings are not tied to a topic, conversation, or workspace directory. They persist across `/reset`, `/new`, and bridge restarts. `/model reset` removes only the model binding and restores default-model inheritance; this chat's reasoning effort stays unchanged. Selections use persistent project state and require no new `config.toml` fields. Failed saves are reported without claiming success.
+
+Older model-state fields are not migrated. Previous chat model bindings and workspace-specific model defaults are not carried over; select the desired model again with the commands above.
 
 Chat selections are resolved when each new request executes, including queued requests. A change or reset takes effect on the next new request; an already running reply keeps its model. An explicit one-shot model from `/fast`, another answer profile, or a task takes precedence for that request; subsequent ordinary messages return to the chat's selection. A profile without an explicit model still inherits the chat model. Model and reasoning effort are resolved independently: overriding one field does not discard the other field's chat setting.
 
-A pinned chat never silently falls back to the default when per-turn support is unavailable, the backend/Provider no longer matches the binding, or applying/running the model fails. The request reports the error. After a backend/Provider change, explicitly select an available model with `/model chat <name>` or use `/model chat reset`.
+A pinned chat never silently falls back to the default when per-turn support is unavailable, the backend/Provider no longer matches the binding, or applying/running the model fails. The request reports the error. After a backend/Provider change, explicitly select an available model with `/model <name>` or use `/model reset`.
 
 If an existing conversation is still connected to a different Provider, sending is also rejected. Reconnect it with `/provider switch <name>` or start `/new`, then retry. Rich-card failures preserve these recovery instructions.
 

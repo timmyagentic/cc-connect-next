@@ -43,13 +43,13 @@ func (e *Engine) cmdSpeed(p Platform, msg *Message, args []string) {
 		catalog = live
 	}
 	model := turnDefaults(agent, as).Model
-	groupModel, err := e.groupDefaultModel(agent, msg.SessionKey, as)
+	chatModel, err := e.chatDefaultModel(agent, msg.SessionKey, as)
 	if err != nil {
 		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgSpeedUnavailable, err))
 		return
 	}
-	if groupModel != "" {
-		model = groupModel
+	if chatModel != "" {
+		model = chatModel
 	}
 	if model == "" && as != nil {
 		if getter, ok := as.(interface{ GetModel() string }); ok {
