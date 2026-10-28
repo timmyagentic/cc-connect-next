@@ -8,6 +8,12 @@
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
+## v0.3.5-beta.11 (2026-10-28)
+
+- Store chat model selections in `[[projects.chat_models]]` in config.toml, with command persistence and manual-edit reload support.
+- Migrate remaining legacy chat model bindings safely, preserving explicit TOML preferences and unrelated state.
+- See `changelogs/v0.3.5-beta.11.md` for migration, downgrade and verification details.
+
 ## v0.3.5-beta.10 (2026-10-28)
 
 - Simplify model commands to current-chat selection and an administrator-controlled global default.
