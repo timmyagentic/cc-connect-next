@@ -45,7 +45,11 @@ func (s *appServerSession) sessionTitleGenerationArgs(cwd string) []string {
 		"--skip-git-repo-check",
 		"-C", cwd,
 		"-m", strings.TrimSpace(s.sessionTitleModel),
-		"-s", "read-only",
+	}
+	if s.privacy != nil {
+		args = append(args, s.privacy.launchArgs("suggest", "never")...)
+	} else {
+		args = append(args, "-s", "read-only")
 	}
 	for _, feature := range sessionTitleDisabledFeatures {
 		args = append(args, "--disable", feature)
@@ -58,6 +62,11 @@ func (s *appServerSession) generateSessionTitleWithCodex(parent context.Context,
 	defer cancel()
 
 	cwd := os.TempDir()
+	if s.privacy != nil {
+		if err := checkPrivacyRuntime(ctx, s.cliBin, cwd, s.sessionTitleGenerationEnv()); err != nil {
+			return "", err
+		}
+	}
 	cmd := exec.CommandContext(ctx, s.cliBin, s.sessionTitleGenerationArgs(cwd)...)
 	cmd.Dir = cwd
 	cmd.Stdin = strings.NewReader(sessionTitleGenerationPrompt(candidate))

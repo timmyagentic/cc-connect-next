@@ -72,6 +72,10 @@ func runDoctorHealthCheck(args []string) int {
 		return 1
 	}
 	annotateUnknownPluginConfigKeys(cfg)
+	if err := configureMacOSPrivacy(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "doctor: macOS privacy guard: %v\n", err)
+		return 1
+	}
 	if config.ConfigPath == "" {
 		config.ConfigPath = configPath
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/timmyagentic/cc-connect-next/core"
+	"github.com/timmyagentic/cc-connect-next/internal/privacyguard"
 )
 
 // CapabilityCatalog returns the complete configuration surface of this
@@ -271,6 +272,8 @@ func isSensitiveConfigPath(path string) bool {
 func builtinMetadata(path string) builtinOptionMeta {
 	zero, one := 0.0, 1.0
 	meta := map[string]builtinOptionMeta{
+		"macos_privacy.enabled":                                {description: "On macOS, apply native filesystem deny rules to local Codex exec/app-server sessions, including YOLO. Requires a supported Codex CLI; other Agents, remote servers, external tools, and standalone shell jobs are not covered. False restores legacy Codex permission selection.", zh: "macOS 下向本地 Codex exec/app-server 会话应用原生文件系统拒绝规则，包括 YOLO。需要受支持的 Codex CLI；不覆盖其他 Agent、远程服务、外部工具及独立 Shell 任务。false 恢复旧版 Codex 权限选择。", defaultValue: "true", apply: core.ConfigApplyRestart, example: "[macos_privacy]\nenabled = true", keywords: []string{"macOS", "权限弹窗", "privacy", "TCC"}},
+		"macos_privacy.allow_directories":                      {description: "Personal-directory categories to exempt in local Codex sessions, such as Documents. The category containing the selected work_dir is automatically exempt to preserve native tooling. Exemptions retain mode permissions for the whole category, not just one child; they do not grant TCC permission. Home/root workspaces do not exempt descendants.", zh: "本地 Codex 会话中豁免的个人目录类别，例如 Documents。工作区所在类别会自动豁免以保持原生工具正常。豁免为整个类别保留原模式权限，不限于某个子目录，也不授予 TCC 权限。主目录或根目录工作区不会豁免其子目录。", defaultValue: "[]", values: privacyguard.DirectoryNames(), apply: core.ConfigApplyRestart, example: "[macos_privacy]\nallow_directories = [\"Documents\"]"},
 		"language":                                             {description: "Choose the canonical bot-message language, or detect it from the user's first message; common regional aliases are normalized.", zh: "选择机器人消息的规范语言，或从用户首条消息自动检测；常见地区别名会被归一化。", defaultValue: "zh", values: []string{"zh", "en", "zh-TW", "ja", "es", "auto"}, openValues: true, keywords: []string{"语言", "locale"}, apply: core.ConfigApplyRestart, example: `language = "zh"`},
 		"data_dir":                                             {description: "Choose where cc-connect-next stores sessions, state, media, and runtime metadata.", zh: "选择 cc-connect-next 存储会话、状态、媒体和运行元数据的位置。", defaultValue: "~/.cc-connect-next", keywords: []string{"存储目录", "state"}},
 		"attachment_send":                                      {description: "Allow or block Agent-initiated image and file send-back without disabling text replies.", zh: "允许或阻止 Agent 主动回传图片和文件，不影响文本回复。", defaultValue: "on", values: []string{"on", "off"}, keywords: []string{"附件回传", "send file"}, apply: core.ConfigApplyReload},
@@ -570,6 +573,7 @@ func genericBuiltinDescription(path string) (string, string) {
 
 func builtinCapabilities() []core.ConfigCapability {
 	return []core.ConfigCapability{
+		{ID: "macos-privacy", Title: "macOS privacy prompts", TitleZH: "macOS 隐私弹窗", Description: "Prevent accidental access to unrelated personal-directory categories in supported local Codex sessions without changing TCC permissions.", DescriptionZH: "阻止受支持的本地 Codex 会话意外访问无关个人目录类别，不修改 TCC 权限。", Keywords: []string{"macOS", "隐私弹窗", "桌面", "文稿", "TCC", "privacy"}, Paths: []string{"macos_privacy.enabled", "macos_privacy.allow_directories"}},
 		{ID: "access-control", Title: "Access control and roles", TitleZH: "访问控制与角色", Description: "Limit who can talk to the bot, who can run privileged commands, and how roles inherit limits.", DescriptionZH: "限制谁能与机器人对话、谁能执行特权命令，以及角色如何继承限流策略。", Keywords: []string{"只允许我", "白名单", "管理员", "权限", "roles"}, Paths: []string{"projects.platforms.options.allow_from", "projects.admin_from", "projects.users.default_role", "projects.users.roles.<name>.user_ids", "projects.users.roles.<name>.disabled_commands"}},
 		{ID: "agent-execution", Title: "Agent execution", TitleZH: "Agent 执行", Description: "Choose the Agent, command, working directory, model, approval mode, prompts, and adapter-specific behavior.", DescriptionZH: "选择 Agent、命令、工作目录、模型、审批模式、提示词和适配器专属行为。", Keywords: []string{"agent", "模型", "yolo", "审批", "工作目录", "fast"}, Paths: []string{"projects.agent.type", "projects.agent.options.work_dir", "projects.agent.options.mode", "projects.agent.options.model", "projects.agent.options.reasoning_effort", "projects.agent.options.service_tier"}},
 		{ID: "attachments-media", Title: "Attachments and media", TitleZH: "附件与媒体", Description: "Control file/image send-back, attachment limits, references, speech recognition, and voice replies.", DescriptionZH: "控制文件/图片回传、附件大小、引用、语音识别和语音回复。", Keywords: []string{"附件", "图片", "文件", "语音", "tts", "stt"}, Paths: []string{"attachment_send", "max_attachment_size_mb", "speech.enabled", "speech.provider", "tts.enabled", "tts.provider"}},

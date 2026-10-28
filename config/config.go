@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/BurntSushi/toml"
+	"github.com/timmyagentic/cc-connect-next/internal/privacyguard"
 	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
 
@@ -88,8 +89,9 @@ var configMu sync.Mutex
 var ConfigPath string
 
 type Config struct {
-	DataDir        string `toml:"data_dir"` // session store directory, default ~/.cc-connect-next
-	AttachmentSend string `toml:"attachment_send"`
+	MacOSPrivacy   MacOSPrivacyConfig `toml:"macos_privacy"`
+	DataDir        string             `toml:"data_dir"` // session store directory, default ~/.cc-connect-next
+	AttachmentSend string             `toml:"attachment_send"`
 	// Quiet is legacy: when true and [display] does not set thinking_messages / tool_messages,
 	// engines behave as if those flags were false. Per-project quiet overrides when set.
 	Quiet              *bool                   `toml:"quiet,omitempty"`
@@ -156,6 +158,13 @@ type Config struct {
 	// did not consume (populated at load time, never serialized). They feed
 	// the feedback channel's capability-gap prompt.
 	UnknownConfigKeys []string `toml:"-"`
+}
+
+// MacOSPrivacyConfig supplies personal-directory rules to supported native
+// Agent sandboxes. Currently enforced by local Codex sessions only.
+type MacOSPrivacyConfig struct {
+	Enabled          *bool    `toml:"enabled"`
+	AllowDirectories []string `toml:"allow_directories"`
 }
 
 // FeedbackConfig controls the in-app problem-reporting channel.
@@ -1190,6 +1199,11 @@ func (c *Config) ResolveEnvironment() {
 }
 
 func (c *Config) validateInternal(permissive bool) error {
+	if c.MacOSPrivacy.Enabled == nil || *c.MacOSPrivacy.Enabled {
+		if err := privacyguard.ValidateDirectories(c.MacOSPrivacy.AllowDirectories); err != nil {
+			return err
+		}
+	}
 	if err := validateProviderConfigs("providers", c.Providers); err != nil {
 		return err
 	}

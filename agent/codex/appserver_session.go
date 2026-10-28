@@ -157,6 +157,7 @@ type appServerSession struct {
 	url                string
 	cliBin             string   // CLI binary from the cmd option, default "codex"
 	cliExtraArgs       []string // extra args from cmd, placed before the app-server subcommand
+	privacy            *codexPrivacyPolicy
 	workDir            string
 	model              string
 	contextWindow      int64
@@ -256,11 +257,30 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 	if err != nil {
 		return nil, fmt.Errorf("codex app-server resolve CLI: %w", err)
 	}
+	var privacy *codexPrivacyPolicy
+	// Host filesystem paths only apply to the local stdio runtime. Remote
+	// app-server configurations are intentionally outside this policy.
+	if localAppServer(p.url) {
+		privacy, err = newCodexPrivacyPolicy(p.workDir, p.cliExtraArgs)
+		if err != nil {
+			return nil, err
+		}
+		if privacy != nil {
+			env := append([]string(nil), p.extraEnv...)
+			if p.codexHome != "" {
+				env = append(env, "CODEX_HOME="+p.codexHome)
+			}
+			if err := checkPrivacyRuntime(ctx, cliBin, p.workDir, env); err != nil {
+				return nil, err
+			}
+		}
+	}
 	sessionCtx, cancel := context.WithCancel(ctx)
 	s := &appServerSession{
 		url:                 p.url,
 		cliBin:              cliBin,
 		cliExtraArgs:        append([]string(nil), p.cliExtraArgs...),
+		privacy:             privacy,
 		workDir:             p.workDir,
 		model:               p.model,
 		contextWindow:       p.contextWindow,
@@ -293,6 +313,12 @@ func newAppServerSession(ctx context.Context, p appServerSessionParams) (*appSer
 	if err := s.initialize(); err != nil {
 		_ = s.Close()
 		return nil, err
+	}
+	if s.privacy != nil && privacyWorkspaceMode(s.mode) {
+		if err := checkPrivacyWorkspaceConfig(s.request, s.workDir); err != nil {
+			_ = s.Close()
+			return nil, err
+		}
 	}
 	if err := s.captureDefaultModel(p.resumeID); err != nil {
 		// Existing sessions without per-turn model selection still resume and
@@ -340,6 +366,10 @@ func (s *appServerSession) launchArgs() []string {
 	}
 	if baseURL := strings.TrimSpace(s.baseURL); baseURL != "" {
 		args = append(args, "-c", fmt.Sprintf("openai_base_url=%q", baseURL))
+	}
+	if s.privacy != nil {
+		approval, _ := appServerModeSettings(s.mode)
+		args = append(args, s.privacy.launchArgs(s.mode, approval)...)
 	}
 	return args
 }
@@ -508,7 +538,14 @@ func (s *appServerSession) threadRequestParams() map[string]any {
 	if model := s.GetModel(); model != "" {
 		params["model"] = model
 	}
-	if approval, sandbox := appServerModeSettings(s.mode); approval != "" {
+	if s.privacy != nil {
+		params["permissions"] = s.privacy.profile(s.mode)
+		// Preserve suggest's interactive approvals. An explicitly approved
+		// escalation can run outside the native sandbox's privacy denies.
+		approval, _ := appServerModeSettings(s.mode)
+		params["approvalPolicy"] = approval
+		params["cwd"] = s.workDir
+	} else if approval, sandbox := appServerModeSettings(s.mode); approval != "" {
 		params["approvalPolicy"] = approval
 		if sandbox != "" {
 			params["sandbox"] = sandbox
@@ -754,7 +791,11 @@ func (s *appServerSession) turnStartParams(threadID string, input []map[string]a
 		params["effort"] = nullableTurnOption(options.ReasoningEffort)
 		params["serviceTier"] = nullableTurnOption(options.ServiceTier)
 	}
-	if approval, _ := appServerModeSettings(s.mode); approval != "" {
+	if s.privacy != nil {
+		params["permissions"] = s.privacy.profile(s.mode)
+		approval, _ := appServerModeSettings(s.mode)
+		params["approvalPolicy"] = approval
+	} else if approval, _ := appServerModeSettings(s.mode); approval != "" {
 		params["approvalPolicy"] = approval
 	}
 	return params
