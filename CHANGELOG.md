@@ -8,6 +8,13 @@
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
+## v0.3.5-beta.10 (2026-10-28)
+
+- Simplify model commands to current-chat selection and an administrator-controlled global default.
+- Apply changed defaults to cached workspaces and subsequent queued turns while preserving conversation history.
+- Breaking change: old model subcommands and stored chat/workspace model selections are not migrated; select models again with the new commands.
+- See `changelogs/v0.3.5-beta.10.md` for bilingual notes and verification boundaries.
+
 ## v0.3.5-beta.9 (2026-10-28)
 
 - Read group discussion once initially and then only new messages after delivered input.
