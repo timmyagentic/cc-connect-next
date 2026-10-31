@@ -13,8 +13,8 @@ Every accepted interactive turn starts with its own Card 2.0 message. The card i
 | Tool event | Localized “calling tools” status and counts | No tool details |
 | First answer text | Localized “answering” status; prior progress disappears | Answer text only |
 | Completed | Localized Done status | Final answer only |
-| Failed before an answer | Localized generic failure | No runtime error details |
-| Failed after partial answer | Localized failure | The already-visible safe partial answer |
+| Agent returns an unclassified error | Localized “Upstream returned an error” | Original error text with secrets and private identifiers/paths redacted; retain any already-visible partial answer |
+| Bridge lifecycle fails or the event channel closes | Localized generic failure | Only the already-visible safe partial answer, if any |
 | Bare `NO_REPLY` | The optimistic card is recalled; no answer or Done state remains | No answer body; Feishu may show its own recall notice |
 | Triggering message recalled | The lifecycle card is deleted silently | No partial answer is persisted to assistant history |
 | Completed with a resolved native @ | The process card is replaced by one tracked quoted text answer | Native Feishu mention event plus final answer and the opt-in reply footer; no stale card |
@@ -33,21 +33,21 @@ Some Agent backends, including the explicitly selected `codex exec --json` path,
 
 If CardKit creation or element streaming is unavailable, cc-connect-next safely falls back to updating the inline card in the same quoted message. A CardKit rate-limit response is treated as an unrendered frame, not a successful stream update; the full-card fallback must succeed before that answer body is recorded as visible. Tables beyond Feishu's per-card component budget are rendered as fenced text in that same card rather than creating overflow answer messages.
 
-If the terminal full-card update itself fails, cc-connect-next creates one completed replacement card with a deletable message handle, then removes the stale lifecycle card. If initial lifecycle-card creation failed, final delivery retries through that same tracked replacement-card path. Answer delivery never degrades into untracked multi-part replies: a recall racing the replacement cleans up every created card handle and prevents history commit. If the platform cannot create the tracked replacement either, the turn fails closed without sending an undeletable answer or committing it to history. If a turn fails earlier or its Agent event channel closes unexpectedly, only the last body confirmed by a successful Feishu create/update call may be retained on the failure card or in assistant history. Text held back by disabled previews, throttling, or a failed update is never treated as visible. If the failure-state update also fails, the fallback reply contains only that confirmed safe partial plus localized static failure copy; raw provider/process errors are never substituted into chat-visible text.
+If the terminal full-card update itself fails, cc-connect-next creates one completed replacement card with a deletable message handle, then removes the stale lifecycle card. If initial lifecycle-card creation failed, final delivery retries through that same tracked replacement-card path. Answer delivery never degrades into untracked multi-part replies: a recall racing the replacement cleans up every created card handle and prevents history commit. If the platform cannot create the tracked replacement either, the turn fails closed without sending an undeletable answer or committing it to history. If a turn fails earlier or its Agent event channel closes unexpectedly, only the last body confirmed by a successful Feishu create/update call may be retained on the failure card or in assistant history. Text held back by disabled previews, throttling, or a failed update is never treated as visible. If the failure-state update also fails, the fallback reply retains the same confirmed safe partial and failure details as the card, including redacted upstream diagnostics. Diagnostics are never stored as an assistant answer in conversation history.
 
 When `resolve_mentions = true`, streaming and safe-partial card bodies resolve `@DisplayName` against the triggering chat for correct visual rendering. Explicit `mention_map` entries override same-name group members and are validated as bot `ou_` open IDs. A completed answer with any successfully resolved native mention does not pretend that Card 2.0 can notify the target: cc-connect-next prepares the `MsgTypeText` at-tag, sends a tracked quoted text replacement, then removes the lifecycle card. If that send fails, the existing card completion path remains available so the user is not left without an answer. A recall racing a successful replacement deletes its exact message handle before history is committed.
 
 Remote markdown images are uploaded once and reused by URL. A failed fetch or Feishu upload enters a one-minute backoff instead of a permanent denylist; after that window the next card that references the URL retries it. This avoids per-frame retry storms while allowing transient timeouts, rate limits, and network failures to recover without restarting the process.
 
-Terminal failure cards follow an allowlist-only disclosure policy. Known
-provider-neutral markers such as usage exhaustion, a required Agent sign-in,
-and the Codex "selected model is at capacity" condition render localized host-owned copy
-with a concrete next step. The original provider error is never copied into
-the card or its fallback message, even after generic redaction, because it may
-contain credentials, local paths, internal IDs, commands, or private upstream
-details. Unclassified failures retain the generic "Not completed" message;
-already-visible partial answer text may still be preserved above that safe
-reason.
+When an Agent returns an unclassified error, the terminal card says “Upstream
+returned an error” (Chinese: “上游返回错误”) and shows the original diagnostic
+text in a code block after the existing secret/path/identifier redaction.
+“Upstream” identifies the Agent/model execution side of the bridge; it does
+not claim which model gateway or provider caused the failure. No detailed
+provider-error taxonomy or blanket retry advice is added. The existing
+usage-limit, sign-in and model-capacity messages remain unchanged. Bridge
+shutdown, unexpected channel closure and prompt-delivery failures retain
+their existing handling rather than being relabeled as upstream errors.
 
 During shutdown, cc-connect-next first interrupts any final remote-image resolution for active turns, then uses the still-live platform connection to deliver each terminal Done/error card within the bounded shutdown window. Platform teardown happens only after those lifecycle updates finish or the deadline expires.
 
@@ -56,7 +56,7 @@ During shutdown, cc-connect-next first interrupts any final remote-image resolut
 Rich-card progress carries event kinds and anonymous counts only. The renderer never receives or emits:
 
 - reasoning text;
-- tool names, arguments, results, or runtime errors;
+- tool-event names, arguments, results, or runtime errors;
 - token, context, or working-directory metadata;
 - expandable/collapsible detail panels.
 

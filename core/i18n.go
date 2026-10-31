@@ -441,6 +441,7 @@ const (
 	MsgRichCardThinkingSummary       MsgKey = "rich_card_thinking_summary"
 	MsgRichCardToolSummary           MsgKey = "rich_card_tool_summary"
 	MsgRichCardAnswerSummary         MsgKey = "rich_card_answer_summary"
+	MsgRichCardUpstreamError         MsgKey = "rich_card_upstream_error"
 	MsgRichCardErrorSummary          MsgKey = "rich_card_error_summary"
 	MsgRichCardUsageLimit            MsgKey = "rich_card_usage_limit"
 	MsgRichCardUsageLimitBody        MsgKey = "rich_card_usage_limit_body"
@@ -3417,6 +3418,10 @@ var messages = map[MsgKey]map[Language]string{
 		LangEnglish: "Generating answer", LangChinese: "正在生成回答", LangTraditionalChinese: "正在產生回答",
 		LangJapanese: "回答を生成しています", LangSpanish: "Generando respuesta",
 	},
+	MsgRichCardUpstreamError: {
+		LangEnglish: "Upstream returned an error", LangChinese: "上游返回错误", LangTraditionalChinese: "上游傳回錯誤",
+		LangJapanese: "上流からエラーが返されました", LangSpanish: "El servicio ascendente devolvió un error",
+	},
 	MsgRichCardErrorSummary: {
 		LangEnglish: "Processing failed", LangChinese: "处理失败", LangTraditionalChinese: "處理失敗",
 		LangJapanese: "処理に失敗しました", LangSpanish: "Error de procesamiento",
@@ -5520,6 +5525,7 @@ func richCardCopyForLanguage(lang Language) RichCardCopy {
 		ToolSummary:          t(MsgRichCardToolSummary),
 		AnswerSummary:        t(MsgRichCardAnswerSummary),
 		ErrorSummary:         t(MsgRichCardErrorSummary),
+		UpstreamError:        t(MsgRichCardUpstreamError),
 		UsageLimit:           t(MsgRichCardUsageLimit),
 		UsageLimitBody:       t(MsgRichCardUsageLimitBody),
 		UsageLimitSummary:    t(MsgRichCardUsageLimitSummary),

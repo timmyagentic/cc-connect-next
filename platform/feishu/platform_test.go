@@ -1453,6 +1453,10 @@ func TestBuildRichCard_CompletedAndErrorStatesAreClean(t *testing.T) {
 	if !strings.Contains(failed, "⚠️ 未完成") || !strings.Contains(failed, "本次处理未能完成") {
 		t.Fatalf("failed card should contain a safe visible fallback, got %q", failed)
 	}
+	upstream := buildRichCard(core.CardStatusError, "upstream_error", steps, "Invalid signature in thinking block", false, "")
+	if !strings.Contains(upstream, "⚠️ 上游返回错误") || !strings.Contains(upstream, "Invalid signature in thinking block") || strings.Contains(upstream, "请稍后重试") {
+		t.Fatalf("upstream error card must identify the source and preserve diagnostics: %s", upstream)
+	}
 	usageLimit := buildRichCard(core.CardStatusError, "usage_limit", steps, "", false, "model · effort:max · ⏱ 12.3s")
 	for _, want := range []string{"⚠️ 额度已用完", "Token 使用额度已用完", "当前 token 使用额度已用完"} {
 		if !strings.Contains(usageLimit, want) {
