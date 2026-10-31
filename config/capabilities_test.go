@@ -170,8 +170,20 @@ func TestCapabilityCatalog_ChatModelsIntentAndContract(t *testing.T) {
 			}
 		}
 	}
-	if seen != 6 {
-		t.Fatalf("chat model fields = %d, want 6", seen)
+	if seen != 7 {
+		t.Fatalf("chat preference fields = %d, want 7", seen)
+	}
+	for _, query := range []string{"按群配置推理强度", "私聊推理强度", "group reasoning effort"} {
+		result := core.SearchConfigCatalog(catalog, query)
+		found := false
+		for _, option := range result.Options {
+			if option.Path == "projects.chat_models.reasoning_effort" {
+				found = option.Requirement == core.ConfigRequirementConditional && option.DefaultSource == core.ConfigDefaultInherit
+			}
+		}
+		if !found {
+			t.Errorf("%q did not find chat effort with its inheritance contract", query)
+		}
 	}
 }
 

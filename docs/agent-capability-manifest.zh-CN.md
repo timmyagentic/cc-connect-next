@@ -121,14 +121,15 @@ Manifest 不把“命令存在”误写成“当前一定能执行”：模型�
   机器人/项目互不影响，共用工作区目录的机器人也不共享绑定。
 
 两种绑定均不按话题、会话或工作区目录划分，跨 `/reset`、`/new` 及重启持久保留。
-项目状态的 `chat_model_bindings` 保存 `ChatModelBinding`；会话 `ChatKey`
-对应 JSON 字段 `chat_key`。聊天设置声明 `persistent_state` 副作用；
-`configuration`、`agent_process` 描述全局默认模型变更。整体命令因同时包含设置操作
-和只读查询而保持可写。模型和推理强度独立持久化，`/model reset` 只清除模型绑定。
-不需要新增 `config.toml` 字段。
+模型和推理强度统一保存在 `config.toml` 的 `[[projects.chat_models]]`，独立设置和重置。
+`/model reset` 只清除模型；`/reasoning chat reset` 只清除 `reasoning_effort`；
+最后一项也重置后才删除条目。会话 `ChatKey` 仍对应 JSON 字段 `chat_key`。
+命令声明 `configuration`、`persistent_state` 和 `agent_process` 副作用，分别覆盖配置写入、
+会话元数据和原默认值变更；只读查询沿用原权限。
 
-旧模型状态字段不迁移；此前保存的聊天模型绑定和工作区默认模型不会沿用，
-需要通过上述命令重新选择。
+启动接受命令前，会将旧项目 JSON 中的模型和强度绑定导入配置。显式 TOML 模型条目及
+明确填写的强度字段（含空值继承）优先；仅配置保存成功后才清理旧绑定，其他运行状态保留。
+`/config reload` 同时替换模型和强度绑定，修改及删除从后续回合生效。
 
 全部三条发送路径在执行时分别解析各字段，包括排队请求。变更在下次新回合生效，
 不打断当前回复。`/fast`/回答预设或任务显式指定的单次模型只覆盖模型字段；
@@ -164,7 +165,8 @@ Provider 名称。可切换 Provider 的 Agent 执行聊天固定模型请求时
 恢复时应执行 `/reasoning chat <level>` 重新选择，或执行 `/reasoning chat reset`
 清除强度绑定；即使后端不再支持固定强度，只要身份已验证且存储有效，仍可 reset。
 
-聊天 effort 独立于模型保存，使用项目内相同的群或私聊 key。群内覆盖全部成员及话题，
+聊天 effort 保存在模型所在 `[[projects.chat_models]]` 条目的 `reasoning_effort` 字段，
+使用项目内相同的群或私聊 key。群内覆盖全部成员及话题，
 私聊按已验证用户和机器人/项目隔离，跨 `/new`、`/reset` 和重启保留。
 排队请求执行时分别解析模型和强度，任务/预设显式指定的字段分别优先。
 仅指定模型的预设仍继承聊天强度，仅指定强度的预设仍继承聊天模型。
