@@ -8,6 +8,12 @@
 
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
+## v0.3.5-beta.12 (2026-10-31)
+
+- Persist chat model and reasoning effort together, with independent resets and safe migration of legacy reasoning bindings.
+- Display redacted upstream Agent error details while retaining visible partial replies.
+- See `changelogs/v0.3.5-beta.12.md` for migration, downgrade and verification details.
+
 ## v0.3.5-beta.11 (2026-10-28)
 
 - Store chat model selections in `[[projects.chat_models]]` in config.toml, with command persistence and manual-edit reload support.
