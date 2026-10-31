@@ -128,17 +128,20 @@ The parameter contract describes isolation within each bot/project:
   bots that share a workspace directory.
 
 Neither binding is scoped to a topic, conversation, or workspace directory.
-Both survive `/reset`, `/new`, and restarts. `ChatModelBinding` is stored under
-`chat_model_bindings` in project state; session `ChatKey` uses the JSON key
-`chat_key`. Chat writes declare `persistent_state`; `configuration` and
-`agent_process` describe global-default changes. The overall command remains
-mutating because it exposes setters as well as read-only queries. Model and
-reasoning effort persist independently; `/model reset` clears only the model
-binding. No new `config.toml` fields are needed.
+Both survive `/reset`, `/new`, and restarts. Model and reasoning effort are
+stored together in `config.toml` under `[[projects.chat_models]]`, with
+independent setters and resets. `/model reset` clears only `model`;
+`/reasoning chat reset` clears only `reasoning_effort`. The last reset removes
+the entry. Session `ChatKey` uses the JSON key `chat_key`. Commands declare
+`configuration`, `persistent_state`, and `agent_process` effects, covering
+configuration writes, session metadata, and legacy default changes. Read-only
+queries retain their existing permissions.
 
-There is no migration for older model-state fields. Previous chat model
-bindings and workspace-specific model defaults are not carried over; select
-the desired model again with the commands above.
+Startup imports legacy project JSON model and reasoning bindings before
+accepting commands. Explicit TOML model entries and explicitly set effort
+(including empty inheritance) win. JSON preferences are removed only after a
+successful config save; unrelated runtime state remains. /config reload
+replaces both preference maps, including removals, for subsequent turns.
 
 All three send paths resolve each field at execution, including queued work.
 Changes affect the next new turn and leave a running reply alone. An explicit
@@ -189,8 +192,8 @@ mismatches fail explicitly without silent fallback. Reselect with
 reset remains available with verified identity and storage even when pinning
 is unsupported.
 
-Chat effort is stored independently of the model, using the same project-local
-group or DM key. Groups share it across all members/topics; private chats are
+Chat effort uses `reasoning_effort` in the same `[[projects.chat_models]]` entry
+as its model, using the same project-local group or DM key. Groups share it across all members/topics; private chats are
 isolated by verified user and bot/project. It persists across `/new`, `/reset`,
 and restarts. Each queued turn resolves model and effort separately: an
 explicit task/profile value wins only for its own field. A model-only profile

@@ -873,10 +873,10 @@ name = "my-backend"
 #   - check background tasks
 #   - continue unfinished work
 
-# Chat model bindings — for a project with per-turn model support (Codex).
-# 聊天模型绑定 — 用于支持逐回合指定模型的项目（Codex）。
-# /model <name> writes the current chat here; /model reset removes its entry.
-# /model <name> 将当前聊天选择写入这里；/model reset 删除对应条目。
+# Chat model and effort bindings — for a project with per-turn support (Codex).
+# 聊天模型与推理强度绑定 — 用于支持逐回合设置的项目（Codex）。
+# /model and /reasoning chat write independent fields here; resetting the last pin removes the entry.
+# /model 与 /reasoning chat 分别写回字段；最后一项也重置后才删除条目。
 # After manual edits/deletions, run /config reload in this bot/project.
 # 手工修改/删除后在本机器人/项目执行 /config reload，后续回合生效。
 # Group members and topics share chat_id; private chats use user_id instead.
@@ -895,6 +895,7 @@ name = "my-backend"
 # agent = "codex"
 # provider = "relay"
 # model = "gpt-4.1"
+# reasoning_effort = "high"
 #
 # [[projects.chat_models]]
 # platform = "feishu"
@@ -902,6 +903,9 @@ name = "my-backend"
 # agent = "codex"
 # provider = "relay"
 # model = "o4-mini"
+# reasoning_effort = "low"
+# Set at least one field; omitted/empty fields inherit. Effort comes from /reasoning.
+# 至少设置模型或强度之一；省略或空值时继承，强度取自 /reasoning 列表。
 
 [projects.agent]
 type = "claudecode"

@@ -315,7 +315,7 @@ func TestChatModels_MergeLegacyExplicitWinsAndIdempotent(t *testing.T) {
 		"feishu:b":       {Model: "imported", Provider: "codex:cpa"},
 		"feishu:dm:user": {Model: "private", Provider: "codex:cpa"},
 	}
-	if err := MergeLegacyChatModels("alpha", legacy); err != nil {
+	if err := MergeLegacyChatModels("alpha", legacy, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := LoadChatModels("alpha")
@@ -323,7 +323,7 @@ func TestChatModels_MergeLegacyExplicitWinsAndIdempotent(t *testing.T) {
 		t.Fatalf("migration = %#v, %v", got, err)
 	}
 	before, _ := os.ReadFile(path)
-	if err := MergeLegacyChatModels("alpha", legacy); err != nil {
+	if err := MergeLegacyChatModels("alpha", legacy, nil); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(path)

@@ -449,7 +449,7 @@ Bindings are isolated within each bot/project:
 
 Bindings are not tied to a topic, conversation, or workspace directory. They persist across `/reset`, `/new`, and bridge restarts. `/model reset` removes only the model binding and restores default-model inheritance; this chat's reasoning effort stays unchanged.
 
-The authoritative settings are `[[projects.chat_models]]` entries in `config.toml`, under the corresponding `[[projects]]`. `/model <name>` writes the same entry that you can edit by hand; `/model reset` deletes it. Failed saves leave the running selection unchanged and report an error. Other bots/projects, comments, and unrelated settings are preserved.
+The authoritative settings are `[[projects.chat_models]]` entries in `config.toml`, under the corresponding `[[projects]]`. `/model <name>` writes the same entry that you can edit by hand; `/model reset` clears only the model, preserving chat effort; the entry is deleted only when neither preference remains pinned. `/reasoning chat <level>` writes `reasoning_effort` in the same entry. Failed saves leave the running selection unchanged and report an error. Other bots/projects, comments, and unrelated settings are preserved.
 
 For example, inside an existing Codex project that has a `feishu` platform and a provider named `relay`:
 
@@ -460,6 +460,7 @@ chat_id = "oc_example_group"
 agent = "codex"
 provider = "relay"
 model = "gpt-4.1"
+reasoning_effort = "high"
 
 [[projects.chat_models]]
 platform = "feishu"
@@ -467,15 +468,18 @@ user_id = "ou_example_user"
 agent = "codex"
 provider = "relay"
 model = "o4-mini"
+reasoning_effort = "low"
 ```
 
-Set exactly one of `chat_id` (group/channel ID) or `user_id` (private-chat user's ID). Duplicate bindings for the same project/platform/chat are rejected. `provider` is a provider name configured for this project, without an Agent prefix. Empty or omitted `provider` means the native provider, **not** inheritance from the currently active provider. `agent` may be omitted to use the project's Agent type; chat commands save it explicitly so a later adapter change cannot silently reuse the binding with a different Agent. The binding checks the provider identity and does not switch providers.
+Set at least one of `model` or `reasoning_effort`; either can be pinned alone. Omitted or empty fields inherit their defaults. Choose effort from the active Agent’s `/reasoning` catalog.
 
-After manually editing or deleting entries, run `/config reload` in the affected bot/project. The reload replaces its complete binding table, so deleted entries resume following the project default. It reports the number of bindings loaded. Running replies keep their model; subsequent requests, including queued ones, use the reloaded settings. An invalid configuration is reported without replacing the existing binding table.
+Set exactly one of `chat_id` (group/channel ID) or `user_id` (private-chat user's ID). Duplicate bindings for the same project/platform/chat are rejected. `provider` is a provider name configured for this project, without an Agent prefix. Empty or omitted `provider` means the native provider, **not** inheritance from the currently active provider. `agent` may be omitted to use the project's Agent type; chat commands save it explicitly so a later adapter change cannot silently reuse the binding with a different Agent. Model and effort share the entry’s Agent/Provider identity. Reset the other pinned field before selecting a different Provider. The binding checks the provider identity and does not switch providers.
+
+After manually editing or deleting entries, run `/config reload` in the affected bot/project. The reload replaces both model and effort preferences: deleting a field restores that field’s default, and deleting an entry restores both. It reports the number of chat entries loaded. Running replies keep their settings; subsequent requests, including queued ones, use the reloaded settings. An invalid configuration is reported without replacing the existing binding table.
 
 Bindings retain the expected platform and provider identity even if those are later removed. Entries for inactive platforms remain dormant; a missing or different active provider produces an error only in the affected chat, without switching provider or falling back to the default.
 
-On startup, existing `group_model_bindings` (beta.9) and `chat_model_bindings` (beta.10) in `projects/<project>.state.json` are imported into TOML. Explicit TOML entries win when both sources identify the same chat. Only after saving TOML successfully are the old model fields removed; directory and reasoning state are retained. A migration failure stops startup and preserves recoverable data for retry. The old verified `group_model_key` session metadata is also read as `chat_key`. Workspace-specific model defaults are not converted into chat bindings because a workspace does not identify a chat.
+On startup, existing `group_model_bindings` (beta.9), `chat_model_bindings` (beta.10), and `group_reasoning_bindings` in `projects/<project>.state.json` are imported into TOML. An existing TOML entry retains its model. Legacy effort is imported only if `reasoning_effort` is omitted; an explicit empty value keeps default inheritance. A conflicting Agent/Provider between the resulting model and effort fails migration and preserves the source. Only after saving TOML successfully are all three legacy fields removed; directories and other state are retained. A migration failure stops startup and preserves recoverable data for retry. The old verified `group_model_key` session metadata is also read as `chat_key`. Workspace-specific model defaults are not converted into chat bindings because a workspace does not identify a chat.
 
 Chat selections are resolved when each new request executes, including queued requests. A change or reset takes effect on the next new request; an already running reply keeps its model. An explicit one-shot model from `/fast`, another answer profile, or a task takes precedence for that request; subsequent ordinary messages return to the chat's selection. A profile without an explicit model still inherits the chat model. Model and reasoning effort are resolved independently: overriding one field does not discard the other field's chat setting.
 
@@ -492,7 +496,7 @@ If an existing conversation is still connected to a different Provider, sending 
 /effort chat high         Alias for /reasoning chat high
 ```
 
-Choose a level from the current Agent's `/reasoning` catalog. Chat effort requires verified private-chat or group identity and per-turn reasoning support (currently Codex `exec` and `app_server`). It uses the same project/platform/chat scope as chat models: all members and topics of a group share it, while DMs are isolated by verified user within each bot/project. It persists across `/new`, `/reset`, and restarts. Model and effort bindings are saved independently; resetting either leaves the other unchanged.
+Choose a level from the current Agent's `/reasoning` catalog. Chat effort requires verified private-chat or group identity and per-turn reasoning support (currently Codex `exec` and `app_server`). It uses the same project/platform/chat scope as chat models: all members and topics of a group share it, while DMs are isolated by verified user within each bot/project. It persists across `/new`, `/reset`, and restarts. Model and effort are saved together in `[[projects.chat_models]]` in `config.toml`, with independent setters and resets. Manual `reasoning_effort` edits apply through `/config reload`; chat effort is no longer written to project JSON state.
 
 `/effort` is an alias for `/reasoning`. The legacy `group` subcommand also remains an alias for `chat`, so `/reasoning group [<level>|reset]` and `/effort group [<level>|reset]` still work in both verified DMs and groups.
 

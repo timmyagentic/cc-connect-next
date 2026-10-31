@@ -36,11 +36,11 @@
 
 相关配置： `cron.silent`, `cron.session_mode`, `projects.heartbeat.enabled`, `projects.heartbeat.interval_mins`, `projects.heartbeat.session_key`
 
-### 按群或私聊持久配置模型 (`chat-model-bindings`)
+### 按群或私聊持久配置模型和推理强度 (`chat-model-bindings`)
 
-在 config.toml 中保存各群或私聊模型；聊天选择与手工编辑共用项目内配置，reload 后修改及删除从后续回合生效。
+在 config.toml 中统一保存各群或私聊模型和推理强度；聊天选择与手工编辑共用项目内配置，reload 后修改及删除从后续回合生效。
 
-相关配置： `projects.chat_models.platform`, `projects.chat_models.chat_id`, `projects.chat_models.user_id`, `projects.chat_models.model`, `projects.chat_models.provider`, `projects.chat_models.agent`
+相关配置： `projects.chat_models.platform`, `projects.chat_models.chat_id`, `projects.chat_models.user_id`, `projects.chat_models.model`, `projects.chat_models.reasoning_effort`, `projects.chat_models.provider`, `projects.chat_models.agent`
 
 ### 命令、别名与内容策略 (`customization`)
 
@@ -2610,16 +2610,17 @@ enabled = true`
 
 ### `projects.chat_models.model`
 
-固定本聊天模型 ID。/model 写回此条目，/model reset 删除条目；手工编辑后 /config reload 从后续回合生效，正在执行的回合保持原模型。
+固定本聊天模型；省略或空值时继承。model 与 reasoning_effort 至少设置一项。/model 只修改模型，重置会保留聊天强度；手改后 /config reload 从后续回合生效。
 
 - 来源：`toml`
 - 配置位置：`[[projects.chat_models]] (inside one [[projects]])`
 - 作用域：`project`
 - 类型：`string`
-- 要求：`必填`
-- 默认值：`none`
-- 默认值来源：`none`
+- 要求：`条件必填`
+- 默认值：`inherit`
+- 默认值来源：`inherit`
 - 生效方式：`reload`
+- 必填条件: `projects.chat_models.reasoning_effort is unset or empty`
 - 示例: `model = "gpt-4.1"`
 
 ### `projects.chat_models.platform`
@@ -2638,7 +2639,7 @@ enabled = true`
 
 ### `projects.chat_models.provider`
 
-填写预期的项目 Provider 名称，不带 Agent 前缀。空值或省略表示原生 Provider，不表示继承；该绑定不会切换 Provider。预期 Provider 缺失或与当前值不符时，仅对应聊天报错。
+填写聊天模型与强度共用的预期 Provider 名称，不带 Agent 前缀。选择不同 Provider 前应先重置另一字段。空值或省略表示原生 Provider，不表示继承；该绑定不会切换 Provider。预期 Provider 缺失或与当前值不符时，仅对应聊天报错。
 
 - 来源：`toml`
 - 配置位置：`[[projects.chat_models]] (inside one [[projects]])`
@@ -2649,6 +2650,21 @@ enabled = true`
 - 默认值来源：`builtin`
 - 生效方式：`reload`
 - 示例: `provider = "relay"`
+
+### `projects.chat_models.reasoning_effort`
+
+按当前 Agent 的强度列表独立固定本聊天推理强度；省略或空值时继承。/reasoning chat 写回此字段，重置会保留聊天模型。手改后 /config reload 生效；仅在省略字段时导入旧 JSON 强度。
+
+- 来源：`toml`
+- 配置位置：`[[projects.chat_models]] (inside one [[projects]])`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`条件必填`
+- 默认值：`inherit`
+- 默认值来源：`inherit`
+- 生效方式：`reload`
+- 必填条件: `projects.chat_models.model is unset or empty`
+- 示例: `reasoning_effort = "high"`
 
 ### `projects.chat_models.user_id`
 

@@ -11,16 +11,17 @@ import (
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
-// ChatModelConfig is a persistent model preference for one verified group or
+// ChatModelConfig holds model and effort preferences for one verified group or
 // direct-message user. Topics inherit their group's preference. Agent pins the
 // adapter identity; omitting it uses the project's configured agent type.
 type ChatModelConfig struct {
-	Platform string `toml:"platform"`
-	ChatID   string `toml:"chat_id,omitempty"`
-	UserID   string `toml:"user_id,omitempty"`
-	Model    string `toml:"model"`
-	Provider string `toml:"provider,omitempty"`
-	Agent    string `toml:"agent,omitempty"`
+	Platform        string  `toml:"platform"`
+	ChatID          string  `toml:"chat_id,omitempty"`
+	UserID          string  `toml:"user_id,omitempty"`
+	Model           string  `toml:"model,omitempty"`
+	ReasoningEffort *string `toml:"reasoning_effort,omitempty"`
+	Provider        string  `toml:"provider,omitempty"`
+	Agent           string  `toml:"agent,omitempty"`
 }
 
 func (c ChatModelConfig) key() string {
@@ -34,7 +35,14 @@ func (c ChatModelConfig) binding(agent string) core.ChatModelBinding {
 	if c.Agent != "" {
 		agent = c.Agent
 	}
-	return core.ChatModelBinding{Model: c.Model, Provider: agent + ":" + c.Provider}
+	return core.ChatModelBinding{Model: c.Model, Provider: agent + ":" + c.Provider, ReasoningEffort: c.effort()}
+}
+
+func (c ChatModelConfig) effort() string {
+	if c.ReasoningEffort != nil {
+		return *c.ReasoningEffort
+	}
+	return ""
 }
 
 func validateChatModels(prefix string, proj ProjectConfig) error {
@@ -44,6 +52,7 @@ func validateChatModels(prefix string, proj ProjectConfig) error {
 		for _, field := range []struct{ name, value string }{
 			{"platform", c.Platform}, {"chat_id", c.ChatID}, {"user_id", c.UserID},
 			{"model", c.Model}, {"provider", c.Provider}, {"agent", c.Agent},
+			{"reasoning_effort", c.effort()},
 		} {
 			if strings.IndexFunc(field.value, unicode.IsSpace) >= 0 || strings.ContainsRune(field.value, 0) {
 				return fmt.Errorf("config: %s.%s must not contain whitespace or NUL", path, field.name)
@@ -58,8 +67,8 @@ func validateChatModels(prefix string, proj ProjectConfig) error {
 		if strings.HasPrefix(c.ChatID, "dm:") {
 			return fmt.Errorf("config: %s.chat_id uses the reserved dm: namespace; use user_id", path)
 		}
-		if c.Model == "" {
-			return fmt.Errorf("config: %s.model is required", path)
+		if c.Model == "" && c.effort() == "" {
+			return fmt.Errorf("config: %s requires model or reasoning_effort", path)
 		}
 		if strings.Contains(c.Agent, ":") {
 			return fmt.Errorf("config: %s.agent must be an agent type without a provider suffix", path)
@@ -112,16 +121,48 @@ func LoadChatModels(projectName string) (map[string]core.ChatModelBinding, error
 	return chatModelMap(cfg.Projects[i]), nil
 }
 
-// SaveChatModel changes only one target. An empty Model resets that target.
+// SaveChatModel changes only the model. An empty Model preserves pinned effort.
 // The complete resulting map is returned only after durable config replacement.
 func SaveChatModel(projectName, key string, binding core.ChatModelBinding) (map[string]core.ChatModelBinding, error) {
+	return saveChatPreference(projectName, key, &binding, nil)
+}
+
+// SaveChatReasoningEffort changes only the effort, preserving the chat model.
+func SaveChatReasoningEffort(projectName, key string, binding core.GroupReasoningBinding) (map[string]core.ChatModelBinding, error) {
+	return saveChatPreference(projectName, key, nil, &binding)
+}
+
+func saveChatPreference(projectName, key string, model *core.ChatModelBinding, reasoning *core.GroupReasoningBinding) (map[string]core.ChatModelBinding, error) {
 	configMu.Lock()
 	defer configMu.Unlock()
 	raw, cfg, idx, err := readChatModelConfig(projectName)
 	if err != nil {
 		return nil, err
 	}
-	raw, err = patchChatModel(raw, cfg, idx, key, binding)
+	binding := chatModelMap(cfg.Projects[idx])[key]
+	if model != nil {
+		if model.Model != "" {
+			if binding.ReasoningEffort != "" && binding.Provider != model.Provider {
+				return nil, fmt.Errorf("chat model and reasoning effort must use the same provider; reset the chat effort before changing provider")
+			}
+			binding.Provider = model.Provider
+		}
+		binding.Model = model.Model
+	}
+	if reasoning != nil {
+		if reasoning.Effort != "" {
+			if binding.Model != "" && binding.Provider != reasoning.Provider {
+				return nil, fmt.Errorf("chat model and reasoning effort must use the same provider; reset the chat model before changing provider")
+			}
+			binding.Provider = reasoning.Provider
+		}
+		binding.ReasoningEffort = reasoning.Effort
+	}
+	field := "model"
+	if reasoning != nil {
+		field = "reasoning_effort"
+	}
+	raw, err = patchChatModel(raw, cfg, idx, key, binding, field)
 	if err != nil {
 		return nil, err
 	}
@@ -138,26 +179,51 @@ func SaveChatModel(projectName, key string, binding core.ChatModelBinding) (map[
 // MergeLegacyChatModels imports missing legacy targets in one config write.
 // Explicit TOML targets always win. The caller removes old state only after
 // this succeeds and must finish that cleanup before accepting commands.
-func MergeLegacyChatModels(projectName string, legacy map[string]core.ChatModelBinding) error {
+func MergeLegacyChatModels(projectName string, legacy map[string]core.ChatModelBinding, reasoning map[string]core.GroupReasoningBinding) error {
 	configMu.Lock()
 	defer configMu.Unlock()
 	raw, cfg, idx, err := readChatModelConfig(projectName)
 	if err != nil {
 		return err
 	}
-	existing := chatModelMap(cfg.Projects[idx])
-	keys := make([]string, 0, len(legacy))
-	for key, binding := range legacy {
-		if _, ok := existing[key]; !ok && binding.Model != "" {
-			keys = append(keys, key)
-		}
+	existing := make(map[string]ChatModelConfig)
+	for _, entry := range cfg.Projects[idx].ChatModels {
+		existing[entry.key()] = entry
 	}
-	if len(keys) == 0 {
-		return nil
+	targets := make(map[string]bool)
+	for key := range legacy {
+		targets[key] = true
 	}
+	for key := range reasoning {
+		targets[key] = true
+	}
+	keys := make([]string, 0, len(targets))
+	for key := range targets {
+		keys = append(keys, key)
+	}
+	changed := false
 	sort.Strings(keys)
 	for _, key := range keys {
-		raw, err = patchChatModel(raw, cfg, idx, key, legacy[key])
+		entry, configured := existing[key]
+		binding := entry.binding(cfg.Projects[idx].Agent.Type)
+		if !configured {
+			binding = legacy[key]
+		}
+		if old := reasoning[key]; old.Effort != "" && (!configured || entry.ReasoningEffort == nil) {
+			if binding.Model != "" && binding.Provider != old.Provider {
+				return fmt.Errorf("migrate chat preferences for %s: model and reasoning effort have different providers", key)
+			}
+			binding.ReasoningEffort = old.Effort
+			binding.Provider = old.Provider
+		}
+		if binding.Model == "" && binding.ReasoningEffort == "" || configured && binding == entry.binding(cfg.Projects[idx].Agent.Type) {
+			continue
+		}
+		field := ""
+		if configured {
+			field = "reasoning_effort"
+		}
+		raw, err = patchChatModel(raw, cfg, idx, key, binding, field)
 		if err != nil {
 			return err
 		}
@@ -165,6 +231,10 @@ func MergeLegacyChatModels(projectName string, legacy map[string]core.ChatModelB
 		if err != nil {
 			return err
 		}
+		changed = true
+	}
+	if !changed {
+		return nil
 	}
 	return writeRawConfig(raw)
 }
@@ -204,12 +274,15 @@ func chatModelFromBinding(key string, binding core.ChatModelBinding) (ChatModelC
 		return ChatModelConfig{}, fmt.Errorf("invalid verified chat key")
 	}
 	c := ChatModelConfig{Platform: platform, Model: binding.Model}
+	if binding.ReasoningEffort != "" {
+		c.ReasoningEffort = &binding.ReasoningEffort
+	}
 	if strings.HasPrefix(target, "dm:") {
 		c.UserID = strings.TrimPrefix(target, "dm:")
 	} else {
 		c.ChatID = target
 	}
-	if binding.Model != "" {
+	if binding.Model != "" || binding.ReasoningEffort != "" {
 		var hasAgent bool
 		c.Agent, c.Provider, hasAgent = strings.Cut(binding.Provider, ":")
 		if !hasAgent || c.Agent == "" {
@@ -222,7 +295,7 @@ func chatModelFromBinding(key string, binding core.ChatModelBinding) (ChatModelC
 // patchChatModel edits an array table without re-encoding the surrounding
 // configuration (comments, secrets, environment placeholders, and unknown
 // settings remain in their original text). Unsupported layouts fail closed.
-func patchChatModel(raw string, cfg *Config, idx int, key string, binding core.ChatModelBinding) (string, error) {
+func patchChatModel(raw string, cfg *Config, idx int, key string, binding core.ChatModelBinding, changedField string) (string, error) {
 	entry, err := chatModelFromBinding(key, binding)
 	if err != nil {
 		return "", err
@@ -253,7 +326,7 @@ func patchChatModel(raw string, cfg *Config, idx int, key string, binding core.C
 				break
 			}
 		}
-		if binding.Model == "" {
+		if binding.Model == "" && binding.ReasoningEffort == "" {
 			// Unknown child tables belong to this entry as well. Leaving one
 			// behind would reattach it to a different target after reset.
 			for end <= span.end && (strings.HasPrefix(strings.TrimSpace(lines[end]), "[projects.chat_models.") || strings.HasPrefix(strings.TrimSpace(lines[end]), "[[projects.chat_models.")) {
@@ -268,7 +341,22 @@ func patchChatModel(raw string, cfg *Config, idx int, key string, binding core.C
 			}
 			lines = append(lines[:start], lines[end:]...)
 		} else {
-			for _, field := range [][2]string{{"model", entry.Model}, {"provider", entry.Provider}, {"agent", entry.Agent}} {
+			for _, field := range [][2]string{{"model", entry.Model}, {"reasoning_effort", entry.effort()}, {"provider", entry.Provider}, {"agent", entry.Agent}} {
+				if changedField != "" && field[0] != changedField && (field[0] == "model" || field[0] == "reasoning_effort") {
+					continue
+				}
+				present := false
+				for _, line := range lines[start+1 : end] {
+					present = present || matchTomlStringKey(line, field[0])
+				}
+				if present && (field[0] == "provider" || field[0] == "agent") && current.binding(cfg.Projects[idx].Agent.Type).Provider == binding.Provider {
+					// Preserve explicit identity expressions when the identity
+					// itself did not change, including environment placeholders.
+					continue
+				}
+				if !present && field[1] == "" && (field[0] == "model" || field[0] == "reasoning_effort") {
+					continue
+				}
 				before := len(lines)
 				lines = upsertTomlStringKey(lines, start+1, end-1, field[0], field[1])
 				end += len(lines) - before
@@ -276,7 +364,7 @@ func patchChatModel(raw string, cfg *Config, idx int, key string, binding core.C
 		}
 		return joinConfigLines(lines, trailing), nil
 	}
-	if binding.Model == "" {
+	if binding.Model == "" && binding.ReasoningEffort == "" {
 		return raw, nil
 	}
 	// Insert after the project's own fields, before its first child or global
@@ -311,7 +399,13 @@ func patchChatModel(raw string, cfg *Config, idx int, key string, binding core.C
 	} else {
 		newLines = append(newLines, "chat_id = "+quoteTomlString(entry.ChatID))
 	}
-	newLines = append(newLines, "model = "+quoteTomlString(entry.Model), "provider = "+quoteTomlString(entry.Provider), "agent = "+quoteTomlString(entry.Agent), "")
+	if entry.Model != "" {
+		newLines = append(newLines, "model = "+quoteTomlString(entry.Model))
+	}
+	if entry.effort() != "" {
+		newLines = append(newLines, "reasoning_effort = "+quoteTomlString(entry.effort()))
+	}
+	newLines = append(newLines, "provider = "+quoteTomlString(entry.Provider), "agent = "+quoteTomlString(entry.Agent), "")
 	lines = append(lines[:insert], append(newLines, lines[insert:]...)...)
 	return joinConfigLines(lines, trailing), nil
 }

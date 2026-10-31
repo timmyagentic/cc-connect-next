@@ -426,7 +426,7 @@ alias = "spark"
 
 绑定不按话题、会话或工作区目录划分，跨 `/reset`、`/new` 及服务重启保留。`/model reset` 只解除模型绑定并恢复跟随默认模型，本聊天推理强度保持原设置。
 
-`config.toml` 中对应 `[[projects]]` 下的 `[[projects.chat_models]]` 是绑定的唯一配置来源。`/model <name>` 写回的就是可以手工编辑的条目，`/model reset` 删除该条目。保存失败时保留原运行设置并明确报错；其他机器人/项目、注释及无关设置保持不变。
+`config.toml` 中对应 `[[projects]]` 下的 `[[projects.chat_models]]` 是绑定的唯一配置来源。`/model <name>` 写回的就是可以手工编辑的条目，`/model reset` 只清除模型，保留推理强度；模型和强度都不再固定时才删除条目。`/reasoning chat <level>` 写回同一条目的 `reasoning_effort`。保存失败时保留原运行设置并明确报错；其他机器人/项目、注释及无关设置保持不变。
 
 例如，在一个已配置 `feishu` 平台及名为 `relay` 的 Provider 的 Codex 项目中加入：
 
@@ -437,6 +437,7 @@ chat_id = "oc_example_group"
 agent = "codex"
 provider = "relay"
 model = "gpt-4.1"
+reasoning_effort = "high"
 
 [[projects.chat_models]]
 platform = "feishu"
@@ -444,15 +445,18 @@ user_id = "ou_example_user"
 agent = "codex"
 provider = "relay"
 model = "o4-mini"
+reasoning_effort = "low"
 ```
 
-`chat_id`（群/频道 ID）与 `user_id`（私聊用户 ID）必须且只能填写一个。同项目、平台、聊天的重复绑定会被拒绝。`provider` 使用本项目已配置的 Provider 名称，不带 Agent 前缀；省略或留空表示原生 Provider，**不表示继承当前激活的 Provider**。`agent` 可省略，默认使用项目 Agent 类型；聊天命令会明确保存当前类型，防止更换适配器后静默沿用旧绑定。绑定会核对 Provider 身份，不会切换 Provider。
+`model` 和 `reasoning_effort` 至少指定一项，可单独固定模型或强度；每个字段省略或为空时跟随默认。强度从当前 Agent 的 `/reasoning` 列表选择。
 
-手工修改或删除条目后，在对应机器人/项目中执行 `/config reload`。reload 会替换整张聊天模型绑定表，因此删除条目会恢复跟随项目默认，并在结果中显示已加载的绑定数量。当前回复保持原模型，后续请求（包括排队请求）使用新设置。配置无效时会报错，并保留原绑定表。
+`chat_id`（群/频道 ID）与 `user_id`（私聊用户 ID）必须且只能填写一个。同项目、平台、聊天的重复绑定会被拒绝。`provider` 使用本项目已配置的 Provider 名称，不带 Agent 前缀；省略或留空表示原生 Provider，**不表示继承当前激活的 Provider**。`agent` 可省略，默认使用项目 Agent 类型；聊天命令会明确保存当前类型，防止更换适配器后静默沿用旧绑定。模型和强度共用本条目的 Agent/Provider 身份；保留的另一项属于不同 Provider 时，先重置另一项再重新选择。绑定会核对 Provider 身份，不会切换 Provider。
+
+手工修改或删除条目后，在对应机器人/项目中执行 `/config reload`。reload 会同时替换模型和强度绑定，因此删除字段会让该字段恢复默认，删除整个条目会让两项都恢复默认，并在结果中显示已加载的聊天条目数量。当前回复保持原设置，后续请求（包括排队请求）使用新设置。配置无效时会报错，并保留原绑定表。
 
 平台或 Provider 被移除后，绑定仍保留原身份。未启用平台的条目保持休眠；预期 Provider 缺失或与当前值不同，仅对应聊天明确报错，不会自动切换 Provider 或回退默认模型，也不会阻止其他项目启动。
 
-启动时会将 `projects/<project>.state.json` 中已有的 `group_model_bindings`（beta.9）及 `chat_model_bindings`（beta.10）导入 TOML；同一聊天已有显式 TOML 条目时，以 TOML 为准。只有 TOML 保存成功后才清理旧模型字段，目录及推理强度状态仍然保留。迁移失败会停止启动并保留可恢复数据，修正后可重试。旧会话中已验证的 `group_model_key` 也会按 `chat_key` 读取。工作区默认模型不会转换为聊天绑定，因为工作区本身不能确定具体聊天。
+启动时将 `projects/<project>.state.json` 中已有的 `group_model_bindings`（beta.9）、`chat_model_bindings`（beta.10）和 `group_reasoning_bindings` 导入 TOML。同一聊天已有 TOML 条目时保留其模型；未指定 `reasoning_effort` 时导入旧强度，显式空值则保留默认继承。迁移后的模型和强度必须使用同一 Agent/Provider，否则报错并保留原数据。只有 TOML 保存成功后才清理三个旧绑定字段，目录及其他状态继续保留。迁移失败会停止启动并保留可恢复数据，修正后可重试。旧会话中已验证的 `group_model_key` 也会按 `chat_key` 读取。工作区默认模型不会转换为聊天绑定，因为工作区本身不能确定具体聊天。
 
 每个新请求开始执行时解析聊天模型，排队请求也遵循这一规则。设置或重置从下次新请求生效，正在运行的回复保持原模型。`/fast`、其他回答预设或任务显式指定的单次模型优先，仅作用于该请求；之后的普通消息继续使用聊天选择。未显式指定模型的回答预设仍继承聊天模型。模型和推理强度分别解析，覆盖其中一个字段不会丢弃另一个字段的聊天设置。
 
@@ -469,7 +473,7 @@ model = "o4-mini"
 /effort chat high         /reasoning chat high 的别名
 ```
 
-可选等级取自当前 Agent 的 `/reasoning` 列表。聊天 effort 需要已验证的私聊或群聊身份及逐回合强度能力（目前 Codex `exec` 和 `app_server` 支持）。隔离规则与聊天模型相同，按项目、平台和聊天绑定：群内覆盖全部成员及话题，私聊在各机器人/项目内按已验证用户隔离。绑定跨 `/new`、`/reset` 和重启保留。模型和强度分别保存，重置一项会保留另一项。
+可选等级取自当前 Agent 的 `/reasoning` 列表。聊天 effort 需要已验证的私聊或群聊身份及逐回合强度能力（目前 Codex `exec` 和 `app_server` 支持）。隔离规则与聊天模型相同，按项目、平台和聊天绑定：群内覆盖全部成员及话题，私聊在各机器人/项目内按已验证用户隔离。绑定跨 `/new`、`/reset` 和重启保留。模型和强度统一保存在 `config.toml` 的 `[[projects.chat_models]]`，但独立设置和重置。手工修改 `reasoning_effort` 后执行 `/config reload`；不再向项目 JSON 状态写回聊天强度。
 
 `/effort` 是 `/reasoning` 的别名。旧的 `group` 子命令仍作为 `chat` 的兼容别名，因此 `/reasoning group [<level>|reset]` 和 `/effort group [<level>|reset]` 在已验证的私聊和群聊中都可使用。
 

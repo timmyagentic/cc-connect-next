@@ -36,11 +36,11 @@ Configure recurring defaults, one-shot task behavior, and periodic main-session 
 
 Related configuration: `cron.silent`, `cron.session_mode`, `projects.heartbeat.enabled`, `projects.heartbeat.interval_mins`, `projects.heartbeat.session_key`
 
-### Persistent models for groups and private chats (`chat-model-bindings`)
+### Persistent models and effort for groups and private chats (`chat-model-bindings`)
 
-Keep each chat's model in config.toml. Chat selections and manual edits use the same project-scoped settings; reload applies edits and removals to subsequent turns.
+Keep each chat's model and reasoning effort together in config.toml. Chat selections and manual edits use the same project-scoped settings; reload applies edits and removals to subsequent turns.
 
-Related configuration: `projects.chat_models.platform`, `projects.chat_models.chat_id`, `projects.chat_models.user_id`, `projects.chat_models.model`, `projects.chat_models.provider`, `projects.chat_models.agent`
+Related configuration: `projects.chat_models.platform`, `projects.chat_models.chat_id`, `projects.chat_models.user_id`, `projects.chat_models.model`, `projects.chat_models.reasoning_effort`, `projects.chat_models.provider`, `projects.chat_models.agent`
 
 ### Commands, aliases, and content policy (`customization`)
 
@@ -2610,16 +2610,17 @@ Bind a group/channel ID; all its members and topics share this model. Set exactl
 
 ### `projects.chat_models.model`
 
-Pin the model ID for this chat. /model writes this entry and /model reset removes it; manual edits apply after /config reload to subsequent turns, preserving the running turn.
+Pin this chat model; omit or empty to inherit. Set model or reasoning_effort. /model changes only this field; reset preserves chat effort. Manual edits apply after /config reload to subsequent turns.
 
 - Source: `toml`
 - Placement: `[[projects.chat_models]] (inside one [[projects]])`
 - Scope: `project`
 - Type: `string`
-- Requirement: `required`
-- Default: `none`
-- Default source: `none`
+- Requirement: `conditional`
+- Default: `inherit`
+- Default source: `inherit`
 - Takes effect: `reload`
+- Required when: `projects.chat_models.reasoning_effort is unset or empty`
 - Example: `model = "gpt-4.1"`
 
 ### `projects.chat_models.platform`
@@ -2638,7 +2639,7 @@ Name the messaging platform for a persistent chat model binding. Entries for ina
 
 ### `projects.chat_models.provider`
 
-Name the expected project provider, without the Agent prefix. Empty or omitted means the native provider, not inheritance; this binding does not switch providers. A missing or different active provider fails only the affected chat.
+Name the expected provider shared by the chat model and effort, without the Agent prefix. Reset the other field before selecting a different provider. Empty or omitted means the native provider, not inheritance; this binding does not switch providers. A missing or different active provider fails only the affected chat.
 
 - Source: `toml`
 - Placement: `[[projects.chat_models]] (inside one [[projects]])`
@@ -2649,6 +2650,21 @@ Name the expected project provider, without the Agent prefix. Empty or omitted m
 - Default source: `builtin`
 - Takes effect: `reload`
 - Example: `provider = "relay"`
+
+### `projects.chat_models.reasoning_effort`
+
+Pin this chat reasoning effort independently of its model, using the current Agent reasoning catalog. Omitted or empty inherits. /reasoning chat writes this field; its reset preserves the chat model. Manual edits apply after /config reload; legacy JSON effort is imported only when this field is omitted.
+
+- Source: `toml`
+- Placement: `[[projects.chat_models]] (inside one [[projects]])`
+- Scope: `project`
+- Type: `string`
+- Requirement: `conditional`
+- Default: `inherit`
+- Default source: `inherit`
+- Takes effect: `reload`
+- Required when: `projects.chat_models.model is unset or empty`
+- Example: `reasoning_effort = "high"`
 
 ### `projects.chat_models.user_id`
 

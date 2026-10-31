@@ -26,7 +26,7 @@ func TestChatModelConfig_ReplacesLegacyStateAndNeverWritesItBack(t *testing.T) {
 			disk[key] = value
 		}
 		return maps.Clone(disk), nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	assertChatModelBinding(t, store, "test:A", ChatModelBinding{}, false)
@@ -71,7 +71,7 @@ func TestChatModelConfig_FailedSaveOrReloadKeepsPublishedBindings(t *testing.T) 
 			return nil, errIO
 		}
 		return map[string]ChatModelBinding{"test:A": old}, nil
-	}, func(string, ChatModelBinding) (map[string]ChatModelBinding, error) { return nil, errIO }); err != nil {
+	}, func(string, ChatModelBinding) (map[string]ChatModelBinding, error) { return nil, errIO }, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, replacement := range []ChatModelBinding{{Model: "new"}, {}} {
@@ -102,7 +102,7 @@ func TestChatModelConfig_ReloadAndSaveSerializeReadThroughPublication(t *testing
 	}, func(key string, value ChatModelBinding) (map[string]ChatModelBinding, error) {
 		disk[key] = value
 		return maps.Clone(disk), nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	block = true
@@ -127,9 +127,10 @@ func TestCUJ_ChatModelConfigReloadAppliesToQueuedTurnAndReset(t *testing.T) {
 	for _, reset := range []bool{false, true} {
 		t.Run(map[bool]string{false: "edit", true: "delete"}[reset], func(t *testing.T) {
 			e, p, a := newChatModelEngine(t, "")
-			disk := map[string]ChatModelBinding{"test:A": {Model: "group-B", Provider: a.Name() + ":"}}
+			a.effort = "medium"
+			disk := map[string]ChatModelBinding{"test:A": {Model: "group-B", Provider: a.Name() + ":", ReasoningEffort: "high"}}
 			if err := e.projectState.ConfigureChatModels(func() (map[string]ChatModelBinding, error) { return maps.Clone(disk), nil },
-				func(string, ChatModelBinding) (map[string]ChatModelBinding, error) { return nil, errors.New("unused") }); err != nil {
+				func(string, ChatModelBinding) (map[string]ChatModelBinding, error) { return nil, errors.New("unused") }, nil); err != nil {
 				t.Fatal(err)
 			}
 			release := make(chan struct{})
@@ -150,7 +151,7 @@ func TestCUJ_ChatModelConfigReloadAppliesToQueuedTurnAndReset(t *testing.T) {
 				delete(disk, "test:A")
 				want = "project-A"
 			} else {
-				disk["test:A"] = ChatModelBinding{Model: want, Provider: a.Name() + ":"}
+				disk["test:A"] = ChatModelBinding{Model: want, Provider: a.Name() + ":", ReasoningEffort: "low"}
 			}
 			if _, err := e.ReloadChatModels(); err != nil {
 				t.Fatal(err)
@@ -163,6 +164,13 @@ func TestCUJ_ChatModelConfigReloadAppliesToQueuedTurnAndReset(t *testing.T) {
 			calls, sessions, setters := a.snapshot()
 			if calls[0].model != "group-B" || calls[1].model != want || setters != 0 {
 				t.Fatalf("calls = %+v, setters=%d", calls, setters)
+			}
+			wantEffort := "low"
+			if reset {
+				wantEffort = "medium"
+			}
+			if calls[0].options.ReasoningEffort != "high" || calls[1].options.ReasoningEffort != wantEffort {
+				t.Fatalf("reload failed to apply reasoning to the queued turn: %+v", calls)
 			}
 			for _, session := range sessions {
 				session.mu.Lock()
