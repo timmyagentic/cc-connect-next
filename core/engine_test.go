@@ -2317,7 +2317,7 @@ func (p *stubRichCardResolverPlatform) resolverCallModes() []bool {
 	return out
 }
 
-func TestProcessInteractiveEvents_RichCardErrorStaysOnCardAndHidesDetails(t *testing.T) {
+func TestProcessInteractiveEvents_RichCardErrorStaysOnCardAndRedactsDetails(t *testing.T) {
 	p := &stubRichCardSilentPlatform{
 		stubPlatformEngine: stubPlatformEngine{n: "feishu"},
 	}
@@ -2361,6 +2361,47 @@ func TestProcessInteractiveEvents_RichCardErrorStaysOnCardAndHidesDetails(t *tes
 	}
 	if deletes != 0 {
 		t.Fatalf("expected no card deletion, got %d", deletes)
+	}
+}
+
+// Regression: upstream diagnostics were replaced by a generic "try again" card.
+func TestProcessInteractiveEvents_RichCardUpstreamErrorPreservesDiagnostics(t *testing.T) {
+	for _, fallback := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fallback=%v", fallback), func(t *testing.T) {
+			base := &stubRichCardSilentPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}}
+			var p Platform = base
+			if fallback {
+				p = &stubRichCardUpdateFailurePlatform{stubRichCardSilentPlatform: base}
+			}
+			e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangChinese)
+			e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: "rich"})
+			sessionKey := "test:upstream-error"
+			session := e.sessions.GetOrCreateActive(sessionKey)
+			agentSession := newControllableSession("upstream-error")
+			state := &interactiveState{agentSession: agentSession, platform: p, replyCtx: "ctx"}
+			e.interactiveStates[sessionKey] = state
+			raw := "{\"error\":{\"code\":5005,\"message\":\"Invalid `signature` in `thinking` block\",\"type\":\"invalid_request_error\"}}\nAuthorization: Bearer example-secret-value"
+			agentSession.events <- Event{Type: EventError, Error: errors.New(raw)}
+			e.processInteractiveEvents(state, session, e.sessions, sessionKey, "message", time.Now(), nil, nil, state.replyCtx)
+			_, _, updates, _ := base.snapshot()
+			rendered := strings.Join(updates, "\n")
+			if fallback {
+				rendered = strings.Join(base.getSent(), "\n")
+			}
+			for _, want := range []string{"上游返回错误", "5005", "Invalid `signature` in `thinking` block", "invalid_request_error"} {
+				if !strings.Contains(rendered, want) {
+					t.Errorf("missing %q in %q", want, rendered)
+				}
+			}
+			for _, hidden := range []string{"example-secret-value", "请稍后重试"} {
+				if strings.Contains(rendered, hidden) {
+					t.Errorf("unexpected %q in %q", hidden, rendered)
+				}
+			}
+			if len(session.GetHistory(0)) != 0 {
+				t.Fatal("upstream diagnostics must not become assistant history")
+			}
+		})
 	}
 }
 
@@ -2990,7 +3031,7 @@ func TestProcessInteractiveEvents_RichCardErrorRetainsVisiblePartialAnswer(t *te
 	e.interactiveStates[sessionKey] = state
 
 	agentSession.events <- Event{Type: EventText, Content: "safe partial answer"}
-	agentSession.events <- Event{Type: EventError, Error: errors.New("private provider failure at /local/path")}
+	agentSession.events <- Event{Type: EventError, Error: errors.New("provider failure at /Users/example/project token=example-secret")}
 
 	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-rich-partial-error", time.Now(), nil, nil, state.replyCtx)
 	_, _, updates, _ := p.snapshot()
@@ -3001,8 +3042,11 @@ func TestProcessInteractiveEvents_RichCardErrorRetainsVisiblePartialAnswer(t *te
 	if !strings.Contains(last, "status=error") || !strings.Contains(last, "safe partial answer") {
 		t.Fatalf("failed card did not preserve its visible partial answer: %q", last)
 	}
-	if strings.Contains(last, "private provider failure") || strings.Contains(last, "/local/path") {
-		t.Fatalf("failed card leaked runtime error details: %q", last)
+	if !strings.Contains(last, "provider failure") {
+		t.Fatalf("failed card omitted upstream diagnostics: %q", last)
+	}
+	if strings.Contains(last, "/Users/example/project") || strings.Contains(last, "example-secret") {
+		t.Fatalf("failed card leaked sensitive diagnostics: %q", last)
 	}
 	history := session.GetHistory(0)
 	if len(history) == 0 || history[len(history)-1].Role != "assistant" || history[len(history)-1].Content != "safe partial answer" {
@@ -3630,7 +3674,7 @@ func TestProcessInteractiveEvents_RichCardFallbackKeepsAnswerReadable(t *testing
 	}
 }
 
-func TestProcessInteractiveEvents_RichCardErrorFallbackIsGenericAndCleansStaleCard(t *testing.T) {
+func TestProcessInteractiveEvents_RichCardErrorFallbackKeepsDiagnosticsAndCleansStaleCard(t *testing.T) {
 	tests := []struct {
 		name        string
 		platform    func(*stubRichCardSilentPlatform) Platform
@@ -3668,9 +3712,9 @@ func TestProcessInteractiveEvents_RichCardErrorFallbackIsGenericAndCleansStaleCa
 			e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-rich-error-fallback", time.Now(), nil, nil, state.replyCtx)
 
 			sent := base.getSent()
-			want := NewI18n(LangEnglish).T(MsgRichCardErrorBody)
-			if len(sent) != 1 || sent[0] != want {
-				t.Fatalf("error fallback sent = %q, want only localized generic failure %q", sent, want)
+			want := NewI18n(LangEnglish).T(MsgRichCardUpstreamError)
+			if len(sent) != 1 || !strings.Contains(sent[0], want) || !strings.Contains(sent[0], "Bash command") {
+				t.Fatalf("error fallback sent = %q, want upstream title and redacted diagnostics", sent)
 			}
 			if strings.Contains(sent[0], privateError) || strings.Contains(sent[0], "/Users/example/secret") {
 				t.Fatalf("error fallback leaked private details: %q", sent[0])
@@ -3701,8 +3745,8 @@ func TestProcessInteractiveEvents_RichCardErrorFallbackPreservesSafePartial(t *t
 	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-rich-error-fallback-partial", time.Now(), nil, nil, state.replyCtx)
 
 	sent := base.getSent()
-	if len(sent) != 1 || !strings.Contains(sent[0], safePartial) || !strings.Contains(sent[0], NewI18n(LangEnglish).T(MsgRichCardErrorBody)) {
-		t.Fatalf("partial error fallback = %q, want safe partial plus generic failure", sent)
+	if len(sent) != 1 || !strings.Contains(sent[0], safePartial) || !strings.Contains(sent[0], NewI18n(LangEnglish).T(MsgRichCardUpstreamError)) {
+		t.Fatalf("partial error fallback = %q, want safe partial plus upstream diagnostics", sent)
 	}
 	if strings.Contains(sent[0], privateError) || strings.Contains(sent[0], "/Users/example/secret") {
 		t.Fatalf("partial error fallback leaked private details: %q", sent[0])
@@ -3756,8 +3800,8 @@ func TestProcessInteractiveEvents_RichCardErrorFallbackUsesTurnLocale(t *testing
 	agentSession.events <- Event{Type: EventError, Error: errors.New("simulated private failure")}
 	e.processInteractiveEvents(state, session, e.sessions, sessionKey, "m-rich-error-turn-locale", time.Now(), nil, nil, state.replyCtx)
 
-	want := NewI18n(LangChinese).T(MsgRichCardErrorBody)
-	if sent := base.getSent(); len(sent) != 1 || sent[0] != want {
+	want := NewI18n(LangChinese).T(MsgRichCardUpstreamError)
+	if sent := base.getSent(); len(sent) != 1 || !strings.Contains(sent[0], want) {
 		t.Fatalf("error fallback sent = %q, want captured turn locale %q", sent, want)
 	}
 }

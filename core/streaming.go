@@ -108,6 +108,7 @@ type RichCardCopy struct {
 	Answering            string
 	Done                 string
 	Error                string
+	UpstreamError        string
 	CompletedBody        string
 	ErrorBody            string
 	PrivacyNotice        string

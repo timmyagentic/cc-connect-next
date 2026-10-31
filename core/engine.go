@@ -5527,6 +5527,7 @@ var agentErrorHandlers = []agentErrorHandler{
 
 const (
 	richCardGenericErrorPhase  = "error"
+	richCardUpstreamErrorPhase = "upstream_error"
 	richCardUsageLimitPhase    = "usage_limit"
 	richCardModelCapacityPhase = "model_capacity"
 	richCardAuthRequiredPhase  = "authentication_required"
@@ -5564,6 +5565,8 @@ func richCardFailurePhase(err error) string {
 
 func richCardFailureCopy(copy RichCardCopy, phase string) (summary, body string) {
 	switch phase {
+	case richCardUpstreamErrorPhase:
+		return copy.UpstreamError, copy.UpstreamError
 	case richCardAuthRequiredPhase:
 		return copy.AuthRequiredSummary, copy.AuthRequiredBody
 	case richCardUsageLimitPhase:
@@ -5577,7 +5580,7 @@ func richCardFailureCopy(copy RichCardCopy, phase string) (summary, body string)
 
 func richCardFailureBody(copy RichCardCopy, phase, partial string) string {
 	partial = strings.TrimSpace(partial)
-	if phase == richCardGenericErrorPhase {
+	if phase == richCardGenericErrorPhase || phase == richCardUpstreamErrorPhase {
 		return partial
 	}
 	_, message := richCardFailureCopy(copy, phase)
@@ -5589,6 +5592,21 @@ func richCardFailureBody(copy RichCardCopy, phase, partial string) string {
 		return partial
 	}
 	return partial + "\n\n" + message
+}
+
+// upstreamFailureBody displays diagnostics received from the agent, not bridge
+// lifecycle failures. Keep the original wording while redacting sensitive data.
+func upstreamFailureBody(copy RichCardCopy, err error, partial string) string {
+	detail := redactFeedbackText(err.Error())
+	fence := "```"
+	for strings.Contains(detail, fence) {
+		fence += "`"
+	}
+	body := copy.UpstreamError + "\n\n" + fence + "text\n" + detail + "\n" + fence
+	if strings.TrimSpace(partial) != "" {
+		body = strings.TrimSpace(partial) + "\n\n" + body
+	}
+	return body
 }
 
 type turnProcessor struct {
@@ -6074,9 +6092,8 @@ func (t *turnProcessor) run() {
 		if !ok {
 			return false
 		}
-		// Deliberately omit raw runtime errors: they may contain local paths,
-		// commands, credentials, or provider internals. A partial assistant
-		// answer is safe to retain because it was already user-visible.
+		// Callers supply only already-visible answers or redacted upstream
+		// diagnostics; arbitrary bridge runtime errors stay private.
 		body := ""
 		if len(safeBody) > 0 {
 			body = safeBody[0]
@@ -6107,9 +6124,8 @@ func (t *turnProcessor) run() {
 		}
 	}
 	sendRichFailure := func(p Platform, rctx any, handle any, phase string, safeBody ...string) {
-		// A failed card update must never turn a private runtime error into a
-		// normal chat message. Remove the stale lifecycle card when possible and
-		// send only an already-visible assistant partial plus localized static copy.
+		// Keep the same safe body when a card update falls back to text,
+		// including redacted upstream diagnostics supplied by the caller.
 		removeRichCardForFallback(p, handle)
 		partial := ""
 		if len(safeBody) > 0 {
@@ -7873,6 +7889,10 @@ func (failure *turnFailure) handle() {
 	state.mu.Unlock()
 	safePartial := persistVisibleRichPartial(p)
 	phase := richCardFailurePhase(event.Error)
+	if event.Error != nil && phase == richCardGenericErrorPhase {
+		phase = richCardUpstreamErrorPhase
+		safePartial = upstreamFailureBody(turnRichCardCopy, event.Error, safePartial)
+	}
 	updatedRichError := hasRichCard && markRichCardFailedWithPhase(p, cardMessageID, phase, safePartial)
 	feedbackKey, feedbackUser := state.feedbackIdentity()
 	if event.Error != nil {
@@ -7889,7 +7909,9 @@ func (failure *turnFailure) handle() {
 				sendRichFailure(p, replyCtx, cardMessageID, phase, safePartial)
 			} else {
 				userMsg := fmt.Sprintf(e.i18n.T(MsgError), errMsg)
-				if phase != richCardGenericErrorPhase {
+				if phase == richCardUpstreamErrorPhase {
+					userMsg = upstreamFailureBody(turnRichCardCopy, event.Error, "")
+				} else if phase != richCardGenericErrorPhase {
 					userMsg = richCardFailureBody(turnRichCardCopy, phase, "")
 					if userMsg == "" {
 						_, userMsg = richCardFailureCopy(e.i18n.RichCardCopy(), phase)

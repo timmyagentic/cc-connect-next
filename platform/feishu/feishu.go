@@ -7786,6 +7786,12 @@ func buildRichCardJSONBytes(status core.CardStatus, phase string, steps []core.T
 	case core.CardStatusError:
 		headerTemplate = "red"
 		switch {
+		case phase == "upstream_error" && strings.TrimSpace(copy.UpstreamError) != "":
+			headerTitle = "⚠️ " + copy.UpstreamError
+			summary = copy.UpstreamError
+			if body == "" {
+				body = copy.UpstreamError
+			}
 		case phase == "authentication_required" && strings.TrimSpace(copy.AuthRequired) != "":
 			headerTitle = "⚠️ " + copy.AuthRequired
 			summary = copy.AuthRequiredSummary
