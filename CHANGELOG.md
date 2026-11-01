@@ -2,10 +2,11 @@
 
 ## Unreleased
 
+## v0.3.5 (2026-11-01)
 
+- Promote beta.12 to stable with per-chat model and reasoning settings, Feishu group catch-up, and redacted upstream diagnostics.
+- See [release notes](changelogs/v0.3.5.md) for migration and downgrade guidance.
 - Improve the website setup guide with the complete bilingual Agent prompt, a five-step path through the first real reply and background service, and a share preview.
-
-
 - Refresh the product website with the timmyagentic visual style while preserving installation, download and documentation paths.
 
 ## v0.3.5-beta.12 (2026-10-31)
