@@ -2,9 +2,9 @@
 
 # CC Connect Next
 
-**在飞书里，更顺手地使用 Codex。**
+**从飞书话题发起任务，让 Codex 在本地仓库里工作。**
 
-专为飞书 / Lark 与 Codex 深度适配。在你的电脑上执行任务，在飞书里查看进展、补充要求、处理审批和接收结果。
+CC Connect Next 是一个独立维护的 [CC Connect](https://github.com/chenhg5/cc-connect) 衍生项目。它运行在你的电脑上，把飞书 / Lark 话题连到本地 Codex 会话。你在话题里交代任务、补充要求或处理审批，Codex 在绑定的工作区执行，结果回到原话题。
 
 [![Release](https://img.shields.io/github/v/release/timmyagentic/cc-connect-next?color=0284c7&label=release)](https://github.com/timmyagentic/cc-connect-next/releases/latest)
 [![npm](https://img.shields.io/npm/v/cc-connect-next?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/cc-connect-next)
@@ -16,11 +16,11 @@
 
 ## ✨ 为飞书与 Codex 打磨
 
-- **任务进行中，随时补一句。** 接入 Codex 原生中途并入（steer），把“保留现有布局，只修校验”这样的补充直接送入正在执行的任务。
-- **飞书原生卡片，清楚呈现进展。** 思考、工具执行、回答和完成状态持续更新；处理中隐藏推理与工具明细，需要审批时在聊天中确认。
-- **按话题组织 Codex 工作。** 不同飞书话题拥有独立会话，可绑定对应工作区，让多个任务各自推进。
+**接上团队已经聊过的事。** 团队在飞书的「订单接口」话题里定了方案。你接着问：「@Codex 刚才决定改哪个接口？对照仓库看看要改哪几处。」
 
-以上体验面向 **Codex app-server + 飞书 / Lark**。新配置默认使用 app-server 的 stdio 连接；Codex `exec` 后端不支持原生中途并入，忙时消息会排队。
+开启群聊补读后，Codex 首次参与时会收到本话题的近期讨论，后续只补上次交付后的新消息。普通群聊按当前群补读。若方案来自另一个机器人，可以显式允许读取它在同一话题公开的答复。Codex 能分清谁提出了方案、谁在请它评审，再到这个话题绑定的本地仓库核对代码。[补读范围与对端机器人配置](docs/feishu.md#回复前补读近期讨论可选)
+
+Codex 检查代码时，你能从飞书原生卡片看到进度。此时再发一句「也检查旧客户端是否兼容」，Codex app-server 可以把这条要求并入正在执行的回合（steer）。后续进度和最终答复接在这条补充消息下。新配置默认使用本地 app-server（stdio）；使用 Codex `exec` 后端时，忙时消息会排队。
 
 ## 🎬 协作示意
 

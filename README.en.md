@@ -2,9 +2,9 @@
 
 # CC Connect Next
 
-**Codex, tuned for Feishu and Lark.**
+**Start a task in a Feishu topic and let Codex work in your local repository.**
 
-Built around Codex and Feishu / Lark. Run tasks on your computer; follow progress, add instructions, handle approvals, and receive results in chat.
+CC Connect Next is an independently maintained successor to [CC Connect](https://github.com/chenhg5/cc-connect). It runs on your computer and connects Feishu / Lark topics to local Codex sessions. Give instructions, refine a request or handle approvals in the topic. Codex works in the bound workspace and replies in the same topic.
 
 [![Release](https://img.shields.io/github/v/release/timmyagentic/cc-connect-next?color=0284c7&label=release)](https://github.com/timmyagentic/cc-connect-next/releases/latest)
 [![npm](https://img.shields.io/npm/v/cc-connect-next?color=cb3837&logo=npm&logoColor=white)](https://www.npmjs.com/package/cc-connect-next)
@@ -16,11 +16,11 @@ Built around Codex and Feishu / Lark. Run tasks on your computer; follow progres
 
 ## ✨ Built for Feishu and Codex
 
-- **Add a requirement while the task is running.** Codex's native steering feeds instructions such as “keep the layout; only fix validation” into the active task.
-- **Follow progress in native Feishu cards.** Thinking, tool execution, answering, and completion update in place. Intermediate reasoning and tool details stay hidden; handle approval requests in chat when needed.
-- **Organize Codex work by topic.** Separate Feishu topics have independent sessions and can bind to their own workspaces, keeping concurrent tasks focused.
+**Pick up where the team left off.** Your team has agreed on a change in the “Orders API” topic. You ask: “@Codex Which endpoint did we decide to change? Check the repository and show me where we need to edit.”
 
-These experiences target **Codex app-server + Feishu / Lark**. New configurations default to app-server over stdio. Codex's `exec` backend does not support native steering; messages sent while it is busy are queued.
+With group context enabled, Codex receives recent messages from this topic the first time it joins in. Later requests include only messages newer than the last delivery. In the main group conversation, it reads that conversation instead. If another bot proposed the change, you can explicitly allow its public replies in the same topic to be included. Codex can distinguish the proposal's author from the teammate asking for a review, then check the code in the topic's bound workspace. [Group context and peer-bot configuration](docs/feishu.md#回复前补读近期讨论可选)
+
+A native Feishu card shows progress while Codex inspects the code. Send “Check older clients for compatibility too” and the Codex app-server can steer the active turn with that instruction. Further progress and the final answer appear under your follow-up. New configurations use a local app-server over stdio; the Codex `exec` backend queues messages received during a turn.
 
 ## 🎬 How a conversation flows
 
