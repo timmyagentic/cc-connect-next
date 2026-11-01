@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Let the website fill the browser width and adapt its opening layout to the available height, including wide monitors and phone orientations.
 ## v0.3.5 (2026-11-01)
 
 - Promote beta.12 to stable with per-chat model and reasoning settings, Feishu group catch-up, and redacted upstream diagnostics.
