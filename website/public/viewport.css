@@ -1,0 +1,128 @@
+
+/* Homepage viewport frame. Inner copy keeps its reading measure. */
+.viewport-home {
+  --screen: 100vh;
+  --page-gutter: clamp(16px, 3vw, 80px);
+  --inset-start: max(var(--page-gutter), env(safe-area-inset-left, 0px));
+  --inset-end: max(var(--page-gutter), env(safe-area-inset-right, 0px));
+  --header-block: 96px;
+  --stage-block: calc(var(--screen) - var(--header-block));
+  --stage-pad: clamp(16px, 2.5vmin, 56px);
+  --stage-gap: clamp(16px, 3vmin, 72px);
+}
+@supports (height: 100dvh) {
+  .viewport-home { --screen: 100dvh; }
+}
+.viewport-home .container, .viewport-home .wrap, .viewport-home .studio-signoff {
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+  padding-inline: var(--inset-start) var(--inset-end);
+}
+.viewport-home > header { padding-top: env(safe-area-inset-top, 0px); }
+.viewport-home main.wrap { padding-inline: 0; }
+.viewport-home main.wrap > :is(.hero, .facts, .section, .install, .faq) {
+  padding-inline: var(--inset-start) var(--inset-end);
+}
+.viewport-home .hero {
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+  gap: var(--stage-gap);
+  align-items: center;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  height: var(--stage-block);
+  min-height: min-content;
+  padding-block: var(--stage-pad);
+  padding-inline: var(--inset-start) var(--inset-end);
+}
+.viewport-home .hero > * { min-width: 0; }
+.viewport-home .hero h1 {
+  font-size: clamp(30px, min(4.2vw, 9.2vh), 96px);
+  line-height: 1.15;
+  letter-spacing: -.035em;
+  margin: 0 0 clamp(12px, 2vh, 28px);
+}
+.viewport-home .hero :is(.intro, .hero-description, .lede, .hero-lead) {
+  max-width: 45ch;
+  font-size: clamp(15px, 1.2vw, 24px);
+  line-height: 1.6;
+}
+.viewport-home .hero .eyebrow { font-size: clamp(10px, .8vw, 16px); margin: 0 0 16px; }
+.viewport-home .hero :is(.button, .text-link) { font-size: clamp(14px, 1vw, 20px); }
+.viewport-home .hero :is(.hero-note, .download-note, .subtle) { font-size: clamp(12px, .8vw, 16px); }
+.viewport-home :is(.section-intro, .feature p, .step p, .faq-list p) { max-width: 70ch; }
+.viewport-home .hero > .hero-copy, .viewport-home .hero .showcase-stage {
+  width: 100%;
+  max-width: none;
+  padding-inline: 0;
+}
+@media (max-aspect-ratio: 3/4) {
+  .viewport-home .hero {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(min(180px, 24vh), 1fr);
+    align-items: center;
+    gap: clamp(14px, 2vh, 32px);
+  }
+  .viewport-home .hero h1 { font-size: clamp(30px, min(7vw, 6.5vh), 80px); }
+}
+@media (max-height: 540px) {
+  .viewport-home { --header-block: 64px; --stage-pad: 10px; --stage-gap: 16px; }
+  .viewport-home > header > nav, .viewport-home .header-inner { min-height: 64px; padding-block: 4px; }
+  .viewport-home .studio-home { font-size: 22px; }
+  .viewport-home .hero h1 { font-size: clamp(24px, min(4vw, 8vh), 38px); margin-bottom: 8px; }
+  .viewport-home .hero :is(.intro, .hero-description, .lede, .hero-lead) { font-size: 14px; line-height: 1.5; margin-block: 8px; }
+  .viewport-home .hero .eyebrow { display: none; }
+  .viewport-home .hero :is(.button, .text-link) { font-size: 14px; }
+}
+
+.viewport-home.brand-cc .hero.container {
+  grid-template: "intro demo" auto "install demo" auto / minmax(0, .8fr) minmax(0, 1.2fr);
+  gap: clamp(16px, 2vh, 32px) var(--stage-gap);
+  padding-block: var(--stage-pad);
+}
+.viewport-home.brand-cc .hero-intro { grid-area: intro; align-self: end; }
+.viewport-home.brand-cc .hero-install { grid-area: install; align-self: start; }
+.viewport-home.brand-cc .hero .demo-section {
+  grid-area: demo; align-self: stretch; min-height: min-content;
+  display: flex; align-items: center; padding: 0;
+}
+.viewport-home .hero .demo-container, .viewport-home .hero .demo-window, .viewport-home .hero .demo-tabs { width: 100%; max-width: none; }
+.viewport-home .hero .demo-window { box-shadow: 0 18px 40px #25334818; }
+.viewport-home .hero .demo-panel { min-height: 0; padding: clamp(14px, 2.5vmin, 48px); }
+.viewport-home .hero .message { font-size: clamp(14px, 1.15vw, 28px); line-height: 1.6; padding: clamp(12px, 1.5vmin, 28px); max-width: 85%; }
+.viewport-home .hero .message-label, .viewport-home .hero .message-status { font-size: clamp(12px, .8vw, 18px); }
+.viewport-home .hero .demo-label, .viewport-home .hero .demo-foot { font-size: clamp(12px, .85vw, 18px); }
+.viewport-home .hero .demo-tabs button { font-size: clamp(13px, 1vw, 22px); min-height: 44px; }
+.viewport-home .hero .install-command code { font-size: clamp(12px, 1vw, 20px); overflow-wrap: anywhere; white-space: normal; }
+.viewport-home .hero .hero-links { flex-wrap: wrap; }
+@media (max-aspect-ratio: 3/4), (max-width: 700px) and (orientation: portrait) {
+  .viewport-home.brand-cc .hero.container {
+    display: grid; grid-template: "intro" auto "demo" minmax(0, 1fr) "install" auto / minmax(0, 1fr);
+    gap: 16px;
+  }
+  .viewport-home.brand-cc .hero-intro, .viewport-home.brand-cc .hero-install { align-self: auto; }
+  .viewport-home .hero .message { max-width: 100%; padding: 10px 12px; }
+  .viewport-home .hero .message + .message { margin-top: 12px; }
+  .viewport-home .hero .message-label { margin-bottom: 6px; }
+  .viewport-home .hero .message-status { margin-top: 10px; padding-top: 8px; }
+  .viewport-home .hero .demo-panel { padding: 12px; }
+}
+@media (max-height: 540px) {
+  .viewport-home .hero .demo-panel { padding: 10px; }
+  .viewport-home .hero .message { padding: 8px 10px; font-size: 13px; margin-bottom: 8px; }
+  .viewport-home .hero .demo-topbar { padding: 8px 10px; }
+  .viewport-home .hero .demo-foot { margin-top: 8px; font-size: 12px; }
+  .viewport-home .hero .demo-tabs { margin-bottom: 8px; }
+  .viewport-home .hero .demo-tabs button { font-size: 12px; padding-inline: 6px; }
+}
+
+/* Let long translations and short windows grow the document instead of overpainting the next section. */
+.viewport-home.brand-cc .hero.container { height: auto; min-height: var(--stage-block); }
+@media (max-height: 540px) {
+  .viewport-home .hero .message + .message { margin-top: 10px; }
+  .viewport-home .hero .message-label { margin-bottom: 4px; }
+  .viewport-home .hero .message-status { margin-top: 8px; padding-top: 6px; font-size: 12px; }
+  .viewport-home.brand-cc .hero-links { margin-top: 10px; gap: 6px; }
+}
