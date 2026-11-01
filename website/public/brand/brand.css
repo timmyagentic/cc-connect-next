@@ -239,7 +239,31 @@ body.brand-site { background: var(--paper); color: var(--ink); font-family: var(
 .brand-smb > header > nav { min-height: 0; padding-block: 0; border: 0; }
 .brand-emomo .studio-accent { color: var(--blue); }
 
-@media (max-width: 760px) { .brand-cc .hero { display: block; } .brand-cc .hero-links { align-items: flex-start; margin-top: 24px; } }
+.brand-cc .hero.container {
+  display: grid;
+  grid-template: "intro demo" auto "install demo" auto / minmax(0, .8fr) minmax(0, 1.2fr);
+  gap: 20px clamp(24px, 4vw, 60px);
+  align-content: center;
+}
+.brand-cc .hero-intro { grid-area: intro; align-self: end; }
+.brand-cc .hero-intro h1 { margin: 0 0 20px; font-size: clamp(34px, 3.7vw, 54px); }
+.brand-cc .hero-install { grid-area: install; align-self: start; min-width: 0; }
+.brand-cc .hero .install-command { margin-top: 0; }
+.brand-cc .hero .demo-section { grid-area: demo; align-self: center; min-width: 0; padding: 0; }
+.brand-cc .hero .demo-tabs { margin: 0 0 12px; }
+.brand-cc .hero .demo-panel { min-height: 290px; padding: 18px; }
+.brand-cc .hero .message { padding: 12px 16px; font-size: 14px; line-height: 1.55; }
+.brand-cc .hero .demo-label { font-size: 12px; }
+.brand-cc .hero .demo-foot { margin-top: 12px; font-size: 12px; }
+@media (max-width: 760px) {
+  .brand-cc .hero.container { display: flex; flex-direction: column; align-items: stretch; gap: 20px; padding-block: 30px 44px; }
+  .brand-cc .hero-intro, .brand-cc .hero-install, .brand-cc .hero .demo-section { width: 100%; }
+  .brand-cc .hero-intro h1 { margin-bottom: 12px; }
+  .brand-cc .hero .hero-description { margin: 0; line-height: 1.6; }
+  .brand-cc .hero .demo-topbar { padding: 11px 14px; }
+  .brand-cc .hero .demo-panel { min-height: 0; padding: 14px; }
+  .brand-cc .hero-links { align-items: flex-start; margin-top: 12px; }
+}
 
 .brand-site .header-inner { display: flex; align-items: center; }
 
