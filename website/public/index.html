@@ -51,32 +51,17 @@
 </div>
 </header>
 <main id="main">
-<section class="hero container">
-<p data-i18n="eyebrow" class="eyebrow">本地 AI 编程，随处接着聊</p>
-<h1>
-<span data-i18n="heroFirst">Agent 在电脑，</span>
+<section class="hero container" aria-labelledby="hero-title">
+<div class="hero-intro">
+<h1 id="hero-title">
+<span data-i18n="heroFirst">在聊天里用</span>
 <br>
-<span data-i18n="heroSecond">你在任何地方。</span>
+<span data-i18n="heroSecond">本机的编程 Agent。</span>
 </h1>
-<p data-i18n="heroBody" class="hero-description">在飞书、Telegram 或 Slack 里，继续和自己的编程 Agent 协作。
-代码与执行环境留在你的机器，消息把你们连起来。</p>
-<div class="install-command">
-<code id="install-command">npm install -g cc-connect-next</code>
-<button data-copy="install-command" aria-label="Copy install command">
-<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
-<span data-copy-label>
-<span data-i18n="copy">复制</span>
-</span>
-</button>
+<p data-i18n="heroBody" class="hero-description">从飞书、Telegram 或 Slack 发起任务，查看回复，给进行中的工作补一句要求。代码留在自己的电脑上。</p>
 </div>
-<div class="hero-links">
-<a data-i18n="start" class="text-link" href="/docs">安装与接入指南</a>
-<span data-i18n="platformNote">macOS · Linux · Windows · 开源</span>
-</div>
-</section>
 <section class="demo-section" aria-labelledby="demo-heading">
-<img class="landscape" src="/assets/soft-landscape.webp" width="1774" height="887" alt="" aria-hidden="true">
-<div class="container demo-container">
+<div class="demo-container">
 <h2 data-i18n="demoHeading" id="demo-heading" class="sr-only">从一句话，到继续推进。</h2>
 <div class="demo-tabs" role="tablist" aria-label="Demo steps">
 <button id="tab-start" data-demo="start" role="tab" aria-controls="panel-start" aria-selected="true" tabindex="0">
@@ -136,6 +121,22 @@
 </div>
 </div>
 <p data-i18n="demoFoot" class="demo-foot">示例展示消息流转；实际能力取决于所选 Agent、平台和配置。</p>
+</div>
+</section>
+<div class="hero-install">
+<div class="install-command">
+<code id="install-command">npm install -g cc-connect-next</code>
+<button data-copy="install-command" aria-label="Copy install command">
+<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
+<span data-copy-label>
+<span data-i18n="copy">复制</span>
+</span>
+</button>
+</div>
+<div class="hero-links">
+<a data-i18n="start" class="text-link" href="/docs">安装与接入指南</a>
+<span data-i18n="platformNote">macOS · Linux · Windows · 开源</span>
+</div>
 </div>
 </section>
 <section id="how" class="section container">
