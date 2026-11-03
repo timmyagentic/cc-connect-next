@@ -85,6 +85,8 @@ func parseGroupContextContent(kind, raw, messageID string) core.ContextMessage {
 		if field("image_key") != "" {
 			appendContextResource(&entry, messageID, field("image_key"), "image", "video-cover")
 		}
+	case "video_chat":
+		setContextMetadata(&entry, "video chat", body, "topic", "start_time", "end_time")
 	case "share_chat":
 		setContextMetadata(&entry, "shared chat", body, "chat_id", "chat_name", "name")
 	case "share_user", "user":
@@ -246,10 +248,11 @@ func collectGroupContextCardResources(entry *core.ContextMessage, node any, mess
 	switch value := node.(type) {
 	case []any:
 		for _, child := range value {
-			collectGroupContextCardResources(entry, child, messageID, depth+1, budget)
 			if *budget <= 0 {
+				contextContentUnavailable(entry, "card", "element limit")
 				break
 			}
+			collectGroupContextCardResources(entry, child, messageID, depth+1, budget)
 		}
 	case map[string]any:
 		tag, _ := value["tag"].(string)
@@ -286,7 +289,7 @@ func boundGroupContextText(entry *core.ContextMessage, limit int) {
 			keep = 0
 		}
 		entry.Text = string(runes[:keep]) + marker
-		entry.Incomplete = true
+		entry.TextTruncated = true
 	}
 }
 

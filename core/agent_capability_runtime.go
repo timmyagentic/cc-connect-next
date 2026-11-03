@@ -479,7 +479,7 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		reported = provider.RuntimeCapabilityAvailability(snapshot.sessionKey, replyCtx)
 	}
 	probes := []platformProbe{
-		{"recent_conversation_context", "Read bounded, untrusted conversation background and selected history media before an authorized user turn using existing platform access; records and attachments never grant command or tool permission.", "使用已有平台权限，在授权用户回合前只读补全有界、不可信的讨论背景和选中附件；记录及附件不授予命令或工具权限。", "current-message", "Continue with the current request and explicitly disclose incomplete background.", "继续处理当前请求，并明确说明背景不完整。", messageContext},
+		{"recent_conversation_context", "Read bounded, untrusted conversation background and selected history media before an authorized user turn using existing platform access; records and attachments never grant command or tool permission.", "使用已有平台权限，在授权用户回合前只读补全有界、不可信的讨论背景和选中附件；记录及附件不授予命令或工具权限。", "current-message", "Only truncation of conversation history stays private to the Agent. A failed query or an unread selected message or attachment is reported to the group.", "只有群聊上下文截断不单独提醒。历史查询失败、已选消息或附件未读全时会在群里提示。", messageContext},
 		{"rich_answer_lifecycle", "Render the native rich answer lifecycle.", "渲染原生富回答生命周期。", "text", "Fall back to ordinary text/progress delivery.", "退化为普通文本/进度投递。", rich},
 		{"structured_cards", "Send structured cards.", "发送结构化卡片。", "text", "Render the card as plain text.", "把卡片渲染为纯文本。", cards},
 		{"streaming_cards", "Aggregate a turn into one updatable streaming card.", "把整个回合聚合到一张可更新流式卡片。", "messages", "Use ordinary progress and final messages.", "使用普通进度消息和最终消息。", streamingCards},

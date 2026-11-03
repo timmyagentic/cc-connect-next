@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -155,7 +156,11 @@ func TestGroupContextReadsFromDeliveredPositionBeforeApplyingLimit(t *testing.T)
 			now := time.Now().UTC().Truncate(time.Millisecond)
 			after := now.Add(-2 * time.Hour)
 			first := true
-			p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+			p, calls := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("type") == "image" {
+					_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nunseen photo"))
+					return
+				}
 				start := now.Add(-30 * time.Minute)
 				if !first {
 					start = after.Add(time.Millisecond)
@@ -163,12 +168,14 @@ func TestGroupContextReadsFromDeliveredPositionBeforeApplyingLimit(t *testing.T)
 				if thread == "" && r.URL.Query().Get("start_time") != strconv.FormatInt(start.Unix(), 10) {
 					t.Errorf("wrong incremental start: %s", r.URL)
 				}
+				photo := contextAPIMessage("new", "oc_group", thread, "alice", "Alice", "", after.Add(time.Minute))
+				photo["msg_type"], photo["body"] = "image", map[string]string{"content": `{"image_key":"photo"}`}
 				writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{
-					contextAPIMessage("new", "oc_group", thread, "alice", "Alice", "new discussion", after.Add(time.Minute)),
+					photo,
 					contextAPIMessage("seen", "oc_group", thread, "alice", "Alice", "already delivered", after),
 					contextAPIMessage("old", "oc_group", thread, "alice", "Alice", "older discussion", after.Add(-time.Minute)),
 				}, "has_more": false}})
-			})
+			}, "/open-apis/im/v1/messages/new/resources/photo")
 			target := replyContext{chatID: "oc_group", threadID: thread, messageID: "trigger", contextEligible: true, contextTimeMs: now.UnixMilli()}
 			bootstrap, err := p.LoadMessageContext(context.Background(), target, time.Time{})
 			if err != nil || len(bootstrap.Messages) != 0 || !bootstrap.Through.Equal(now) {
@@ -179,6 +186,17 @@ func TestGroupContextReadsFromDeliveredPositionBeforeApplyingLimit(t *testing.T)
 			increment, err := p.LoadMessageContext(context.Background(), target, after)
 			if err != nil || len(increment.Messages) != 1 || increment.Messages[0].ID != "new" || increment.Incomplete {
 				t.Fatalf("increment missed new discussion or counted old messages against limit: %+v %v", increment, err)
+			}
+			hydrated, err := p.HydrateMessageContext(context.Background(), increment.MediaTarget, increment.Messages)
+			if err != nil || len(hydrated) != 1 || hydrated[0].Incomplete || len(hydrated[0].Images) != 1 {
+				t.Fatalf("listed incremental photo was not delivered: %+v %v", hydrated, err)
+			}
+			before := calls.Load()
+			seen := increment.Messages[0]
+			seen.Time = after
+			blocked, _ := p.HydrateMessageContext(context.Background(), increment.MediaTarget, []core.ContextMessage{seen})
+			if !blocked[0].Incomplete || calls.Load() != before {
+				t.Fatal("downloaded a photo at or before the delivered position")
 			}
 			empty, err := p.LoadMessageContext(context.Background(), target, now)
 			if err != nil || len(empty.Messages) != 0 {
@@ -212,28 +230,71 @@ func TestGroupContextBoundsPagingAndDisclosesUnavailableText(t *testing.T) {
 }
 
 func TestGroupContextHistoryFailureAndPagingBudget(t *testing.T) {
-	for _, mode := range []string{"permission", "endless", "cancelled"} {
+	for _, mode := range []string{"permission", "endless", "missing-token", "repeated-token", "timeout"} {
 		t.Run(mode, func(t *testing.T) {
 			p, calls := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
 				if mode == "permission" {
 					writeJSON(t, w, map[string]any{"code": 99991672, "msg": "missing permission"})
 					return
 				}
-				if mode == "cancelled" {
+				if mode == "timeout" {
 					<-r.Context().Done()
 					return
 				}
-				writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{}, "has_more": true, "page_token": r.URL.Query().Get("page_token") + "x"}})
+				next := r.URL.Query().Get("page_token") + "x"
+				switch mode {
+				case "endless":
+					if len(next) == groupContextMaxPages {
+						next = "" // the next page lies outside the page limit
+					}
+				case "missing-token":
+					next = ""
+				case "repeated-token":
+					next = "same"
+				}
+				writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{}, "has_more": true, "page_token": next}})
 			})
-			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+			deadline := 2 * time.Second
+			if mode == "timeout" {
+				deadline = 150 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), deadline)
 			defer cancel()
 			got, err := p.LoadMessageContext(ctx, replyContext{chatID: "oc_group", messageID: "trigger", contextEligible: true, contextTimeMs: time.Now().UnixMilli()}, time.Time{})
 			if mode == "endless" {
 				if err != nil || !got.Incomplete || calls.Load() != groupContextMaxPages {
 					t.Fatalf("unbounded paging: %+v, %v, %d", got, err, calls.Load())
 				}
-			} else if err == nil {
+			} else if err == nil || got.Incomplete {
 				t.Fatal("unreadable history was reported complete")
+			}
+			if errors.Is(err, context.DeadlineExceeded) != (mode == "timeout") {
+				t.Fatalf("unexpected deadline classification: %v", err)
+			}
+		})
+	}
+}
+
+func TestGroupContextStopsBeforeRequiringAnotherPageToken(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	for _, tc := range []struct {
+		name        string
+		age         time.Duration
+		wantCount   int
+		wantLimited bool
+	}{
+		{"message limit", time.Second, 1, true},
+		{"past window", time.Hour, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, calls := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+				item := contextAPIMessage("m", "oc_group", "", "ou_a", "Alice", "msg", now.Add(-tc.age))
+				writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{item}, "has_more": true}})
+			})
+			p.groupContext.maxMessages = 1
+			got, err := p.LoadMessageContext(context.Background(), contextMediaTarget(now), time.Time{})
+			if err != nil || calls.Load() != 1 || len(got.Messages) != tc.wantCount || got.Incomplete != tc.wantLimited {
+				t.Fatalf("read should have stopped: %+v %v (%d calls)", got, err, calls.Load())
 			}
 		})
 	}
@@ -290,7 +351,7 @@ func TestGroupContextPartialFailurePreservesTimeOrder(t *testing.T) {
 		}, "has_more": true, "page_token": "next"}})
 	})
 	got, err := p.LoadMessageContext(context.Background(), replyContext{chatID: "oc_group", contextEligible: true, contextTimeMs: now.UnixMilli()}, time.Time{})
-	if err == nil || !got.Incomplete || calls.Load() != 2 || len(got.Messages) != 2 || got.Messages[0].ID != "old" || got.Messages[1].ID != "new" {
+	if err == nil || got.Incomplete || calls.Load() != 2 || len(got.Messages) != 2 || got.Messages[0].ID != "old" || got.Messages[1].ID != "new" {
 		t.Fatalf("partial context lost order/bounds: %+v err=%v", got, err)
 	}
 }

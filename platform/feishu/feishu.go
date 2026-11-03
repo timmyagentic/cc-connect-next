@@ -257,6 +257,7 @@ func parseMentionMap(raw any) (map[string]string, error) {
 type replyContext struct {
 	contextEligible bool // authorized group trigger accepted by configured reply rules
 	contextTimeMs   int64
+	mediaStart      time.Time // lower bound of this trigger's validated history read
 	contextRootID   string
 	messageID       string
 	chatID          string

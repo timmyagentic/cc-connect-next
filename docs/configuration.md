@@ -3780,7 +3780,7 @@ Include new public messages and readable card snapshots from the exact peer_bots
 
 ### `projects.platforms.options.group_context_max_chars` — `feishu, lark`
 
-Bound the complete JSON background including message text, sender, time and reply metadata; preserve the newest discussion and disclose truncation.
+Bound the complete JSON background including message text, sender, time and reply metadata; preserve the newest discussion and mark truncation in the Agent input.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3796,7 +3796,7 @@ Bound the complete JSON background including message text, sender, time and repl
 
 ### `projects.platforms.options.group_context_max_messages` — `feishu, lark`
 
-Maximum background messages per accepted input, after excluding messages at or before the delivered read position. Keep the newest messages and disclose truncation.
+Maximum background messages per accepted input, after excluding messages at or before the delivered read position. Keep the newest messages and mark truncation in the Agent input.
 
 - Source: `toml`
 - Placement: `[projects.platforms.options] (inside one [[projects.platforms]])`

@@ -450,8 +450,10 @@ const (
 	MsgRichCardModelCapacityBody     MsgKey = "rich_card_model_capacity_body"
 	MsgRichCardModelCapacitySummary  MsgKey = "rich_card_model_capacity_summary"
 	MsgRecentContextIncomplete       MsgKey = "recent_context_incomplete"
+	MsgRecentContextHistoryTimeout   MsgKey = "recent_context_history_timeout"
 	MsgRecentContextLimited          MsgKey = "recent_context_limited"
 	MsgRecentContextMediaUnavailable MsgKey = "recent_context_media_unavailable"
+	MsgRecentContextMediaTimeout     MsgKey = "recent_context_media_timeout"
 	MsgRichCardAuthRequired          MsgKey = "rich_card_authentication_required"
 	MsgRichCardAuthRequiredBody      MsgKey = "rich_card_authentication_required_body"
 	MsgRichCardAuthRequiredSummary   MsgKey = "rich_card_authentication_required_summary"
@@ -3457,26 +3459,41 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese: "選択したモデルは現在容量の上限に達しています", LangSpanish: "El modelo seleccionado no tiene capacidad disponible",
 	},
 	MsgRecentContextIncomplete: {
-		LangEnglish:            "Recent discussion context is incomplete: the history request failed or timed out. I will answer using the available messages.",
-		LangChinese:            "近期讨论读取未完成：历史消息请求失败或超时。我会基于已读到的内容回答。",
-		LangTraditionalChinese: "近期討論讀取未完成：歷史訊息請求失敗或逾時。我會根據已讀到的內容回答。",
-		LangJapanese:           "最近の履歴の取得が失敗またはタイムアウトしました。取得済みの内容に基づいて回答します。",
-		LangSpanish:            "El contexto reciente está incompleto: la consulta del historial falló o agotó el tiempo. Responderé con los mensajes disponibles.",
+		LangEnglish:            "The group history request failed.",
+		LangChinese:            "群聊历史查询失败。",
+		LangTraditionalChinese: "群聊歷史查詢失敗。",
+		LangJapanese:           "グループの履歴を取得できませんでした。",
+		LangSpanish:            "No se pudo consultar el historial del grupo.",
+	},
+	MsgRecentContextHistoryTimeout: {
+		LangEnglish:            "The group history request timed out.",
+		LangChinese:            "群聊历史查询超时。",
+		LangTraditionalChinese: "群聊歷史查詢逾時。",
+		LangJapanese:           "グループの履歴の取得がタイムアウトしました。",
+		LangSpanish:            "Se agotó el tiempo de espera al consultar el historial del grupo.",
 	},
 	MsgRecentContextLimited: {
-		LangEnglish:            "Recent discussion was limited by the history page, message or text budget. I will answer using the selected recent messages.",
-		LangChinese:            "近期讨论较多，已按历史页数、消息条数或文字长度限制保留最近内容。",
-		LangTraditionalChinese: "近期討論較多，已按歷史頁數、訊息條數或文字長度限制保留最近內容。",
-		LangJapanese:           "履歴のページ数・件数・文字数の上限に従い、最近の内容を選択しました。",
-		LangSpanish:            "Se seleccionaron los mensajes más recientes dentro de los límites de páginas, mensajes y texto.",
+		LangEnglish:            "The group history was shortened to fit the page, message or text limit.",
+		LangChinese:            "群聊历史已按页数、消息条数或文字长度限制截取。",
+		LangTraditionalChinese: "群聊歷史已依頁數、訊息數或文字長度限制截取。",
+		LangJapanese:           "ページ数、メッセージ数または文字数の上限により履歴の一部が省略されています。",
+		LangSpanish:            "El historial se ha acortado por los límites de páginas, mensajes o texto.",
 	},
 	MsgRecentContextMediaUnavailable: {
-		LangEnglish:            "Some recent message content or attachments could not be read or exceeded the resource budget. Unavailable parts are marked in the context; other text and images remain available.",
-		LangChinese:            "部分近期消息内容或附件读取失败，或超出资源限额；缺失位置已在上下文中标注，其他文字和图片可正常参考。",
-		LangTraditionalChinese: "部分近期訊息內容或附件讀取失敗，或超出資源限額；缺失位置已在上下文中標註，其他文字和圖片可正常參考。",
-		LangJapanese:           "一部の内容や添付を取得できなかったか、リソース上限を超えました。欠落箇所を明示し、取得できた文字と画像を使用します。",
-		LangSpanish:            "No se pudo leer parte del contenido o los adjuntos, o se excedió el límite de recursos. Las partes no disponibles están marcadas; el resto del texto y las imágenes sigue disponible.",
-	}, MsgRichCardAuthRequired: {
+		LangEnglish:            "Some message content or attachments were unavailable.",
+		LangChinese:            "部分历史消息内容或附件未能读取。",
+		LangTraditionalChinese: "部分歷史訊息內容或附件未能讀取。",
+		LangJapanese:           "一部の過去のメッセージ内容または添付ファイルを取得できませんでした。",
+		LangSpanish:            "Parte del contenido o de los adjuntos del historial no está disponible.",
+	},
+	MsgRecentContextMediaTimeout: {
+		LangEnglish:            "Reading attachments from the group history timed out.",
+		LangChinese:            "读取群聊历史附件超时。",
+		LangTraditionalChinese: "讀取群聊歷史附件逾時。",
+		LangJapanese:           "グループの履歴から添付ファイルを読み込む際にタイムアウトしました。",
+		LangSpanish:            "Se agotó el tiempo de espera al leer los adjuntos del historial del grupo.",
+	},
+	MsgRichCardAuthRequired: {
 		LangEnglish: "Sign-in required", LangChinese: "需要重新登录", LangTraditionalChinese: "需要重新登入",
 		LangJapanese: "再ログインが必要です", LangSpanish: "Es necesario iniciar sesión",
 	},

@@ -1511,23 +1511,29 @@ use their own history container; private chats and other topics are excluded.
 Text, rich text, readable cards and forwarded conversations retain their
 sender/time attribution. Images and downloadable attachments from selected
 history are passed through the Agent's existing image/file input paths, including
-images inside forwarded messages. Downloads happen after deduplication and text
-selection, under a separate 15-second preparation budget. Feishu downloads at
-most 12 resources and 20 MiB within 12 seconds, also respecting the existing
-per-resource limit.
+images inside forwarded messages. Media uses the same read window as the selected
+text, including when the last delivered position precedes the initial lookback.
+Meeting notices supply the topic and available start/end times. Downloads happen
+after deduplication and text selection. Feishu downloads at most 12 resources
+totaling 100 MiB per turn, with one 45-second deadline shared by all downloads,
+chunks and retries. The existing per-resource size limit still applies.
 Sticker and other platform-only content is represented with explicit metadata
 or an unavailable marker; audio/video files are attachments, not a claim that
 every Agent can transcribe or play them. No extra permissions are requested.
 
-Read failures, history limits and unavailable attachments have separate notices.
-The model also receives markers at the missing content. Background and its media
-remain untrusted quoted data, never commands or approval. A native Agent
-conversation saves its per-group/topic read position when input delivery succeeds,
+Only truncation of the conversation context is quiet: the bridge can keep the
+newest history pages or messages and shorten text to fit. The Agent still knows
+that the history is partial. A failed history query or a selected message or
+attachment that could not be fully read produces a group notice. This includes
+attachments skipped because of their number, size, or download deadline.
+When both happen, one notice reports the read problem. The Agent continues
+with the available information.
+Background and its media remain untrusted quoted data, never commands or
+approval. A native Agent conversation saves its per-group/topic read position when input delivery succeeds,
 not when the task finishes. Failed tasks do not replay delivered background.
 Unconfirmed sends and failed history requests do not advance the position.
-Bounded or unavailable content is disclosed; old truncated messages and failed
-attachments are not automatically retried. `/new` or a different native
-conversation starts fresh. Busy follow-ups use the same incremental read whether
+Old truncated messages and failed attachments are not automatically retried.
+`/new` or a different native conversation starts fresh. Busy follow-ups use the same incremental read whether
 steered or queued, regardless of sender. No new discussion means no background
 block. There is no polling or separate chat archive.
 

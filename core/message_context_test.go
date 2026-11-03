@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -174,6 +175,20 @@ func TestMessageContextRejectedSteerDoesNotAdvancePosition(t *testing.T) {
 	}
 }
 
+func TestMessageContextFailedReadIsReportedDuringSteer(t *testing.T) {
+	const key = "test:group"
+	env, p, as, session := newContextSteerEnv(t, key)
+	p.setBackground(key, nil, errors.New("history request failed"))
+	as.steerErr = ErrSteerTurnMismatch
+	msg := &Message{SessionKey: key, UserID: "alice", Content: "continue", MessageID: "request", ReplyCtx: key}
+	if env.engine.trySteerBusyMessage(p, msg, key, session, env.engine.sessions) {
+		t.Fatal("rejected steer should fall back to the queue")
+	}
+	if sent := env.plat.getSent(); !slices.Equal(sent, []string{env.engine.i18n.T(MsgRecentContextIncomplete)}) {
+		t.Fatalf("missing read failure notice: %q", sent)
+	}
+}
+
 func TestMessageContextQueuedTurnsOnlyDeliverNewDiscussion(t *testing.T) {
 	env, p := newContextCUJEnv(t)
 	key := "test:group"
@@ -219,6 +234,55 @@ func TestMessageContextFailedResultDoesNotReplayDeliveredBackground(t *testing.T
 	}
 }
 
+func TestMessageContextOnlyHistoryTruncationIsQuiet(t *testing.T) {
+	const key = "test:group"
+	const link = "https://example.org/preview"
+	for _, tc := range []struct {
+		name                                               string
+		listLimit, textTruncated, entryFailure, unreadable bool
+		queryErr                                           error
+		wantFailures                                       []MsgKey
+	}{
+		{name: "normal history"},
+		{name: "history limit", listLimit: true},
+		{name: "text clipped to fit context", textTruncated: true},
+		{name: "history query timed out", queryErr: context.DeadlineExceeded, wantFailures: []MsgKey{MsgRecentContextHistoryTimeout}},
+		{name: "unreadable entry", unreadable: true, wantFailures: []MsgKey{MsgRecentContextMediaUnavailable}},
+		{name: "failed attachment with usable link", entryFailure: true, wantFailures: []MsgKey{MsgRecentContextMediaUnavailable}},
+		{name: "clipped text and missing attachment in the same post", textTruncated: true, entryFailure: true, wantFailures: []MsgKey{MsgRecentContextMediaUnavailable}},
+		{name: "partial query and content fail together", queryErr: errors.New("private test detail"), listLimit: true, entryFailure: true, wantFailures: []MsgKey{MsgRecentContextIncomplete, MsgRecentContextMediaUnavailable}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, p := newContextCUJEnv(t)
+			entry := ContextMessage{ID: "post", Text: link, Time: time.Now(), TextTruncated: tc.textTruncated, Incomplete: tc.entryFailure}
+			p.backgrounds[key] = MessageContext{Messages: []ContextMessage{entry}, Incomplete: tc.listLimit, Unreadable: tc.unreadable}
+			p.loadErrors[key] = tc.queryErr
+			contextReceive(env, p, key, "alice", "request", "What is the preview link?")
+			session := env.engine.sessions.GetOrCreateActive(key)
+			env.waitFor("answer", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
+			prompt := contextLatestSession(env).getSentPrompts()[0]
+			want := []string{"ok"}
+			if len(tc.wantFailures) > 0 {
+				var reasons []string
+				for _, k := range tc.wantFailures {
+					reason := env.engine.i18n.T(k)
+					reasons = append(reasons, reason)
+					if !strings.Contains(prompt, reason) {
+						t.Fatalf("agent missing read failure: %q", reason)
+					}
+				}
+				want = append([]string{strings.Join(reasons, "\n")}, want...)
+			}
+			if sent := env.plat.getSent(); !slices.Equal(sent, want) {
+				t.Fatalf("group replies = %q, want %q", sent, want)
+			}
+			if !strings.Contains(prompt, link) || ((tc.textTruncated || tc.listLimit) && !strings.Contains(prompt, env.engine.i18n.T(MsgRecentContextLimited))) {
+				t.Fatal("agent lost available history or its budget limit")
+			}
+		})
+	}
+}
+
 func TestMessageContextReadFailureDoesNotAdvancePosition(t *testing.T) {
 	env, p := newContextCUJEnv(t)
 	key := "test:group"
@@ -226,8 +290,12 @@ func TestMessageContextReadFailureDoesNotAdvancePosition(t *testing.T) {
 	contextReceive(env, p, key, "alice", "first", "what happened?")
 	session := env.engine.sessions.GetOrCreateActive(key)
 	env.waitFor("partial answer", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
-	if !env.sentContains("context is incomplete") || env.sentContains("synthetic permission") || !session.messageContextPosition(key).IsZero() {
-		t.Fatalf("wrong disclosure or position: %v", env.plat.getSent())
+	if sent := env.plat.getSent(); !slices.Equal(sent, []string{env.engine.i18n.T(MsgRecentContextIncomplete), "ok"}) || !session.messageContextPosition(key).IsZero() {
+		t.Fatalf("failed lookback did not notify and continue, or consumed history: %v", sent)
+	}
+	prompt := contextLatestSession(env).getSentPrompts()[0]
+	if !strings.Contains(prompt, env.engine.i18n.T(MsgRecentContextIncomplete)) || strings.Contains(prompt, "synthetic permission") {
+		t.Fatal("agent did not receive a safe account of the history failure")
 	}
 	p.setBackground(key, []ContextMessage{{ID: "missed", Text: "recovered fact"}}, nil)
 	env.plat.clearSent()
@@ -298,12 +366,25 @@ func TestMessageContextDrainsEventsThatArriveDuringRead(t *testing.T) {
 type mediaContextPlatform struct {
 	*contextTestPlatform
 	hydrated []string
+	deadline time.Time
+	target   any
 	fail     bool
 }
 
-func (p *mediaContextPlatform) HydrateMessageContext(_ context.Context, _ any, entries []ContextMessage) ([]ContextMessage, error) {
+type testMediaTarget string
+
+func (p *mediaContextPlatform) MessageContextScope(target any) string {
+	if bound, ok := target.(testMediaTarget); ok {
+		return string(bound)
+	}
+	return p.contextTestPlatform.MessageContextScope(target)
+}
+
+func (p *mediaContextPlatform) HydrateMessageContext(ctx context.Context, target any, entries []ContextMessage) ([]ContextMessage, error) {
 	p.contextMu.Lock()
 	defer p.contextMu.Unlock()
+	p.deadline, _ = ctx.Deadline()
+	p.target = target
 	for i := range entries {
 		if len(entries[i].Resources) == 0 {
 			continue
@@ -318,6 +399,46 @@ func (p *mediaContextPlatform) HydrateMessageContext(_ context.Context, _ any, e
 		entries[i].Files = []FileAttachment{{MimeType: "text/plain", Data: []byte("file bytes"), FileName: "notes.txt", MessageID: entries[i].ID}}
 	}
 	return entries, nil
+}
+
+func TestMessageContextUsesAdapterMediaDeadlineOrDefault(t *testing.T) {
+	env, base := newContextCUJEnv(t)
+	p := &mediaContextPlatform{contextTestPlatform: base}
+	for _, tc := range []struct{ timeout, want time.Duration }{
+		{0, 15 * time.Second},
+		{45 * time.Second, 45 * time.Second},
+	} {
+		const key = "test:large-file"
+		p.backgrounds[key] = MessageContext{MediaTimeout: tc.timeout, Messages: []ContextMessage{{
+			ID: "file", Text: "attachment", Resources: []ContextResource{{Kind: "file", Key: "opaque"}},
+		}}}
+		before := time.Now()
+		env.engine.prepareMessageContext(p, key, &Session{}, &interactiveState{}, "open", "trigger")
+		if p.deadline.Before(before.Add(tc.want)) || p.deadline.After(time.Now().Add(tc.want)) {
+			t.Fatalf("adapter timeout %v: got %v, want %v", tc.timeout, p.deadline.Sub(before), tc.want)
+		}
+	}
+}
+
+func TestMessageContextUsesMediaTargetOnlyInTriggerScope(t *testing.T) {
+	const key = "test:group:topic"
+	for _, target := range []testMediaTarget{key, "test:other-group:topic", "test:group:other-topic"} {
+		t.Run(string(target), func(t *testing.T) {
+			env, base := newContextCUJEnv(t)
+			p := &mediaContextPlatform{contextTestPlatform: base}
+			p.backgrounds[key] = MessageContext{MediaTarget: target, Messages: []ContextMessage{{
+				ID: "photo", Text: "attachment", Resources: []ContextResource{{Kind: "image", Key: "opaque"}},
+			}}}
+			env.engine.prepareMessageContext(p, key, &Session{}, &interactiveState{}, "open", "trigger")
+			if target == key {
+				if p.target != target || len(p.hydrated) != 1 {
+					t.Fatal("did not hydrate with the target bound to the history read")
+				}
+			} else if len(p.hydrated) != 0 {
+				t.Fatalf("read attachments with a foreign media target: %v", p.hydrated)
+			}
+		})
+	}
 }
 
 func TestMessageContextDeliveredMediaIsNotDownloadedAgain(t *testing.T) {

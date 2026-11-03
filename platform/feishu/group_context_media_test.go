@@ -41,6 +41,8 @@ func TestGroupContextCommonTypesParseWithoutIO(t *testing.T) {
 		{"audio", `{"file_key":"audio","duration":4000}`, "duration=4000", 1, false},
 		{"video", `{"file_key":"video","image_key":"cover","duration":5000}`, "duration=5000", 2, false},
 		{"media", `{"file_key":"video","file_name":"clip.mp4"}`, "clip.mp4", 1, false},
+		{"video_chat", `{"topic":"Planning","meet_number":"123456","start_time":"1700000000000","end_time":"1700000300000"}`, "[video chat: topic=Planning, start_time=1700000000000, end_time=1700000300000]", 0, false},
+		{"video_chat", `{"meet_number":"123456"}`, "missing readable metadata", 0, true},
 		{"share_chat", `{"chat_id":"oc_shared","chat_name":"Planning"}`, "Planning", 0, false},
 		{"share_user", `{"user_id":"ou_shared"}`, "ou_shared", 0, false},
 		{"location", `{"name":"Office","latitude":"31.2","longitude":"121.5"}`, "31.2", 0, false},
@@ -153,6 +155,32 @@ func TestGroupContextContentFailureIsPerEntryAndStickerIsExpected(t *testing.T) 
 	}
 }
 
+func TestGroupContextDistinguishesUnreadContentFromTrimmedText(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	longText := strings.Repeat("x", 600)
+	card := `{"elements":[{"tag":"markdown","content":"Visible"}` + strings.Repeat(`,{"tag":"hr"}`, 256) + `]}`
+	p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{
+			contextTypedMessage("card", "interactive", card, now.Add(-time.Minute)),
+			contextTypedMessage("raw", "text", `{"text":"`+strings.Repeat("x", groupContextContentBytes)+`"}`, now.Add(-time.Minute)),
+			contextTypedMessage("text", "text", `{"text":"`+longText+`"}`, now.Add(-time.Second)),
+			contextTypedMessage("mixed", "post", `{"content":[[{"tag":"text","text":"`+longText+`"},{"tag":"img"}]]}`, now.Add(-time.Second)),
+		}}})
+	})
+	p.groupContext.maxChars = 512
+	got, err := p.LoadMessageContext(context.Background(), contextMediaTarget(now), time.Time{})
+	if err != nil || got.Unreadable || len(got.Messages) != 4 {
+		t.Fatalf("load: %+v (%v)", got, err)
+	}
+	for _, entry := range got.Messages {
+		wantTrimmed := entry.ID == "text" || entry.ID == "mixed"
+		wantUnavailable := entry.ID != "text"
+		if entry.TextTruncated != wantTrimmed || entry.Incomplete != wantUnavailable {
+			t.Fatalf("%s: truncated=%v unavailable=%v", entry.ID, entry.TextTruncated, entry.Incomplete)
+		}
+	}
+}
+
 func TestGroupContextHydratePartialFailuresAndResourceIsolation(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	png := []byte("\x89PNG\r\n\x1a\nimage")
@@ -211,9 +239,37 @@ func TestGroupContextHydratePartialFailuresAndResourceIsolation(t *testing.T) {
 			p.markMessageRecalled("outer")
 		}
 		out, _ := p.HydrateMessageContext(context.Background(), contextMediaTarget(now), []core.ContextMessage{invalid})
-		if !out[0].Incomplete || calls.Load() != count {
+		if len(out) != 1 || !out[0].Incomplete || calls.Load() != count {
 			t.Fatalf("%s crossed resource boundary: %+v", change, out)
 		}
+		if change == "recalled" && (strings.Contains(out[0].Text, "report.pdf") || len(out[0].Resources)+len(out[0].Images)+len(out[0].Files) > 0) {
+			t.Fatal("recalled source leaked text or attachments")
+		}
+	}
+}
+
+func TestGroupContextHydratesScreenRecordingAndCover(t *testing.T) {
+	const recordingSize = 96 << 20
+	recording := make([]byte, recordingSize)
+	cover := []byte("\xff\xd8\xff\xe0cover")
+	p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("type") == "image" {
+			http.ServeContent(w, r, "cover.jpg", time.Time{}, bytes.NewReader(cover))
+			return
+		}
+		http.ServeContent(w, r, "recording.mp4", time.Time{}, bytes.NewReader(recording))
+	}, "/open-apis/im/v1/messages/post/resources/clip", "/open-apis/im/v1/messages/post/resources/cover")
+
+	now := time.Now()
+	entry := parseGroupContextContent("post", `{"content":[[{"tag":"media","file_key":"clip","image_key":"cover"}]]}`, "post")
+	entry.ID, entry.Time = "post", now.Add(-time.Second)
+	got, err := p.HydrateMessageContext(context.Background(), contextMediaTarget(now), []core.ContextMessage{entry})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("hydrate: %v, got %d entries", err, len(got))
+	}
+	msg := got[0]
+	if msg.Incomplete || len(msg.Files) != 1 || len(msg.Files[0].Data) != recordingSize || len(msg.Images) != 1 || !bytes.Equal(msg.Images[0].Data, cover) {
+		t.Fatalf("recording and cover not both delivered: %s", msg.Text)
 	}
 }
 
@@ -276,7 +332,7 @@ func TestGroupContextHydrateCountAndTotalByteBudgets(t *testing.T) {
 }
 
 func TestGroupContextForwardBoundedAndNoExtraScopeReads(t *testing.T) {
-	for _, mode := range []string{"request-limit", "depth", "count", "failure", "cancelled", "wrong-root", "filtered"} {
+	for _, mode := range []string{"request-limit", "depth", "count", "failure", "cancelled", "wrong-root", "deleted-root", "filtered"} {
 		t.Run(mode, func(t *testing.T) {
 			now := time.Now().UTC().Truncate(time.Millisecond)
 			var items []any
@@ -309,6 +365,9 @@ func TestGroupContextForwardBoundedAndNoExtraScopeReads(t *testing.T) {
 				root := contextTypedMessage(id, "merge_forward", `{}`, now.Add(-time.Minute))
 				if mode == "wrong-root" {
 					root["chat_id"] = "foreign"
+				}
+				if mode == "deleted-root" {
+					root["deleted"] = true
 				}
 				children := []any{root}
 				n, parent := 1, id
@@ -363,8 +422,8 @@ func TestGroupContextForwardBoundedAndNoExtraScopeReads(t *testing.T) {
 				if len([]rune(entry.Text)) > p.groupContext.maxChars || len(entry.Resources) > groupContextMaxResources {
 					t.Fatal("unbounded forward output")
 				}
-				if mode == "wrong-root" && strings.Contains(entry.Text, "source fact") {
-					t.Fatal("wrong root data leaked")
+				if (mode == "wrong-root" || mode == "deleted-root") && (!entry.Incomplete || strings.Contains(entry.Text, "source fact")) {
+					t.Fatal("invalid or deleted forward root was silently omitted or its children leaked")
 				}
 			}
 			if incomplete == 0 {

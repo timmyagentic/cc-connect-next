@@ -151,6 +151,7 @@ func (p *Platform) appendGroupContextForward(ctx context.Context, entry *core.Co
 		}
 		entry.Text += child.Text
 		entry.Incomplete = entry.Incomplete || child.Incomplete
+		entry.TextTruncated = entry.TextTruncated || child.TextTruncated
 		available := groupContextMaxResources - len(entry.Resources)
 		if len(child.Resources) > available {
 			child.Resources = child.Resources[:available]

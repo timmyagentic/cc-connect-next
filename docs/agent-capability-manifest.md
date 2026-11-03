@@ -219,14 +219,16 @@ untrusted discussion using existing platform access before a verified user
 turn. It does not execute quoted commands or grant tool permissions. Its
 availability reports disabled configuration, an ineligible target, or the
 conditional need for existing history access; unavailable adapters retain the
-entry with a current-message fallback. Failed/truncated reads are disclosed.
+entry with a current-message fallback. Only truncation of conversation history is marked privately in the Agent input.
+Failed queries and incomplete reads of selected messages or attachments,
+including attachment limits, are reported to the group in one notice.
 Selected history can include attributed forwarded text, images and files. Media is
 downloaded only after deduplication and text-budget selection, using bounded
-resource requests. Unavailable content is marked; failed media remains retryable.
+resource requests. Unavailable content is marked in the Agent input.
 
 The associated `group_context` configuration defaults off. Reads occur only
-for requests accepted by the configured group reply rules and never by polling; ID receipts persist only after a
-successful turn. Busy requests queue to preserve that ordering.
+for requests accepted by the configured group reply rules. The per-group or
+per-topic position advances on input delivery, including queued or steered follow-ups.
 
 ## Conversation speed
 

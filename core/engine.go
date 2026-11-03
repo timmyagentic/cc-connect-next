@@ -14131,12 +14131,19 @@ func drainEvents(ch <-chan Event) {
 
 // replyWithError applies outgoing rate limiting and p.Reply.
 func (e *Engine) replyWithError(p Platform, replyCtx any, content string) error {
-	if err := e.waitOutgoing(p); err != nil {
+	return e.replyWithErrorContext(e.ctx, p, replyCtx, content)
+}
+
+func (e *Engine) replyWithErrorContext(ctx context.Context, p Platform, replyCtx any, content string) error {
+	if err := e.waitOutgoingWithContext(ctx, p); err != nil {
 		slog.Warn("outgoing rate limit: context cancelled", "platform", p.Name(), "error", err)
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	start := time.Now()
-	if err := p.Reply(e.ctx, replyCtx, content); err != nil {
+	if err := p.Reply(ctx, replyCtx, content); err != nil {
 		slog.Error("platform reply failed", "platform", p.Name(), "error", err, "content_len", len(content))
 		return err
 	}

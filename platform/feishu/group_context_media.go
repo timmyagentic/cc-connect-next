@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	groupContextMediaBytes   int64 = 20 * 1024 * 1024
-	groupContextMediaTimeout       = 12 * time.Second
+	groupContextMediaBytes   int64 = 100 * 1024 * 1024
+	groupContextMediaTimeout       = 45 * time.Second
 )
 
 var _ core.MessageContextMediaProvider = (*Platform)(nil)
@@ -22,6 +22,16 @@ var _ core.MessageContextMediaProvider = (*Platform)(nil)
 // Keep identity/order and partial successes intact, even on cancellation.
 func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messages []core.ContextMessage) ([]core.ContextMessage, error) {
 	result := append([]core.ContextMessage(nil), messages...)
+	// A source can be recalled after selection, even while another file is
+	// downloading. Replace the entire source before the result is delivered.
+	defer func() {
+		for i, entry := range result {
+			if p.isMessageRecalled(entry.ID) {
+				result[i] = core.ContextMessage{ID: entry.ID, Time: entry.Time}
+				contextContentUnavailable(&result[i], "message", "source was recalled")
+			}
+		}
+	}()
 	if !p.MessageContextEnabled(target) {
 		for i := range result {
 			result[i].Images, result[i].Files = nil, nil
@@ -35,7 +45,10 @@ func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messag
 	defer cancel()
 	rc := target.(replyContext)
 	cutoff := time.UnixMilli(rc.contextTimeMs)
-	start := cutoff.Add(-time.Duration(p.groupContext.minutes) * time.Minute)
+	start := rc.mediaStart
+	if start.IsZero() {
+		start = cutoff.Add(-time.Duration(p.groupContext.minutes) * time.Minute)
+	}
 
 	// Reuse the validated range downloader with an isolated configuration:
 	// never copy Platform's locks or mutate its live download limits.
@@ -61,6 +74,9 @@ func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messag
 		entry.Images, entry.Files = nil, nil
 		imageNumber := 0
 		for _, resource := range entry.Resources {
+			if p.isMessageRecalled(entry.ID) {
+				break
+			}
 			label := resource.Kind
 			if resource.Kind == "image" {
 				imageNumber++
@@ -70,7 +86,7 @@ func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messag
 			}
 			reason := ""
 			switch {
-			case rc.contextTimeMs <= 0 || entry.Time.Before(start) || entry.Time.After(cutoff) || p.isMessageRecalled(entry.ID):
+			case rc.contextTimeMs <= 0 || entry.Time.Before(start) || entry.Time.After(cutoff):
 				reason = "message outside authorized snapshot"
 			case entry.ID == "" || resource.MessageID != entry.ID || strings.TrimSpace(resource.Key) == "":
 				reason = "invalid resource source"
