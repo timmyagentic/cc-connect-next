@@ -1513,7 +1513,7 @@ sender/time attribution. Images and downloadable attachments from selected
 history are passed through the Agent's existing image/file input paths, including
 images inside forwarded messages. Downloads happen after deduplication and text
 selection, under a separate 15-second preparation budget. Feishu downloads at
-most 12 resources and 20 MiB within 12 seconds, also respecting the existing
+most 12 resources and 50 MiB within 12 seconds, also respecting the existing
 per-resource limit.
 Sticker and other platform-only content is represented with explicit metadata
 or an unavailable marker; audio/video files are attachments, not a claim that

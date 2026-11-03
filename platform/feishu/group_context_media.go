@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	groupContextMediaBytes   int64 = 20 * 1024 * 1024
+	groupContextMediaBytes   int64 = 50 * 1024 * 1024
 	groupContextMediaTimeout       = 12 * time.Second
 )
 

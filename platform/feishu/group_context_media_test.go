@@ -217,6 +217,31 @@ func TestGroupContextHydratePartialFailuresAndResourceIsolation(t *testing.T) {
 	}
 }
 
+func TestGroupContextHydratesScreenRecordingAndCover(t *testing.T) {
+	const recordingSize = 36 << 20
+	recording := make([]byte, recordingSize)
+	cover := []byte("\xff\xd8\xff\xe0cover")
+	p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("type") == "image" {
+			http.ServeContent(w, r, "cover.jpg", time.Time{}, bytes.NewReader(cover))
+			return
+		}
+		http.ServeContent(w, r, "recording.mp4", time.Time{}, bytes.NewReader(recording))
+	}, "/open-apis/im/v1/messages/post/resources/clip", "/open-apis/im/v1/messages/post/resources/cover")
+
+	now := time.Now()
+	entry := parseGroupContextContent("post", `{"content":[[{"tag":"media","file_key":"clip","image_key":"cover"}]]}`, "post")
+	entry.ID, entry.Time = "post", now.Add(-time.Second)
+	got, err := p.HydrateMessageContext(context.Background(), contextMediaTarget(now), []core.ContextMessage{entry})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("hydrate: %v, got %d entries", err, len(got))
+	}
+	msg := got[0]
+	if msg.Incomplete || len(msg.Files) != 1 || len(msg.Files[0].Data) != recordingSize || len(msg.Images) != 1 || !bytes.Equal(msg.Images[0].Data, cover) {
+		t.Fatalf("recording and cover not both delivered: %s", msg.Text)
+	}
+}
+
 func TestGroupContextHydrateCountAndTotalByteBudgets(t *testing.T) {
 	for _, mode := range []string{"count", "bytes", "failed-bytes", "existing-max"} {
 		t.Run(mode, func(t *testing.T) {
