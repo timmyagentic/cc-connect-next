@@ -138,8 +138,9 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 	}
 	rctx := target.(replyContext)
 	result = core.MessageContext{
-		Scope:    p.MessageContextScope(target),
-		MaxChars: p.groupContext.maxChars,
+		Scope:        p.MessageContextScope(target),
+		MaxChars:     p.groupContext.maxChars,
+		MediaTimeout: groupContextMediaTimeout,
 	}
 	forwardIDs := make(map[string]bool)
 	defer func() {
@@ -155,6 +156,8 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 	if !after.IsZero() {
 		start = after.Add(time.Millisecond)
 	}
+	rctx.mediaStart = start
+	result.MediaTarget = rctx
 	result.Through = cutoff
 	if start.After(cutoff) {
 		return result, nil

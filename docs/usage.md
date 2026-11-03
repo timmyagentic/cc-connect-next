@@ -1511,10 +1511,12 @@ use their own history container; private chats and other topics are excluded.
 Text, rich text, readable cards and forwarded conversations retain their
 sender/time attribution. Images and downloadable attachments from selected
 history are passed through the Agent's existing image/file input paths, including
-images inside forwarded messages. Downloads happen after deduplication and text
-selection, under a separate 15-second preparation budget. Feishu downloads at
-most 12 resources and 50 MiB within 12 seconds, also respecting the existing
-per-resource limit.
+images inside forwarded messages. Media uses the same read window as the selected
+text, including when the last delivered position precedes the initial lookback.
+Meeting notices supply the topic and available start/end times. Downloads happen
+after deduplication and text selection. Feishu downloads at most 12 resources
+totaling 100 MiB per turn, with one 45-second deadline shared by all downloads,
+chunks and retries. The existing per-resource size limit still applies.
 Sticker and other platform-only content is represented with explicit metadata
 or an unavailable marker; audio/video files are attachments, not a claim that
 every Agent can transcribe or play them. No extra permissions are requested.

@@ -41,6 +41,8 @@ func TestGroupContextCommonTypesParseWithoutIO(t *testing.T) {
 		{"audio", `{"file_key":"audio","duration":4000}`, "duration=4000", 1, false},
 		{"video", `{"file_key":"video","image_key":"cover","duration":5000}`, "duration=5000", 2, false},
 		{"media", `{"file_key":"video","file_name":"clip.mp4"}`, "clip.mp4", 1, false},
+		{"video_chat", `{"topic":"Planning","meet_number":"123456","start_time":"1700000000000","end_time":"1700000300000"}`, "[video chat: topic=Planning, start_time=1700000000000, end_time=1700000300000]", 0, false},
+		{"video_chat", `{"meet_number":"123456"}`, "missing readable metadata", 0, true},
 		{"share_chat", `{"chat_id":"oc_shared","chat_name":"Planning"}`, "Planning", 0, false},
 		{"share_user", `{"user_id":"ou_shared"}`, "ou_shared", 0, false},
 		{"location", `{"name":"Office","latitude":"31.2","longitude":"121.5"}`, "31.2", 0, false},
@@ -218,7 +220,7 @@ func TestGroupContextHydratePartialFailuresAndResourceIsolation(t *testing.T) {
 }
 
 func TestGroupContextHydratesScreenRecordingAndCover(t *testing.T) {
-	const recordingSize = 36 << 20
+	const recordingSize = 96 << 20
 	recording := make([]byte, recordingSize)
 	cover := []byte("\xff\xd8\xff\xe0cover")
 	p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {

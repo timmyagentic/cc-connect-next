@@ -85,6 +85,8 @@ func parseGroupContextContent(kind, raw, messageID string) core.ContextMessage {
 		if field("image_key") != "" {
 			appendContextResource(&entry, messageID, field("image_key"), "image", "video-cover")
 		}
+	case "video_chat":
+		setContextMetadata(&entry, "video chat", body, "topic", "start_time", "end_time")
 	case "share_chat":
 		setContextMetadata(&entry, "shared chat", body, "chat_id", "chat_name", "name")
 	case "share_user", "user":

@@ -298,12 +298,25 @@ func TestMessageContextDrainsEventsThatArriveDuringRead(t *testing.T) {
 type mediaContextPlatform struct {
 	*contextTestPlatform
 	hydrated []string
+	deadline time.Time
+	target   any
 	fail     bool
 }
 
-func (p *mediaContextPlatform) HydrateMessageContext(_ context.Context, _ any, entries []ContextMessage) ([]ContextMessage, error) {
+type testMediaTarget string
+
+func (p *mediaContextPlatform) MessageContextScope(target any) string {
+	if bound, ok := target.(testMediaTarget); ok {
+		return string(bound)
+	}
+	return p.contextTestPlatform.MessageContextScope(target)
+}
+
+func (p *mediaContextPlatform) HydrateMessageContext(ctx context.Context, target any, entries []ContextMessage) ([]ContextMessage, error) {
 	p.contextMu.Lock()
 	defer p.contextMu.Unlock()
+	p.deadline, _ = ctx.Deadline()
+	p.target = target
 	for i := range entries {
 		if len(entries[i].Resources) == 0 {
 			continue
@@ -318,6 +331,46 @@ func (p *mediaContextPlatform) HydrateMessageContext(_ context.Context, _ any, e
 		entries[i].Files = []FileAttachment{{MimeType: "text/plain", Data: []byte("file bytes"), FileName: "notes.txt", MessageID: entries[i].ID}}
 	}
 	return entries, nil
+}
+
+func TestMessageContextUsesAdapterMediaDeadlineOrDefault(t *testing.T) {
+	env, base := newContextCUJEnv(t)
+	p := &mediaContextPlatform{contextTestPlatform: base}
+	for _, tc := range []struct{ timeout, want time.Duration }{
+		{0, 15 * time.Second},
+		{45 * time.Second, 45 * time.Second},
+	} {
+		const key = "test:large-file"
+		p.backgrounds[key] = MessageContext{MediaTimeout: tc.timeout, Messages: []ContextMessage{{
+			ID: "file", Text: "attachment", Resources: []ContextResource{{Kind: "file", Key: "opaque"}},
+		}}}
+		before := time.Now()
+		env.engine.prepareMessageContext(p, key, &Session{}, &interactiveState{}, "open", "trigger")
+		if p.deadline.Before(before.Add(tc.want)) || p.deadline.After(time.Now().Add(tc.want)) {
+			t.Fatalf("adapter timeout %v: got %v, want %v", tc.timeout, p.deadline.Sub(before), tc.want)
+		}
+	}
+}
+
+func TestMessageContextUsesMediaTargetOnlyInTriggerScope(t *testing.T) {
+	const key = "test:group:topic"
+	for _, target := range []testMediaTarget{key, "test:other-group:topic", "test:group:other-topic"} {
+		t.Run(string(target), func(t *testing.T) {
+			env, base := newContextCUJEnv(t)
+			p := &mediaContextPlatform{contextTestPlatform: base}
+			p.backgrounds[key] = MessageContext{MediaTarget: target, Messages: []ContextMessage{{
+				ID: "photo", Text: "attachment", Resources: []ContextResource{{Kind: "image", Key: "opaque"}},
+			}}}
+			env.engine.prepareMessageContext(p, key, &Session{}, &interactiveState{}, "open", "trigger")
+			if target == key {
+				if p.target != target || len(p.hydrated) != 1 {
+					t.Fatal("did not hydrate with the target bound to the history read")
+				}
+			} else if len(p.hydrated) != 0 {
+				t.Fatalf("read attachments with a foreign media target: %v", p.hydrated)
+			}
+		})
+	}
 }
 
 func TestMessageContextDeliveredMediaIsNotDownloadedAgain(t *testing.T) {

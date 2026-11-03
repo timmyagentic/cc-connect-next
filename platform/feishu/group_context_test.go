@@ -155,7 +155,11 @@ func TestGroupContextReadsFromDeliveredPositionBeforeApplyingLimit(t *testing.T)
 			now := time.Now().UTC().Truncate(time.Millisecond)
 			after := now.Add(-2 * time.Hour)
 			first := true
-			p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+			p, calls := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("type") == "image" {
+					_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nunseen photo"))
+					return
+				}
 				start := now.Add(-30 * time.Minute)
 				if !first {
 					start = after.Add(time.Millisecond)
@@ -163,12 +167,14 @@ func TestGroupContextReadsFromDeliveredPositionBeforeApplyingLimit(t *testing.T)
 				if thread == "" && r.URL.Query().Get("start_time") != strconv.FormatInt(start.Unix(), 10) {
 					t.Errorf("wrong incremental start: %s", r.URL)
 				}
+				photo := contextAPIMessage("new", "oc_group", thread, "alice", "Alice", "", after.Add(time.Minute))
+				photo["msg_type"], photo["body"] = "image", map[string]string{"content": `{"image_key":"photo"}`}
 				writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{
-					contextAPIMessage("new", "oc_group", thread, "alice", "Alice", "new discussion", after.Add(time.Minute)),
+					photo,
 					contextAPIMessage("seen", "oc_group", thread, "alice", "Alice", "already delivered", after),
 					contextAPIMessage("old", "oc_group", thread, "alice", "Alice", "older discussion", after.Add(-time.Minute)),
 				}, "has_more": false}})
-			})
+			}, "/open-apis/im/v1/messages/new/resources/photo")
 			target := replyContext{chatID: "oc_group", threadID: thread, messageID: "trigger", contextEligible: true, contextTimeMs: now.UnixMilli()}
 			bootstrap, err := p.LoadMessageContext(context.Background(), target, time.Time{})
 			if err != nil || len(bootstrap.Messages) != 0 || !bootstrap.Through.Equal(now) {
@@ -179,6 +185,17 @@ func TestGroupContextReadsFromDeliveredPositionBeforeApplyingLimit(t *testing.T)
 			increment, err := p.LoadMessageContext(context.Background(), target, after)
 			if err != nil || len(increment.Messages) != 1 || increment.Messages[0].ID != "new" || increment.Incomplete {
 				t.Fatalf("increment missed new discussion or counted old messages against limit: %+v %v", increment, err)
+			}
+			hydrated, err := p.HydrateMessageContext(context.Background(), increment.MediaTarget, increment.Messages)
+			if err != nil || len(hydrated) != 1 || hydrated[0].Incomplete || len(hydrated[0].Images) != 1 {
+				t.Fatalf("listed incremental photo was not delivered: %+v %v", hydrated, err)
+			}
+			before := calls.Load()
+			seen := increment.Messages[0]
+			seen.Time = after
+			blocked, _ := p.HydrateMessageContext(context.Background(), increment.MediaTarget, []core.ContextMessage{seen})
+			if !blocked[0].Incomplete || calls.Load() != before {
+				t.Fatal("downloaded a photo at or before the delivered position")
 			}
 			empty, err := p.LoadMessageContext(context.Background(), target, now)
 			if err != nil || len(empty.Messages) != 0 {

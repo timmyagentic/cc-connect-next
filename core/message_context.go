@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -48,12 +49,14 @@ type ContextMessage struct {
 }
 
 type MessageContext struct {
-	Scope      string    // opaque platform/app/conversation boundary
-	Through    time.Time // trigger timestamp; advance only after input delivery
-	Messages   []ContextMessage
-	MaxChars   int // total serialized background, including attribution
-	Incomplete bool
-	Unreadable bool // an entry could not be safely attributed or read
+	Scope        string    // opaque platform/app/conversation boundary
+	Through      time.Time // trigger timestamp; advance only after input delivery
+	Messages     []ContextMessage
+	MaxChars     int           // total serialized background, including attribution
+	MediaTimeout time.Duration // adapter's total attachment deadline; zero uses 15 seconds
+	MediaTarget  any           `json:"-"` // optional same-scope target bound by the provider to this read
+	Incomplete   bool
+	Unreadable   bool // an entry could not be safely attributed or read
 }
 
 // ContextProgress stores where this Agent conversation has caught up, not a
@@ -199,9 +202,22 @@ func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, repl
 	selected := selectContextMessages(unseen, candidates)
 	var mediaErr error
 	if media, ok := p.(MessageContextMediaProvider); ok && len(selected) > 0 {
-		mediaCtx, stopMedia := context.WithTimeout(ctx, 15*time.Second)
-		selected, mediaErr = media.HydrateMessageContext(mediaCtx, replyCtx, selected)
-		stopMedia()
+		mediaTarget := background.MediaTarget
+		switch {
+		case mediaTarget == nil:
+			mediaTarget = replyCtx
+		case scope == "" || background.Scope != scope || provider.MessageContextScope(mediaTarget) != scope:
+			mediaErr = errors.New("history media target does not match the trigger scope")
+		}
+		if mediaErr == nil {
+			timeout := background.MediaTimeout
+			if timeout <= 0 {
+				timeout = 15 * time.Second
+			}
+			mediaCtx, stopMedia := context.WithTimeout(ctx, timeout)
+			selected, mediaErr = media.HydrateMessageContext(mediaCtx, mediaTarget, selected)
+			stopMedia()
+		}
 		if mediaErr != nil {
 			slog.Warn("recent conversation media could not be fully read", "platform", p.Name(), "error", redactFeedbackText(mediaErr.Error()))
 		}

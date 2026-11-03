@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	groupContextMediaBytes   int64 = 50 * 1024 * 1024
-	groupContextMediaTimeout       = 12 * time.Second
+	groupContextMediaBytes   int64 = 100 * 1024 * 1024
+	groupContextMediaTimeout       = 45 * time.Second
 )
 
 var _ core.MessageContextMediaProvider = (*Platform)(nil)
@@ -35,7 +35,10 @@ func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messag
 	defer cancel()
 	rc := target.(replyContext)
 	cutoff := time.UnixMilli(rc.contextTimeMs)
-	start := cutoff.Add(-time.Duration(p.groupContext.minutes) * time.Minute)
+	start := rc.mediaStart
+	if start.IsZero() {
+		start = cutoff.Add(-time.Duration(p.groupContext.minutes) * time.Minute)
+	}
 
 	// Reuse the validated range downloader with an isolated configuration:
 	// never copy Platform's locks or mutate its live download limits.
