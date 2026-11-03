@@ -127,8 +127,8 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 			option.Requires = []string{"group_context = true"}
 			minimum, maximum, fallback := 1.0, float64(maxGroupContextMessages), defaultGroupContextMessages
 			option.Unit = "messages"
-			option.Description = "Maximum background messages per accepted input, after excluding messages at or before the delivered read position. Keep the newest messages and disclose truncation."
-			option.DescriptionZH = "每次输入最多补读的背景消息条数；先排除已读位置及之前的消息，再保留最新消息，明确提示截断。"
+			option.Description = "Maximum background messages per accepted input, after excluding messages at or before the delivered read position. Keep the newest messages and mark truncation in the Agent input."
+			option.DescriptionZH = "每次输入最多补读的背景消息条数；先排除已读位置及之前的消息，再保留最新消息，并在 Agent 输入中标记截断。"
 			switch option.Key {
 			case "group_context_window_minutes":
 				maximum, fallback = float64(maxGroupContextMinutes), defaultGroupContextMinutes
@@ -138,8 +138,8 @@ func feishuConfigOptions(defaultDomain string) []core.ConfigOption {
 			case "group_context_max_chars":
 				minimum, maximum, fallback = float64(minGroupContextChars), float64(maxGroupContextChars), defaultGroupContextChars
 				option.Unit = "Unicode characters"
-				option.Description = "Bound the complete JSON background including message text, sender, time and reply metadata; preserve the newest discussion and disclose truncation."
-				option.DescriptionZH = "限制完整 JSON 背景的字符数，包含正文、发送者、时间及回复元数据；优先保留最新讨论并提示截断。"
+				option.Description = "Bound the complete JSON background including message text, sender, time and reply metadata; preserve the newest discussion and mark truncation in the Agent input."
+				option.DescriptionZH = "限制完整 JSON 背景的字符数，包含正文、发送者、时间及回复元数据；优先保留最新讨论，并在 Agent 输入中标记截断。"
 			}
 			option.Minimum, option.Maximum = &minimum, &maximum
 			option.Default = strconv.Itoa(fallback)

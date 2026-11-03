@@ -219,6 +219,41 @@ func TestMessageContextFailedResultDoesNotReplayDeliveredBackground(t *testing.T
 	}
 }
 
+func TestMessageContextGapsDoNotInterruptGroupReplies(t *testing.T) {
+	const key = "test:group"
+	const link = "https://example.org/preview"
+	for _, tc := range []struct {
+		name             string
+		limited, missing bool
+	}{
+		{"history limit", true, false},
+		{"missing recording", false, true},
+		{"both", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env, p := newContextCUJEnv(t)
+			entry := ContextMessage{ID: "post", Text: link, Time: time.Now()}
+			if tc.missing {
+				entry.Incomplete = true
+				entry.Text += "\n[recording: unavailable]"
+			}
+			p.backgrounds[key] = MessageContext{Messages: []ContextMessage{entry}, Incomplete: tc.limited}
+			contextReceive(env, p, key, "alice", "request", "What is the preview link?")
+			session := env.engine.sessions.GetOrCreateActive(key)
+			env.waitFor("answer", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
+			if sent := env.plat.getSent(); len(sent) != 1 {
+				t.Fatalf("expected only the agent reply, got %v", sent)
+			}
+			prompt := contextLatestSession(env).getSentPrompts()[0]
+			if !strings.Contains(prompt, link) ||
+				(tc.limited && !strings.Contains(prompt, env.engine.i18n.T(MsgRecentContextLimited))) ||
+				(tc.missing && !strings.Contains(prompt, "[recording: unavailable]")) {
+				t.Fatal("agent lost available context or its limitations")
+			}
+		})
+	}
+}
+
 func TestMessageContextReadFailureDoesNotAdvancePosition(t *testing.T) {
 	env, p := newContextCUJEnv(t)
 	key := "test:group"
@@ -226,8 +261,12 @@ func TestMessageContextReadFailureDoesNotAdvancePosition(t *testing.T) {
 	contextReceive(env, p, key, "alice", "first", "what happened?")
 	session := env.engine.sessions.GetOrCreateActive(key)
 	env.waitFor("partial answer", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
-	if !env.sentContains("context is incomplete") || env.sentContains("synthetic permission") || !session.messageContextPosition(key).IsZero() {
-		t.Fatalf("wrong disclosure or position: %v", env.plat.getSent())
+	if sent := env.plat.getSent(); len(sent) != 1 || !session.messageContextPosition(key).IsZero() {
+		t.Fatalf("failed lookback interrupted the answer or consumed history: %v", sent)
+	}
+	prompt := contextLatestSession(env).getSentPrompts()[0]
+	if !strings.Contains(prompt, env.engine.i18n.T(MsgRecentContextIncomplete)) || strings.Contains(prompt, "synthetic permission") {
+		t.Fatal("agent did not receive a safe account of the history failure")
 	}
 	p.setBackground(key, []ContextMessage{{ID: "missed", Text: "recovered fact"}}, nil)
 	env.plat.clearSent()

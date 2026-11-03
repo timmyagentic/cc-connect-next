@@ -3780,7 +3780,7 @@ enabled = true`
 
 ### `projects.platforms.options.group_context_max_chars` — `feishu, lark`
 
-限制完整 JSON 背景的字符数，包含正文、发送者、时间及回复元数据；优先保留最新讨论并提示截断。
+限制完整 JSON 背景的字符数，包含正文、发送者、时间及回复元数据；优先保留最新讨论，并在 Agent 输入中标记截断。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`
@@ -3796,7 +3796,7 @@ enabled = true`
 
 ### `projects.platforms.options.group_context_max_messages` — `feishu, lark`
 
-每次输入最多补读的背景消息条数；先排除已读位置及之前的消息，再保留最新消息，明确提示截断。
+每次输入最多补读的背景消息条数；先排除已读位置及之前的消息，再保留最新消息，并在 Agent 输入中标记截断。
 
 - 来源：`toml`
 - 配置位置：`[projects.platforms.options] (inside one [[projects.platforms]])`

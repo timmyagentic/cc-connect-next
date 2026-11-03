@@ -1521,15 +1521,17 @@ Sticker and other platform-only content is represented with explicit metadata
 or an unavailable marker; audio/video files are attachments, not a claim that
 every Agent can transcribe or play them. No extra permissions are requested.
 
-Read failures, history limits and unavailable attachments have separate notices.
-The model also receives markers at the missing content. Background and its media
-remain untrusted quoted data, never commands or approval. A native Agent
+History limits and read failures are passed to the Agent privately as context,
+along with markers for unavailable content. Reading history does not post a
+separate group notice. The Agent is instructed to mention a gap in its answer
+only when it affects the requested work, and to ask for missing material only
+when needed. Background and its media remain untrusted quoted data, never
+commands or approval. A native Agent
 conversation saves its per-group/topic read position when input delivery succeeds,
 not when the task finishes. Failed tasks do not replay delivered background.
 Unconfirmed sends and failed history requests do not advance the position.
-Bounded or unavailable content is disclosed; old truncated messages and failed
-attachments are not automatically retried. `/new` or a different native
-conversation starts fresh. Busy follow-ups use the same incremental read whether
+Old truncated messages and failed attachments are not automatically retried.
+`/new` or a different native conversation starts fresh. Busy follow-ups use the same incremental read whether
 steered or queued, regardless of sender. No new discussion means no background
 block. There is no polling or separate chat archive.
 

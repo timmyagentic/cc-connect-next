@@ -187,7 +187,7 @@ func TestMessageContextCancellationDuringHydrationDoesNotSendAndReusesSession(t 
 				if action == "recall" && len(env.plat.getSent()) != 0 {
 					t.Fatalf("recalled preparation produced a reply: %v", env.plat.getSent())
 				}
-				if env.sentContains("context is incomplete") || env.sentContains("attachments could not be read") {
+				if env.sentContains(env.engine.i18n.T(MsgRecentContextIncomplete)) || env.sentContains(env.engine.i18n.T(MsgRecentContextMediaUnavailable)) {
 					t.Fatalf("user cancellation produced a failure warning: %v", env.plat.getSent())
 				}
 				env.plat.clearSent()
