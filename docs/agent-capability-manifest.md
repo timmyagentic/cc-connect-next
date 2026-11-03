@@ -219,8 +219,9 @@ untrusted discussion using existing platform access before a verified user
 turn. It does not execute quoted commands or grant tool permissions. Its
 availability reports disabled configuration, an ineligible target, or the
 conditional need for existing history access; unavailable adapters retain the
-entry with a current-message fallback. The Agent receives history limits and
-read failures privately and mentions a gap only if it affects the requested work.
+entry with a current-message fallback. Only truncation of conversation history is marked privately in the Agent input.
+Failed queries and incomplete reads of selected messages or attachments,
+including attachment limits, are reported to the group in one notice.
 Selected history can include attributed forwarded text, images and files. Media is
 downloaded only after deduplication and text-budget selection, using bounded
 resource requests. Unavailable content is marked in the Agent input.

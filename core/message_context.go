@@ -35,17 +35,18 @@ type ContextResource struct {
 
 // ContextMessage is quoted data, not a command or permission decision.
 type ContextMessage struct {
-	ID         string            `json:"message_id"`
-	SenderID   string            `json:"sender_id"`
-	SenderName string            `json:"sender_name,omitempty"`
-	SenderType string            `json:"sender_type,omitempty"`
-	Time       time.Time         `json:"time"`
-	ReplyTo    string            `json:"reply_to,omitempty"`
-	Text       string            `json:"text"`
-	Resources  []ContextResource `json:"-"`
-	Images     []ImageAttachment `json:"-"`
-	Files      []FileAttachment  `json:"-"`
-	Incomplete bool              `json:"-"`
+	ID            string            `json:"message_id"`
+	SenderID      string            `json:"sender_id"`
+	SenderName    string            `json:"sender_name,omitempty"`
+	SenderType    string            `json:"sender_type,omitempty"`
+	Time          time.Time         `json:"time"`
+	ReplyTo       string            `json:"reply_to,omitempty"`
+	Text          string            `json:"text"`
+	Resources     []ContextResource `json:"-"`
+	Images        []ImageAttachment `json:"-"`
+	Files         []FileAttachment  `json:"-"`
+	Incomplete    bool              `json:"-"` // selected content or media could not be fully read, including resource limits
+	TextTruncated bool              `json:"-"` // already-read text was shortened to fit the conversation context
 }
 
 type MessageContext struct {
@@ -55,8 +56,8 @@ type MessageContext struct {
 	MaxChars     int           // total serialized background, including attribution
 	MediaTimeout time.Duration // adapter's total attachment deadline; zero uses 15 seconds
 	MediaTarget  any           `json:"-"` // optional same-scope target bound by the provider to this read
-	Incomplete   bool
-	Unreadable   bool // an entry could not be safely attributed or read
+	Incomplete   bool          // the history selection reached a limit; report request failures via error
+	Unreadable   bool          // an entry could not be safely attributed or read
 }
 
 // ContextProgress stores where this Agent conversation has caught up, not a
@@ -226,21 +227,42 @@ func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, repl
 		return prepared
 	}
 	serialized, included, truncated := renderMessageContext(selected, background.MaxChars)
-	failedContent := background.Unreadable
+	contextTruncated := background.Incomplete || initiallyTruncated || truncated
+	failedContent := background.Unreadable || mediaErr != nil
 	for _, entry := range selected {
+		contextTruncated = contextTruncated || entry.TextTruncated
 		failedContent = failedContent || entry.Incomplete
 	}
-	var coverageNotes []string
+	var failures []string
 	if err != nil {
-		coverageNotes = append(coverageNotes, e.i18n.TForText(MsgRecentContextIncomplete, content))
-	} else if background.Incomplete || initiallyTruncated || truncated {
-		coverageNotes = append(coverageNotes, e.i18n.TForText(MsgRecentContextLimited, content))
+		key := MsgRecentContextIncomplete
+		if errors.Is(err, context.DeadlineExceeded) {
+			key = MsgRecentContextHistoryTimeout
+		}
+		failures = append(failures, e.i18n.TForText(key, content))
 	}
-	if failedContent || mediaErr != nil {
-		coverageNotes = append(coverageNotes, e.i18n.TForText(MsgRecentContextMediaUnavailable, content))
+	if failedContent {
+		key := MsgRecentContextMediaUnavailable
+		if errors.Is(mediaErr, context.DeadlineExceeded) {
+			key = MsgRecentContextMediaTimeout
+		}
+		failures = append(failures, e.i18n.TForText(key, content))
+	}
+	coverageNotes := failures
+	if contextTruncated {
+		coverageNotes = append(coverageNotes, e.i18n.TForText(MsgRecentContextLimited, content))
 	}
 	if serialized != "" || len(coverageNotes) > 0 {
 		prepared = buildMessageContextPrompt(content, serialized, coverageNotes, selectContextMessages(selected, included))
+	}
+	// Only trimming the conversation context is quiet. Report a read problem
+	// even when the remaining history is sufficient to answer the request.
+	if len(failures) > 0 {
+		_ = e.replyWithErrorContext(ctx, p, replyCtx, strings.Join(failures, "\n"))
+		if err := ctx.Err(); err != nil {
+			prepared.Err = err
+			return prepared
+		}
 	}
 	// A failed history request did not establish a read position. Bounded
 	// snapshots and unavailable attachments advance with the delivered input.

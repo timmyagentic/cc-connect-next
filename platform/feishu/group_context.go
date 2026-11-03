@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -132,7 +133,7 @@ func (p *Platform) MessageContextScope(target any) string {
 	return p.Name() + ":" + p.appID + ":" + rctx.chatID + ":" + rctx.threadID
 }
 
-func (p *Platform) LoadMessageContext(ctx context.Context, target any, after time.Time) (result core.MessageContext, readErr error) {
+func (p *Platform) LoadMessageContext(ctx context.Context, target any, after time.Time) (result core.MessageContext, err error) {
 	if !p.MessageContextEnabled(target) {
 		return core.MessageContext{}, nil
 	}
@@ -144,7 +145,6 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 	}
 	forwardIDs := make(map[string]bool)
 	defer func() {
-		result.Incomplete = result.Incomplete || readErr != nil
 		finishGroupContext(&result, p.groupContext.maxMessages)
 		p.expandGroupContextForwards(ctx, rctx, result.Messages, forwardIDs)
 	}()
@@ -167,6 +167,7 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 		containerType, containerID = "thread", rctx.threadID
 	}
 	seen := make(map[string]bool)
+	seenPageTokens := make(map[string]bool)
 	pageToken := ""
 	for page := 0; page < groupContextMaxPages; page++ {
 		builder := larkim.NewListMessageReqBuilder().ContainerIdType(containerType).ContainerId(containerID).
@@ -182,6 +183,10 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 		}
 		resp, err := p.client.Im.Message.List(ctx, builder.Build())
 		if err != nil {
+			// The SDK can flatten an HTTP cancellation or deadline into text.
+			if cause := ctx.Err(); cause != nil && !errors.Is(err, cause) {
+				err = errors.Join(err, cause)
+			}
 			return result, fmt.Errorf("%s: list recent messages: %w", p.tag(), err)
 		}
 		if resp == nil || !resp.Success() || resp.Data == nil {
@@ -210,17 +215,18 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 			result.Messages = append(result.Messages, entry)
 		}
 		hasMore := resp.Data.HasMore != nil && *resp.Data.HasMore
-		if len(result.Messages) > p.groupContext.maxMessages || pastWindow || !hasMore {
-			if len(result.Messages) > p.groupContext.maxMessages {
-				result.Incomplete = true
-			}
+		if pastWindow || !hasMore {
 			break
 		}
-		nextToken := stringValue(resp.Data.PageToken)
-		if nextToken == "" || nextToken == pageToken || page == groupContextMaxPages-1 {
+		if len(result.Messages) >= p.groupContext.maxMessages || page == groupContextMaxPages-1 {
 			result.Incomplete = true
 			break
 		}
+		nextToken := stringValue(resp.Data.PageToken)
+		if nextToken == "" || seenPageTokens[nextToken] {
+			return result, fmt.Errorf("%s: list recent messages returned a missing or repeated next page token", p.tag())
+		}
+		seenPageTokens[nextToken] = true
 		pageToken = nextToken
 	}
 	return result, nil
@@ -240,7 +246,10 @@ func finishGroupContext(result *core.MessageContext, maxMessages int) {
 }
 
 func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start, cutoff time.Time) (core.ContextMessage, bool, bool) {
-	if item == nil || (item.Deleted != nil && *item.Deleted) || p.isMessageRecalled(stringValue(item.MessageId)) {
+	if item == nil {
+		return core.ContextMessage{}, false, true
+	}
+	if (item.Deleted != nil && *item.Deleted) || p.isMessageRecalled(stringValue(item.MessageId)) {
 		return core.ContextMessage{}, false, false
 	}
 	id := stringValue(item.MessageId)
@@ -295,7 +304,7 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 	if strings.TrimSpace(text) == "" {
 		return core.ContextMessage{}, false, false
 	}
-	entry := core.ContextMessage{ID: id, SenderID: senderID, SenderName: senderName, SenderType: senderType, Time: at, ReplyTo: stringValue(item.ParentId), Resources: parsed.Resources, Incomplete: parsed.Incomplete}
+	entry := core.ContextMessage{ID: id, SenderID: senderID, SenderName: senderName, SenderType: senderType, Time: at, ReplyTo: stringValue(item.ParentId), Resources: parsed.Resources, Incomplete: parsed.Incomplete, TextTruncated: parsed.TextTruncated}
 	if senderType == "app" {
 		entry.SenderName = p.peerBots[senderID]
 	}

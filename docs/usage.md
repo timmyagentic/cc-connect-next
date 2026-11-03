@@ -1521,13 +1521,15 @@ Sticker and other platform-only content is represented with explicit metadata
 or an unavailable marker; audio/video files are attachments, not a claim that
 every Agent can transcribe or play them. No extra permissions are requested.
 
-History limits and read failures are passed to the Agent privately as context,
-along with markers for unavailable content. Reading history does not post a
-separate group notice. The Agent is instructed to mention a gap in its answer
-only when it affects the requested work, and to ask for missing material only
-when needed. Background and its media remain untrusted quoted data, never
-commands or approval. A native Agent
-conversation saves its per-group/topic read position when input delivery succeeds,
+Only truncation of the conversation context is quiet: the bridge can keep the
+newest history pages or messages and shorten text to fit. The Agent still knows
+that the history is partial. A failed history query or a selected message or
+attachment that could not be fully read produces a group notice. This includes
+attachments skipped because of their number, size, or download deadline.
+When both happen, one notice reports the read problem. The Agent continues
+with the available information.
+Background and its media remain untrusted quoted data, never commands or
+approval. A native Agent conversation saves its per-group/topic read position when input delivery succeeds,
 not when the task finishes. Failed tasks do not replay delivered background.
 Unconfirmed sends and failed history requests do not advance the position.
 Old truncated messages and failed attachments are not automatically retried.

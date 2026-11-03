@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -174,6 +175,20 @@ func TestMessageContextRejectedSteerDoesNotAdvancePosition(t *testing.T) {
 	}
 }
 
+func TestMessageContextFailedReadIsReportedDuringSteer(t *testing.T) {
+	const key = "test:group"
+	env, p, as, session := newContextSteerEnv(t, key)
+	p.setBackground(key, nil, errors.New("history request failed"))
+	as.steerErr = ErrSteerTurnMismatch
+	msg := &Message{SessionKey: key, UserID: "alice", Content: "continue", MessageID: "request", ReplyCtx: key}
+	if env.engine.trySteerBusyMessage(p, msg, key, session, env.engine.sessions) {
+		t.Fatal("rejected steer should fall back to the queue")
+	}
+	if sent := env.plat.getSent(); !slices.Equal(sent, []string{env.engine.i18n.T(MsgRecentContextIncomplete)}) {
+		t.Fatalf("missing read failure notice: %q", sent)
+	}
+}
+
 func TestMessageContextQueuedTurnsOnlyDeliverNewDiscussion(t *testing.T) {
 	env, p := newContextCUJEnv(t)
 	key := "test:group"
@@ -219,36 +234,50 @@ func TestMessageContextFailedResultDoesNotReplayDeliveredBackground(t *testing.T
 	}
 }
 
-func TestMessageContextGapsDoNotInterruptGroupReplies(t *testing.T) {
+func TestMessageContextOnlyHistoryTruncationIsQuiet(t *testing.T) {
 	const key = "test:group"
 	const link = "https://example.org/preview"
 	for _, tc := range []struct {
-		name             string
-		limited, missing bool
+		name                                               string
+		listLimit, textTruncated, entryFailure, unreadable bool
+		queryErr                                           error
+		wantFailures                                       []MsgKey
 	}{
-		{"history limit", true, false},
-		{"missing recording", false, true},
-		{"both", true, true},
+		{name: "normal history"},
+		{name: "history limit", listLimit: true},
+		{name: "text clipped to fit context", textTruncated: true},
+		{name: "history query timed out", queryErr: context.DeadlineExceeded, wantFailures: []MsgKey{MsgRecentContextHistoryTimeout}},
+		{name: "unreadable entry", unreadable: true, wantFailures: []MsgKey{MsgRecentContextMediaUnavailable}},
+		{name: "failed attachment with usable link", entryFailure: true, wantFailures: []MsgKey{MsgRecentContextMediaUnavailable}},
+		{name: "clipped text and missing attachment in the same post", textTruncated: true, entryFailure: true, wantFailures: []MsgKey{MsgRecentContextMediaUnavailable}},
+		{name: "partial query and content fail together", queryErr: errors.New("private test detail"), listLimit: true, entryFailure: true, wantFailures: []MsgKey{MsgRecentContextIncomplete, MsgRecentContextMediaUnavailable}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, p := newContextCUJEnv(t)
-			entry := ContextMessage{ID: "post", Text: link, Time: time.Now()}
-			if tc.missing {
-				entry.Incomplete = true
-				entry.Text += "\n[recording: unavailable]"
-			}
-			p.backgrounds[key] = MessageContext{Messages: []ContextMessage{entry}, Incomplete: tc.limited}
+			entry := ContextMessage{ID: "post", Text: link, Time: time.Now(), TextTruncated: tc.textTruncated, Incomplete: tc.entryFailure}
+			p.backgrounds[key] = MessageContext{Messages: []ContextMessage{entry}, Incomplete: tc.listLimit, Unreadable: tc.unreadable}
+			p.loadErrors[key] = tc.queryErr
 			contextReceive(env, p, key, "alice", "request", "What is the preview link?")
 			session := env.engine.sessions.GetOrCreateActive(key)
 			env.waitFor("answer", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
-			if sent := env.plat.getSent(); len(sent) != 1 {
-				t.Fatalf("expected only the agent reply, got %v", sent)
-			}
 			prompt := contextLatestSession(env).getSentPrompts()[0]
-			if !strings.Contains(prompt, link) ||
-				(tc.limited && !strings.Contains(prompt, env.engine.i18n.T(MsgRecentContextLimited))) ||
-				(tc.missing && !strings.Contains(prompt, "[recording: unavailable]")) {
-				t.Fatal("agent lost available context or its limitations")
+			want := []string{"ok"}
+			if len(tc.wantFailures) > 0 {
+				var reasons []string
+				for _, k := range tc.wantFailures {
+					reason := env.engine.i18n.T(k)
+					reasons = append(reasons, reason)
+					if !strings.Contains(prompt, reason) {
+						t.Fatalf("agent missing read failure: %q", reason)
+					}
+				}
+				want = append([]string{strings.Join(reasons, "\n")}, want...)
+			}
+			if sent := env.plat.getSent(); !slices.Equal(sent, want) {
+				t.Fatalf("group replies = %q, want %q", sent, want)
+			}
+			if !strings.Contains(prompt, link) || ((tc.textTruncated || tc.listLimit) && !strings.Contains(prompt, env.engine.i18n.T(MsgRecentContextLimited))) {
+				t.Fatal("agent lost available history or its budget limit")
 			}
 		})
 	}
@@ -261,8 +290,8 @@ func TestMessageContextReadFailureDoesNotAdvancePosition(t *testing.T) {
 	contextReceive(env, p, key, "alice", "first", "what happened?")
 	session := env.engine.sessions.GetOrCreateActive(key)
 	env.waitFor("partial answer", 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
-	if sent := env.plat.getSent(); len(sent) != 1 || !session.messageContextPosition(key).IsZero() {
-		t.Fatalf("failed lookback interrupted the answer or consumed history: %v", sent)
+	if sent := env.plat.getSent(); !slices.Equal(sent, []string{env.engine.i18n.T(MsgRecentContextIncomplete), "ok"}) || !session.messageContextPosition(key).IsZero() {
+		t.Fatalf("failed lookback did not notify and continue, or consumed history: %v", sent)
 	}
 	prompt := contextLatestSession(env).getSentPrompts()[0]
 	if !strings.Contains(prompt, env.engine.i18n.T(MsgRecentContextIncomplete)) || strings.Contains(prompt, "synthetic permission") {

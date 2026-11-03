@@ -450,8 +450,10 @@ const (
 	MsgRichCardModelCapacityBody     MsgKey = "rich_card_model_capacity_body"
 	MsgRichCardModelCapacitySummary  MsgKey = "rich_card_model_capacity_summary"
 	MsgRecentContextIncomplete       MsgKey = "recent_context_incomplete"
+	MsgRecentContextHistoryTimeout   MsgKey = "recent_context_history_timeout"
 	MsgRecentContextLimited          MsgKey = "recent_context_limited"
 	MsgRecentContextMediaUnavailable MsgKey = "recent_context_media_unavailable"
+	MsgRecentContextMediaTimeout     MsgKey = "recent_context_media_timeout"
 	MsgRichCardAuthRequired          MsgKey = "rich_card_authentication_required"
 	MsgRichCardAuthRequiredBody      MsgKey = "rich_card_authentication_required_body"
 	MsgRichCardAuthRequiredSummary   MsgKey = "rich_card_authentication_required_summary"
@@ -3457,14 +3459,21 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese: "選択したモデルは現在容量の上限に達しています", LangSpanish: "El modelo seleccionado no tiene capacidad disponible",
 	},
 	MsgRecentContextIncomplete: {
-		LangEnglish:            "The history request failed or timed out.",
-		LangChinese:            "群聊历史查询失败或超时。",
-		LangTraditionalChinese: "群聊歷史查詢失敗或逾時。",
-		LangJapanese:           "履歴の取得に失敗したか、タイムアウトしました。",
-		LangSpanish:            "La consulta del historial falló o agotó el tiempo de espera.",
+		LangEnglish:            "The group history request failed.",
+		LangChinese:            "群聊历史查询失败。",
+		LangTraditionalChinese: "群聊歷史查詢失敗。",
+		LangJapanese:           "グループの履歴を取得できませんでした。",
+		LangSpanish:            "No se pudo consultar el historial del grupo.",
+	},
+	MsgRecentContextHistoryTimeout: {
+		LangEnglish:            "The group history request timed out.",
+		LangChinese:            "群聊历史查询超时。",
+		LangTraditionalChinese: "群聊歷史查詢逾時。",
+		LangJapanese:           "グループの履歴の取得がタイムアウトしました。",
+		LangSpanish:            "Se agotó el tiempo de espera al consultar el historial del grupo.",
 	},
 	MsgRecentContextLimited: {
-		LangEnglish:            "The history was shortened to fit the page, message or text limit.",
+		LangEnglish:            "The group history was shortened to fit the page, message or text limit.",
 		LangChinese:            "群聊历史已按页数、消息条数或文字长度限制截取。",
 		LangTraditionalChinese: "群聊歷史已依頁數、訊息數或文字長度限制截取。",
 		LangJapanese:           "ページ数、メッセージ数または文字数の上限により履歴の一部が省略されています。",
@@ -3476,7 +3485,15 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "部分歷史訊息內容或附件未能讀取。",
 		LangJapanese:           "一部の過去のメッセージ内容または添付ファイルを取得できませんでした。",
 		LangSpanish:            "Parte del contenido o de los adjuntos del historial no está disponible.",
-	}, MsgRichCardAuthRequired: {
+	},
+	MsgRecentContextMediaTimeout: {
+		LangEnglish:            "Reading attachments from the group history timed out.",
+		LangChinese:            "读取群聊历史附件超时。",
+		LangTraditionalChinese: "讀取群聊歷史附件逾時。",
+		LangJapanese:           "グループの履歴から添付ファイルを読み込む際にタイムアウトしました。",
+		LangSpanish:            "Se agotó el tiempo de espera al leer los adjuntos del historial del grupo.",
+	},
+	MsgRichCardAuthRequired: {
 		LangEnglish: "Sign-in required", LangChinese: "需要重新登录", LangTraditionalChinese: "需要重新登入",
 		LangJapanese: "再ログインが必要です", LangSpanish: "Es necesario iniciar sesión",
 	},

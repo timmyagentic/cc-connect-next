@@ -22,6 +22,16 @@ var _ core.MessageContextMediaProvider = (*Platform)(nil)
 // Keep identity/order and partial successes intact, even on cancellation.
 func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messages []core.ContextMessage) ([]core.ContextMessage, error) {
 	result := append([]core.ContextMessage(nil), messages...)
+	// A source can be recalled after selection, even while another file is
+	// downloading. Replace the entire source before the result is delivered.
+	defer func() {
+		for i, entry := range result {
+			if p.isMessageRecalled(entry.ID) {
+				result[i] = core.ContextMessage{ID: entry.ID, Time: entry.Time}
+				contextContentUnavailable(&result[i], "message", "source was recalled")
+			}
+		}
+	}()
 	if !p.MessageContextEnabled(target) {
 		for i := range result {
 			result[i].Images, result[i].Files = nil, nil
@@ -64,6 +74,9 @@ func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messag
 		entry.Images, entry.Files = nil, nil
 		imageNumber := 0
 		for _, resource := range entry.Resources {
+			if p.isMessageRecalled(entry.ID) {
+				break
+			}
 			label := resource.Kind
 			if resource.Kind == "image" {
 				imageNumber++
@@ -73,7 +86,7 @@ func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messag
 			}
 			reason := ""
 			switch {
-			case rc.contextTimeMs <= 0 || entry.Time.Before(start) || entry.Time.After(cutoff) || p.isMessageRecalled(entry.ID):
+			case rc.contextTimeMs <= 0 || entry.Time.Before(start) || entry.Time.After(cutoff):
 				reason = "message outside authorized snapshot"
 			case entry.ID == "" || resource.MessageID != entry.ID || strings.TrimSpace(resource.Key) == "":
 				reason = "invalid resource source"
