@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.3.6-beta.1 (2026-11-03)
+
+- Keep routine Feishu history truncation quiet while reporting failed queries and unread selected content or attachments.
+- Extend history attachment reads to 100 MiB / 12 resources with a shared 45-second deadline; preserve the delivered read window and redact recalled sources.
+- See [release notes](changelogs/v0.3.6-beta.1.md) for details.
+
 - Let the website fill the browser width and adapt its opening layout to the available height, including wide monitors and phone orientations.
 ## v0.3.5 (2026-11-01)
 
