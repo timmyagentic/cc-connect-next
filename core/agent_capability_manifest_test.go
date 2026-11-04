@@ -209,6 +209,9 @@ func TestAgentCapabilityManifest_CoversContractsWithoutLeakingBodies(t *testing.
 	if findRuntimeFeature(t, platformAdapter.Capabilities, "structured_cards").Availability.State != CapabilityAvailable {
 		t.Fatalf("card capability not detected: %#v", platformAdapter)
 	}
+	if receipt := findRuntimeFeature(t, platformAdapter.Capabilities, "direct_user_form_receipts"); receipt.Availability.State != CapabilityUnavailable || receipt.Fallback.Mode != "no-form" {
+		t.Fatalf("a card sender without form receipt support should omit the input: %#v", receipt)
+	}
 	audio := findRuntimeFeature(t, platformAdapter.Capabilities, "audio")
 	if audio.Availability.State != CapabilityUnavailable || audio.Fallback.Mode != "file" {
 		t.Fatalf("audio fallback = %#v", audio)

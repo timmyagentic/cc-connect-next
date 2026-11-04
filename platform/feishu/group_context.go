@@ -119,10 +119,12 @@ func (p *Platform) RuntimeCapabilityAvailability(_ string, target any) map[strin
 		availability.ReasonZH += " 已显式开启对端机器人共享：仅补读同群同话题、近期窗口内带归因的公开快照，不合并原生 Agent 会话，不因机器人消息触发回复。"
 	}
 	batches := core.CapabilityAvailability{State: core.CapabilityAvailable, Reason: "Multiple images are sent as two-column Card 2.0 galleries, up to five originals per message; single images stay native.", ReasonZH: "多张图片按每批最多 5 张原图发送双列 Card 2.0 图集；单张保持原生图片消息。"}
+	receipts := core.CapabilityAvailability{State: core.CapabilityAvailable, Reason: "Interactive callbacks can return an owner-bound private form receipt.", ReasonZH: "交互回调支持返回绑定用户的私聊表单回执。"}
 	if !p.useInteractiveCard {
 		batches = core.CapabilityAvailability{State: core.CapabilityUnavailable, Reason: "enable_feishu_card is false; images are sent individually.", ReasonZH: "enable_feishu_card 为 false，图片逐张发送。"}
+		receipts = core.CapabilityAvailability{State: core.CapabilityUnavailable, Reason: "Interactive cards are disabled.", ReasonZH: "交互卡片已禁用。"}
 	}
-	return map[string]core.CapabilityAvailability{"recent_conversation_context": availability, "image_batches": batches}
+	return map[string]core.CapabilityAvailability{"recent_conversation_context": availability, "image_batches": batches, "direct_user_form_receipts": receipts}
 }
 
 func (p *Platform) MessageContextScope(target any) string {

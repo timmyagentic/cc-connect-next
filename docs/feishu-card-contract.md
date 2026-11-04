@@ -80,6 +80,32 @@ intermediate CardKit frame. Conversely, a chunk that happens to end with a
 footer-shaped substring is retained when later text proves that the logical line
 is ordinary prose; transport framing alone is never treated as a line ending.
 
+## Private form receipts
+
+Offer an editable field only when the selected project's running platform reports
+`direct_user_form_receipts` as available. On a non-forwardable, shared v1 card,
+set the submit button's name to `send_text` and its value's `action` to
+`form:receipt`. Bind `cc_project` and `cc_direct_user` to the exact project and
+operator. Set `form_field` to the input name (1–64 ASCII letters, digits or
+underscores, starting with a letter or underscore). Generate a fresh 32-byte
+random `receipt_nonce` per card and encode it as lowercase hex. The card author
+supplies `after_click.title`, `after_click.color` (`green`), and `after_click.markdown`.
+
+The callback takes the named string from that submission's `form_value`.
+The limit is 1,000 Unicode code points, including whitespace. Tabs, CR, LF,
+joiners (U+200C/U+200D) and emoji tags (U+E0020–U+E007F) are preserved.
+Other control or format characters and input consisting entirely of whitespace
+or format characters are rejected. Invalid input leaves the card in place;
+the optional `invalid_text` button value supplies an error toast (up to 120 code points).
+
+Success replaces only the original card. Its first element contains the fixed
+Markdown followed by one ASCII space and the lowercase hexadecimal HMAC-SHA256
+of the exact submitted UTF-8 bytes, keyed by the decoded nonce. The second
+element is `div.text` of type `plain_text` containing those same characters.
+The receipt has no buttons and forwarding is disabled. No command or agent turn
+runs. A reader must check the original message, private chat and sender before
+matching the digest against that card's nonce and text.
+
 ## Locale and completion
 
 Lifecycle copy and reply-footer duration units are defined for English, Simplified Chinese, Traditional Chinese, Japanese, and Spanish. Each accepted turn snapshots the locale selected by its own triggering message, so concurrent sessions cannot make a card or footer switch language mid-turn; a queued turn receives its own fresh snapshot. A configured `done_emoji` is added to the triggering message only after a visible successful answer; it is suppressed for `NO_REPLY`, recalled triggers, and failures.

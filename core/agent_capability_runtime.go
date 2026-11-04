@@ -497,6 +497,7 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		{"reply_target_snapshot", "Persist and restore a concrete reply target independently from session identity.", "将具体回复目标与 session identity 分离并持久恢复。", "session-key", "Fall back to session-key reconstruction when the target shape permits it.", "目标结构允许时退化为 session-key 重建。", replySnapshot},
 		{"direct_user_messages", "Send proactive private messages to an explicit platform user ID without borrowing a recent chat/session.", "按明确的平台 user ID 主动私聊，不借用最近 chat/session。", "reject", "Reject when no explicit direct-user target exists; never fall back to a recent group or topic.", "没有明确私聊目标时拒绝；绝不回退最近群聊或话题。", directUser},
 		{"direct_user_cards", "Send actionable structured cards to an explicit private user target.", "向明确的私聊用户目标发送可操作结构化卡片。", "direct-text", "Fall back to a private text message for the same explicit user.", "退化为发送给同一明确用户的私聊文本。", directUserCard},
+		{"direct_user_form_receipts", "Replace an owner-bound private card with a receipt for one submitted text field.", "将绑定用户的私聊卡片更新为单个文本字段的提交回执。", "no-form", "Omit the editable form field.", "不展示可编辑的表单字段。", false},
 		{"message_recall_detection", "Detect whether the triggering message was recalled.", "检测触发消息是否已撤回。", "best-effort", "Continue without recall detection.", "无法检测撤回时按尽力而为继续。", recall},
 		{"card_navigation", "Navigate interactive cards in place.", "原地导航交互卡片。", "new-card", "Send a replacement card or text response.", "发送替换卡片或文本回复。", navigation},
 	}
