@@ -1212,7 +1212,8 @@ func (p *Platform) isBoundDirectUserCardAction(values map[string]any, userID str
 }
 
 // onCardAction handles card.action.trigger callbacks via the official SDK event dispatcher.
-// Three prefixes are supported:
+// form:receipt returns a private form submission on its originating card.
+// Three command prefixes are supported:
 //   - nav:/xxx   — render a card page and update the original card in-place
 //   - act:/xxx   — execute an action, then render and update the card in-place
 //   - cmd:/xxx   — legacy: dispatch as a user command (sends a new message)
@@ -1257,6 +1258,9 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	}
 
 	actionVal, _ := values["action"].(string)
+	if actionVal == "form:receipt" {
+		return p.formReceipt(event.Event.Action, userID, chatID, messageID), nil
+	}
 
 	// select_static callbacks put the chosen value in event.Event.Action.Option
 	if actionVal == "" && event.Event.Action.Option != "" {
