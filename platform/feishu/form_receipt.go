@@ -32,7 +32,7 @@ func validReceiptText(text string) bool {
 			}
 		case unicode.Is(unicode.Cf, r):
 			// Preserve joiners and emoji tags, but reject other format controls.
-			if r != '\u200c' && r != '\u200d' && !(r >= '\U000e0020' && r <= '\U000e007f') {
+			if r != '\u200c' && r != '\u200d' && (r < '\U000e0020' || r > '\U000e007f') {
 				return false
 			}
 		case !unicode.IsSpace(r):

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.3.6-beta.3 (2026-11-04)
+
+- Fix the form receipt Unicode range condition to pass staticcheck without changing validation behavior.
+- See [release notes](changelogs/v0.3.6-beta.3.md) for details.
+
 ## v0.3.6-beta.2 (2026-11-04)
 
 - Return submitted text on owner-bound Feishu form cards with a verifiable receipt, input validation, and runtime capability discovery.
