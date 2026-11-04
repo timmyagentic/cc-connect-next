@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v0.3.6-beta.2 (2026-11-04)
+
+- Return submitted text on owner-bound Feishu form cards with a verifiable receipt, input validation, and runtime capability discovery.
+- See [release notes](changelogs/v0.3.6-beta.2.md) for details.
+
 ## v0.3.6-beta.1 (2026-11-03)
 
 - Keep routine Feishu history truncation quiet while reporting failed queries and unread selected content or attachments.
