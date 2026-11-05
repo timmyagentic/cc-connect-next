@@ -123,22 +123,6 @@ func (e *Engine) prepareSessionTurnOverrides(agent Agent, sessions *SessionManag
 	return prepareAgentTurnOverrides(sessions, session, backend, profile, model, reasoning, tier)
 }
 
-// Publish the resolved model atomically with steering admission. A binding can
-// be set and reset between queue admission and dispatch; steering must observe
-// the model actually captured for this turn, not just the current binding.
-func (e *Engine) prepareInteractiveTurnOverrides(state *interactiveState, agent Agent, sessions *SessionManager, session *Session, backend AgentSession, sessionKey string, profile AnswerProfileName, model, reasoning, tier string) (agentTurnOverrides, error) {
-	state.steerMu.Lock()
-	defer state.steerMu.Unlock()
-	overrides, err := e.prepareSessionTurnOverrides(agent, sessions, session, backend, sessionKey, profile, model, reasoning, tier)
-	if err == nil {
-		state.mu.Lock()
-		state.activeModelOverride = overrides.model
-		state.activeReasoningEffortOverride = overrides.reasoningEffort
-		state.mu.Unlock()
-	}
-	return overrides, err
-}
-
 func (e *Engine) setChatModel(agent Agent, sessionKey, input string) (string, error) {
 	key := e.chatKey(sessionKey)
 	if key == "" {

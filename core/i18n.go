@@ -645,6 +645,7 @@ const (
 
 	// Steer (append input to the in-flight turn, issue #27)
 	MsgSteered                 MsgKey = "steered"
+	MsgSteerPending            MsgKey = "steer_pending"
 	MsgSteerUnsupportedBackend MsgKey = "steer_unsupported_backend"
 	MsgSteerTurnGone           MsgKey = "steer_turn_gone"
 	MsgSteerOutcomeUnknown     MsgKey = "steer_outcome_unknown"
@@ -4498,6 +4499,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "↪️ 已併入目前任務。",
 		LangJapanese:           "↪️ 現在のタスクに追加しました。",
 		LangSpanish:            "↪️ Añadido a la tarea en curso.",
+	},
+	MsgSteerPending: {
+		LangEnglish:            "⏳ Message received. Waiting for the current task to start before adding it.",
+		LangChinese:            "⏳ 补充消息已收到，等待当前任务启动后追加。",
+		LangTraditionalChinese: "⏳ 已收到補充訊息，等待目前任務啟動後追加。",
+		LangJapanese:           "⏳ 補足メッセージを受信しました。現在のタスクの開始後に追加します。",
+		LangSpanish:            "⏳ Mensaje recibido. Se añadirá cuando se inicie la tarea actual.",
 	},
 	MsgSteerUnsupportedBackend: {
 		LangEnglish:            "❌ This agent backend cannot add input to a running turn. Native steering for Codex requires `backend = \"app_server\"` in [projects.agent.options]; otherwise wait for the current task to finish and send a normal message.",

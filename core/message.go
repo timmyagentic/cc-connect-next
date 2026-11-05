@@ -309,8 +309,10 @@ type LocationAttachment struct {
 
 // Message represents a unified incoming message from any platform.
 type Message struct {
-	feedbackText    string // captured before aliases, quotes and injected context
-	feedbackTextSet bool
+	steerWhenReady   bool   // ordinary supplement deferred until the active turn finishes starting
+	steerDispatching bool   // pending supplement passed to the backend; guarded by interactiveState.mu
+	feedbackText     string // captured before aliases, quotes and injected context
+	feedbackTextSet  bool
 
 	SessionKey   string // unique key for user context, e.g. "feishu:{chatID}:{userID}"
 	Platform     string
