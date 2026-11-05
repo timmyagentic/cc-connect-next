@@ -146,13 +146,13 @@ func (e *Engine) prepareSteerMessageContext(p Platform, replyCtx any, session *S
 
 func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, replyCtx any, session *Session, state *interactiveState, content, messageID string) preparedMessageContext {
 	prepared := preparedMessageContext{Text: content}
-	if !hasMessageContext(p, replyCtx) {
-		return prepared
-	}
 	if mode == contextPrepTurn {
 		state.mu.Lock()
 		state.contextSending = true
 		state.mu.Unlock()
+	}
+	if !hasMessageContext(p, replyCtx) {
+		return prepared
 	}
 	ctx, cancel := context.WithCancel(e.ctx)
 	state.mu.Lock()

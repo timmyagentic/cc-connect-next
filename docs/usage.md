@@ -111,7 +111,7 @@ name = "conservative-project"
 busy_message_mode = "queue"
 ```
 
-**`steer` (default).** Busy messages are appended to the in-flight turn on agents that support native steering; agents without the capability (and an explicitly selected Codex exec backend) transparently fall back to the FIFO queue, so the default is safe everywhere. Codex now defaults to the native-steer app-server backend over stdio:
+**`steer` (default).** An ordinary busy message joins the running interactive turn when the backend supports native steering. It uses that turn's model, reasoning effort, and speed, including any one-shot answer profile. Changes to chat or project defaults apply when the next independent turn starts. A message that explicitly requests its own profile, model, or reasoning effort starts an independent turn from the queue. Ordinary chat messages also queue behind a scheduled job that reuses the session. Backends without native steering use the FIFO queue. Codex defaults to the native-steer app-server backend over stdio:
 
 ```toml
 [projects.agent.options]
@@ -149,7 +149,7 @@ adds Codex latency and usage; any unavailable model, timeout,
 non-zero exit, or invalid output falls back to the deterministic title. The
 option is intentionally disabled by default.
 
-The steer is sent as `turn/steer` with the active turn pinned via `expectedTurnId`, so it can never race a completing turn. When steering is definitively unavailable (unsupported backend, the turn just ended), the message safely falls back to the queue.
+If an ordinary message arrives while the turn is starting, it can join that turn when it is ready. Codex sends `turn/steer` with `expectedTurnId` so the addition targets that exact turn. When steering is definitively unavailable, such as when the turn has ended, the message falls back to the queue.
 
 **`queue`.** Set `busy_message_mode = "queue"` to always use the per-session FIFO: busy messages are processed as new turns after the current one completes (the pre-v0.1.3 behavior). If the steer outcome is *unknown* (RPC timeout), the message is deliberately **not** re-queued — that could deliver it twice — and you get an explicit warning instead.
 
@@ -280,7 +280,7 @@ High-risk cc-connect-next chat commands are separately protected by `projects.ad
 
 ## One-shot Answer Profiles (Codex)
 
-Codex projects can define optional `fast` and `quality` profiles. A profile overrides only the current message; it does not mutate the project defaults or affect the next ordinary message.
+Codex projects can define optional `fast` and `quality` profiles. A profile applies to one turn, including ordinary messages steered into it. Each subsequent independent turn resolves its own settings.
 
 ```toml
 [projects.agent.options]
@@ -308,7 +308,7 @@ Blank profile fields inherit the ordinary `[projects.agent.options]` defaults. A
 用高质量模式来完成这个设计
 ```
 
-- Ordinary messages always use the defaults; there is no `/balanced` or default-mode command.
+- An independent ordinary turn uses the applicable defaults. There is no `/balanced` or default-mode command.
 - Only explicit leading directives match. Negations, comparisons, and mentions later in the message do not trigger a profile.
 - A profiled message received while the Agent is busy is queued as the next turn instead of being steered into the active turn.
 - Only the Codex `app_server` and `exec` backends support this today. Missing or unsupported profiles fail visibly and never silently downgrade.
@@ -475,13 +475,13 @@ Set at least one of `model` or `reasoning_effort`; either can be pinned alone. O
 
 Set exactly one of `chat_id` (group/channel ID) or `user_id` (private-chat user's ID). Duplicate bindings for the same project/platform/chat are rejected. `provider` is a provider name configured for this project, without an Agent prefix. Empty or omitted `provider` means the native provider, **not** inheritance from the currently active provider. `agent` may be omitted to use the project's Agent type; chat commands save it explicitly so a later adapter change cannot silently reuse the binding with a different Agent. Model and effort share the entry’s Agent/Provider identity. Reset the other pinned field before selecting a different Provider. The binding checks the provider identity and does not switch providers.
 
-After manually editing or deleting entries, run `/config reload` in the affected bot/project. The reload replaces both model and effort preferences: deleting a field restores that field’s default, and deleting an entry restores both. It reports the number of chat entries loaded. Running replies keep their settings; subsequent requests, including queued ones, use the reloaded settings. An invalid configuration is reported without replacing the existing binding table.
+After manually editing or deleting entries, run `/config reload` in the affected bot/project. Deleting a field restores its default, and deleting an entry restores both defaults. Reload reports the number of chat entries loaded. The next independent turn uses the reloaded settings, including when it starts from the queue. A running turn keeps its settings. An invalid configuration is reported without replacing the existing binding table.
 
 Bindings retain the expected platform and provider identity even if those are later removed. Entries for inactive platforms remain dormant; a missing or different active provider produces an error only in the affected chat, without switching provider or falling back to the default.
 
 On startup, existing `group_model_bindings` (beta.9), `chat_model_bindings` (beta.10), and `group_reasoning_bindings` in `projects/<project>.state.json` are imported into TOML. An existing TOML entry retains its model. Legacy effort is imported only if `reasoning_effort` is omitted; an explicit empty value keeps default inheritance. A conflicting Agent/Provider between the resulting model and effort fails migration and preserves the source. Only after saving TOML successfully are all three legacy fields removed; directories and other state are retained. A migration failure stops startup and preserves recoverable data for retry. The old verified `group_model_key` session metadata is also read as `chat_key`. Workspace-specific model defaults are not converted into chat bindings because a workspace does not identify a chat.
 
-Chat selections are resolved when each new request executes, including queued requests. A change or reset takes effect on the next new request; an already running reply keeps its model. An explicit one-shot model from `/fast`, another answer profile, or a task takes precedence for that request; subsequent ordinary messages return to the chat's selection. A profile without an explicit model still inherits the chat model. Model and reasoning effort are resolved independently: overriding one field does not discard the other field's chat setting.
+Chat selections are resolved when each independent turn starts. An ordinary message steered into a running turn uses its existing model, even after a change or reset. An explicit one-shot model from `/fast`, another answer profile, or a task takes precedence for its own turn. Subsequent independent ordinary turns use the chat's selection. A profile without an explicit model inherits the chat model. Model and reasoning effort are resolved independently, so overriding one field preserves the other field's chat setting.
 
 A pinned chat never silently falls back to the default when per-turn support is unavailable, the backend/Provider no longer matches the binding, or applying/running the model fails. The request reports the error. After a backend/Provider change, explicitly select an available model with `/model <name>` or use `/model reset`.
 
@@ -500,7 +500,7 @@ Choose a level from the current Agent's `/reasoning` catalog. Chat effort requir
 
 `/effort` is an alias for `/reasoning`. The legacy `group` subcommand also remains an alias for `chat`, so `/reasoning group [<level>|reset]` and `/effort group [<level>|reset]` still work in both verified DMs and groups.
 
-An explicit task or answer-profile effort takes precedence for that request; a profile with only a model still inherits chat effort. Conversely, an effort-only profile still inherits the chat model. Queued requests read the latest settings when they start; a running reply is not interrupted or steered into a turn with different effort. Unsupported effort, backend/Provider or session mismatches, and persistence failures are reported without silent fallback. Reselect with `/reasoning chat <level>` or use `/reasoning chat reset`; reconnect the conversation or start `/new` if its Provider connection is stale.
+An explicit task or answer-profile effort takes precedence for its turn. A model-only profile inherits chat effort, and an effort-only profile inherits the chat model. A running turn keeps its effort for any steered input, while queued turns read the latest settings when they start. Unsupported effort, backend/Provider or session mismatches, and persistence failures are reported without silent fallback. Reselect with `/reasoning chat <level>` or use `/reasoning chat reset`. Reconnect the conversation or start `/new` if its Provider connection is stale.
 
 Bare `/reasoning <level>` retains its existing behavior: it changes the project/workspace Agent default and resets the current conversation. Chats with fixed effort keep their selection. Use `chat` to preserve history and avoid changing the default for other chats.
 

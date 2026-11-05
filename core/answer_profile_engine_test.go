@@ -208,56 +208,68 @@ func TestEngineBusyProfileQueuesInsteadOfSteering(t *testing.T) {
 	}
 }
 
-func TestEngineBusyOrdinaryQueuesWhileProfiledTurnActive(t *testing.T) {
-	session := newAnswerProfileTestSession()
-	session.releaseFirst = make(chan struct{})
-	released := false
-
-	agent := &answerProfileTestAgent{session: session}
-	platform := &stubPlatformEngine{n: "test"}
-	engine := NewEngine("test", agent, []Platform{platform}, "", LangEnglish)
-	engine.SetBusyMessageMode(BusyMessageModeSteer)
-	engine.SetAnswerProfiles(AnswerProfiles{
-		Fast: &AnswerProfileOptions{Model: "fast-model", ReasoningEffort: "low", ServiceTier: "fast"},
-	})
-	t.Cleanup(func() { _ = engine.Stop() })
-	t.Cleanup(func() {
-		if !released {
-			close(session.releaseFirst)
+func TestEngineBusyOrdinarySteersIntoTurnWithExplicitOptions(t *testing.T) {
+	for _, profile := range []bool{false, true} {
+		name := "task-override"
+		if profile {
+			name = "answer-profile"
 		}
-	})
+		t.Run(name, func(t *testing.T) {
+			session := newAnswerProfileTestSession()
+			session.releaseFirst = make(chan struct{})
+			var release sync.Once
+			agent := &answerProfileTestAgent{session: session}
+			platform := &stubPlatformEngine{n: "test"}
+			engine := NewEngine("test", agent, []Platform{platform}, "", LangEnglish)
+			engine.SetBusyMessageMode(BusyMessageModeSteer)
+			engine.SetAnswerProfiles(AnswerProfiles{
+				Fast: &AnswerProfileOptions{Model: "fast-model", ReasoningEffort: "low", ServiceTier: "fast"},
+			})
+			t.Cleanup(func() { _ = engine.Stop() })
+			t.Cleanup(func() { release.Do(func() { close(session.releaseFirst) }) })
 
-	engine.ReceiveMessage(platform, answerProfileMessage("m1", "/fast profiled task"))
-	waitAnswerProfileTest(t, "profiled turn starts", func() bool {
-		calls, _ := session.snapshot()
-		return len(calls) == 1 && calls[0].options.AnswerProfile == AnswerProfileFast
-	})
+			first := answerProfileMessage("m1", "pinned task")
+			want := TurnOptions{Model: "task-model", ReasoningEffort: "high", ServiceTier: "default"}
+			if profile {
+				first.Content = "/fast profiled task"
+				want = TurnOptions{Model: "fast-model", ReasoningEffort: "low", ServiceTier: "fast", AnswerProfile: AnswerProfileFast}
+			} else {
+				first.ModelOverride = want.Model
+				first.ReasoningEffortOverride = want.ReasoningEffort
+			}
+			engine.ReceiveMessage(platform, first)
+			waitAnswerProfileTest(t, "turn with explicit options starts", func() bool {
+				calls, _ := session.snapshot()
+				return len(calls) == 1
+			})
+			engine.ReceiveMessage(platform, answerProfileMessage("m2", "ordinary follow-up"))
+			waitAnswerProfileTest(t, "ordinary follow-up steered", func() bool {
+				_, steers := session.snapshot()
+				return steers == 1
+			})
+			release.Do(func() { close(session.releaseFirst) })
+			waitAnswerProfileTest(t, "turn completes", func() bool {
+				return !engine.sessions.GetOrCreateActive(first.SessionKey).Busy()
+			})
+			calls, _ := session.snapshot()
+			if len(calls) != 1 || calls[0].options != want {
+				t.Fatalf("follow-up did not stay in the original turn with %+v: %+v", want, calls)
+			}
 
-	engine.ReceiveMessage(platform, answerProfileMessage("m2", "ordinary follow-up"))
-	waitAnswerProfileTest(t, "ordinary busy message is routed", func() bool {
-		_, steerCalls := session.snapshot()
-		return steerCalls > 0 || len(platform.getSent()) > 0
-	})
-	if _, steerCalls := session.snapshot(); steerCalls != 0 {
-		t.Fatalf("steer calls = %d, want 0 when ordinary input would change the active profile", steerCalls)
-	}
-
-	close(session.releaseFirst)
-	released = true
-	waitAnswerProfileTest(t, "queued ordinary turn starts", func() bool {
-		calls, _ := session.snapshot()
-		return len(calls) == 2
-	})
-	calls, steerCalls := session.snapshot()
-	if steerCalls != 0 {
-		t.Fatalf("steer calls after drain = %d, want 0", steerCalls)
-	}
-	if got := calls[1].options; got.AnswerProfile != "" || got.Model != "balanced-model" || got.ReasoningEffort != "medium" || got.ServiceTier != "default" {
-		t.Fatalf("queued ordinary turn options = %+v, want project defaults", got)
+			engine.ReceiveMessage(platform, answerProfileMessage("m3", "independent ordinary request"))
+			waitAnswerProfileTest(t, "independent turn starts", func() bool {
+				calls, _ := session.snapshot()
+				return len(calls) == 2
+			})
+			calls, _ = session.snapshot()
+			if got := calls[1].options; got != (TurnOptions{Model: "balanced-model", ReasoningEffort: "medium", ServiceTier: "default"}) {
+				t.Fatalf("independent ordinary turn options = %+v, want project defaults", got)
+			}
+		})
 	}
 }
 
-func TestEngineQueuedProfileKeepsOrdinaryFollowUpInFIFO(t *testing.T) {
+func TestEngineOrdinaryFollowUpSteersIntoPreviouslyQueuedProfile(t *testing.T) {
 	session := newAnswerProfileTestSession()
 	session.releaseFirst = make(chan struct{})
 	session.releaseSecond = make(chan struct{})
@@ -298,28 +310,20 @@ func TestEngineQueuedProfileKeepsOrdinaryFollowUpInFIFO(t *testing.T) {
 		return len(calls) == 2 && calls[1].options.AnswerProfile == AnswerProfileFast
 	})
 
-	sentBeforeOrdinaryFollowUp := len(platform.getSent())
 	engine.ReceiveMessage(platform, answerProfileMessage("m3", "ordinary after queued profile"))
-	waitAnswerProfileTest(t, "ordinary follow-up queues behind profiled turn", func() bool {
+	waitAnswerProfileTest(t, "ordinary follow-up steers into profiled turn", func() bool {
 		_, steerCalls := session.snapshot()
-		return steerCalls > 0 || len(platform.getSent()) > sentBeforeOrdinaryFollowUp
+		return steerCalls == 1
 	})
-	if _, steerCalls := session.snapshot(); steerCalls != 0 {
-		t.Fatalf("steer calls = %d, want 0 while queued profiled turn is active", steerCalls)
-	}
 
 	close(session.releaseSecond)
 	releasedSecond = true
-	waitAnswerProfileTest(t, "ordinary follow-up starts with defaults", func() bool {
-		calls, _ := session.snapshot()
-		return len(calls) == 3
+	waitAnswerProfileTest(t, "queued profile completes", func() bool {
+		return !engine.sessions.GetOrCreateActive("test:user").Busy()
 	})
 	calls, steerCalls := session.snapshot()
-	if steerCalls != 0 {
-		t.Fatalf("steer calls after chained drain = %d, want 0", steerCalls)
-	}
-	if got := calls[2].options; got.AnswerProfile != "" || got.Model != "balanced-model" || got.ReasoningEffort != "medium" || got.ServiceTier != "default" {
-		t.Fatalf("ordinary follow-up options = %+v, want project defaults", got)
+	if len(calls) != 2 || steerCalls != 1 {
+		t.Fatalf("follow-up started another turn after steering: %d calls, %d steers", len(calls), steerCalls)
 	}
 }
 

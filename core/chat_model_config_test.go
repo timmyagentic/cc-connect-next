@@ -127,6 +127,8 @@ func TestCUJ_ChatModelConfigReloadAppliesToQueuedTurnAndReset(t *testing.T) {
 	for _, reset := range []bool{false, true} {
 		t.Run(map[bool]string{false: "edit", true: "delete"}[reset], func(t *testing.T) {
 			e, p, a := newChatModelEngine(t, "")
+			e.SetBusyMessageMode(BusyMessageModeSteer)
+			e.SetAnswerProfiles(AnswerProfiles{Fast: &AnswerProfileOptions{ServiceTier: "fast"}})
 			a.effort = "medium"
 			disk := map[string]ChatModelBinding{"test:A": {Model: "group-B", Provider: a.Name() + ":", ReasoningEffort: "high"}}
 			if err := e.projectState.ConfigureChatModels(func() (map[string]ChatModelBinding, error) { return maps.Clone(disk), nil },
@@ -137,15 +139,23 @@ func TestCUJ_ChatModelConfigReloadAppliesToQueuedTurnAndReset(t *testing.T) {
 			var once sync.Once
 			t.Cleanup(func() { once.Do(func() { close(release) }) })
 			a.onSend = func(s *cronModelSession, call cronModelCall) error {
+				result := Event{Type: EventResult, Content: call.model, Done: true}
 				if call.prompt == "first" {
-					<-release
+					go func() {
+						<-release
+						s.events <- result
+					}()
+					return nil
 				}
-				s.events <- Event{Type: EventResult, Content: call.model, Done: true}
+				s.events <- result
 				return nil
 			}
 			e.ReceiveMessage(p, chatModelMessage("A", "t", "first", "first"))
 			waitAnswerProfileTest(t, "started", func() bool { calls, _, _ := a.snapshot(); return len(calls) == 1 })
-			e.ReceiveMessage(p, chatModelMessage("A", "t", "queued", "queued"))
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "queued", "/fast independent request"))
+			if got := strings.Join(p.getSent(), "\n"); !strings.Contains(got, e.i18n.TForText(MsgMessageQueued, "independent request")) {
+				t.Fatalf("missing acknowledgement for the queued profile: %s", got)
+			}
 			want := "group-C"
 			if reset {
 				delete(disk, "test:A")
@@ -156,13 +166,16 @@ func TestCUJ_ChatModelConfigReloadAppliesToQueuedTurnAndReset(t *testing.T) {
 			if _, err := e.ReloadChatModels(); err != nil {
 				t.Fatal(err)
 			}
+			_, backends, _ := a.snapshot()
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "follow-up", "append to running turn"))
+			waitChatModelSteers(t, backends[0], 1)
 			once.Do(func() { close(release) })
 			waitAnswerProfileTest(t, "drained", func() bool {
 				calls, _, _ := a.snapshot()
 				return len(calls) == 2 && !e.sessions.GetOrCreateActive("test:A:root:t").Busy()
 			})
-			calls, sessions, setters := a.snapshot()
-			if calls[0].model != "group-B" || calls[1].model != want || setters != 0 {
+			calls, _, setters := a.snapshot()
+			if calls[0].model != "group-B" || calls[1].model != want || calls[1].options.AnswerProfile != AnswerProfileFast || setters != 0 {
 				t.Fatalf("calls = %+v, setters=%d", calls, setters)
 			}
 			wantEffort := "low"
@@ -171,14 +184,6 @@ func TestCUJ_ChatModelConfigReloadAppliesToQueuedTurnAndReset(t *testing.T) {
 			}
 			if calls[0].options.ReasoningEffort != "high" || calls[1].options.ReasoningEffort != wantEffort {
 				t.Fatalf("reload failed to apply reasoning to the queued turn: %+v", calls)
-			}
-			for _, session := range sessions {
-				session.mu.Lock()
-				steers := session.steerCalls
-				session.mu.Unlock()
-				if steers != 0 {
-					t.Fatal("queued input steered into previous model")
-				}
 			}
 		})
 	}

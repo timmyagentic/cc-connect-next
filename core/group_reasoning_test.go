@@ -78,7 +78,7 @@ func TestGroupReasoning_ProfileAndTaskOverridesAreIndependentOfModel(t *testing.
 	reasoningChat(t, e, p, a, chatModelMessage("A", "", "ordinary", "hello"), "high")
 }
 
-func TestGroupReasoning_QueuedTurnResolvesChangeAndResetWithoutSteering(t *testing.T) {
+func TestGroupReasoning_SteerKeepsRunningEffortAndQueuedTurnReadsLatestBinding(t *testing.T) {
 	for _, choice := range []string{"low", "reset"} {
 		t.Run(choice, func(t *testing.T) {
 			e, p, a := newGroupReasoningEngine(t, "")
@@ -87,38 +87,41 @@ func TestGroupReasoning_QueuedTurnResolvesChangeAndResetWithoutSteering(t *testi
 			var once sync.Once
 			t.Cleanup(func() { once.Do(func() { close(release) }) })
 			a.onSend = func(s *cronModelSession, call cronModelCall) error {
+				result := Event{Type: EventResult, Content: "ok", Done: true}
 				if call.prompt == "first" {
-					<-release
+					go func() {
+						<-release
+						s.events <- result
+					}()
+					return nil
 				}
-				s.events <- Event{Type: EventResult, Content: "ok", Done: true}
+				s.events <- result
 				return nil
 			}
 			e.ReceiveMessage(p, chatModelMessage("A", "t", "pin", "/reasoning group high"))
 			e.ReceiveMessage(p, chatModelMessage("A", "t", "first", "first"))
 			waitAnswerProfileTest(t, "turn started", func() bool { calls, _, _ := a.snapshot(); return len(calls) == 1 })
-			e.ReceiveMessage(p, chatModelMessage("A", "t", "queued", "queued"))
+			_, backends, _ := a.snapshot()
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "before", "follow-up before change"))
+			waitChatModelSteers(t, backends[0], 1)
+			queued := chatModelMessage("A", "t", "queued", "independent request")
+			queued.ModelOverride = "project-C"
+			e.ReceiveMessage(p, queued)
 			e.ReceiveMessage(p, chatModelMessage("A", "t", "change", "/reasoning group "+choice))
-			e.ReceiveMessage(p, chatModelMessage("A", "t", "queued2", "queued2"))
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "after", "follow-up after change"))
+			waitChatModelSteers(t, backends[0], 2)
 			once.Do(func() { close(release) })
 			waitAnswerProfileTest(t, "drained", func() bool {
 				calls, _, _ := a.snapshot()
-				return len(calls) == 3 && !e.sessions.GetOrCreateActive("test:A:root:t").Busy()
+				return len(calls) == 2 && !e.sessions.GetOrCreateActive("test:A:root:t").Busy()
 			})
-			calls, sessions, _ := a.snapshot()
+			calls, _, _ := a.snapshot()
 			want := choice
 			if choice == "reset" {
 				want = "medium"
 			}
-			if calls[0].options.ReasoningEffort != "high" || calls[1].options.ReasoningEffort != want || calls[2].options.ReasoningEffort != want {
+			if calls[0].options.ReasoningEffort != "high" || calls[1].options.ReasoningEffort != want || calls[1].model != "project-C" {
 				t.Fatalf("queued effort leaked: %+v", calls)
-			}
-			for _, s := range sessions {
-				s.mu.Lock()
-				steers := s.steerCalls
-				s.mu.Unlock()
-				if steers != 0 {
-					t.Fatalf("steered into previous effort: %d", steers)
-				}
 			}
 		})
 	}

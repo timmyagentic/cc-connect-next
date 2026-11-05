@@ -3037,7 +3037,7 @@ func TestCUJ_F5_OneShotAnswerProfilesReturnToDefault(t *testing.T) {
 		t.Fatalf("visible profile journey = %#v, want %#v", got, wantReplies)
 	}
 
-	t.Run("busy profiled turn queues ordinary follow-up", func(t *testing.T) {
+	t.Run("ordinary follow-up joins busy profiled turn", func(t *testing.T) {
 		releaseFirst := make(chan struct{})
 		session := &answerProfileCUJSession{
 			events:       make(chan Event, 16),
@@ -3064,31 +3064,29 @@ func TestCUJ_F5_OneShotAnswerProfilesReturnToDefault(t *testing.T) {
 			return session.snapshot().calls == 1
 		})
 
-		engine.ReceiveMessage(platform, answerProfileCUJMessage("busy-profile-2", "继续普通处理"))
-		waitAnswerProfileCUJ(t, "ordinary follow-up is visibly queued", func() bool {
-			return len(platform.getSent()) > 0
+		const followUp = "继续普通处理"
+		engine.ReceiveMessage(platform, answerProfileCUJMessage("busy-profile-2", followUp))
+		waitAnswerProfileCUJ(t, "visible receipt confirms the follow-up joined the current turn", func() bool {
+			return slices.Contains(platform.getSent(), engine.i18n.TForText(MsgSteered, followUp))
 		})
-		if got := session.snapshot().steerCalls; got != 0 {
-			t.Fatalf("steer calls = %d, want 0 across the one-shot profile boundary", got)
-		}
 
 		close(releaseFirst)
 		released = true
-		waitAnswerProfileCUJ(t, "queued ordinary turn completes with defaults", func() bool {
-			return reflect.DeepEqual(answerProfileCUJReplies(platform.getSent()), []string{
-				"fast:先分析",
-				"default:继续普通处理",
-			}) && !engine.sessions.GetOrCreateActive("test:user").Busy()
+		waitAnswerProfileCUJ(t, "profiled turn completes with its follow-up", func() bool {
+			return reflect.DeepEqual(answerProfileCUJReplies(platform.getSent()), []string{"fast:先分析"}) &&
+				!engine.sessions.GetOrCreateActive("test:user").Busy()
 		})
 
 		engine.ReceiveMessage(platform, answerProfileCUJMessage("busy-profile-3", "最后普通确认"))
 		waitAnswerProfileCUJ(t, "later ordinary turn stays on defaults", func() bool {
 			return reflect.DeepEqual(answerProfileCUJReplies(platform.getSent()), []string{
 				"fast:先分析",
-				"default:继续普通处理",
 				"default:最后普通确认",
 			}) && !engine.sessions.GetOrCreateActive("test:user").Busy()
 		})
+		if got := session.snapshot(); got.calls != 2 || got.steerCalls != 1 {
+			t.Fatalf("follow-up started another turn or was steered more than once: %+v", got)
+		}
 	})
 }
 
@@ -3121,9 +3119,21 @@ func TestCUJ_F6_SavedSpeedKeepsTurnBoundaries(t *testing.T) {
 	if got := speedCommand(t, e, p, "/speed"); !strings.Contains(got, "Next-turn speed: `default`") || !strings.Contains(got, "Running-turn speed: `fast`") {
 		t.Fatalf("busy query: %q", got)
 	}
-	e.ReceiveMessage(p, answerProfileMessage("queued", "follow up"))
+	const followUp = "follow up"
+	e.ReceiveMessage(p, answerProfileMessage("steer", followUp))
+	waitAnswerProfileCUJ(t, "visible receipt confirms the follow-up joined the fast turn", func() bool {
+		return slices.Contains(p.getSent(), e.i18n.TForText(MsgSteered, followUp))
+	})
 	close(a.session.releaseFirst)
 	released = true
+	session := e.sessions.GetOrCreateActive("test:user")
+	waitAnswerProfileCUJ(t, "fast reply delivered", func() bool {
+		return slices.Contains(p.getSent(), "ok") && !session.Busy()
+	})
+	if calls, steers := a.session.snapshot(); len(calls) != 1 || calls[0].options.ServiceTier != "priority" || steers != 1 {
+		t.Fatalf("speed change or follow-up changed the running turn: calls=%+v steers=%d", calls, steers)
+	}
+	e.ReceiveMessage(p, answerProfileMessage("next", "independent request"))
 	waitAnswerProfileCUJ(t, "both replies delivered", func() bool {
 		count := 0
 		for _, text := range p.getSent() {
@@ -3131,8 +3141,11 @@ func TestCUJ_F6_SavedSpeedKeepsTurnBoundaries(t *testing.T) {
 				count++
 			}
 		}
-		return count == 2 && !e.sessions.GetOrCreateActive("test:user").Busy()
+		return count == 2 && !session.Busy()
 	})
+	if calls, steers := a.session.snapshot(); len(calls) != 2 || calls[1].options.ServiceTier != "default" || steers != 1 {
+		t.Fatalf("independent turn did not use the restored speed: calls=%+v steers=%d", calls, steers)
+	}
 	if got := speedCommand(t, e, p, "/speed"); !strings.Contains(got, "Next-turn speed: `default`") || strings.Contains(got, "Running-turn") {
 		t.Fatalf("idle query: %q", got)
 	}

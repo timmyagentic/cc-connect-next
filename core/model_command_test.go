@@ -365,10 +365,15 @@ func TestModelCommand_DefaultBusySteeringUsesRunningModel(t *testing.T) {
 			var once sync.Once
 			t.Cleanup(func() { once.Do(func() { close(release) }) })
 			a.onSend = func(s *cronModelSession, call cronModelCall) error {
+				result := Event{Type: EventResult, Content: "model=" + call.model + " " + call.prompt, Done: true}
 				if call.prompt == "first" {
-					<-release
+					go func() {
+						<-release
+						s.events <- result
+					}()
+					return nil
 				}
-				s.events <- Event{Type: EventResult, Content: "model=" + call.model + " " + call.prompt, Done: true}
+				s.events <- result
 				return nil
 			}
 			first := chatModelMessage("A", "", "first", "first")
@@ -379,35 +384,21 @@ func TestModelCommand_DefaultBusySteeringUsesRunningModel(t *testing.T) {
 				nextModel = "project-C"
 			}
 			e.ReceiveMessage(p, chatModelMessage("A", "", "default", "/model default "+nextModel))
-			e.ReceiveMessage(p, chatModelMessage("A", "", "next", "next"))
+			e.ReceiveMessage(p, chatModelMessage("A", "", "follow-up", "append to running turn"))
 			_, backends, _ := a.snapshot()
-			backends[0].mu.Lock()
-			steers := backends[0].steerCalls
-			backends[0].mu.Unlock()
-			if changed && steers != 0 {
-				t.Fatal("new-default message was steered into the old running model")
-			}
-			if !changed && steers != 1 {
-				t.Fatalf("unchanged-default steering regressed: calls=%d", steers)
-			}
+			waitChatModelSteers(t, backends[0], 1)
 			if !backends[0].Alive() || !e.sessions.GetOrCreateActive(first.SessionKey).Busy() {
 				t.Fatal("default update interrupted the in-flight turn")
 			}
 			once.Do(func() { close(release) })
-			waitAnswerProfileTest(t, "turns completed", func() bool {
+			waitAnswerProfileTest(t, "running turn completed", func() bool {
 				return !e.sessions.GetOrCreateActive(first.SessionKey).Busy()
 			})
 			calls, _, _ := a.snapshot()
-			if changed {
-				if len(calls) != 2 || calls[0].model != "project-A" || calls[1].model != "project-C" {
-					t.Fatalf("new turn did not use the changed default: %+v", calls)
-				}
-				if visible := strings.Join(p.getSent(), "\n"); !strings.Contains(visible, "model=project-C next") {
-					t.Fatalf("queued reply used old model: %s", visible)
-				}
-			} else if len(calls) != 1 {
-				t.Fatalf("steered message was also sent as a new turn: %+v", calls)
+			if len(calls) != 1 || calls[0].model != "project-A" {
+				t.Fatalf("default update replaced the running model or steer started another turn: %+v", calls)
 			}
+			chatModelTurn(t, e, p, &a.chatModelTestAgent, chatModelMessage("A", "", "next", "independent request"), nextModel)
 		})
 	}
 }

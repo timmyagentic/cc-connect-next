@@ -628,9 +628,10 @@ type workspaceInitFlow struct {
 }
 
 // queuedMessage holds a message that arrived while the session was busy.
-// The message is NOT sent to agent stdin at queue time; the event loop
-// sends it after the current turn completes to avoid mid-turn interference.
+// Startup supplements are retried when the active turn is ready; independent
+// requests and definitive steer failures run after the current turn completes.
 type queuedMessage struct {
+	pendingSteer            *Message // accepted startup supplement; also identifies it across concurrent recalls
 	feedbackText            string
 	messageID               string
 	platform                Platform
@@ -697,8 +698,9 @@ type interactiveState struct {
 	// steerMu makes a same-turn steer decision atomic with answer-profile
 	// handoff. Code that needs both locks must acquire steerMu before mu; unlike
 	// mu, steerMu may be held across the bounded backend steer RPC.
-	steerMu        sync.Mutex
-	contextSending bool // ordinary input is being prepared or handed to the Agent
+	steerMu            sync.Mutex
+	contextSending     bool // ordinary input is being prepared or handed to the Agent
+	steerWorkerRunning bool // one startup-supplement worker; never block the event reader on RPC
 
 	// Unsolicited event reader: a background goroutine that consumes agent
 	// events between user-initiated turns (e.g. background task completions).
@@ -718,15 +720,11 @@ type interactiveState struct {
 	// currentTurnUserMessageTimeMs is the UserMessageTimeMs for the in-flight
 	// foreground turn (including a queued turn after EventResult).
 	currentTurnUserMessageTimeMs int64
-	// activeAnswerProfile is the one-shot profile of the in-flight foreground
-	// turn. Empty means project defaults. turn/steer cannot change turn options,
-	// so a busy message that would cross this boundary must start a queued turn.
-	activeAnswerProfile           AnswerProfileName
-	activeModelOverride           string // task model of the in-flight turn; never inherited by queued input
-	activeGroupReasoning          bool   // effort bindings also require distinct queued turns
-	activeChatModel               bool   // keeps a bound turn out of steering even if its binding is reset
-	activeReasoningEffortOverride string
-	activeServiceTier             string // session override captured at turn admission
+	// Ordinary supplements inherit the active turn's options. Defaults apply
+	// when a new turn starts. Scheduled turns retain their independent receipt.
+	activeAnswerProfile AnswerProfileName
+	activeServiceTier   string
+	activeScheduled     bool
 
 	// Steer presentation handoff (issue #27). When a busy-session message is
 	// appended to the in-flight turn via SteerableSession, the visible
@@ -2875,8 +2873,13 @@ func (e *Engine) removeQueuedMessageByID(messageID string) (string, bool) {
 		}
 		filtered := pending[:0]
 		removed := false
+		cancelDispatchedSteer := false
 		for _, queued := range pending {
 			if queued.messageID == messageID {
+				if queued.pendingSteer != nil {
+					queued.pendingSteer.Recalled = true
+					cancelDispatchedSteer = queued.pendingSteer.steerDispatching
+				}
 				removed = true
 				continue
 			}
@@ -2885,6 +2888,9 @@ func (e *Engine) removeQueuedMessageByID(messageID string) (string, bool) {
 		if removed {
 			state.pendingMessages = filtered
 			state.mu.Unlock()
+			if cancelDispatchedSteer {
+				e.stopInteractiveSessionSilently(sessionKey)
+			}
 			return sessionKey, true
 		}
 		state.mu.Unlock()
@@ -2900,22 +2906,6 @@ func (e *Engine) isStaleUserMessageLocked(state *interactiveState, timeMs int64)
 		return false
 	}
 	wm := latestUserMessageWatermarkLocked(state)
-	return wm > 0 && timeMs < wm
-}
-
-// isQueuedUserMessageStaleForDrainLocked reports whether a queued message is
-// older than an already processed or currently in-flight turn. It intentionally
-// ignores other queued messages so a FIFO queue with increasing create_time
-// does not drop earlier queued messages just because later queued messages
-// have already been accepted.
-func (e *Engine) isQueuedUserMessageStaleForDrainLocked(state *interactiveState, timeMs int64) bool {
-	if timeMs <= 0 {
-		return false
-	}
-	wm := state.lastCompletedUserMessageTimeMs
-	if state.currentTurnUserMessageTimeMs > wm {
-		wm = state.currentTurnUserMessageTimeMs
-	}
 	return wm > 0 && timeMs < wm
 }
 
@@ -3531,17 +3521,8 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 // session lacks the steer capability, or the steer was definitively rejected
 // without delivering anything.
 func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey string, session *Session, sessions *SessionManager) bool {
-	if _, bound := e.chatModelBinding(msg.SessionKey); bound {
-		// A binding may have changed while the previous turn was running.
-		// Resolve it when the queued turn starts, never steer into an old model.
-		return false
-	}
-	if _, bound := e.groupReasoningBinding(msg.SessionKey); bound {
-		return false
-	}
-	// turn/steer cannot carry model, reasoning-effort, or service-tier
-	// overrides. A profiled message must remain a distinct queued turn or the
-	// user would be told a profile was applied when it was not.
+	// Explicit per-request options describe a separate turn. Plain supplements
+	// inherit the active turn, including one-shot options and changed defaults.
 	if msg.AnswerProfile != "" || msg.ModelOverride != "" || msg.ReasoningEffortOverride != "" {
 		return false
 	}
@@ -3561,11 +3542,22 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgRestarting, msg.Content))
 		return true
 	}
-	if as == nil || !as.Alive() || state.contextSending {
+	if state.stopped || state.activeScheduled {
 		state.mu.Unlock()
 		return false
 	}
-	if state.activeAnswerProfile != "" || state.activeModelOverride != "" || state.activeChatModel || state.activeGroupReasoning || state.activeReasoningEffortOverride != "" || state.activeServiceTier != sessions.ServiceTier(session) {
+	if as != nil {
+		if _, supported := as.(SteerableSession); !supported {
+			state.mu.Unlock()
+			return false
+		}
+	}
+	if as == nil || state.contextSending || !state.presentationOpen {
+		msg.steerWhenReady = true
+		state.mu.Unlock()
+		return false
+	}
+	if !as.Alive() {
 		state.mu.Unlock()
 		return false
 	}
@@ -3575,24 +3567,20 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 		e.logStaleUserMessageDropped("reject_before_steer", msg, interactiveKey, snap)
 		return true
 	}
-	turnAgent := state.agent
 	state.mu.Unlock()
-	if turnAgent == nil {
-		turnAgent = e.agent
-	}
-	if current, ok := as.(interface{ GetModel() string }); ok {
-		if selected := defaultTurnOptions(turnAgent).Model; selected != "" && selected != current.GetModel() {
-			// A changed global default needs a new turn; steering would keep
-			// this message on the model of the already-running turn.
-			return false
-		}
-	}
 
 	steerable, ok := as.(SteerableSession)
 	if !ok {
 		return false
 	}
 
+	e.steerQueuedMessagesLocked(state, steerable, interactiveKey, session, sessions)
+	return e.deliverSteerMessage(p, msg, state, steerable, interactiveKey, session, sessions)
+}
+
+// deliverSteerMessage runs with steerMu held. Both fresh input and previously
+// accepted startup supplements share acknowledgement and presentation handling.
+func (e *Engine) deliverSteerMessage(p Platform, msg *Message, state *interactiveState, steerable SteerableSession, interactiveKey string, session *Session, sessions *SessionManager) bool {
 	// Create the successor lifecycle card ("C2") in a pending steering phase
 	// BEFORE the RPC so the sender gets immediate acknowledgement replying to
 	// their own message (issue #27 card handoff).
@@ -3614,6 +3602,17 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 	prompt := e.buildCapabilityPrompt(state, e.buildSenderPrompt(historyContext.Text, msg.UserID, msg.UserName, msg.Platform, msg.SessionKey, msg.ChannelKey))
 	steerImages := append(append([]ImageAttachment(nil), msg.Images...), historyContext.Images...)
 	steerFiles := append(scopeFileAttachments(msg.Files, msg.MessageID), historyContext.Files...)
+	state.mu.Lock()
+	recalled := msg.steerWhenReady && msg.Recalled
+	stopped := state.stopped
+	if msg.steerWhenReady && !recalled && !stopped {
+		msg.steerDispatching = true
+	}
+	state.mu.Unlock()
+	if recalled || stopped {
+		e.removeSteerPendingCard(p, cardHandle)
+		return true
+	}
 	err := steerable.Steer(prompt, steerImages, steerFiles)
 	switch {
 	case err == nil:
@@ -3676,6 +3675,85 @@ func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey st
 			"session", msg.SessionKey, "msg_id", msg.MessageID, "error", err)
 		e.removeSteerPendingCard(p, cardHandle)
 		return false
+	}
+}
+
+// Retry startup supplements as soon as Send succeeds. The same mutex used by
+// live steering and turn transitions keeps one consumer and one target turn.
+func (e *Engine) steerQueuedMessages(state *interactiveState, interactiveKey string, session *Session, sessions *SessionManager) {
+	state.mu.Lock()
+	ready := !state.steerWorkerRunning && !state.contextSending && state.presentationOpen && !state.activeScheduled && !state.stopped && !state.restartAdmissionFenced
+	pending := false
+	for _, queued := range state.pendingMessages {
+		pending = pending || queued.pendingSteer != nil
+	}
+	if !ready || !pending || state.agentSession == nil || !state.agentSession.Alive() || e.ctx.Err() != nil {
+		state.mu.Unlock()
+		return
+	}
+	state.steerWorkerRunning = true
+	state.mu.Unlock()
+	done := e.updates().retainWork()
+	go func() {
+		defer done()
+		state.steerMu.Lock()
+		state.mu.Lock()
+		as := state.agentSession
+		ready := !state.contextSending && state.presentationOpen && !state.activeScheduled && !state.stopped && !state.restartAdmissionFenced
+		state.mu.Unlock()
+		if ready && as != nil && as.Alive() {
+			steerable, _ := as.(SteerableSession)
+			e.steerQueuedMessagesLocked(state, steerable, interactiveKey, session, sessions)
+		}
+		state.steerMu.Unlock()
+		state.mu.Lock()
+		state.steerWorkerRunning = false
+		state.mu.Unlock()
+		// A queue append may have raced the worker's final empty check.
+		e.steerQueuedMessages(state, interactiveKey, session, sessions)
+	}()
+}
+
+func (e *Engine) steerQueuedMessagesLocked(state *interactiveState, steerable SteerableSession, interactiveKey string, session *Session, sessions *SessionManager) {
+	for {
+		state.mu.Lock()
+		var msg *Message
+		var platform Platform
+		for _, queued := range state.pendingMessages {
+			if queued.pendingSteer != nil {
+				msg, platform = queued.pendingSteer, queued.platform
+				break
+			}
+		}
+		stopped := state.stopped || state.restartAdmissionFenced
+		state.mu.Unlock()
+		if msg == nil || stopped {
+			return
+		}
+		// This input already passed admission. A newer queued/steered message
+		// must not cause it to be rejected by the redelivery watermark.
+		handled := false
+		if steerable != nil {
+			handled = e.deliverSteerMessage(platform, msg, state, steerable, interactiveKey, session, sessions)
+		}
+		state.mu.Lock()
+		for i := range state.pendingMessages {
+			if state.pendingMessages[i].pendingSteer != msg {
+				continue
+			}
+			if handled {
+				state.pendingMessages = append(state.pendingMessages[:i], state.pendingMessages[i+1:]...)
+			} else {
+				// Definitive rejection keeps its original FIFO position. Unknown
+				// outcomes count as handled and are never delivered a second time.
+				state.pendingMessages[i].pendingSteer = nil
+			}
+			break
+		}
+		state.mu.Unlock()
+		if !handled {
+			e.reply(platform, msg.ReplyCtx, e.i18n.TForText(MsgMessageQueued, msg.Content))
+		}
 	}
 }
 
@@ -3772,6 +3850,9 @@ func (e *Engine) commitSteerPresentation(interactiveKey string, h steerHandoff) 
 	// gets around to adopting its presentation card.
 	e.adoptSteerFeedbackLocked(state, h)
 	state.currentUserID = h.userID
+	if h.userMessageTimeMs > state.currentTurnUserMessageTimeMs {
+		state.currentTurnUserMessageTimeMs = h.userMessageTimeMs
+	}
 	ch := state.handoffSignalChLocked()
 	state.mu.Unlock()
 	select {
@@ -3827,11 +3908,8 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		}
 	}
 
-	// Only queue metadata — do NOT send to agent stdin yet.
-	// The agent CLI may treat a mid-turn stdin message as part of the
-	// current turn, causing the event loop to hang waiting for a second
-	// EventResult that never arrives. Instead, the event loop sends the
-	// message after the current turn's EventResult is received.
+	// Admission stores input without sending it. Startup supplements use
+	// native Steer once ready; separate requests use Send after EventResult.
 	if e.isStaleUserMessageLocked(state, msg.UserMessageTimeMs) {
 		snap := userMessageWatermarkSnapshotLocked(state)
 		e.logStaleUserMessageDropped("reject_before_queue", msg, interactiveKey, snap)
@@ -3842,7 +3920,13 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.TForText(MsgQueueFull, msg.Content), depth))
 		return true // handled: queue-full reply sent
 	}
+	var pendingSteer *Message
+	if msg.steerWhenReady {
+		copy := *msg
+		pendingSteer = &copy
+	}
 	state.pendingMessages = append(state.pendingMessages, queuedMessage{
+		pendingSteer:            pendingSteer,
 		feedbackText:            feedbackUserContent(msg),
 		messageID:               msg.MessageID,
 		platform:                p,
@@ -3879,7 +3963,17 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		"user", msg.UserName,
 		"queue_depth", queueDepth,
 	)
-	e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgMessageQueued, msg.Content))
+	if pendingSteer != nil {
+		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgSteerPending, msg.Content))
+		// Send may have become ready between the initial steer attempt and
+		// this append. Wake its event loop so that window cannot strand input.
+		select {
+		case state.handoffSignalChLocked() <- struct{}{}:
+		default:
+		}
+	} else {
+		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgMessageQueued, msg.Content))
+	}
 	return true
 }
 
@@ -4417,6 +4511,8 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.currentMessageID = msg.MessageID
 	state.currentReplyUserID = msg.UserID
 	state.currentTurnUserMessageTimeMs = msg.UserMessageTimeMs
+	state.activeScheduled = msg.scheduledResult != nil
+	state.contextSending = true
 	state.mu.Unlock()
 	e.activateAgentTurnCredential(state, msg.UserID, msg.SessionKey)
 	state.setTurnRichCardCopy(msg.MessageID, turnRichCardCopy)
@@ -4520,10 +4616,6 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.fromVoice = msg.FromVoice
 	state.sideText = ""
 	state.activeAnswerProfile = msg.AnswerProfile
-	state.activeModelOverride = msg.ModelOverride
-	_, state.activeChatModel = e.chatModelBinding(msg.SessionKey)
-	_, state.activeGroupReasoning = e.groupReasoningBinding(msg.SessionKey)
-	state.activeReasoningEffortOverride = msg.ReasoningEffortOverride
 	speedTier := sessions.ServiceTier(session)
 	state.activeServiceTier = speedTier
 	as := state.agentSession // capture under lock to avoid race with cleanup
@@ -4546,7 +4638,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			sendDone <- fmt.Errorf("agent session became nil")
 			return
 		}
-		overrides, err := e.prepareInteractiveTurnOverrides(state, agent, sessions, session, as, msg.SessionKey, msg.AnswerProfile, msg.ModelOverride, msg.ReasoningEffortOverride, speedTier)
+		overrides, err := e.prepareSessionTurnOverrides(agent, sessions, session, as, msg.SessionKey, msg.AnswerProfile, msg.ModelOverride, msg.ReasoningEffortOverride, speedTier)
 		if err != nil {
 			finishMessageContextInput(state)
 			sendDone <- err
@@ -5664,6 +5756,7 @@ type turnEventReader struct {
 	onSilent     func()
 	onStop       func()
 	onHandoff    func()
+	onSendReady  func()
 	onSendError  func(error)
 	onEngineDone func()
 }
@@ -5689,6 +5782,9 @@ func (r *turnEventReader) read() turnEventRead {
 		if err != nil {
 			r.onSendError(err)
 			return turnEventRead{control: turnReadStop}
+		}
+		if r.onSendReady != nil {
+			r.onSendReady()
 		}
 		return turnEventRead{control: turnReadContinue}
 	case <-r.idle:
@@ -5872,10 +5968,7 @@ func (t *turnProcessor) run() {
 		}
 		state.mu.Lock()
 		state.activeAnswerProfile = ""
-		state.activeModelOverride = ""
-		state.activeChatModel = false
-		state.activeGroupReasoning = false
-		state.activeReasoningEffortOverride = ""
+		state.activeScheduled = false
 		state.mu.Unlock()
 	}()
 
@@ -6295,8 +6388,6 @@ func (t *turnProcessor) run() {
 			state.currentMessageID = h.messageID
 			state.currentReplyUserID = h.userID
 			state.fromVoice = h.fromVoice
-			state.currentUserID = h.userID
-			state.currentTurnUserMessageTimeMs = h.userMessageTimeMs
 			// Fence: async work that captured an older generation must not
 			// mutate a card that has been frozen by this handoff.
 			state.presentationGeneration++
@@ -6457,7 +6548,13 @@ func (t *turnProcessor) run() {
 				removeRichCardForFallback(p, cardMessageID)
 			}
 		},
-		onHandoff: applySteerHandoffs,
+		onHandoff: func() {
+			e.steerQueuedMessages(state, sessionKey, session, sessions)
+			applySteerHandoffs()
+		},
+		onSendReady: func() {
+			e.steerQueuedMessages(state, sessionKey, session, sessions)
+		},
 		onSendError: func(err error) {
 			t.scheduledResult.complete(err)
 			e.recordFeedbackFailure(state, "prompt_send", err)
@@ -7346,17 +7443,6 @@ func (queue *turnQueue) handle() {
 	// for the next turn instead of returning.
 	state.steerMu.Lock()
 	state.mu.Lock()
-	droppedStale := 0
-	for len(state.pendingMessages) > 0 && e.isQueuedUserMessageStaleForDrainLocked(state, state.pendingMessages[0].userMessageTimeMs) {
-		state.pendingMessages = state.pendingMessages[1:]
-		droppedStale++
-	}
-	if droppedStale > 0 {
-		slog.Info("dropped stale queued user messages after completed turn",
-			"session", sessionKey,
-			"dropped", droppedStale,
-		)
-	}
 	if state.stopped {
 		state.pendingMessages = nil
 		state.mu.Unlock()
@@ -7365,6 +7451,11 @@ func (queue *turnQueue) handle() {
 		return
 	}
 	if len(state.pendingMessages) > 0 {
+		// Remaining supplements belong to the completed turn and now run
+		// independently, never inside another queued task.
+		for i := range state.pendingMessages {
+			state.pendingMessages[i].pendingSteer = nil
+		}
 		queued := state.pendingMessages[0]
 		state.pendingMessages = state.pendingMessages[1:]
 		// A queued message gets its own processing timer from the moment it is
@@ -7380,10 +7471,8 @@ func (queue *turnQueue) handle() {
 		state.currentUserID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
-		state.activeModelOverride = queued.modelOverride
-		_, state.activeChatModel = e.chatModelBinding(queued.msgSessionKey)
-		_, state.activeGroupReasoning = e.groupReasoningBinding(queued.msgSessionKey)
-		state.activeReasoningEffortOverride = queued.reasoningEffortOverride
+		state.activeScheduled = false
+		state.contextSending = true
 		speedTier := sessions.ServiceTier(session)
 		state.activeServiceTier = speedTier
 		// Re-open the steer adoption window for the queued turn.
@@ -7452,7 +7541,7 @@ func (queue *turnQueue) handle() {
 				nextSend <- fmt.Errorf("agent session became nil")
 				return
 			}
-			overrides, err := e.prepareInteractiveTurnOverrides(state, turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
+			overrides, err := e.prepareSessionTurnOverrides(turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
 			if err != nil {
 				finishMessageContextInput(state)
 				nextSend <- err
@@ -8991,28 +9080,8 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 			state.steerMu.Unlock()
 			return true
 		}
-		droppedStale := 0
-		for len(state.pendingMessages) > 0 && e.isQueuedUserMessageStaleForDrainLocked(state, state.pendingMessages[0].userMessageTimeMs) {
-			state.pendingMessages = state.pendingMessages[1:]
-			droppedStale++
-		}
-		if droppedStale > 0 {
-			slog.Info("dropped stale queued user messages while draining",
-				"session", sessionKey,
-				"dropped", droppedStale,
-			)
-		}
-		if len(state.pendingMessages) == 0 {
-			if state.deferredRestart != nil {
-				state.restartAdmissionFenced = true
-				state.mu.Unlock()
-				state.steerMu.Unlock()
-				return false
-			}
-			session.Unlock()
-			state.mu.Unlock()
-			state.steerMu.Unlock()
-			return true
+		for i := range state.pendingMessages {
+			state.pendingMessages[i].pendingSteer = nil
 		}
 		queued := state.pendingMessages[0]
 		state.pendingMessages = state.pendingMessages[1:]
@@ -9024,10 +9093,8 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.currentUserID = queued.userID
 		state.currentTurnUserMessageTimeMs = queued.userMessageTimeMs
 		state.activeAnswerProfile = queued.answerProfile
-		state.activeModelOverride = queued.modelOverride
-		_, state.activeChatModel = e.chatModelBinding(queued.msgSessionKey)
-		_, state.activeGroupReasoning = e.groupReasoningBinding(queued.msgSessionKey)
-		state.activeReasoningEffortOverride = queued.reasoningEffortOverride
+		state.activeScheduled = false
+		state.contextSending = true
 		speedTier := sessions.ServiceTier(session)
 		state.activeServiceTier = speedTier
 		state.mu.Unlock()
@@ -9079,7 +9146,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 				sendDone <- fmt.Errorf("agent session became nil")
 				return
 			}
-			overrides, err := e.prepareInteractiveTurnOverrides(state, turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
+			overrides, err := e.prepareSessionTurnOverrides(turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
 			if err != nil {
 				finishMessageContextInput(state)
 				sendDone <- err
@@ -12679,10 +12746,6 @@ func (e *Engine) runCompress(state *interactiveState, session *Session, sessions
 	speedTier := sessions.ServiceTier(session)
 	state.activeServiceTier = speedTier
 	state.activeAnswerProfile = ""
-	state.activeModelOverride = ""
-	state.activeChatModel = false
-	state.activeGroupReasoning = false
-	state.activeReasoningEffortOverride = ""
 	state.mu.Unlock()
 	state.steerMu.Unlock()
 	if turnAgent == nil {

@@ -65,7 +65,7 @@ func TestChatModel_OneShotModelPrecedenceAndPrivateIsolation(t *testing.T) {
 	}
 }
 
-func TestChatModel_QueuedTurnReadsLatestBindingAndResetCannotSteer(t *testing.T) {
+func TestChatModel_SteerKeepsRunningModelAndQueuedTurnReadsLatestBinding(t *testing.T) {
 	for _, selection := range []string{"group-C", "reset"} {
 		t.Run(selection, func(t *testing.T) {
 			e, p, a := newChatModelEngine(t, "")
@@ -74,42 +74,54 @@ func TestChatModel_QueuedTurnReadsLatestBindingAndResetCannotSteer(t *testing.T)
 			var once sync.Once
 			t.Cleanup(func() { once.Do(func() { close(release) }) })
 			a.onSend = func(s *cronModelSession, call cronModelCall) error {
+				result := Event{Type: EventResult, Content: "model=" + call.model, Done: true}
 				if call.prompt == "first" {
-					<-release
+					go func() {
+						<-release
+						s.events <- result
+					}()
+					return nil
 				}
-				s.events <- Event{Type: EventResult, Content: "model=" + call.model, Done: true}
+				s.events <- result
 				return nil
 			}
 			e.ReceiveMessage(p, chatModelMessage("A", "t", "bind", "/model group-B"))
 			e.ReceiveMessage(p, chatModelMessage("A", "t", "first", "first"))
 			waitAnswerProfileTest(t, "first started", func() bool { calls, _, _ := a.snapshot(); return len(calls) == 1 })
-			e.ReceiveMessage(p, chatModelMessage("A", "t", "queued", "queued"))
+			_, backends, _ := a.snapshot()
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "before", "follow-up before change"))
+			waitChatModelSteers(t, backends[0], 1)
+			queued := chatModelMessage("A", "t", "queued", "independent request")
+			queued.ReasoningEffortOverride = "high"
+			e.ReceiveMessage(p, queued)
 			e.ReceiveMessage(p, chatModelMessage("A", "t", "change", "/model "+selection))
-			e.ReceiveMessage(p, chatModelMessage("A", "t", "queued-after", "queued-after"))
+			e.ReceiveMessage(p, chatModelMessage("A", "t", "after", "follow-up after change"))
+			waitChatModelSteers(t, backends[0], 2)
 			chatModelTurn(t, e, p, a, chatModelMessage("B", "", "other", "other"), "project-A")
 			once.Do(func() { close(release) })
 			waitAnswerProfileTest(t, "queue drained", func() bool {
 				calls, _, _ := a.snapshot()
-				return len(calls) == 4 && !e.sessions.GetOrCreateActive("test:A:root:t").Busy()
+				return len(calls) == 3 && !e.sessions.GetOrCreateActive("test:A:root:t").Busy()
 			})
-			calls, sessions, setters := a.snapshot()
+			calls, _, setters := a.snapshot()
 			want := selection
 			if selection == "reset" {
 				want = "project-A"
 			}
-			if calls[0].model != "group-B" || calls[2].model != want || calls[3].model != want || setters != 0 {
+			if calls[0].model != "group-B" || calls[2].model != want || calls[2].options.ReasoningEffort != "high" || setters != 0 {
 				t.Fatalf("models leaked across queue/group: %+v setters=%d", calls, setters)
-			}
-			for _, s := range sessions {
-				s.mu.Lock()
-				steers := s.steerCalls
-				s.mu.Unlock()
-				if steers != 0 {
-					t.Fatalf("steered into old model: %d", steers)
-				}
 			}
 		})
 	}
+}
+
+func waitChatModelSteers(t *testing.T, backend *cronModelSession, want int) {
+	t.Helper()
+	waitAnswerProfileTest(t, "follow-up steered into running turn", func() bool {
+		backend.mu.Lock()
+		defer backend.mu.Unlock()
+		return backend.steerCalls == want
+	})
 }
 
 func TestChatModel_RestartAndNewSessionKeepBinding(t *testing.T) {

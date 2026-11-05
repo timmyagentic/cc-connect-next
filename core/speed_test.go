@@ -173,7 +173,7 @@ func TestSpeedTurnsPreserveModelEffortAndOneShotProfiles(t *testing.T) {
 	}
 }
 
-func TestSpeedBusyChangeQueuesAcrossBothTurnHandoffs(t *testing.T) {
+func TestSpeedBusyChangeAppliesToNextIndependentTurn(t *testing.T) {
 	e, p, a := newSpeedTestEngine(t, "")
 	e.SetBusyMessageMode(BusyMessageModeSteer)
 	a.session.releaseFirst = make(chan struct{})
@@ -194,21 +194,33 @@ func TestSpeedBusyChangeQueuesAcrossBothTurnHandoffs(t *testing.T) {
 	if got := speedCommand(t, e, p, "/speed"); !strings.Contains(got, "Next-turn speed: `fast`") || !strings.Contains(got, "Running-turn speed: `default`") {
 		t.Fatalf("busy query = %q", got)
 	}
-	e.ReceiveMessage(p, answerProfileMessage("second", "second"))
-	if calls, steers := a.session.snapshot(); len(calls) != 1 || steers != 0 || !a.session.Alive() {
-		t.Fatalf("speed change interrupted or steered: %d calls, %d steers", len(calls), steers)
-	}
+	e.ReceiveMessage(p, answerProfileMessage("steer-first", "append to default-speed turn"))
+	waitAnswerProfileTest(t, "first turn steered", func() bool {
+		_, steers := a.session.snapshot()
+		return steers == 1
+	})
 	close(a.session.releaseFirst)
 	first = true
-	waitAnswerProfileTest(t, "queued fast turn", func() bool { calls, _ := a.session.snapshot(); return len(calls) == 2 })
-	speedCommand(t, e, p, "/speed default")
-	e.ReceiveMessage(p, answerProfileMessage("third", "third"))
-	if _, steers := a.session.snapshot(); steers != 0 {
-		t.Fatal("message steered across speed boundary of queued turn")
+	waitAnswerProfileTest(t, "first turn completes", func() bool { return !e.sessions.GetOrCreateActive("test:user").Busy() })
+	if calls, _ := a.session.snapshot(); len(calls) != 1 || !a.session.Alive() {
+		t.Fatalf("steer started another turn or replaced the backend: %+v", calls)
 	}
+	e.ReceiveMessage(p, answerProfileMessage("second", "independent fast-speed turn"))
+	waitAnswerProfileTest(t, "independent fast turn starts", func() bool { calls, _ := a.session.snapshot(); return len(calls) == 2 })
+	speedCommand(t, e, p, "/speed default")
+	e.ReceiveMessage(p, answerProfileMessage("steer-second", "append to fast-speed turn"))
+	waitAnswerProfileTest(t, "second turn steered", func() bool {
+		_, steers := a.session.snapshot()
+		return steers == 2
+	})
 	close(a.session.releaseSecond)
 	second = true
-	waitAnswerProfileTest(t, "queued default turn", func() bool { calls, _ := a.session.snapshot(); return len(calls) == 3 })
+	waitAnswerProfileTest(t, "second turn completes", func() bool { return !e.sessions.GetOrCreateActive("test:user").Busy() })
+	if calls, _ := a.session.snapshot(); len(calls) != 2 {
+		t.Fatalf("second steer also started another turn: %+v", calls)
+	}
+	e.ReceiveMessage(p, answerProfileMessage("third", "independent default-speed turn"))
+	waitAnswerProfileTest(t, "independent default turn starts", func() bool { calls, _ := a.session.snapshot(); return len(calls) == 3 })
 	calls, _ := a.session.snapshot()
 	for i, want := range []string{"default", "priority", "default"} {
 		if got := calls[i].options.ServiceTier; got != want {
