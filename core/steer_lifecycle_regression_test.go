@@ -88,8 +88,8 @@ func TestCUJ_SteerStartupRecallCancelsPendingDelivery(t *testing.T) {
 			// The worker owns steerMu through preparation and dispatch. Acquiring
 			// it after releasing preparation proves the attempt has settled.
 			state.steerMu.Lock()
-			state.steerMu.Unlock()
 			sends, steers := backend.inputs()
+			state.steerMu.Unlock()
 			if len(sends) != 1 || len(steers) != 0 || cronModelQueueDepth(engine) != 0 {
 				t.Fatalf("recalled startup correction was delivered: sends=%+v steers=%+v", sends, steers)
 			}
