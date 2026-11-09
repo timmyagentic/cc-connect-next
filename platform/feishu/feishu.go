@@ -1435,6 +1435,10 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 
 	// cmd: — async command dispatch, with optional in-place card replacement
 	if strings.HasPrefix(actionVal, "cmd:") {
+		rich, validSchema := callbackCardSchema(values)
+		if !validSchema {
+			return nil, nil
+		}
 		cmdText := strings.TrimPrefix(actionVal, "cmd:")
 		rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, directUserID: directUserID}
 
@@ -1469,7 +1473,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 				return &callback.CardActionTriggerResponse{
 					Card: &callback.Card{
 						Type: "raw",
-						Data: p.renderBoundCardMap(cb.Build(), sessionKey, directUserID),
+						Data: callbackConfirmationCard(p.renderBoundCardMap(cb.Build(), sessionKey, directUserID), rich),
 					},
 				}, nil
 			}

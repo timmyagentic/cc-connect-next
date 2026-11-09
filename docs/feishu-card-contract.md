@@ -83,7 +83,7 @@ is ordinary prose; transport framing alone is never treated as a line ending.
 ## Private form receipts
 
 Offer an editable field only when the selected project's running platform reports
-`direct_user_form_receipts` as available. On a non-forwardable, shared v1 card,
+`direct_user_form_receipts` as available. On a non-forwardable, shared card,
 set the submit button's name to `send_text` and its value's `action` to
 `form:receipt`. Bind `cc_project` and `cc_direct_user` to the exact project and
 operator. Set `form_field` to the input name (1–64 ASCII letters, digits or
@@ -105,6 +105,17 @@ element is `div.text` of type `plain_text` containing those same characters.
 The receipt has no buttons and forwarding is disabled. No command or agent turn
 runs. A reader must check the original message, private chat and sender before
 matching the digest against that card's nonce and text.
+
+On Card 2.0, add `"cc_card_schema": "2.0"` to the submit button's callback
+value. The confirmation then retains schema 2.0 and places the same two elements
+under `body.elements`; `div.text` stays literal `plain_text`, including every
+submitted whitespace character. The HMAC still covers the exact original UTF-8
+bytes. The same optional value applies to a `cmd:` callback with `after_click`
+(for example, a text/reaction choice): its replacement also retains schema 2.0.
+Neither path adds a second command or model turn. Missing `cc_card_schema` retains
+the existing v1 result. Any explicitly supplied value other than the string
+`"2.0"` is rejected before replacement or command dispatch. Schema selection
+does not change project, operator, user/chat allowlist or admission checks.
 
 ## Locale and completion
 

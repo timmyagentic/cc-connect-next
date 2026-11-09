@@ -46,6 +46,10 @@ func validReceiptText(text string) bool {
 // requires explicit owner bindings, even on installations that accept legacy cards.
 func (p *Platform) formReceipt(action *callback.CallBackAction, userID, chatID, messageID string) *callback.CardActionTriggerResponse {
 	values := action.Value
+	rich, validSchema := callbackCardSchema(values)
+	if !validSchema {
+		return nil
+	}
 	project := p.boundProjectName()
 	if !p.useInteractiveCard || project == "" || values[cardActionProjectKey] != project || values[cardActionDirectUserKey] != userID ||
 		!receiptChatID.MatchString(chatID) || !receiptMessageID.MatchString(messageID) ||
@@ -84,5 +88,5 @@ func (p *Platform) formReceipt(action *callback.CallBackAction, userID, chatID, 
 		},
 	}
 	slog.Info("feishu: card form receipt", "user", userID)
-	return &callback.CardActionTriggerResponse{Card: &callback.Card{Type: "raw", Data: card}}
+	return &callback.CardActionTriggerResponse{Card: &callback.Card{Type: "raw", Data: callbackConfirmationCard(card, rich)}}
 }
