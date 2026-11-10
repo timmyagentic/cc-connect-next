@@ -259,6 +259,8 @@ type replyContext struct {
 	contextTimeMs   int64
 	mediaStart      time.Time // lower bound of this trigger's validated history read
 	contextRootID   string
+	contextParentID string
+	referenceIDs    map[string]bool // explicit sources selected by this context read
 	messageID       string
 	chatID          string
 	groupID         string // chatID only when the inbound chat type was verified as group
@@ -2082,6 +2084,7 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 			rctx.contextTimeMs = time.Now().UnixMilli()
 		}
 		rctx.contextRootID = stringValue(msg.RootId)
+		rctx.contextParentID = parentID
 	}
 	if chatType == "p2p" {
 		rctx.directUserID = userID

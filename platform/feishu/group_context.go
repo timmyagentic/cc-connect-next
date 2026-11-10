@@ -146,8 +146,16 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 		MediaTimeout: groupContextMediaTimeout,
 	}
 	forwardIDs := make(map[string]bool)
+	var referenceErr error
 	defer func() {
+		err = errors.Join(err, referenceErr)
 		finishGroupContext(&result, p.groupContext.maxMessages)
+		for _, entry := range result.Messages {
+			if entry.Referenced && entry.Time.Before(rctx.mediaStart) {
+				rctx.mediaStart = entry.Time
+			}
+		}
+		result.MediaTarget = rctx
 		p.expandGroupContextForwards(ctx, rctx, result.Messages, forwardIDs)
 	}()
 	cutoff := time.UnixMilli(rctx.contextTimeMs)
@@ -161,6 +169,43 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 	rctx.mediaStart = start
 	result.MediaTarget = rctx
 	result.Through = cutoff
+	// Explicit replies are request anchors, not incremental background. Keep
+	// their real timestamps and run them through the same scope/media checks.
+	rctx.referenceIDs = make(map[string]bool)
+	if rctx.contextParentID != "" && rctx.contextParentID != rctx.messageID {
+		rctx.referenceIDs[rctx.contextParentID] = true
+	}
+	if after.IsZero() && rctx.contextRootID != "" && rctx.contextRootID != rctx.messageID {
+		rctx.referenceIDs[rctx.contextRootID] = true
+	}
+	seen := make(map[string]bool)
+	for index, id := range []string{rctx.contextParentID, rctx.contextRootID} {
+		if !rctx.referenceIDs[id] || (index == 1 && id == rctx.contextParentID) {
+			continue
+		}
+		resp, readErr := p.client.Im.Message.Get(ctx, larkim.NewGetMessageReqBuilder().
+			MessageId(id).WithSenderName(true).CardMsgContentType("user_card_content").Build())
+		if readErr != nil || resp == nil || !resp.Success() || resp.Data == nil {
+			referenceErr = errors.Join(referenceErr, fmt.Errorf("%s: read explicit reference %s failed", p.tag(), id), readErr, ctx.Err())
+			continue
+		}
+		seen[id] = true
+		found := false
+		for _, item := range resp.Data.Items {
+			if item == nil || stringValue(item.MessageId) != id {
+				continue
+			}
+			entry, usable, _ := p.contextMessage(item, rctx, start, cutoff)
+			if !usable {
+				continue
+			}
+			found = true
+			result.Messages = append(result.Messages, entry)
+			forwardIDs[id] = stringValue(item.MsgType) == "merge_forward"
+			break
+		}
+		result.Unreadable = result.Unreadable || !found
+	}
 	if start.After(cutoff) {
 		return result, nil
 	}
@@ -168,7 +213,6 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 	if rctx.threadID != "" {
 		containerType, containerID = "thread", rctx.threadID
 	}
-	seen := make(map[string]bool)
 	seenPageTokens := make(map[string]bool)
 	pageToken := ""
 	for page := 0; page < groupContextMaxPages; page++ {
@@ -236,6 +280,11 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 
 func finishGroupContext(result *core.MessageContext, maxMessages int) {
 	sort.Slice(result.Messages, func(i, j int) bool {
+		// Core selects from the end: explicit references take priority within
+		// the existing message/text budgets, followed by recent background.
+		if result.Messages[i].Referenced != result.Messages[j].Referenced {
+			return !result.Messages[i].Referenced
+		}
 		if result.Messages[i].Time.Equal(result.Messages[j].Time) {
 			return result.Messages[i].ID < result.Messages[j].ID
 		}
@@ -255,6 +304,7 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 		return core.ContextMessage{}, false, false
 	}
 	id := stringValue(item.MessageId)
+	reference := rctx.referenceIDs[id]
 	if id == rctx.messageID {
 		return core.ContextMessage{}, false, false
 	}
@@ -270,14 +320,14 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 	if systemMessage {
 		senderType, senderID, senderName = "system", "system", "System"
 	}
-	if senderType == "app" && (!p.groupContext.includePeerBots || senderID == p.appID || p.peerBots[senderID] == "") {
+	if !reference && senderType == "app" && (!p.groupContext.includePeerBots || senderID == p.appID || p.peerBots[senderID] == "") {
 		return core.ContextMessage{}, false, false
 	}
 	if stringValue(item.ChatId) != rctx.chatID {
 		return core.ContextMessage{}, false, true
 	}
 	threadID := stringValue(item.ThreadId)
-	if (rctx.threadID == "" && threadID != "") || (rctx.threadID != "" && threadID != rctx.threadID && id != rctx.contextRootID) {
+	if (rctx.threadID == "" && threadID != "") || (rctx.threadID != "" && threadID != rctx.threadID && !(id == rctx.contextRootID && threadID == "")) {
 		return core.ContextMessage{}, false, false
 	}
 	ms, err := strconv.ParseInt(stringValue(item.CreateTime), 10, 64)
@@ -286,7 +336,7 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 		return core.ContextMessage{}, false, true
 	}
 	at := time.UnixMilli(ms).UTC()
-	if at.Before(start) || at.After(cutoff) {
+	if (!reference && at.Before(start)) || at.After(cutoff) {
 		return core.ContextMessage{}, false, false
 	}
 	// A queued trigger cannot read the old version of a card edited after it
@@ -307,8 +357,15 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 		return core.ContextMessage{}, false, false
 	}
 	entry := core.ContextMessage{ID: id, SenderID: senderID, SenderName: senderName, SenderType: senderType, Time: at, ReplyTo: stringValue(item.ParentId), Resources: parsed.Resources, Incomplete: parsed.Incomplete, TextTruncated: parsed.TextTruncated}
+	entry.Referenced = reference
 	if senderType == "app" {
-		entry.SenderName = p.peerBots[senderID]
+		if reference {
+			if entry.SenderName == "" {
+				entry.SenderName = p.resolveBotSenderName(senderID)
+			}
+		} else {
+			entry.SenderName = p.peerBots[senderID]
+		}
 	}
 	entry.Text = text
 	boundGroupContextText(&entry, p.groupContext.maxChars)

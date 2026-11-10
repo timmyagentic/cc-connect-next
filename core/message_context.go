@@ -45,8 +45,9 @@ type ContextMessage struct {
 	Resources     []ContextResource `json:"-"`
 	Images        []ImageAttachment `json:"-"`
 	Files         []FileAttachment  `json:"-"`
-	Incomplete    bool              `json:"-"` // selected content or media could not be fully read, including resource limits
-	TextTruncated bool              `json:"-"` // already-read text was shortened to fit the conversation context
+	Incomplete    bool              `json:"-"`                    // selected content or media could not be fully read, including resource limits
+	TextTruncated bool              `json:"-"`                    // already-read text was shortened to fit the conversation context
+	Referenced    bool              `json:"referenced,omitempty"` // current request points here, independently of background progress
 }
 
 type MessageContext struct {
@@ -191,7 +192,7 @@ func (e *Engine) prepareMessageContextFor(mode contextPrepMode, p Platform, repl
 	seen := make(map[string]bool)
 	var unseen []ContextMessage
 	for _, entry := range background.Messages {
-		if entry.ID == "" || entry.ID == messageID || seen[entry.ID] || (!after.IsZero() && !entry.Time.After(after)) {
+		if entry.ID == "" || entry.ID == messageID || seen[entry.ID] || (!entry.Referenced && !after.IsZero() && !entry.Time.After(after)) {
 			continue
 		}
 		seen[entry.ID] = true

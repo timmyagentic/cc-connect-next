@@ -192,6 +192,10 @@ group_context_max_chars = 8000       # 512–32000 个 Unicode 字符，含 JSON
 
 补读遵循三个步骤：首次参与补最近一段背景；之后只补上次交付之后的新消息，文字和附件使用同一时间范围；输入交给 Agent 后推进阅读位置，不等待任务完成。同人、跨人、普通回合和忙时追加使用同一规则。没有新讨论时，直接发送当前请求，不添加背景块。排队请求以自己的触发时间为终点，不混入之后的消息。
 
+显式回复的消息独立于背景窗口和阅读位置；首次参与话题时也补读根帖，包括机器人发出的原帖。最多额外读取当前 parent/root 两条，按消息 ID 与背景去重，在原有条数、文字和附件预算内优先保留引用。消息的真实时间、同群/话题、撤回及触发时刻检查不变；之后没有显式引用的输入不会重复补根帖。
+
+Explicit replies are read independently of the background window and delivered position. First participation also reads the topic root, including bot-authored sources. At most two parent/root sources are merged by message ID and prioritized within the existing message, text and media budgets; ordinary follow-ups do not replay the root. Original timestamps, conversation boundaries, recall and trigger-time checks still apply.
+
 每次最多读取 4 页、每页 50 条候选记录，并受 4 秒超时及上述条数/总长度限制。先排除已读位置及之前的记录，再优先保留最新消息；超过预算时保留最近内容，后续回合不会自动重放被截断的旧讨论。保留发送者名称/ID、时间、回复关系，略过自身及未开启共享的机器人输出、其他话题与撤回消息。支持文本、富文本、可读卡片及合并转发记录：转发内容展开为带发送者和时间的引用文字，图片（包括富文本和转发内图片）通过 Agent 图片输入传递，文件及音视频通过已有附件路径传递。会议通知保留已有的主题和开始、结束时间。仅为文字预算内选中的新增背景下载附件，每轮最多 12 个资源、累计 100 MiB。全部附件的下载、分片请求和重试共享 45 秒，且继续遵守已有的单资源大小限制。贴纸及平台专属消息保留明确的类型/可读元数据或不可用标记；传入音视频文件不代表所有 Agent 都能直接转写或播放。启用后使用这条有界读取路径代替该群消息原有的引用链/话题根消息自动下载路径。
 
 只使用应用已经拥有的消息历史读取权限，不申请新权限、不修改权限清单、不轮询。只有上下文截断不单独提醒，例如有 35 条群聊历史而只保留最近 20 条，或为适应上下文长度而截短文字。历史查询失败、超时，或已选中的消息、附件未能完整读取时，群里都会收到提醒。这包括附件因大小、数量或下载时间限制而被跳过。同时发生上下文截断和读取问题时，一条提醒只报告读取问题。Agent 仍能使用已读内容作答，并在需要时说明回答所覆盖的范围。
