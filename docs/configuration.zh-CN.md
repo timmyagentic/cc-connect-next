@@ -894,6 +894,21 @@ projects.agent.options.codex_home 未设置时选择 Codex Home。
 - 生效方式：`restart`
 - 示例: `endpoint = "value"`
 
+### `history.enabled`
+
+显式开启 Cron/Timer 执行历史，保存到 data_dir/history.sqlite。默认关闭，不打开、恢复或写入历史库，已有历史保留；调度仍使用 jobs.json。修改后需重启。
+
+- 来源：`toml`
+- 配置位置：`[history]`
+- 作用域：`global`
+- 类型：`boolean`
+- 要求：`可选`
+- 默认值：`false`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 示例: `[history]
+enabled = true`
+
 ### `hooks.async`
 
 异步运行 Hook，避免阻塞消息处理。

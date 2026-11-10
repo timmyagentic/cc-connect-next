@@ -1989,6 +1989,7 @@ func (e *Engine) reconstructReplyContext(platform Platform, sessionKey string) (
 }
 
 type scheduledJobSpec struct {
+	historyRun      *scheduledRun
 	kind            string
 	hookEvent       HookEventType
 	id              string
@@ -2034,6 +2035,10 @@ func (r *scheduledTurnResult) result() error {
 // lifecycle while preserving cron-specific shell, notification, and response
 // requirements.
 func (e *Engine) ExecuteCronJob(job *CronJob) error {
+	return e.executeCronJob(job, nil)
+}
+
+func (e *Engine) executeCronJob(job *CronJob, run *scheduledRun) error {
 	silent := false
 	newSession := job.UsesNewSessionPerRun()
 	if e.cronScheduler != nil {
@@ -2041,6 +2046,7 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 		newSession = e.cronScheduler.UsesNewSession(job)
 	}
 	return e.executeScheduledJob(scheduledJobSpec{
+		historyRun:      run,
 		kind:            "cron",
 		hookEvent:       HookEventCronTriggered,
 		id:              job.ID,
@@ -2057,6 +2063,7 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 		requireResponse: true,
 		runTitle:        cronRunTitle(job),
 		shell: scheduledShellSpec{
+			historyRun:   run,
 			command:      job.Exec,
 			workDir:      job.WorkDir,
 			timeout:      job.ExecutionTimeout(),
@@ -2070,6 +2077,10 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 // ExecuteTimerJob runs a one-shot job through the same scheduled-message
 // lifecycle, with timer-specific shell defaults and no cron response contract.
 func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
+	return e.executeTimerJob(job, nil)
+}
+
+func (e *Engine) executeTimerJob(job *TimerJob, run *scheduledRun) error {
 	silent := false
 	newSession := job.UsesNewSessionPerRun()
 	if e.timerScheduler != nil {
@@ -2077,6 +2088,7 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 		newSession = e.timerScheduler.UsesNewSession(job)
 	}
 	return e.executeScheduledJob(scheduledJobSpec{
+		historyRun:  run,
 		kind:        "timer",
 		hookEvent:   HookEventTimerTriggered,
 		id:          job.ID,
@@ -2090,11 +2102,12 @@ func (e *Engine) ExecuteTimerJob(job *TimerJob) error {
 		newSession:  newSession,
 		runTitle:    timerRunTitle(job),
 		shell: scheduledShellSpec{
-			command:   job.Exec,
-			workDir:   job.WorkDir,
-			timeout:   job.ExecutionTimeout(),
-			shell:     defaultShell(),
-			shellFlag: defaultShellFlag(),
+			historyRun: run,
+			command:    job.Exec,
+			workDir:    job.WorkDir,
+			timeout:    job.ExecutionTimeout(),
+			shell:      defaultShell(),
+			shellFlag:  defaultShellFlag(),
 		},
 	})
 }
@@ -2238,9 +2251,11 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 	} else {
 		session = sessions.GetOrCreateActive(sessionKey)
 	}
+	spec.historyRun.linkSession(session)
 	if !session.TryLock() {
 		return fmt.Errorf("session %q is busy", lockKey)
 	}
+	defer spec.historyRun.linkSession(session)
 	if workspaceDir != "" {
 		interactiveKey = workspaceDir + ":" + interactiveKey
 	}
@@ -2275,6 +2290,7 @@ func timerRunTitle(job *TimerJob) string {
 }
 
 type scheduledShellSpec struct {
+	historyRun   *scheduledRun
 	command      string
 	workDir      string
 	timeout      time.Duration
@@ -2323,6 +2339,9 @@ func (e *Engine) executeScheduledShell(p Platform, replyCtx any, spec scheduledS
 
 	shellCmd := shellExecCommand(ctx, spec.shell, spec.shellFlag, spec.shellProfile, spec.command)
 	shellCmd.Dir = workDir
+	if spec.historyRun != nil {
+		shellCmd.Env = append(shellCmd.Environ(), "CC_SCHEDULED_RUN_ID="+spec.historyRun.runID())
+	}
 
 	stdout, err := shellCmd.StdoutPipe()
 	if err != nil {

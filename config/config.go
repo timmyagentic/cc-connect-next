@@ -112,6 +112,7 @@ type Config struct {
 	OutgoingRateLimit  OutgoingRateLimitConfig `toml:"outgoing_rate_limit"` // outgoing message throttling
 	Relay              RelayConfig             `toml:"relay"`               // bot-to-bot relay behavior
 	Cron               CronConfig              `toml:"cron"`
+	History            HistoryConfig           `toml:"history"`
 	Queue              QueueConfig             `toml:"queue"`
 	// UpdateNotice controls the daemon-side update reminder: when a newer
 	// stable release is published, each pass privately notifies every explicit
@@ -212,6 +213,11 @@ func validateFeedbackEndpoint(raw string) error {
 		}
 	}
 	return fmt.Errorf("config: feedback.endpoint must use HTTPS (HTTP is allowed only for loopback development)")
+}
+
+// HistoryConfig controls optional persistent Cron/Timer execution history.
+type HistoryConfig struct {
+	Enabled bool `toml:"enabled"` // opt-in; false does not open or modify history.sqlite
 }
 
 // CronConfig controls cron job behavior.

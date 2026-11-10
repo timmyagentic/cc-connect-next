@@ -894,6 +894,21 @@ Override the author-operated anonymous Feedback v1 relay; requires exact /v1/fee
 - Takes effect: `restart`
 - Example: `endpoint = "value"`
 
+### `history.enabled`
+
+Opt in to persistent Cron/Timer execution history in data_dir/history.sqlite. Disabled by default: no database is opened, recovered, or written; existing history is retained. Scheduling still uses jobs.json. Restart required.
+
+- Source: `toml`
+- Placement: `[history]`
+- Scope: `global`
+- Type: `boolean`
+- Requirement: `optional`
+- Default: `false`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Example: `[history]
+enabled = true`
+
 ### `hooks.async`
 
 Run the hook asynchronously instead of blocking message handling.
