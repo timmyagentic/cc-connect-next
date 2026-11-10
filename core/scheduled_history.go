@@ -165,6 +165,15 @@ func (h *ScheduledHistory) Observe(kind string, job any) {
 	historyWarning("observe job definition", err)
 }
 
+func (h *ScheduledHistory) archive(kind, jobID string) {
+	if h == nil {
+		return
+	}
+	_, err := h.db.Exec(`UPDATE job_versions SET archived_at=COALESCE(archived_at,?),
+ archive_reason=COALESCE(archive_reason,'removed_from_scheduler') WHERE kind=? AND job_id=?`, historyTime(), kind, jobID)
+	historyWarning("archive removed job definition", err)
+}
+
 // scheduledRun is unique even when the same manual worker runs concurrently.
 type scheduledRun struct {
 	history   *ScheduledHistory

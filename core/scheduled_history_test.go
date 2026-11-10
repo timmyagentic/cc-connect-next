@@ -60,6 +60,12 @@ func TestScheduledHistory_VersionsChangeOnlyWithDefinitions(t *testing.T) {
 	if strings.Contains(snapshot, "last_run") || strings.Contains(snapshot, "last_error") {
 		t.Fatalf("runtime state in definition: %s", snapshot)
 	}
+	if !store.Remove(job.ID) {
+		t.Fatal("remove failed")
+	}
+	if got := historyCount(t, h, "SELECT count(*) FROM job_versions WHERE archived_at IS NOT NULL"); got != 2 {
+		t.Fatalf("removed definition versions were not retained and archived: %d", got)
+	}
 }
 
 func TestScheduledHistory_ConcurrentManualWorkersHaveSeparateRuns(t *testing.T) {

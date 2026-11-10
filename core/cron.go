@@ -206,6 +206,8 @@ func (s *CronStore) Remove(id string) bool {
 			s.jobs = append(s.jobs[:i], s.jobs[i+1:]...)
 			if err := s.save(); err != nil {
 				slog.Warn("cron: failed to save after remove", "error", err)
+			} else {
+				s.history.archive("cron", id)
 			}
 			return true
 		}

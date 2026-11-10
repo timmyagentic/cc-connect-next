@@ -158,6 +158,8 @@ func (s *TimerStore) Remove(id string) bool {
 			s.jobs = append(s.jobs[:i], s.jobs[i+1:]...)
 			if err := s.save(); err != nil {
 				slog.Warn("timer: failed to save after remove", "error", err)
+			} else {
+				s.history.archive("timer", id)
 			}
 			return true
 		}
