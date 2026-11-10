@@ -137,9 +137,10 @@ func validateCronReasoningEffort(j *CronJob) error {
 
 // CronStore persists cron jobs to a JSON file.
 type CronStore struct {
-	path string
-	mu   sync.Mutex
-	jobs []*CronJob
+	history *ScheduledHistory
+	path    string
+	mu      sync.Mutex
+	jobs    []*CronJob
 }
 
 func NewCronStore(dataDir string) (*CronStore, error) {
@@ -163,7 +164,26 @@ func (s *CronStore) load() {
 	}
 }
 
+func (s *CronStore) SetHistory(history *ScheduledHistory) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.history = history
+	for _, job := range s.jobs {
+		history.Observe("cron", job)
+	}
+}
+
 func (s *CronStore) save() error {
+	if err := s.saveRuntime(); err != nil {
+		return err
+	}
+	for _, job := range s.jobs {
+		s.history.Observe("cron", job)
+	}
+	return nil
+}
+
+func (s *CronStore) saveRuntime() error {
 	data, err := json.MarshalIndent(s.jobs, "", "  ")
 	if err != nil {
 		return err
@@ -249,7 +269,7 @@ func (s *CronStore) MarkRun(id string, err error) {
 			} else {
 				j.LastError = ""
 			}
-			if saveErr := s.save(); saveErr != nil {
+			if saveErr := s.saveRuntime(); saveErr != nil {
 				slog.Warn("cron: failed to save after mark run", "error", saveErr)
 			}
 			return
@@ -785,33 +805,44 @@ func (cs *CronScheduler) runJob(job *CronJob, manual bool) {
 		return
 	}
 
+	run := cs.store.history.begin("cron", job, job.SessionKey, manual)
+	status := "failed"
+	var result error
+	defer func() { run.finish(status, result) }()
+
 	cs.mu.RLock()
 	engine, ok := cs.engines[job.Project]
 	cs.mu.RUnlock()
 
 	if !ok {
 		slog.Error("cron: project not found", "job", job.ID, "project", job.Project, "manual", manual)
-		cs.store.MarkRun(job.ID, fmt.Errorf("project %q not found", job.Project))
+		result = fmt.Errorf("project %q not found", job.Project)
+		cs.store.MarkRun(job.ID, result)
 		return
 	}
 	if err := cs.validateOverrides(job); err != nil {
+		result = err
 		cs.store.MarkRun(job.ID, err)
-		slog.Error("cron: invalid prompt overrides", "id", job.ID, "manual", manual, "error", err)
+		slog.Error("cron: invalid prompt overrides", "id", job.ID, "manual", manual, "run_id", run.runID(), "error", err)
 		return
 	}
 	job = cloneCronJob(job)
 	job.ReasoningEffort = strings.ToLower(strings.TrimSpace(job.ReasoningEffort))
 	if err := engine.ValidatePersistentProactiveTarget(job.SessionKey); err != nil {
+		result = err
 		cs.store.MarkRun(job.ID, err)
 		slog.Error("cron: unsupported persistent target", "id", job.ID, "manual", manual, "error", err)
 		return
 	}
 
-	slog.Info("cron: executing job", "id", job.ID, "project", job.Project, "manual", manual, "prompt", truncateStr(job.Prompt, 60))
+	slog.Info("cron: executing job", "id", job.ID, "project", job.Project, "manual", manual, "run_id", run.runID(), "prompt", truncateStr(job.Prompt, 60))
 
 	done := make(chan error, 1)
+	run.executionStarted()
 	go func() {
-		done <- engine.ExecuteCronJob(job)
+		err := engine.executeCronJob(job, run)
+		run.executionFinished(err)
+		done <- err
 	}()
 
 	var err error
@@ -820,18 +851,23 @@ func (cs *CronScheduler) runJob(job *CronJob, manual bool) {
 		select {
 		case err = <-done:
 		case <-time.After(timeout):
+			status = "timed_out"
 			err = fmt.Errorf("job timed out after %v", timeout)
 		}
 	} else {
 		err = <-done
 	}
 
+	result = err
+	if err == nil {
+		status = "succeeded"
+	}
 	cs.store.MarkRun(job.ID, err)
 
 	if err != nil {
-		slog.Error("cron: job failed", "id", job.ID, "manual", manual, "error", err)
+		slog.Error("cron: job failed", "id", job.ID, "manual", manual, "run_id", run.runID(), "error", err)
 	} else {
-		slog.Info("cron: job completed", "id", job.ID, "manual", manual)
+		slog.Info("cron: job completed", "id", job.ID, "manual", manual, "run_id", run.runID())
 	}
 }
 

@@ -1108,6 +1108,15 @@ func main() {
 		effectiveWorkDirs = append(effectiveWorkDirs, effectiveWorkDir)
 	}
 
+	// History is observational; a storage failure must not stop existing jobs.
+	scheduledHistory, historyErr := core.NewScheduledHistory(cfg.DataDir)
+	if historyErr != nil {
+		slog.Warn("scheduled history unavailable", "error", historyErr)
+	} else {
+		scheduledHistory.RecoverInterrupted()
+		defer scheduledHistory.Close()
+	}
+
 	// Start cron scheduler
 	cronStore, err := core.NewCronStore(cfg.DataDir)
 	if err != nil {
@@ -1115,6 +1124,7 @@ func main() {
 	}
 	var cronSched *core.CronScheduler
 	if cronStore != nil {
+		cronStore.SetHistory(scheduledHistory)
 		cronSched = core.NewCronScheduler(cronStore)
 		if cfg.Cron.Silent != nil && *cfg.Cron.Silent {
 			cronSched.SetDefaultSilent(true)
@@ -1135,6 +1145,7 @@ func main() {
 	}
 	var timerSched *core.TimerScheduler
 	if timerStore != nil {
+		timerStore.SetHistory(scheduledHistory)
 		timerSched = core.NewTimerScheduler(timerStore)
 		if cfg.Cron.Silent != nil && *cfg.Cron.Silent {
 			timerSched.SetDefaultSilent(true)

@@ -89,9 +89,10 @@ func validateTimerJob(j *TimerJob) error {
 
 // TimerStore persists timer jobs to a JSON file.
 type TimerStore struct {
-	path string
-	mu   sync.Mutex
-	jobs []*TimerJob
+	history *ScheduledHistory
+	path    string
+	mu      sync.Mutex
+	jobs    []*TimerJob
 }
 
 func NewTimerStore(dataDir string) (*TimerStore, error) {
@@ -115,7 +116,26 @@ func (s *TimerStore) load() {
 	}
 }
 
+func (s *TimerStore) SetHistory(history *ScheduledHistory) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.history = history
+	for _, job := range s.jobs {
+		history.Observe("timer", job)
+	}
+}
+
 func (s *TimerStore) save() error {
+	if err := s.saveRuntime(); err != nil {
+		return err
+	}
+	for _, job := range s.jobs {
+		s.history.Observe("timer", job)
+	}
+	return nil
+}
+
+func (s *TimerStore) saveRuntime() error {
 	data, err := json.MarshalIndent(s.jobs, "", "  ")
 	if err != nil {
 		return err
@@ -172,7 +192,7 @@ func (s *TimerStore) MarkFired(id string, err error) {
 			} else {
 				j.LastError = ""
 			}
-			if saveErr := s.save(); saveErr != nil {
+			if saveErr := s.saveRuntime(); saveErr != nil {
 				slog.Warn("timer: failed to save after mark fired", "error", saveErr)
 			}
 			return
@@ -399,26 +419,36 @@ func (ts *TimerScheduler) executeJob(jobID string) {
 		return
 	}
 
+	run := ts.store.history.begin("timer", job, job.SessionKey, false)
+	status := "failed"
+	var result error
+	defer func() { run.finish(status, result) }()
+
 	ts.mu.RLock()
 	engine, ok := ts.engines[job.Project]
 	ts.mu.RUnlock()
 
 	if !ok {
 		slog.Error("timer: project not found", "job", jobID, "project", job.Project)
-		ts.store.MarkFired(jobID, fmt.Errorf("project %q not found", job.Project))
+		result = fmt.Errorf("project %q not found", job.Project)
+		ts.store.MarkFired(jobID, result)
 		return
 	}
 	if err := engine.ValidatePersistentProactiveTarget(job.SessionKey); err != nil {
+		result = err
 		ts.store.MarkFired(jobID, err)
-		slog.Error("timer: unsupported persistent target", "id", jobID, "error", err)
+		slog.Error("timer: unsupported persistent target", "id", jobID, "run_id", run.runID(), "error", err)
 		return
 	}
 
-	slog.Info("timer: executing job", "id", jobID, "project", job.Project, "prompt", truncateStr(job.Prompt, 60))
+	slog.Info("timer: executing job", "id", jobID, "project", job.Project, "run_id", run.runID(), "prompt", truncateStr(job.Prompt, 60))
 
 	done := make(chan error, 1)
+	run.executionStarted()
 	go func() {
-		done <- engine.ExecuteTimerJob(job)
+		err := engine.executeTimerJob(job, run)
+		run.executionFinished(err)
+		done <- err
 	}()
 
 	var err error
@@ -427,18 +457,23 @@ func (ts *TimerScheduler) executeJob(jobID string) {
 		select {
 		case err = <-done:
 		case <-time.After(timeout):
+			status = "timed_out"
 			err = fmt.Errorf("job timed out after %v", timeout)
 		}
 	} else {
 		err = <-done
 	}
 
+	result = err
+	if err == nil {
+		status = "succeeded"
+	}
 	ts.store.MarkFired(jobID, err)
 
 	if err != nil {
-		slog.Error("timer: job failed", "id", jobID, "error", err)
+		slog.Error("timer: job failed", "id", jobID, "run_id", run.runID(), "error", err)
 	} else {
-		slog.Info("timer: job completed", "id", jobID)
+		slog.Info("timer: job completed", "id", jobID, "run_id", run.runID())
 	}
 }
 
