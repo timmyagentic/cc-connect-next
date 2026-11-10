@@ -3592,3 +3592,78 @@ func TestCUJ_I5_ImageGallerySendBackKeepsTopicAndBatching(t *testing.T) {
 		}
 	}
 }
+
+// CUJ-H11: after ordinary answers, only the blocked request mentions the owner
+// in its original topic. Clarification, resolution and the owner's own request
+// remain ordinary replies, and later judgments can see the previous handoff.
+func TestCUJ_H11_OwnerEscalationMentionsOriginalTopic(t *testing.T) {
+	p := newOwnerEscalationPlatform()
+	as := newCUJAgentSession()
+	e := NewEngine("project", &controllableAgent{nextSession: as}, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
+	defer func() { _ = e.Stop() }()
+	if err := e.SetOwnerEscalation(ownerEscalationTestConfig()); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	judgeCalls := 0
+	sawPreviousMention := false
+	e.ownerEscalation.judge = func(_ context.Context, in escalationInput) (escalationDecision, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		judgeCalls++
+		last := in.History[len(in.History)-1].Content
+		switch last {
+		case "Please provide reproduction details.":
+			return escalationDecision{Status: "waiting", Reason: "Normal clarification."}, nil
+		case "The verification passed.":
+			return escalationDecision{Status: "resolved", Reason: "Execution succeeded."}, nil
+		case "The release needs an owner decision.":
+			return needsOwnerTestDecision(), nil
+		case "The same decision remains pending.":
+			for _, h := range in.History {
+				if strings.Contains(h.Content, "@Tingjun") && strings.Contains(h.Content, "release policy") {
+					sawPreviousMention = true
+				}
+			}
+			return escalationDecision{Status: "waiting", Reason: "Owner was already mentioned for this issue."}, nil
+		default:
+			return escalationDecision{}, errors.New("unexpected judgment")
+		}
+	}
+	env := &cujEnv{t: t, engine: e, plat: p.stubPlatformEngine}
+	const key = "test:shared-topic"
+	send := func(user, id, question, answer string) {
+		t.Helper()
+		as.mu.Lock()
+		as.reply = answer
+		as.mu.Unlock()
+		e.ReceiveMessage(p, &Message{Platform: "test", SessionKey: key, UserID: user, UserName: user, MessageID: id, Content: question, ReplyCtx: "topic-" + id})
+		session := e.sessions.GetOrCreateActive(key)
+		env.waitFor("completed answer "+id, 2*time.Second, func() bool { return env.sentContains(answer) && !session.Busy() })
+	}
+	send("requester", "clarify", "Help investigate.", "Please provide reproduction details.")
+	send("requester", "resolved", "Here are the details.", "The verification passed.")
+	send("requester", "blocked", "Should the release proceed?", "The release needs an owner decision.")
+	send("requester", "followup", "Any update on the same release?", "The same decision remains pending.")
+	send("owner", "owner", "I will decide.", "Awaiting your decision.")
+	mentions := p.snapshot()
+	if len(mentions) != 1 || mentions[0].TriggerMessageID != "blocked" || mentions[0].SessionKey != key || mentions[0].OwnerID != "owner" {
+		t.Fatalf("expected one owner mention for the blocked request: %+v", mentions)
+	}
+	p.mu.Lock()
+	context := p.contexts[0]
+	before := strings.Join(p.before[0], "\n")
+	p.mu.Unlock()
+	if context != "topic-blocked" || !strings.Contains(before, "The release needs an owner decision.") {
+		t.Fatalf("mention lost original topic or answer ordering: context=%v, preceding=%s", context, before)
+	}
+	visible := strings.Join(p.getSent(), "\n")
+	if strings.Count(visible, "@Tingjun") != 1 || strings.Contains(visible, "privately notified") {
+		t.Fatalf("unexpected extra or private receipt: %s", visible)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if judgeCalls != 4 || !sawPreviousMention {
+		t.Fatalf("judgments=%d, previous handoff visible=%v; owner request must skip", judgeCalls, sawPreviousMention)
+	}
+}

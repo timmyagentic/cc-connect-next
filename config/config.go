@@ -612,12 +612,13 @@ type ProjectConfig struct {
 	// project: "queue" or "steer". Empty inherits the global setting. Useful
 	// because one process can host projects with different agent backends,
 	// and only some backends support native steering.
-	BusyMessageMode string             `toml:"busy_message_mode,omitempty"`
-	Agent           AgentConfig        `toml:"agent"`
-	Platforms       []PlatformConfig   `toml:"platforms"`
-	ChatModels      []ChatModelConfig  `toml:"chat_models,omitempty"`
-	Heartbeat       HeartbeatConfig    `toml:"heartbeat"`
-	AutoCompress    AutoCompressConfig `toml:"auto_compress"`
+	BusyMessageMode string                `toml:"busy_message_mode,omitempty"`
+	Agent           AgentConfig           `toml:"agent"`
+	Platforms       []PlatformConfig      `toml:"platforms"`
+	ChatModels      []ChatModelConfig     `toml:"chat_models,omitempty"`
+	Heartbeat       HeartbeatConfig       `toml:"heartbeat"`
+	AutoCompress    AutoCompressConfig    `toml:"auto_compress"`
+	OwnerEscalation OwnerEscalationConfig `toml:"owner_escalation,omitempty"`
 	// ResetOnIdleMins automatically rotates to a new cc-connect-next session after
 	// the current session has been inactive for the specified number of minutes.
 	// 0 or nil disables the behavior.
@@ -1384,6 +1385,9 @@ func (c *Config) validateInternal(permissive bool) error {
 		}
 		if proj.Heartbeat.TimeoutMins != nil && *proj.Heartbeat.TimeoutMins <= 0 {
 			return fmt.Errorf("config: %s.heartbeat.timeout_mins must be > 0", prefix)
+		}
+		if err := validateOwnerEscalation(prefix, proj.OwnerEscalation); err != nil {
+			return err
 		}
 		if err := validateAnswerProfiles(prefix+".agent.answer_profiles", proj.Agent.AnswerProfiles); err != nil {
 			return err

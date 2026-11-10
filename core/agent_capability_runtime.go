@@ -530,6 +530,21 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	notification.SideEffects = expandSideEffects([]string{"persistent_state", "network", "external_message"})
 	result.Capabilities = append(result.Capabilities, notification)
 
+	_, canEscalate := platform.(OwnerEscalationSender)
+	escalationAvailability := platformAvailability(canEscalate)
+	if canEscalate && state == CapabilityAvailable {
+		if e.ownerEscalation == nil {
+			escalationAvailability = unavailable("Owner escalation is disabled for this project.", "此项目未启用负责人转交。")
+		} else {
+			escalationAvailability = conditional("A post-answer model judges whether an explicit owner mention is needed; the owner must be reachable in the original conversation.", "回复后由独立模型判断是否需要 @ 固定负责人；负责人必须在原对话中可联系。")
+		}
+	}
+	escalation := feature("owner_escalation", "After a visible answer, independently judge whether to mention the configured owner in the original conversation. Never sends a private message.", "可见答复后独立判断是否需要在原对话 @ 配置的负责人，不发送私聊。", escalationAvailability, CapabilityFallback{Mode: "skip", Description: "Keep the answer, record judge failures, and report failed mentions without claiming delivery or switching to private messages.", DescriptionZH: "保留回答，记录判断失败；@ 失败时如实说明，不宣称成功或改发私聊。"})
+	escalation.Permission = CapabilityPermissionConditional
+	escalation.ReadOnly = &readOnly
+	escalation.SideEffects = expandSideEffects([]string{"persistent_state", "network", "external_message"})
+	result.Capabilities = append(result.Capabilities, escalation)
+
 	proactiveAvailability := platformAvailability(reconstruct)
 	_, hasValidator := platform.(PersistentProactiveTargetValidator)
 	_, requiresSnapshot := platform.(PersistentReplyTargetRequirer)

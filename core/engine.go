@@ -436,6 +436,7 @@ type RateLimitCfg struct {
 
 // Engine routes messages between platforms and the agent for a single project.
 type Engine struct {
+	ownerEscalation       *ownerEscalation
 	name                  string
 	agent                 Agent
 	platforms             []Platform
@@ -5702,6 +5703,7 @@ func upstreamFailureBody(copy RichCardCopy, err error, partial string) string {
 }
 
 type turnProcessor struct {
+	escalationTools []escalationToolResult
 	engine          *Engine
 	state           *interactiveState
 	session         *Session
@@ -5880,6 +5882,7 @@ func formatToolInput(toolName, input string) string {
 }
 
 func (t *turnProcessor) handleToolResult(event Event, p Platform, hasRichCard bool, display DisplayCfg, progress *compactProgressWriter) {
+	t.captureEscalationTool(event)
 	if hasRichCard || !display.ToolMessages {
 		return
 	}
@@ -7172,6 +7175,11 @@ func (completion *turnCompletion) handle() bool {
 	}
 	completion.commit(response, triggerAutoCompress, tokenEstimate)
 	t.scheduledResult.complete(completion.event.Error)
+	if t.scheduledResult == nil {
+		completion.escalateOwner(response)
+	} else {
+		t.escalationTools = nil
+	}
 	// A reused session can immediately drain ordinary queued messages. Their
 	// outcome must never replace the scheduled turn's receipt.
 	t.scheduledResult = nil

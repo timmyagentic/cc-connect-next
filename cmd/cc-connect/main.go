@@ -681,6 +681,11 @@ func main() {
 		// Wire admin allowlist for privileged commands
 		engine.SetAdminFrom(proj.AdminFrom)
 
+		if err := engine.SetOwnerEscalation(proj.OwnerEscalation); err != nil {
+			slog.Error("owner escalation configuration failed", "project", proj.Name, "error", err)
+			os.Exit(1)
+		}
+
 		// Wire per-user role-based policies
 		if proj.Users != nil {
 			engine.SetUserRoles(buildUserRoleManager(proj.Users))

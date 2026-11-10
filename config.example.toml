@@ -373,6 +373,24 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 # visibility = "full"       # "full" (default), "summary", or "none" / 群内可见消息：完整、摘要或不显示
 
 # =============================================================================
+# Owner Escalation / 转交负责人
+# =============================================================================
+# Optional post-answer handoff to one owner / 可选：回复后自动转交负责人
+# A separate Luna call receives recent conversation and execution evidence.
+# 独立 Luna 调用会读取近期对话与执行结果，判断是否需要负责人介入。
+# Mention the configured owner in the ORIGINAL conversation/topic when needed.
+# The owner's own requests are excluded. No private notification is sent.
+# 需要时在原会话/话题中真实 @ 配置的负责人；负责人自己发起的请求不触发转交。
+# [projects.owner_escalation]
+# enabled = false
+# owner_id = "ou_owner"                 # explicit platform user ID / 明确的平台用户 ID
+# owner_name = "廷君"
+# base_url = "https://api.openai.com/v1" # compatible Responses endpoint base
+# api_key = "${OWNER_ESCALATION_API_KEY}"
+# model = "gpt-6-luna"
+# timeout_seconds = 20
+
+# =============================================================================
 # Auto-Compress / 自动压缩
 # =============================================================================
 # Automatically trigger /compress when estimated token usage exceeds threshold.

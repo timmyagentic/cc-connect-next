@@ -90,6 +90,12 @@ Run multiple named projects, dynamically bind workspaces, isolate OS users, and 
 
 Related configuration: `projects.name`, `projects.mode`, `projects.base_dir`, `projects.workspace_init_allow_local_paths`, `projects.run_as_user`, `workspace_idle_timeout_mins`
 
+### Escalate unresolved requests to an owner (`owner-escalation`)
+
+Use an independent decision model after answers and mention one configured owner in the original conversation or topic when intervention is needed.
+
+Related configuration: `projects.owner_escalation.enabled`, `projects.owner_escalation.owner_id`, `projects.owner_escalation.owner_name`, `projects.owner_escalation.base_url`, `projects.owner_escalation.api_key`, `projects.owner_escalation.model`, `projects.owner_escalation.timeout_seconds`
+
 ### Continue a peer bot conversation (`peer-bot-conversation-context`)
 
 Opt in to bounded public peer-bot snapshots in the same group/topic; native Agent sessions remain independent.
@@ -3033,6 +3039,119 @@ Enable or disable projects observe.
 - Default source: `runtime`
 - Takes effect: `restart`
 - Example: `enabled = true`
+
+### `projects.owner_escalation.api_key`
+
+Authenticate the decision model; supports environment-variable substitution and is never exposed by the configuration catalog.
+
+- Source: `toml`
+- Placement: `[[projects]]`
+- Scope: `project`
+- Type: `string`
+- Requirement: `conditional`
+- Default: `unset`
+- Default source: `unset`
+- Takes effect: `restart`
+- Required when: `projects.owner_escalation.enabled = true`
+- Requires: `projects.owner_escalation.enabled`
+- Sensitive: yes; prefer an environment-variable placeholder.
+- Example: `[projects.owner_escalation]
+api_key = "${OWNER_ESCALATION_API_KEY}"`
+
+### `projects.owner_escalation.base_url`
+
+Choose the OpenAI-compatible Responses API base URL. Use HTTPS, or HTTP on loopback only; omit credentials, query and fragment from the URL.
+
+- Source: `toml`
+- Placement: `[[projects]]`
+- Scope: `project`
+- Type: `string`
+- Requirement: `optional`
+- Default: `https://api.openai.com/v1`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Example: `[projects.owner_escalation]
+base_url = "https://api.openai.com/v1"`
+
+### `projects.owner_escalation.enabled`
+
+After a visible answer, ask a separate model whether the configured owner must intervene; mention that owner in the original conversation or topic when intervention is needed.
+
+- Source: `toml`
+- Placement: `[[projects]]`
+- Scope: `project`
+- Type: `boolean`
+- Requirement: `optional`
+- Default: `false`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Example: `[projects.owner_escalation]
+enabled = false`
+
+### `projects.owner_escalation.model`
+
+Choose the independent post-answer decision model.
+
+- Source: `toml`
+- Placement: `[[projects]]`
+- Scope: `project`
+- Type: `string`
+- Requirement: `optional`
+- Default: `gpt-6-luna`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Example: `[projects.owner_escalation]
+model = "gpt-6-luna"`
+
+### `projects.owner_escalation.owner_id`
+
+Choose one explicit platform-scoped user to mention in the original conversation; wildcards, lists and recent-chat fallback are prohibited. Requests from this user are excluded.
+
+- Source: `toml`
+- Placement: `[[projects]]`
+- Scope: `project`
+- Type: `string`
+- Requirement: `conditional`
+- Default: `unset`
+- Default source: `unset`
+- Takes effect: `restart`
+- Required when: `projects.owner_escalation.enabled = true`
+- Requires: `projects.owner_escalation.enabled`
+- Example: `[projects.owner_escalation]
+owner_id = "ou_owner"`
+
+### `projects.owner_escalation.owner_name`
+
+Set the owner's display name used in the fixed handoff message.
+
+- Source: `toml`
+- Placement: `[[projects]]`
+- Scope: `project`
+- Type: `string`
+- Requirement: `conditional`
+- Default: `unset`
+- Default source: `unset`
+- Takes effect: `restart`
+- Required when: `projects.owner_escalation.enabled = true`
+- Requires: `projects.owner_escalation.enabled`
+- Example: `[projects.owner_escalation]
+owner_name = "Owner"`
+
+### `projects.owner_escalation.timeout_seconds`
+
+Bound the decision request in seconds; zero uses the built-in 20-second default. Failure is recorded as a failed judgment, not a no-handoff decision.
+
+- Source: `toml`
+- Placement: `[[projects]]`
+- Scope: `project`
+- Type: `integer`
+- Requirement: `optional`
+- Default: `20`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Range: `0` to `120` `seconds`
+- Example: `[projects.owner_escalation]
+timeout_seconds = 20`
 
 ### `projects.platforms.options.access_token` — `matrix`
 

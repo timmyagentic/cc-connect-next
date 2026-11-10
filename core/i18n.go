@@ -652,6 +652,8 @@ const (
 	MsgSteerMergedCompleted    MsgKey = "steer_merged_completed"
 
 	MsgCompletionNotification     MsgKey = "completion_notification"
+	MsgOwnerEscalationRequest     MsgKey = "owner_escalation_request"
+	MsgOwnerEscalationFailed      MsgKey = "owner_escalation_failed"
 	MsgCompletionOpenConversation MsgKey = "completion_open_conversation"
 
 	// Proactive update notice (daemon-side)
@@ -4541,6 +4543,20 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 已完成：%s",
 		LangJapanese:           "✅ 完了しました：%s",
 		LangSpanish:            "✅ Completado: %s",
+	},
+	MsgOwnerEscalationRequest: {
+		LangEnglish:            "This needs your help.\nIssue: %s\nPlease help with: %s",
+		LangChinese:            "这个问题需要你协助处理。\n问题：%s\n需要你：%s",
+		LangTraditionalChinese: "這個問題需要你協助處理。\n問題：%s\n需要你：%s",
+		LangJapanese:           "この件についてご協力が必要です。\n問題：%s\nお願いしたいこと：%s",
+		LangSpanish:            "Se necesita tu ayuda.\nProblema: %s\nAyuda necesaria: %s",
+	},
+	MsgOwnerEscalationFailed: {
+		LangEnglish:            "This needs %s's help, but I could not confirm an @mention in this conversation. Please contact them here.",
+		LangChinese:            "这个问题需要%s协助，但我未能确认在当前对话中 @ 成功，请在这里联系他。",
+		LangTraditionalChinese: "這個問題需要%s協助，但我未能確認在目前對話中 @ 成功，請在這裡聯絡他。",
+		LangJapanese:           "この件には%sの協力が必要ですが、この会話でのメンション送信を確認できませんでした。ここで連絡してください。",
+		LangSpanish:            "Se necesita la ayuda de %s, pero no pude confirmar la mención en esta conversación. Contacta con esa persona aquí.",
 	},
 	MsgCompletionOpenConversation: {
 		LangEnglish:            "Open the original conversation:",

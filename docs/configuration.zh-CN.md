@@ -90,6 +90,12 @@
 
 相关配置： `projects.name`, `projects.mode`, `projects.base_dir`, `projects.workspace_init_allow_local_paths`, `projects.run_as_user`, `workspace_idle_timeout_mins`
 
+### 未解决请求自动转交负责人 (`owner-escalation`)
+
+答复后由独立模型判断是否需要负责人介入；需要时在原会话或话题中真实 @ 配置的负责人。
+
+相关配置： `projects.owner_escalation.enabled`, `projects.owner_escalation.owner_id`, `projects.owner_escalation.owner_name`, `projects.owner_escalation.base_url`, `projects.owner_escalation.api_key`, `projects.owner_escalation.model`, `projects.owner_escalation.timeout_seconds`
+
 ### 同群同话题机器人上下文互通 (`peer-bot-conversation-context`)
 
 显式开启同群同话题内有界公开机器人回复的补读，原生 Agent 会话仍独立。
@@ -3033,6 +3039,119 @@ enabled = true`
 - 默认值来源：`runtime`
 - 生效方式：`restart`
 - 示例: `enabled = true`
+
+### `projects.owner_escalation.api_key`
+
+用于决策模型认证，支持环境变量替换；配置目录不会暴露实际密钥。
+
+- 来源：`toml`
+- 配置位置：`[[projects]]`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`条件必填`
+- 默认值：`unset`
+- 默认值来源：`unset`
+- 生效方式：`restart`
+- 必填条件: `projects.owner_escalation.enabled = true`
+- 依赖: `projects.owner_escalation.enabled`
+- 敏感信息：是；优先使用环境变量占位符。
+- 示例: `[projects.owner_escalation]
+api_key = "${OWNER_ESCALATION_API_KEY}"`
+
+### `projects.owner_escalation.base_url`
+
+设置兼容 OpenAI Responses API 的基础 URL。使用 HTTPS，仅回环地址允许 HTTP；URL 不得包含凭据、查询或片段。
+
+- 来源：`toml`
+- 配置位置：`[[projects]]`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`可选`
+- 默认值：`https://api.openai.com/v1`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 示例: `[projects.owner_escalation]
+base_url = "https://api.openai.com/v1"`
+
+### `projects.owner_escalation.enabled`
+
+可见答复后由独立模型判断是否需要负责人介入；需要介入时在原会话或话题中真实 @ 负责人。
+
+- 来源：`toml`
+- 配置位置：`[[projects]]`
+- 作用域：`project`
+- 类型：`boolean`
+- 要求：`可选`
+- 默认值：`false`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 示例: `[projects.owner_escalation]
+enabled = false`
+
+### `projects.owner_escalation.model`
+
+设置回复后独立判断是否转交的模型。
+
+- 来源：`toml`
+- 配置位置：`[[projects]]`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`可选`
+- 默认值：`gpt-6-luna`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 示例: `[projects.owner_escalation]
+model = "gpt-6-luna"`
+
+### `projects.owner_escalation.owner_id`
+
+指定一个平台范围内的用户，在原会话中 @；不接受通配符、名单或最近会话回退。该用户自己发起的请求不触发转交。
+
+- 来源：`toml`
+- 配置位置：`[[projects]]`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`条件必填`
+- 默认值：`unset`
+- 默认值来源：`unset`
+- 生效方式：`restart`
+- 必填条件: `projects.owner_escalation.enabled = true`
+- 依赖: `projects.owner_escalation.enabled`
+- 示例: `[projects.owner_escalation]
+owner_id = "ou_owner"`
+
+### `projects.owner_escalation.owner_name`
+
+设置固定转交消息中使用的负责人显示名称。
+
+- 来源：`toml`
+- 配置位置：`[[projects]]`
+- 作用域：`project`
+- 类型：`string`
+- 要求：`条件必填`
+- 默认值：`unset`
+- 默认值来源：`unset`
+- 生效方式：`restart`
+- 必填条件: `projects.owner_escalation.enabled = true`
+- 依赖: `projects.owner_escalation.enabled`
+- 示例: `[projects.owner_escalation]
+owner_name = "Owner"`
+
+### `projects.owner_escalation.timeout_seconds`
+
+限制决策请求秒数；0 使用内置 20 秒默认值。调用失败记录为判断失败，不视为无需转交。
+
+- 来源：`toml`
+- 配置位置：`[[projects]]`
+- 作用域：`project`
+- 类型：`integer`
+- 要求：`可选`
+- 默认值：`20`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 范围: `0` 到 `120` `seconds`
+- 示例: `[projects.owner_escalation]
+timeout_seconds = 20`
 
 ### `projects.platforms.options.access_token` — `matrix`
 
