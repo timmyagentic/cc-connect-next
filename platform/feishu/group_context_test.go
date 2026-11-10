@@ -356,14 +356,20 @@ func TestGroupContextPartialFailurePreservesTimeOrder(t *testing.T) {
 	}
 }
 
-func TestGroupContextMentionEventReachesLoaderThroughCardWrapper(t *testing.T) {
+func TestGroupContextMentionEventPreservesExplicitQuoteThroughCardWrapper(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	p, calls := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/open-apis/im/v1/messages/om_root" {
+			root := contextAPIMessage("om_root", "oc_group", "omt_topic", "cli_context", "Assistant", "the alert being discussed", now.Add(-77*time.Minute))
+			root["sender"].(map[string]string)["sender_type"] = "app"
+			writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{root}}})
+			return
+		}
 		if r.URL.Query().Get("container_id_type") != "thread" || r.URL.Query().Get("container_id") != "omt_topic" {
 			t.Errorf("lost actual thread: %s", r.URL)
 		}
 		writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{contextAPIMessage("discussion", "oc_group", "omt_topic", "ou_alice", "Alice", "unmentioned fact", now.Add(-time.Minute))}, "has_more": false}})
-	})
+	}, "/open-apis/im/v1/messages/om_root")
 	p.dedup = &core.MessageDedup{}
 	p.threadMode = threadIsolationTopicsOnly
 	p.defaultGroupSharing = true
@@ -414,10 +420,121 @@ func TestGroupContextMentionEventReachesLoaderThroughCardWrapper(t *testing.T) {
 			t.Fatal("authorized event lost context eligibility")
 		}
 		background, err := provider.LoadMessageContext(context.Background(), got.ReplyCtx, time.Time{})
-		if err != nil || len(background.Messages) != 1 || background.Messages[0].Text != "unmentioned fact" {
+		if err != nil || len(background.Messages) != 2 || background.Messages[0].Text != "unmentioned fact" || background.Messages[1].Text != "the alert being discussed" || calls.Load() != 2 {
 			t.Fatalf("event context unavailable: %+v %v", background, err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("mentioned event did not reach core")
+	}
+}
+
+func TestGroupContextExplicitReferenceSharesSelectionAndMediaBudget(t *testing.T) {
+	for _, incremental := range []bool{false, true} {
+		t.Run(fmt.Sprintf("incremental=%v", incremental), func(t *testing.T) {
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			old := now.Add(-31 * time.Minute)
+			root := contextAPIMessage("reference", "oc_group", "", "ou_alice", "Alice", "", old)
+			root["msg_type"] = "post"
+			root["body"] = map[string]string{"content": `{"zh_cn":{"title":"Quoted screenshot","content":[[{"tag":"text","text":"Original problem"},{"tag":"img","image_key":"photo"}]]}}`}
+			p, calls := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("type") == "image" {
+					_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nquoted image"))
+					return
+				}
+				items := []any{root}
+				if r.URL.Path == "/open-apis/im/v1/messages" {
+					items = append(items, contextAPIMessage("new", "oc_group", "omt_topic", "ou_bob", "Bob", strings.Repeat("background ", 100), now.Add(-time.Second)))
+				}
+				writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": items, "has_more": false}})
+			}, "/open-apis/im/v1/messages/reference", "/open-apis/im/v1/messages/reference/resources/photo")
+			p.groupContext.maxMessages, p.groupContext.maxChars = 1, 512
+			target := replyContext{chatID: "oc_group", threadID: "omt_topic", messageID: "trigger", contextEligible: true, contextTimeMs: now.UnixMilli(), contextRootID: "reference"}
+			after := time.Time{}
+			if incremental {
+				after = now.Add(-time.Minute)
+				target.contextParentID = "reference"
+			}
+			got, err := p.LoadMessageContext(context.Background(), target, after)
+			if err != nil || len(got.Messages) != 1 || got.Messages[0].ID != "reference" || !got.Messages[0].Referenced || !got.Messages[0].Time.Equal(old) || !strings.Contains(got.Messages[0].Text, "Original problem") || calls.Load() != 2 {
+				t.Fatalf("old quote lost priority, duplicated or changed timestamp: %+v, %v, calls=%d", got, err, calls.Load())
+			}
+			hydrated, err := p.HydrateMessageContext(context.Background(), got.MediaTarget, got.Messages)
+			if err != nil || len(hydrated[0].Images) != 1 || hydrated[0].Incomplete || calls.Load() != 3 {
+				t.Fatalf("old quoted image did not use existing media path: %+v, %v", hydrated, err)
+			}
+			// With no explicit reply, an engaged topic must not replay its root.
+			target.contextParentID = ""
+			got, err = p.LoadMessageContext(context.Background(), target, now.Add(-time.Minute))
+			if err != nil || len(got.Messages) != 1 || got.Messages[0].ID != "new" || calls.Load() != 4 {
+				t.Fatalf("ordinary incremental input replayed the root: %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestGroupContextExplicitReferenceRetainsSnapshotAndScopeChecks(t *testing.T) {
+	for _, invalid := range []string{"chat", "topic", "root-topic", "deleted", "recalled", "future", "edited", "missing", "failure"} {
+		t.Run(invalid, func(t *testing.T) {
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			item := contextAPIMessage("reference", "oc_group", "omt_topic", "alice", "Alice", "private fact", now.Add(-time.Hour))
+			switch invalid {
+			case "chat":
+				item["chat_id"] = "oc_other"
+			case "topic", "root-topic":
+				item["thread_id"] = "omt_other"
+			case "deleted":
+				item["deleted"] = true
+			case "future":
+				item["create_time"] = strconv.FormatInt(now.Add(time.Second).UnixMilli(), 10)
+			case "edited":
+				item["update_time"] = strconv.FormatInt(now.Add(time.Second).UnixMilli(), 10)
+			}
+			p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+				items, code := []any{}, 0
+				if r.URL.Path != "/open-apis/im/v1/messages" && invalid != "missing" {
+					items = append(items, item)
+				}
+				if invalid == "failure" && r.URL.Path != "/open-apis/im/v1/messages" {
+					code = 999
+				}
+				writeJSON(t, w, map[string]any{"code": code, "data": map[string]any{"items": items, "has_more": false}})
+			}, "/open-apis/im/v1/messages/reference")
+			if invalid == "recalled" {
+				p.markMessageRecalled("reference")
+			}
+			target := replyContext{chatID: "oc_group", threadID: "omt_topic", contextEligible: true, contextTimeMs: now.UnixMilli(), contextParentID: "reference"}
+			if invalid == "root-topic" {
+				target.contextRootID = "reference"
+			}
+			got, err := p.LoadMessageContext(context.Background(), target, time.Time{})
+			if len(got.Messages) != 0 || (!got.Unreadable && err == nil) {
+				t.Fatalf("invalid reference accepted or silently omitted: %+v %v", got, err)
+			}
+		})
+	}
+}
+
+func TestGroupContextExplicitReferenceFallsBackToListedSource(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	root := contextAPIMessage("reference", "oc_group", "omt_topic", "alice", "Alice", "", now.Add(-time.Hour))
+	root["msg_type"], root["body"] = "image", map[string]string{"content": `{"image_key":"photo"}`}
+	p, calls := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("type") == "image" {
+			_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nquoted image"))
+			return
+		}
+		code := 0
+		if r.URL.Path == "/open-apis/im/v1/messages/reference" {
+			code = 999
+		}
+		writeJSON(t, w, map[string]any{"code": code, "data": map[string]any{"items": []any{root}, "has_more": false}})
+	}, "/open-apis/im/v1/messages/reference", "/open-apis/im/v1/messages/reference/resources/photo")
+	got, err := p.LoadMessageContext(context.Background(), replyContext{chatID: "oc_group", threadID: "omt_topic", contextEligible: true, contextTimeMs: now.UnixMilli(), contextParentID: "reference", contextRootID: "reference"}, time.Time{})
+	if err == nil || len(got.Messages) != 1 || got.Messages[0].ID != "reference" || calls.Load() != 2 {
+		t.Fatalf("list did not recover reference after Get failure: %+v %v", got, err)
+	}
+	hydrated, err := p.HydrateMessageContext(context.Background(), got.MediaTarget, got.Messages)
+	if err != nil || len(hydrated[0].Images) != 1 || hydrated[0].Incomplete {
+		t.Fatalf("recovered old image was not downloadable: %+v %v", hydrated, err)
 	}
 }

@@ -3283,6 +3283,36 @@ func waitAnswerProfileCUJ(t *testing.T, reason string, condition func() bool) {
 // CUJ-H5: shared discussion is delivered once, including during busy turns; a
 // new conversation gets its own cursor. The model and platform are boundaries.
 func TestCUJ_H5_GroupContextCatchup(t *testing.T) {
+	t.Run("explicit reference survives delivered position without replaying background", func(t *testing.T) {
+		env, p := newContextCUJEnv(t)
+		const key = "test:group:reference"
+		send := func(id, text string) {
+			env.plat.clearSent()
+			contextReceive(env, p, key, "alice", id, text)
+			session := env.engine.sessions.GetOrCreateActive(key)
+			env.waitFor("answer to "+id, 2*time.Second, func() bool { return env.sentContains("ok") && !session.Busy() })
+		}
+		send("warmup", "start")
+		old := time.Now().UTC().Add(-time.Hour)
+		reference := ContextMessage{ID: "reference", SenderID: "alice", Time: old, Text: "explicitly quoted fact", Referenced: true}
+		p.setBackground(key, []ContextMessage{
+			{ID: "seen", SenderID: "bob", Time: old, Text: "already delivered background"},
+			reference, reference,
+		}, nil)
+		send("reply", "check this")
+		as := contextLatestSession(env)
+		prompt := as.getSentPrompts()[1]
+		if strings.Count(prompt, "explicitly quoted fact") != 1 || strings.Contains(prompt, "already delivered background") || !strings.Contains(prompt, old.Format(time.RFC3339Nano)) {
+			t.Fatalf("explicit reference lost, duplicated or replayed background: %s", prompt)
+		}
+		reference.Referenced = false
+		p.setBackground(key, []ContextMessage{reference}, nil)
+		send("ordinary", "continue")
+		if strings.Contains(as.getSentPrompts()[2], "explicitly quoted fact") {
+			t.Fatal("ordinary follow-up replayed the old reference")
+		}
+	})
+
 	t.Run("busy same-sender and cross-sender follow-ups", func(t *testing.T) {
 		env, p := newContextCUJEnv(t)
 		as := newSteerableSession("group-steer")
