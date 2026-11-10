@@ -1109,10 +1109,10 @@ func main() {
 	}
 
 	// History is observational; a storage failure must not stop existing jobs.
-	scheduledHistory, historyErr := core.NewScheduledHistory(cfg.DataDir)
+	scheduledHistory, historyErr := openScheduledHistory(cfg)
 	if historyErr != nil {
 		slog.Warn("scheduled history unavailable", "error", historyErr)
-	} else {
+	} else if scheduledHistory != nil {
 		scheduledHistory.RecoverInterrupted()
 		defer scheduledHistory.Close()
 	}

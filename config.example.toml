@@ -25,6 +25,13 @@
 # Global Settings / 全局设置
 # =============================================================================
 
+# Optional Cron/Timer execution history; disabled by default. Restart to apply.
+# 可选的 Cron/Timer 执行历史，默认关闭，修改后需重启。
+# Enabling writes data_dir/history.sqlite; disabling retains the existing database.
+# 开启后写入 data_dir/history.sqlite，关闭时保留已有数据库。
+# [history]
+# enabled = false
+
 # Language for bot messages / 机器人消息语言
 # - "zh": 中文 (default / 默认)
 # - "en": English

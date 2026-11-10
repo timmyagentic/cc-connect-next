@@ -71,6 +71,25 @@ func TestCapabilityCatalog_NaturalLanguageSearchFindsMessageDisplay(t *testing.T
 	}
 }
 
+func TestCapabilityCatalog_ScheduledHistoryIntentAndContract(t *testing.T) {
+	for _, query := range []string{"执行历史", "定时任务历史", "cron history", "timer history", "SQLite"} {
+		result := core.SearchConfigCatalog(CapabilityCatalog("v-test"), query)
+		found := false
+		for _, option := range result.Options {
+			if option.Path != "history.enabled" {
+				continue
+			}
+			found = true
+			if option.Type != "boolean" || option.Default != "false" || option.ApplyMode != core.ConfigApplyRestart || option.Example != "[history]\nenabled = true" {
+				t.Errorf("history opt-in contract = %#v", option)
+			}
+		}
+		if !found {
+			t.Errorf("%q did not find history.enabled", query)
+		}
+	}
+}
+
 func TestCapabilityCatalog_TokenBudgetIsNotSensitive(t *testing.T) {
 	catalog := CapabilityCatalog("v-test")
 	wantSensitive := map[string]bool{

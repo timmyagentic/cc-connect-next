@@ -1,7 +1,21 @@
 # Scheduled execution history
 
-The daemon writes `history.sqlite` under its effective `data_dir` using the
-existing SQLite dependency. Cron and Timer definitions continue to be scheduled
+Execution history is **disabled by default**. To enable it, add this global
+section to `config.toml` and restart the daemon:
+
+```toml
+[history]
+enabled = true
+```
+
+When enabled, the daemon writes `history.sqlite` under its effective `data_dir`
+using the existing SQLite dependency. Omission or `enabled = false` does not
+open, create, recover, or write the history database. Existing history is
+retained when disabled; runs during that time are not recorded or backfilled
+automatically. Re-enabling resumes recording; startup recovery can mark earlier
+unfinished waits as interrupted without inventing their actual completion time.
+
+Cron and Timer definitions continue to be scheduled
 from their existing JSON stores. History adds no scheduler, service or model turn.
 
 Every scheduler attempt gets a random `run_id` and an immutable definition
