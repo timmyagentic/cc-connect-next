@@ -201,6 +201,35 @@ func TestScheduledHistory_AgentSessionLinksAndVersionsSurviveReopen(t *testing.T
 	}
 }
 
+func TestScheduledHistory_QueuedTurnDoesNotReplaceScheduledSessionProof(t *testing.T) {
+	h := newTestScheduledHistory(t)
+	a := &cronModelAgent{model: "project-model"}
+	engine, platform := newCronModelEngine(t, a, "")
+	store, _ := NewCronStore(t.TempDir())
+	store.SetHistory(h)
+	scheduler := NewCronScheduler(store)
+	scheduler.RegisterEngine("test", engine)
+	a.onSend = func(backend *cronModelSession, call cronModelCall) error {
+		if call.prompt == "scheduled" {
+			engine.ReceiveMessage(platform, answerProfileMessage("queued", "queued"))
+		} else if call.prompt == "queued" {
+			engine.sessions.GetOrCreateActive("test:user").SetAgentInfo("queued-agent", "test", "")
+		}
+		backend.events <- Event{Type: EventResult, Content: "completed", Done: true}
+		return nil
+	}
+	job := cronModelJob("scheduled", "task-model")
+	job.Mute = true
+	scheduler.runJob(job, true)
+	var agent string
+	if err := h.db.QueryRow("SELECT agent_session_id FROM runs").Scan(&agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent == "" || agent == "queued-agent" {
+		t.Fatalf("a queued turn replaced the scheduled execution identity: %q", agent)
+	}
+}
+
 func TestScheduledHistory_TimerAndStorageFailurePreserveExecution(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX fixture")
