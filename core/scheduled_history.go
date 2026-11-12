@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -206,7 +207,12 @@ func (h *ScheduledHistory) begin(kind string, job any, sessionKey string, manual
 		historyWarning("begin run transaction", err)
 		return nil
 	}
-	defer tx.Rollback()
+	// A committed transaction needs no rollback; other cleanup errors are diagnostic.
+	defer func() {
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			historyWarning("rollback run transaction", err)
+		}
+	}()
 	_, err = tx.Exec(`INSERT OR IGNORE INTO job_versions
  (version_id,kind,job_id,project,description,observed_at,source,snapshot_json) VALUES(?,?,?,?,?,?,?,?)`,
 		version, kind, id, project, description, started.UTC().Format(time.RFC3339Nano), "runtime", string(body))
