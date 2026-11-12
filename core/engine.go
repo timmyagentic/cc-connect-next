@@ -1119,6 +1119,15 @@ func (e *Engine) reapIdleWorkspaces() {
 // SetHooks configures the lifecycle event hook manager.
 func (e *Engine) SetHooks(hm *HookManager) {
 	e.hooks = hm
+	for _, platform := range e.platforms {
+		if source, ok := platform.(MessageObservationSource); ok {
+			var observer func(HookEvent) error
+			if hm.handlesEvent(HookEventMessageObserved) {
+				observer = hm.EmitSync
+			}
+			source.SetMessageObserver(observer)
+		}
+	}
 }
 
 // SetShell configures the shell binary, flag, and shell profile used for exec.

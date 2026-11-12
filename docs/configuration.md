@@ -911,7 +911,7 @@ enabled = true`
 
 ### `hooks.async`
 
-Run the hook asynchronously instead of blocking message handling.
+Run the hook asynchronously instead of blocking message handling. message.observed always waits for matching hooks before transport acknowledgement, regardless of this option.
 
 - Source: `toml`
 - Placement: `[[hooks]]`
@@ -941,7 +941,7 @@ Set the shell command executed by a command hook.
 
 ### `hooks.event`
 
-Choose the event that triggers this hook.
+Choose the event that triggers this hook. message.observed receives human mention routing metadata before Agent reply filtering on supported platforms.
 
 - Source: `toml`
 - Placement: `[[hooks]]`

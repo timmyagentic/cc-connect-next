@@ -911,7 +911,7 @@ enabled = true`
 
 ### `hooks.async`
 
-异步运行 Hook，避免阻塞消息处理。
+异步运行 Hook，避免阻塞消息处理。message.observed 始终等待匹配 Hook 完成后再确认传输事件，不受此选项影响。
 
 - 来源：`toml`
 - 配置位置：`[[hooks]]`
@@ -941,7 +941,7 @@ enabled = true`
 
 ### `hooks.event`
 
-选择触发该 Hook 的事件。
+选择触发该 Hook 的事件。支持的平台通过 message.observed 在 Agent 回复过滤前提供真人提及的路由元数据。
 
 - 来源：`toml`
 - 配置位置：`[[hooks]]`

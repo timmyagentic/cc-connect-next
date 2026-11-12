@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 type HookEventType string
 
 const (
+	HookEventMessageObserved     HookEventType = "message.observed"
 	HookEventMessageReceived     HookEventType = "message.received"
 	HookEventMessageSent         HookEventType = "message.sent"
 	HookEventSessionStarted      HookEventType = "session.started"
@@ -26,6 +28,12 @@ const (
 	HookEventPermissionRequested HookEventType = "permission.requested"
 	HookEventError               HookEventType = "error"
 )
+
+// MessageObservationSource reports message metadata independently of Agent reply
+// routing. A failed observer must prevent acknowledgement so the source can retry.
+type MessageObservationSource interface {
+	SetMessageObserver(func(HookEvent) error)
+}
 
 // HookHandlerType is the execution strategy for a hook.
 type HookHandlerType string
@@ -153,6 +161,37 @@ func (hm *HookManager) Emit(event HookEvent) {
 	}
 }
 
+// EmitSync waits for every matching hook, regardless of its Async setting. Sources
+// that acknowledge events use the returned error to retain delivery for retry.
+// Consumers must persist idempotently before returning success.
+func (hm *HookManager) EmitSync(event HookEvent) error {
+	if hm == nil {
+		return nil
+	}
+	event.Project = hm.project
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now()
+	}
+	var errs []error
+	for _, hook := range hm.Hooks() {
+		if matchEvent(hook.Event, string(event.Event)) {
+			if err := hm.execute(&hook, event); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (hm *HookManager) handlesEvent(event HookEventType) bool {
+	for _, hook := range hm.Hooks() {
+		if matchEvent(hook.Event, string(event)) {
+			return true
+		}
+	}
+	return false
+}
+
 // matchEvent checks if a hook's event pattern matches the fired event.
 // Supports exact match and wildcard "*".
 func matchEvent(pattern, event string) bool {
@@ -162,16 +201,17 @@ func matchEvent(pattern, event string) bool {
 	return strings.EqualFold(pattern, event)
 }
 
-func (hm *HookManager) execute(h *HookConfig, event HookEvent) {
+func (hm *HookManager) execute(h *HookConfig, event HookEvent) error {
 	switch HookHandlerType(h.Type) {
 	case HookHandlerCommand:
-		hm.executeCommand(h, event)
+		return hm.executeCommand(h, event)
 	case HookHandlerHTTP:
-		hm.executeHTTP(h, event)
+		return hm.executeHTTP(h, event)
 	}
+	return fmt.Errorf("hooks: unsupported handler type %q", h.Type)
 }
 
-func (hm *HookManager) executeCommand(h *HookConfig, event HookEvent) {
+func (hm *HookManager) executeCommand(h *HookConfig, event HookEvent) error {
 	timeout := h.timeoutDuration()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -188,19 +228,20 @@ func (hm *HookManager) executeCommand(h *HookConfig, event HookEvent) {
 			"error", err,
 			"output", truncateStr(strings.TrimSpace(string(output)), 500),
 		)
-		return
+		return fmt.Errorf("hooks: command for %s failed: %w", event.Event, err)
 	}
 	slog.Debug("hooks: command executed",
 		"project", hm.project, "event", event.Event,
 		"command", truncateStr(h.Command, 80),
 	)
+	return nil
 }
 
-func (hm *HookManager) executeHTTP(h *HookConfig, event HookEvent) {
+func (hm *HookManager) executeHTTP(h *HookConfig, event HookEvent) error {
 	body, err := json.Marshal(event)
 	if err != nil {
 		slog.Warn("hooks: marshal event failed", "error", err)
-		return
+		return fmt.Errorf("hooks: marshal event: %w", err)
 	}
 
 	timeout := h.timeoutDuration()
@@ -210,7 +251,7 @@ func (hm *HookManager) executeHTTP(h *HookConfig, event HookEvent) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, h.URL, bytes.NewReader(body))
 	if err != nil {
 		slog.Warn("hooks: create request failed", "url", h.URL, "error", err)
-		return
+		return fmt.Errorf("hooks: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "CC-Connect-Hooks/1.0")
@@ -222,7 +263,7 @@ func (hm *HookManager) executeHTTP(h *HookConfig, event HookEvent) {
 			"project", hm.project, "event", event.Event,
 			"url", h.URL, "error", err,
 		)
-		return
+		return fmt.Errorf("hooks: request for %s failed: %w", event.Event, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -231,12 +272,13 @@ func (hm *HookManager) executeHTTP(h *HookConfig, event HookEvent) {
 			"project", hm.project, "event", event.Event,
 			"url", h.URL, "status", resp.StatusCode,
 		)
-		return
+		return fmt.Errorf("hooks: response for %s returned HTTP %d", event.Event, resp.StatusCode)
 	}
 	slog.Debug("hooks: http delivered",
 		"project", hm.project, "event", event.Event,
 		"url", h.URL, "status", resp.StatusCode,
 	)
+	return nil
 }
 
 // eventToEnv converts a HookEvent to environment variables for shell hooks.
@@ -263,6 +305,11 @@ func eventToEnv(e HookEvent) []string {
 	}
 	if e.Error != "" {
 		env = append(env, "CC_HOOK_ERROR="+e.Error)
+	}
+	if len(e.Extra) > 0 {
+		if extra, err := json.Marshal(e.Extra); err == nil {
+			env = append(env, "CC_HOOK_EXTRA="+string(extra))
+		}
 	}
 	return env
 }

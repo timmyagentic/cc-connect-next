@@ -478,6 +478,8 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 # 在生命周期事件发生时执行 Shell 命令或发送 HTTP 请求。
 #
 # Supported events / 支持的事件:
+#   message.observed   — human mention metadata before reply filtering (Feishu/Lark)
+#                      — 回复过滤前的真人提及元数据（飞书/Lark）；同步成功才确认事件
 #   message.received   — user message arrives / 用户消息到达
 #   message.sent       — agent reply sent / Agent 回复发送完成
 #   session.started    — agent session spawned / Agent 会话启动
@@ -499,6 +501,15 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 # command = "echo $CC_HOOK_USER_NAME >> /tmp/cc-messages.log"
 # async = true                    # default true; set false to block until done
 # timeout = 10                    # seconds; default 10s for command, 5s for http
+#
+# Observation consumers must persist idempotently before returning; see docs/message-observed.md.
+# 观察消费者返回前须幂等落盘，详见 docs/message-observed.md。
+# [[hooks]]
+# event = "message.observed"
+# type = "command"
+# command = "python3 /path/to/persist_mention.py" # reads CC_HOOK_EXTRA / 从 CC_HOOK_EXTRA 读取元数据
+# async = false                  # message.observed always waits, including wildcard hooks
+# timeout = 2                    # persist only; defer network/model work to a worker
 #
 # [[hooks]]
 # event = "error"

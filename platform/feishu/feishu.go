@@ -360,6 +360,7 @@ type Platform struct {
 	replayClientMu       sync.Mutex
 	wsClient             *larkws.Client
 	handler              core.MessageHandler
+	messageObserver      func(core.HookEvent) error
 	lifecycleHandler     core.PlatformLifecycleHandler
 	cardNavHandler       core.CardNavigationHandler
 	cancel               context.CancelFunc
@@ -924,16 +925,7 @@ func (p *Platform) Start(handler core.MessageHandler) (startErr error) {
 	}
 
 	p.eventHandler = dispatcher.NewEventDispatcher("", p.encryptKey).
-		OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
-			// Fan out to all platforms sharing this WebSocket connection.
-			// Each platform's onMessage applies its own allow_chat filter.
-			for _, sibling := range p.sharedGroup.allPlatforms() {
-				if err := sibling.onMessage(ctx, event); err != nil {
-					slog.Error("shared ws: onMessage error", "err", err)
-				}
-			}
-			return nil
-		}).
+		OnP2MessageReceiveV1(p.onSharedMessage).
 		OnP2MessageRecalledV1(func(ctx context.Context, event *larkim.P2MessageRecalledV1) error {
 			for _, sibling := range p.sharedGroup.allPlatforms() {
 				if err := sibling.onMessageRecalled(ctx, event); err != nil {
@@ -1999,6 +1991,12 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	if p.isMessageRecalled(messageID) {
 		slog.Debug(p.tag()+": recalled message ignored before dispatch", "message_id", messageID)
 		return nil
+	}
+
+	// Observation has its own persistent consumer. Do not let Agent-only dedup,
+	// restart filtering or the @bot reply gate acknowledge an unpersisted event.
+	if err := p.observeMessage(msg, sender); err != nil {
+		return err
 	}
 
 	if p.dedup.IsDuplicate(messageID) {
