@@ -941,7 +941,7 @@ enabled = true`
 
 ### `hooks.event`
 
-选择触发该 Hook 的事件。支持的平台通过 message.observed 在 Agent 回复过滤前提供真人提及的路由元数据。
+选择触发该 Hook 的事件。message.observed 在 Agent 回复过滤前提供真人提及元数据；支持的平台通过 reply.completed 在群聊 rich 模式非静默答复成功投递后提供路由 ID，遵循 hooks.async，Hook 失败不重投。
 
 - 来源：`toml`
 - 配置位置：`[[hooks]]`

@@ -299,3 +299,25 @@ func TestSendRichCardTerminalTextReturnsRecallableHandle(t *testing.T) {
 		t.Fatalf("sent message = type %q content %q", gotMsgType, gotContent)
 	}
 }
+
+func TestFinalReplyHookRouteRejectsUntrackedOrCrossGroupDelivery(t *testing.T) {
+	p := &Platform{}
+	group := replyContext{groupID: "oc_group", messageID: "om_source"}
+	for _, tc := range []struct {
+		name            string
+		context, handle any
+	}{
+		{"missing context", nil, &feishuPreviewHandle{chatID: "oc_group", messageID: "om_answer"}},
+		{"private", replyContext{messageID: "om_source"}, &feishuPreviewHandle{chatID: "oc_group", messageID: "om_answer"}},
+		{"untracked", group, "om_answer"},
+		{"nil handle", group, (*feishuPreviewHandle)(nil)},
+		{"different group", group, &feishuPreviewHandle{chatID: "oc_other", messageID: "om_answer"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, answer, chat := p.FinalReplyHookRoute(tc.context, tc.handle)
+			if source != "" || answer != "" || chat != "" {
+				t.Fatalf("ineligible route exposed (%q, %q, %q)", source, answer, chat)
+			}
+		})
+	}
+}

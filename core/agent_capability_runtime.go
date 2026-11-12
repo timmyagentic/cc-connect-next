@@ -548,6 +548,28 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	observation.SideEffects = expandSideEffects([]string{"shell_execution", "network"})
 	result.Capabilities = append(result.Capabilities, observation)
 
+	_, routesFinalReply := platform.(FinalReplyHookRouter)
+	replyCompletionAvailability := platformAvailability(routesFinalReply && rich)
+	if routesFinalReply && rich && state != CapabilityUnavailable {
+		display, _ := e.displayRuntimeSnapshot()
+		switch {
+		case !e.hooks.handlesEvent(HookEventReplyCompleted):
+			replyCompletionAvailability = unavailable("No reply.completed hook is configured.", "未配置 reply.completed Hook。")
+		case display.CardMode != "rich":
+			replyCompletionAvailability = unavailable("reply.completed requires rich card mode.", "reply.completed 需要 rich 卡片模式。")
+		case state == CapabilityAvailable:
+			replyCompletionAvailability = conditional("A matching hook is configured; emission requires successful non-silent final rich-mode delivery and a platform-approved group route with source, answer, and chat IDs.", "已配置匹配 Hook；仅在非静默的 rich 模式最终答复成功投递，且平台认可的群聊路由提供原消息、答复和群 ID 时触发。")
+		}
+	}
+	replyCompletion := feature("reply_completion_hook",
+		"Emit reply.completed routing IDs and completion time after successful group rich-mode reply delivery, including tracked replacement text or cards; no message bodies or display names. Honors hooks.async and existing reply permissions.",
+		"群聊 rich 模式答复成功投递后发出 reply.completed 路由 ID 和完成时间，包含可追踪的替换文本或卡片；不传正文或显示名称，遵循 hooks.async 及已有回复权限。",
+		replyCompletionAvailability, CapabilityFallback{Mode: "skip", Description: "Skip unsupported, private, silent, failed, or canceled deliveries. Hook failures are logged best-effort; they do not undo the answer, retry delivery, or create a durable receipt.", DescriptionZH: "不支持的路由、私聊、静默、失败或取消投递不触发。Hook 为尽力交付，失败仅记录日志，不撤回答复、不重投，也不生成持久化回执。"})
+	replyCompletion.Permission = CapabilityPermissionConditional
+	replyCompletion.ReadOnly = &readOnly
+	replyCompletion.SideEffects = expandSideEffects([]string{"shell_execution", "network"})
+	result.Capabilities = append(result.Capabilities, replyCompletion)
+
 	proactiveAvailability := platformAvailability(reconstruct)
 	_, hasValidator := platform.(PersistentProactiveTargetValidator)
 	_, requiresSnapshot := platform.(PersistentReplyTargetRequirer)

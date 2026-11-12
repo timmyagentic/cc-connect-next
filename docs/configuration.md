@@ -941,7 +941,7 @@ Set the shell command executed by a command hook.
 
 ### `hooks.event`
 
-Choose the event that triggers this hook. message.observed receives human mention routing metadata before Agent reply filtering on supported platforms.
+Choose the event that triggers this hook. message.observed receives human mention routing metadata before Agent reply filtering. reply.completed reports routing IDs after successful non-silent group rich-mode reply delivery on supported platforms; it honors hooks.async and does not retry failed hooks.
 
 - Source: `toml`
 - Placement: `[[hooks]]`

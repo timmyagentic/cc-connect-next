@@ -15,11 +15,21 @@ type finalReplyHookPlatform struct {
 	*stubRichCardSilentPlatform
 	failUpdate   bool
 	failFallback bool
+	missingRoute string
 }
 
 func (p *finalReplyHookPlatform) FinalReplyHookRoute(_ any, handle any) (string, string, string) {
 	answer, _ := handle.(string)
-	return "om_source", answer, "oc_chat"
+	source, chat := "om_source", "oc_chat"
+	switch p.missingRoute {
+	case "source":
+		source = ""
+	case "answer":
+		answer = ""
+	case "chat":
+		chat = ""
+	}
+	return source, answer, chat
 }
 
 func (p *finalReplyHookPlatform) UpdateMessage(ctx context.Context, handle any, content string) error {
@@ -38,18 +48,27 @@ func (p *finalReplyHookPlatform) SendPreviewStart(ctx context.Context, replyCtx 
 
 func TestReplyCompletedHookFollowsFinalDelivery(t *testing.T) {
 	for _, tc := range []struct {
-		name, answer string
-		failUpdate   bool
-		failFallback bool
+		name, answer      string
+		content, cardMode string
+		hookFailure       bool
+		missingRoute      string
+		failUpdate        bool
+		failFallback      bool
 	}{
 		{name: "updated card", answer: "handle-1"},
 		{name: "replacement card", answer: "handle-2", failUpdate: true},
 		{name: "failed delivery", failUpdate: true, failFallback: true},
+		{name: "silent reply", content: "NO_REPLY"},
+		{name: "missing source", missingRoute: "source"},
+		{name: "missing answer", missingRoute: "answer"},
+		{name: "missing chat", missingRoute: "chat"},
+		{name: "legacy reply", cardMode: "legacy"},
+		{name: "hook failure is not retried", answer: "handle-1", hookFailure: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := &finalReplyHookPlatform{
 				stubRichCardSilentPlatform: &stubRichCardSilentPlatform{stubPlatformEngine: stubPlatformEngine{n: "fixture"}},
-				failUpdate:                 tc.failUpdate, failFallback: tc.failFallback,
+				failUpdate:                 tc.failUpdate, failFallback: tc.failFallback, missingRoute: tc.missingRoute,
 			}
 			received := make(chan HookEvent, 4)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +79,10 @@ func TestReplyCompletedHookFollowsFinalDelivery(t *testing.T) {
 					return
 				}
 				received <- event
+				if tc.hookFailure {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
 				w.WriteHeader(http.StatusNoContent)
 			}))
 			defer server.Close()
@@ -67,14 +90,22 @@ func TestReplyCompletedHookFollowsFinalDelivery(t *testing.T) {
 			e.SetHooks(NewHookManager("test", []HookConfig{{
 				Event: string(HookEventReplyCompleted), Type: "http", URL: server.URL, Async: boolPtr(false),
 			}}, "", "", ""))
-			e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: "rich"})
+			cardMode := tc.cardMode
+			if cardMode == "" {
+				cardMode = "rich"
+			}
+			e.SetDisplayConfig(DisplayCfg{Mode: "compact", CardMode: cardMode})
 			sessionKey := "fixture:group"
 			session := e.sessions.GetOrCreateActive(sessionKey)
 			agent := newControllableSession("reply-completed")
 			state := &interactiveState{agentSession: agent, platform: p, replyCtx: "group"}
 			e.interactiveStates[sessionKey] = state
-			agent.events <- Event{Type: EventText, Content: "Final answer."}
-			agent.events <- Event{Type: EventResult, Content: "Final answer.", Done: true}
+			content := tc.content
+			if content == "" {
+				content = "Final answer."
+			}
+			agent.events <- Event{Type: EventText, Content: content}
+			agent.events <- Event{Type: EventResult, Content: content, Done: true}
 			e.processInteractiveEvents(state, session, e.sessions, sessionKey, "om_source", time.Now(), nil, nil, state.replyCtx)
 			if tc.answer == "" {
 				if len(received) != 0 {
@@ -91,5 +122,47 @@ func TestReplyCompletedHookFollowsFinalDelivery(t *testing.T) {
 				t.Fatalf("unexpected completion event: %#v", event)
 			}
 		})
+	}
+}
+
+func TestReplyCompletedManifest_ContractAndPrivacy(t *testing.T) {
+	p := &finalReplyHookPlatform{stubRichCardSilentPlatform: &stubRichCardSilentPlatform{stubPlatformEngine: stubPlatformEngine{n: "fixture"}}}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+	e.platformLifecycleMu.Lock()
+	e.platformReady[p] = true
+	e.platformLifecycleMu.Unlock()
+	feature := func() RuntimeFeatureCapability {
+		manifest := e.QueryAgentCapabilityManifest("", "", false)
+		adapter := findRuntimeAdapter(t, manifest.Runtime, "platform", "fixture")
+		return findRuntimeFeature(t, adapter.Capabilities, "reply_completion_hook")
+	}
+	e.SetDisplayConfig(DisplayCfg{CardMode: "rich"})
+	if got := feature(); got.Availability.State != CapabilityUnavailable {
+		t.Fatalf("unconfigured hook advertised: %#v", got)
+	}
+	for _, pattern := range []string{"reply.completed", "*"} {
+		e.SetHooks(NewHookManager("test", []HookConfig{{Event: pattern, Type: "command", Command: "DO_NOT_LEAK_REPLY_COMMAND"}}, "sh", "-c", ""))
+		got := feature()
+		if got.Availability.State != CapabilityConditional || got.Permission != CapabilityPermissionConditional || got.ReadOnly == nil || *got.ReadOnly || !hasManifestEffect(got.SideEffects, "shell_execution") || !hasManifestEffect(got.SideEffects, "network") || got.Fallback.Mode != "skip" {
+			t.Fatalf("incomplete reply hook contract: %#v", got)
+		}
+		encoded, err := json.Marshal(e.QueryAgentCapabilityManifest("", "", false))
+		if err != nil || strings.Contains(string(encoded), "DO_NOT_LEAK_REPLY_COMMAND") {
+			t.Fatal("manifest exposed hook body")
+		}
+	}
+	e.SetDisplayConfig(DisplayCfg{CardMode: "legacy"})
+	if got := feature(); got.Availability.State != CapabilityUnavailable {
+		t.Fatalf("legacy mode advertised: %#v", got)
+	}
+	e.SetHooks(nil)
+	if got := feature(); got.Availability.State != CapabilityUnavailable {
+		t.Fatalf("removed hook advertised: %#v", got)
+	}
+	unsupported := &stubPlatformEngine{n: "plain"}
+	e2 := NewEngine("plain", &stubAgent{}, []Platform{unsupported}, "", LangEnglish)
+	adapter := findRuntimeAdapter(t, e2.QueryAgentCapabilityManifest("", "", false).Runtime, "platform", "plain")
+	if got := findRuntimeFeature(t, adapter.Capabilities, "reply_completion_hook"); got.Availability.State != CapabilityUnavailable {
+		t.Fatalf("unsupported adapter advertised: %#v", got)
 	}
 }

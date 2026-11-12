@@ -323,3 +323,16 @@ func containsTestString(values []string, target string) bool {
 	}
 	return false
 }
+
+func TestCapabilityCatalog_ReplyCompletedHookIsDiscoverable(t *testing.T) {
+	for _, option := range CapabilityCatalog("test").Options {
+		if option.Path != "hooks.event" {
+			continue
+		}
+		if !strings.Contains(option.Description, "reply.completed") || !strings.Contains(option.DescriptionZH, "reply.completed") || !strings.Contains(option.Description, "hooks.async") || !strings.Contains(option.DescriptionZH, "不重投") {
+			t.Fatalf("reply completion missing bilingual delivery contract: %#v", option)
+		}
+		return
+	}
+	t.Fatal("hooks.event missing from catalog")
+}
