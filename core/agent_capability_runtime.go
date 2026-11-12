@@ -530,6 +530,24 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	notification.SideEffects = expandSideEffects([]string{"persistent_state", "network", "external_message"})
 	result.Capabilities = append(result.Capabilities, notification)
 
+	_, canObserve := platform.(MessageObservationSource)
+	observationAvailability := platformAvailability(canObserve)
+	if canObserve && state == CapabilityAvailable {
+		if !e.hooks.handlesEvent(HookEventMessageObserved) {
+			observationAvailability = unavailable("No message.observed hook is configured.", "未配置 message.observed Hook。")
+		} else {
+			observationAvailability = conditional("Configured synchronous observation covers only messages delivered by the platform's existing event access and allowed by sender/chat restrictions.", "已配置同步观察，仅覆盖平台已有事件权限实际投递且发送人、群范围允许的消息。")
+		}
+	}
+	observation := feature("message_observation",
+		"Pass human mention routing metadata to configured hooks before Agent reply filtering; wait for hook success before transport acknowledgement. Duplicate and restart deliveries can recur.",
+		"在 Agent 回复过滤前把真人提及的路由元数据传给已配置 Hook；Hook 成功后才确认传输事件，重复及重启重投可能再次到达。",
+		observationAvailability, CapabilityFallback{Mode: "skip", Description: "No observer is installed without a matching hook. Hook failures are returned to the source transport; no polling or Agent turn is started by observation.", DescriptionZH: "没有匹配 Hook 时不安装观察器。Hook 失败返回来源传输；观察本身不启动轮询或 Agent 回合。"})
+	observation.Permission = CapabilityPermissionConditional
+	observation.ReadOnly = &readOnly
+	observation.SideEffects = expandSideEffects([]string{"shell_execution", "network"})
+	result.Capabilities = append(result.Capabilities, observation)
+
 	proactiveAvailability := platformAvailability(reconstruct)
 	_, hasValidator := platform.(PersistentProactiveTargetValidator)
 	_, requiresSnapshot := platform.(PersistentReplyTargetRequirer)
