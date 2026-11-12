@@ -59,6 +59,8 @@ function fetch(url, redirects = 5) {
     mod
       .get(url, { headers: { "User-Agent": "cc-connect-next-npm" } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          // Consume redirect responses so keep-alive sockets can be released.
+          res.resume();
           const redirect = new URL(res.headers.location, url).toString();
           return resolve(fetch(redirect, redirects - 1));
         }
@@ -294,6 +296,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  fetch,
   getPlatformInfo,
   isNewerOrEqual,
   parseChecksumManifest,
