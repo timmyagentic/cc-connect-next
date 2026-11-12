@@ -21,6 +21,7 @@ const (
 	HookEventMessageObserved     HookEventType = "message.observed"
 	HookEventMessageReceived     HookEventType = "message.received"
 	HookEventMessageSent         HookEventType = "message.sent"
+	HookEventReplyCompleted      HookEventType = "reply.completed"
 	HookEventSessionStarted      HookEventType = "session.started"
 	HookEventSessionEnded        HookEventType = "session.ended"
 	HookEventCronTriggered       HookEventType = "cron.triggered"
@@ -33,6 +34,12 @@ const (
 // routing. A failed observer must prevent acknowledgement so the source can retry.
 type MessageObservationSource interface {
 	SetMessageObserver(func(HookEvent) error)
+}
+
+// FinalReplyHookRouter exposes the IDs of a delivered reply for a platform
+// that tracks the final message (including any replacement message).
+type FinalReplyHookRouter interface {
+	FinalReplyHookRoute(replyCtx, deliveredHandle any) (sourceID, answerID, chatID string)
 }
 
 // HookHandlerType is the execution strategy for a hook.

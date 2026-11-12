@@ -482,6 +482,8 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 #                      — 回复过滤前的真人提及元数据（飞书/Lark）；同步成功才确认事件
 #   message.received   — user message arrives / 用户消息到达
 #   message.sent       — agent reply sent / Agent 回复发送完成
+#   reply.completed    — delivered group rich-mode reply IDs (Feishu/Lark)
+#                      — 群聊 rich 模式最终答复送达 ID；尽力交付，Hook 失败不重投
 #   session.started    — agent session spawned / Agent 会话启动
 #   session.ended      — agent session stopped / Agent 会话结束
 #   cron.triggered     — cron job fires / 定时任务触发
@@ -501,6 +503,15 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 # command = "echo $CC_HOOK_USER_NAME >> /tmp/cc-messages.log"
 # async = true                    # default true; set false to block until done
 # timeout = 10                    # seconds; default 10s for command, 5s for http
+#
+# Reply completion metadata only; see docs/reply-completed.md.
+# 仅答复送达元数据，详见 docs/reply-completed.md。
+# [[hooks]]
+# event = "reply.completed"
+# type = "command"
+# command = "python3 /path/to/handle_reply.py" # reads CC_HOOK_EXTRA
+# async = true                  # honors normal Hook delivery; failure is not retried
+# timeout = 2
 #
 # Observation consumers must persist idempotently before returning; see docs/message-observed.md.
 # 观察消费者返回前须幂等落盘，详见 docs/message-observed.md。

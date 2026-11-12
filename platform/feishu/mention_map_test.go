@@ -242,7 +242,7 @@ func TestSendRichCardTerminalTextReturnsRecallableHandle(t *testing.T) {
 		switch {
 		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
 			writeJSON(t, w, map[string]any{"code": 0, "expire": 7200, "tenant_access_token": "t"})
-		case r.URL.Path == "/open-apis/im/v1/messages" && r.Method == http.MethodPost:
+		case r.URL.Path == "/open-apis/im/v1/messages/om_request/reply" && r.Method == http.MethodPost:
 			body, _ := io.ReadAll(r.Body)
 			var req struct {
 				MsgType string `json:"msg_type"`
@@ -274,9 +274,10 @@ func TestSendRichCardTerminalTextReturnsRecallableHandle(t *testing.T) {
 			lark.WithHttpClient(srv.Client())),
 	}
 	p := &interactivePlatform{Platform: base}
+	replyCtx := replyContext{chatID: chatID, groupID: chatID, messageID: "om_request"}
 	handle, err := p.SendRichCardTerminalText(
 		context.Background(),
-		replyContext{chatID: chatID},
+		replyCtx,
 		`完成，请 <at user_id="ou_bot">Reviewer-Bot</at> 复核`,
 	)
 	if err != nil {
@@ -286,7 +287,37 @@ func TestSendRichCardTerminalTextReturnsRecallableHandle(t *testing.T) {
 	if !ok || h.messageID != "om_text_final" || h.chatID != chatID {
 		t.Fatalf("terminal handle = %#v", handle)
 	}
+	sourceID, answerID, deliveredChatID := p.FinalReplyHookRoute(replyCtx, handle)
+	if sourceID != "om_request" || answerID != "om_text_final" || deliveredChatID != chatID {
+		t.Fatalf("completion route = (%q, %q, %q)", sourceID, answerID, deliveredChatID)
+	}
+	privateReplyCtx := replyContext{chatID: chatID, messageID: "om_private_request"}
+	if sourceID, answerID, deliveredChatID := p.FinalReplyHookRoute(privateReplyCtx, handle); sourceID != "" || answerID != "" || deliveredChatID != "" {
+		t.Fatalf("private reply exposed completion route (%q, %q, %q)", sourceID, answerID, deliveredChatID)
+	}
 	if gotMsgType != larkim.MsgTypeText || !strings.Contains(gotContent, "ou_bot") {
 		t.Fatalf("sent message = type %q content %q", gotMsgType, gotContent)
+	}
+}
+
+func TestFinalReplyHookRouteRejectsUntrackedOrCrossGroupDelivery(t *testing.T) {
+	p := &Platform{}
+	group := replyContext{groupID: "oc_group", messageID: "om_source"}
+	for _, tc := range []struct {
+		name            string
+		context, handle any
+	}{
+		{"missing context", nil, &feishuPreviewHandle{chatID: "oc_group", messageID: "om_answer"}},
+		{"private", replyContext{messageID: "om_source"}, &feishuPreviewHandle{chatID: "oc_group", messageID: "om_answer"}},
+		{"untracked", group, "om_answer"},
+		{"nil handle", group, (*feishuPreviewHandle)(nil)},
+		{"different group", group, &feishuPreviewHandle{chatID: "oc_other", messageID: "om_answer"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, answer, chat := p.FinalReplyHookRoute(tc.context, tc.handle)
+			if source != "" || answer != "" || chat != "" {
+				t.Fatalf("ineligible route exposed (%q, %q, %q)", source, answer, chat)
+			}
+		})
 	}
 }
