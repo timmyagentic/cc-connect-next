@@ -152,7 +152,11 @@ func TestScheduledHistory_RestartDoesNotInventExecutionCompletion(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resumed.Close()
+	defer func() {
+		if err := resumed.Close(); err != nil {
+			t.Errorf("close resumed history: %v", err)
+		}
+	}()
 	resumed.RecoverInterrupted()
 	var scheduler, execution string
 	var finished, observed sql.NullString
@@ -210,9 +214,10 @@ func TestScheduledHistory_QueuedTurnDoesNotReplaceScheduledSessionProof(t *testi
 	scheduler := NewCronScheduler(store)
 	scheduler.RegisterEngine("test", engine)
 	a.onSend = func(backend *cronModelSession, call cronModelCall) error {
-		if call.prompt == "scheduled" {
+		switch call.prompt {
+		case "scheduled":
 			engine.ReceiveMessage(platform, answerProfileMessage("queued", "queued"))
-		} else if call.prompt == "queued" {
+		case "queued":
 			engine.sessions.GetOrCreateActive("test:user").SetAgentInfo("queued-agent", "test", "")
 		}
 		backend.events <- Event{Type: EventResult, Content: "completed", Done: true}

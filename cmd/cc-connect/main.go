@@ -1114,7 +1114,11 @@ func main() {
 		slog.Warn("scheduled history unavailable", "error", historyErr)
 	} else if scheduledHistory != nil {
 		scheduledHistory.RecoverInterrupted()
-		defer scheduledHistory.Close()
+		defer func() {
+			if err := scheduledHistory.Close(); err != nil {
+				slog.Warn("scheduled history close failed", "error", err)
+			}
+		}()
 	}
 
 	// Start cron scheduler

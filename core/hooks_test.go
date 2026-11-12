@@ -20,11 +20,11 @@ func boolPtr(v bool) *bool { return &v }
 func TestNewHookManager_ValidatesConfig(t *testing.T) {
 	hooks := []HookConfig{
 		{Event: "message.received", Type: "command", Command: "echo ok"},
-		{Event: "", Type: "command", Command: "echo bad"},         // missing event
-		{Event: "error", Type: "http", URL: ""},                   // missing url
-		{Event: "error", Type: "http", URL: "ftp://bad"},          // bad url scheme
-		{Event: "error", Type: "unknown", Command: "echo"},        // bad type
-		{Event: "error", Type: "command", Command: ""},            // missing command
+		{Event: "", Type: "command", Command: "echo bad"},  // missing event
+		{Event: "error", Type: "http", URL: ""},            // missing url
+		{Event: "error", Type: "http", URL: "ftp://bad"},   // bad url scheme
+		{Event: "error", Type: "unknown", Command: "echo"}, // bad type
+		{Event: "error", Type: "command", Command: ""},     // missing command
 		{Event: "message.sent", Type: "http", URL: "http://ok.com"},
 	}
 	hm := NewHookManager("test", hooks, "sh", "-c", "")
@@ -355,6 +355,44 @@ func TestEmit_HTTPError_DoesNotPanic(t *testing.T) {
 	hm := NewHookManager("proj", hooks, "sh", "-c", "")
 	// Should not panic even with connection refused
 	hm.Emit(HookEvent{Event: HookEventError, Error: "test"})
+}
+
+func TestEmit_FailedHookDoesNotSkipOtherHooks(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		name := "sync"
+		if async {
+			name = "async"
+		}
+		t.Run(name, func(t *testing.T) {
+			delivered := make(chan string, 2)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				delivered <- r.URL.Path
+				if r.URL.Path == "/fail" {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+			hm := NewHookManager("project", []HookConfig{
+				{Event: "message.received", Type: "http", URL: server.URL + "/fail", Async: boolPtr(async)},
+				{Event: "message.received", Type: "http", URL: server.URL + "/ok", Async: boolPtr(async)},
+			}, "sh", "-c", "")
+			hm.Emit(HookEvent{Event: HookEventMessageReceived})
+			seen := make(map[string]bool)
+			for range 2 {
+				select {
+				case path := <-delivered:
+					seen[path] = true
+				case <-time.After(time.Second):
+					t.Fatal("a failed lifecycle hook prevented another hook from running")
+				}
+			}
+			if !seen["/fail"] || !seen["/ok"] {
+				t.Fatalf("unexpected hook deliveries: %v", seen)
+			}
+		})
+	}
 }
 
 func TestEmit_CommandTimeout(t *testing.T) {

@@ -73,7 +73,11 @@ func TestOpenScheduledHistory_OptIn(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer db.Close()
+			defer func() {
+				if err := db.Close(); err != nil {
+					t.Errorf("close history database: %v", err)
+				}
+			}()
 			var kinds int
 			if err := db.QueryRow("SELECT count(DISTINCT kind) FROM job_versions").Scan(&kinds); err != nil || kinds != 2 {
 				t.Fatalf("recorded scheduler kinds = %d, err = %v", kinds, err)

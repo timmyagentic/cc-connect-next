@@ -154,9 +154,13 @@ func (hm *HookManager) Emit(event HookEvent) {
 			continue
 		}
 		if h.isAsync() {
-			go hm.execute(h, event)
+			go func() {
+				// Ordinary lifecycle hooks remain best-effort; execute logs failures.
+				_ = hm.execute(h, event)
+			}()
 		} else {
-			hm.execute(h, event)
+			// Only EmitSync propagates failures to a source transport.
+			_ = hm.execute(h, event)
 		}
 	}
 }

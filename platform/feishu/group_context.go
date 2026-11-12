@@ -327,7 +327,7 @@ func (p *Platform) contextMessage(item *larkim.Message, rctx replyContext, start
 		return core.ContextMessage{}, false, true
 	}
 	threadID := stringValue(item.ThreadId)
-	if (rctx.threadID == "" && threadID != "") || (rctx.threadID != "" && threadID != rctx.threadID && !(id == rctx.contextRootID && threadID == "")) {
+	if (rctx.threadID == "" && threadID != "") || (rctx.threadID != "" && threadID != rctx.threadID && (id != rctx.contextRootID || threadID != "")) {
 		return core.ContextMessage{}, false, false
 	}
 	ms, err := strconv.ParseInt(stringValue(item.CreateTime), 10, 64)
