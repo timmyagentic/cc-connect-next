@@ -5274,6 +5274,15 @@ type feishuPreviewHandle struct {
 	lastContent string
 }
 
+func (p *Platform) FinalReplyHookRoute(rctx, deliveredHandle any) (sourceID, answerID, chatID string) {
+	rc, ok := rctx.(replyContext)
+	handle, tracked := deliveredHandle.(*feishuPreviewHandle)
+	if !ok || !tracked || handle == nil || rc.groupID == "" || rc.groupID != handle.chatID {
+		return "", "", ""
+	}
+	return rc.messageID, handle.messageID, handle.chatID
+}
+
 // buildCardJSON builds a Feishu interactive card JSON string with a markdown element.
 // Uses schema 2.0 which supports code blocks, tables, and inline formatting.
 // Card font is inherently smaller than Post/Text — this is a Feishu platform limitation.

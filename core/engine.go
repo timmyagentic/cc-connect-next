@@ -7193,6 +7193,18 @@ func (completion *turnCompletion) handle() bool {
 	if completion.hasRichCard && !response.isSilent && completion.abortIfTerminalDeliveryCanceled() {
 		return false
 	}
+	if router, ok := completion.platform.(FinalReplyHookRouter); ok && completion.hasRichCard && !response.isSilent {
+		sourceID, answerID, chatID := router.FinalReplyHookRoute(completion.replyCtx, *completion.cardMessageID)
+		if sourceID != "" && answerID != "" && chatID != "" {
+			e.hooks.Emit(HookEvent{
+				Event: HookEventReplyCompleted, Platform: completion.platform.Name(), SessionKey: t.sessionKey,
+				Extra: map[string]any{
+					"source_id": sourceID, "answer_id": answerID, "chat_id": chatID,
+					"completed_at_ms": time.Now().UnixMilli(),
+				},
+			})
+		}
+	}
 	if completion.event.Error != nil {
 		e.recordFeedbackFailure(state, "agent_error", completion.event.Error)
 	} else {
