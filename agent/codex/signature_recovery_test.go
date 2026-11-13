@@ -46,8 +46,12 @@ func TestSignatureRecoveryHelperProcess(t *testing.T) {
 	if err != nil {
 		os.Exit(2)
 	}
-	fmt.Fprintln(log, "launch")
-	log.Close()
+	if _, err := fmt.Fprintln(log, "launch"); err != nil {
+		os.Exit(2)
+	}
+	if err := log.Close(); err != nil {
+		os.Exit(2)
+	}
 	out := json.NewEncoder(os.Stdout)
 	scan := bufio.NewScanner(os.Stdin)
 	for scan.Scan() {
@@ -70,6 +74,9 @@ func TestSignatureRecoveryHelperProcess(t *testing.T) {
 		switch req.Method {
 		case "thread/resume", "thread/read":
 			result = map[string]any{"thread": map[string]any{"id": "thread-a", "path": path}, "model": "original-model", "reasoningEffort": "high"}
+			if req.Params["includeTurns"] == true {
+				result = map[string]any{"thread": map[string]any{"id": "thread-a", "status": map[string]string{"type": "idle"}, "turns": []any{map[string]any{"id": "turn-a", "status": "failed", "items": []any{map[string]any{"type": "userMessage", "clientId": "original-client"}}}}}}
+			}
 		case "thread/backgroundTerminals/list":
 			result = map[string]any{"data": []any{}, "nextCursor": nil}
 		case "turn/start":
@@ -99,18 +106,28 @@ func TestSignatureRecoveryHelperProcess(t *testing.T) {
 			}
 			_ = os.WriteFile(filepath.Join(dir, "failed"), []byte("yes"), 0o600)
 		}
-		out.Encode(map[string]any{"method": "turn/started", "params": map[string]any{"threadId": "thread-a", "turn": map[string]any{"id": turnID}}})
+		if err := out.Encode(map[string]any{"method": "turn/started", "params": map[string]any{"threadId": "thread-a", "turn": map[string]any{"id": turnID}}}); err != nil {
+			os.Exit(4)
+		}
 		failed := first || os.Getenv("CC_SIGNATURE_REFAIL") == "1"
 		if failed {
-			out.Encode(map[string]any{"method": "error", "params": map[string]any{"threadId": "thread-a", "turnId": turnID, "willRetry": false, "error": map[string]any{"message": signatureTestError}}})
-			out.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-a", "turn": map[string]any{"id": turnID, "status": "failed", "error": map[string]any{"message": signatureTestError}}}})
+			if err := out.Encode(map[string]any{"method": "error", "params": map[string]any{"threadId": "thread-a", "turnId": turnID, "willRetry": false, "error": map[string]any{"message": signatureTestError}}}); err != nil {
+				os.Exit(4)
+			}
+			if err := out.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-a", "turn": map[string]any{"id": turnID, "status": "failed", "error": map[string]any{"message": signatureTestError}}}}); err != nil {
+				os.Exit(4)
+			}
 		} else {
 			data, _ := os.ReadFile(path)
 			if strings.Contains(string(data), "bad-cipher") || !strings.Contains(string(data), "Committed receipt 123") {
 				os.Exit(7)
 			}
-			out.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-a", "turnId": turnID, "item": map[string]any{"type": "agentMessage", "id": "answer", "text": "Recovered using receipt 123"}}})
-			out.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-a", "turn": map[string]any{"id": turnID, "status": "completed"}}})
+			if err := out.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-a", "turnId": turnID, "item": map[string]any{"type": "agentMessage", "id": "answer", "text": "Recovered using receipt 123"}}}); err != nil {
+				os.Exit(4)
+			}
+			if err := out.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-a", "turn": map[string]any{"id": turnID, "status": "completed"}}}); err != nil {
+				os.Exit(4)
+			}
 		}
 	}
 	if first && os.Getenv("CC_SIGNATURE_HOLD_CLOSE") == "1" {
@@ -141,7 +158,16 @@ func signatureProcessSession(t *testing.T, extra ...string) (*appServerSession, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("close test session: %v", err)
+		}
+	})
+	for _, option := range extra {
+		if option == "CC_SIGNATURE_CHECKPOINT=1" {
+			s.preparedRecovery = &codexTurnCheckpoint{Version: 1, ThreadID: "thread-a", ClientID: "original-client", InputHash: recoveryInputHash("Continue the investigation", nil, nil), Input: []map[string]any{{"type": "text", "text": "Continue the investigation"}}, WorkDir: s.workDir, Mode: normalizeMode(s.mode), Provider: s.providerName}
+		}
+	}
 	if err := s.SendWithTurnOptions("Continue the investigation", nil, nil, core.TurnOptions{Model: "task-model", ReasoningEffort: "high", ServiceTier: "fast"}); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +200,9 @@ func TestSignatureRecoveryRetriesSameThreadWithoutIntermediateError(t *testing.T
 				}
 				data, _ := os.ReadFile(filepath.Join(dir, "last-turn.json"))
 				var turn map[string]any
-				json.Unmarshal(data, &turn)
+				if err := json.Unmarshal(data, &turn); err != nil {
+					t.Fatal(err)
+				}
 				if turn["threadId"] != "thread-a" || turn["model"] != "task-model" || turn["serviceTier"] != "fast" {
 					t.Fatalf("retry lost options: %s", data)
 				}
@@ -219,9 +247,54 @@ func TestSignatureRecoveryStopDuringReloadPreventsRetry(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	s.Close()
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
 	launches, _ := os.ReadFile(filepath.Join(dir, "launches"))
 	if strings.Count(string(launches), "launch") != 1 {
 		t.Fatalf("cancelled recovery restarted: %s", launches)
+	}
+}
+
+func TestSignatureRecoverySilentRetryWaitsForDurableCheckpoint(t *testing.T) {
+	s, dir := signatureProcessSession(t, "CC_SIGNATURE_CHECKPOINT=1")
+	deadline := time.After(8 * time.Second)
+	acknowledged := false
+	for {
+		select {
+		case event := <-s.Events():
+			switch event.Type {
+			case core.EventError:
+				t.Fatal(event.Error)
+			case core.EventSessionRecovery:
+				if acknowledged || !event.RecoverySilent || event.SessionID != "thread-a" || event.RecoveryReady == nil {
+					t.Fatalf("unexpected retry event: %#v", event)
+				}
+				var cp codexTurnCheckpoint
+				if err := json.Unmarshal(event.RecoveryCheckpoint, &cp); err != nil || !cp.SignatureRecovered || cp.BoundaryID != "turn-a" || cp.ClientID == "original-client" {
+					t.Fatalf("invalid retry checkpoint: %+v %v", cp, err)
+				}
+				data, err := os.ReadFile(filepath.Join(dir, "last-turn.json"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var params map[string]any
+				if err := json.Unmarshal(data, &params); err != nil {
+					t.Fatal(err)
+				}
+				if params["clientUserMessageId"] != "original-client" {
+					t.Fatal("retry started before persistence acknowledgement")
+				}
+				event.RecoveryReady <- nil
+				acknowledged = true
+			case core.EventResult:
+				if !acknowledged {
+					t.Fatal("finished retry without durable checkpoint")
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("retry did not finish")
+		}
 	}
 }

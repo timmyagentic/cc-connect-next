@@ -191,8 +191,10 @@ type appServerSession struct {
 	pendingMu sync.Mutex
 	pending   map[int64]chan rpcResponseEnvelope
 
-	approvalsMu      sync.Mutex
-	pendingApprovals map[string]chan core.PermissionResult
+	approvalsMu         sync.Mutex
+	pendingApprovals    map[string]chan core.PermissionResult
+	approvalWorkers     sync.WaitGroup
+	transportGeneration atomic.Uint64
 
 	threadID atomic.Value
 	alive    atomic.Bool
@@ -216,12 +218,16 @@ type appServerSession struct {
 	titleMu             sync.Mutex
 	explicitTitleRev    uint64
 
-	runtimeMu       sync.RWMutex
-	turnOptions     *core.TurnOptions
-	defaultModel    *string // Project/native default, independent of a resumed thread's last turn.
-	defaultEffort   *string // Non-nil even when native effort is unset; resume must not adopt task effort.
-	defaultModelErr error   // Blocks explicit per-turn options, never the legacy Send path.
-	diagnostics     appServerDiagnostics
+	runtimeMu           sync.RWMutex
+	turnOptions         *core.TurnOptions
+	defaultModel        *string // Project/native default, independent of a resumed thread's last turn.
+	defaultEffort       *string // Non-nil even when native effort is unset; resume must not adopt task effort.
+	defaultModelErr     error   // Blocks explicit per-turn options, never the legacy Send path.
+	diagnostics         appServerDiagnostics
+	recoveryMu          sync.Mutex
+	preparedRecovery    *codexTurnCheckpoint
+	activeRecovery      *codexTurnCheckpoint
+	recoveryFreshThread bool
 }
 
 const (
@@ -413,6 +419,7 @@ func (s *appServerSession) connect() error {
 
 	slog.Info("codex app-server session started", "transport", "stdio", "pid", cmd.Process.Pid, "work_dir", s.workDir)
 
+	s.transportGeneration.Add(1)
 	s.wg.Add(3)
 	s.readDone = make(chan struct{})
 	s.transportDone = make(chan struct{})
@@ -497,6 +504,9 @@ func (s *appServerSession) ensureThread(resumeID string) error {
 	s.applyThreadRuntimeState(resp.Cwd, resp.Model, resp.ReasoningEffort)
 	s.applyThreadServiceTier(resp.ServiceTier)
 	s.threadID.Store(resp.Thread.ID)
+	s.recoveryMu.Lock()
+	s.recoveryFreshThread = true
+	s.recoveryMu.Unlock()
 	slog.Info("codex app-server thread started", "thread_id", resp.Thread.ID)
 	return nil
 }
@@ -628,32 +638,45 @@ func (s *appServerSession) send(prompt string, images []core.ImageAttachment, fi
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
+	s.recoveryMu.Lock()
+	prepared := s.preparedRecovery
+	s.preparedRecovery = nil
+	s.activeRecovery = prepared
+	s.recoveryMu.Unlock()
+	if prepared != nil {
+		if prepared.InputHash != recoveryInputHash(prompt, images, files) {
+			return fmt.Errorf("codex recovery input changed after checkpoint")
+		}
+		return s.startPreparedTurn(prepared.Input, options, prepared.ClientID)
+	}
+	input, err := s.prepareTurnInput(prompt, images, files)
+	if err != nil {
+		return err
+	}
+	return s.startPreparedTurn(input, options, "")
+}
 
+// Preparing attachment paths separately lets restart recovery persist exactly
+// the input submitted to Codex, including a fresh thread's initial preamble.
+func (s *appServerSession) prepareTurnInput(prompt string, images []core.ImageAttachment, files []core.FileAttachment) ([]map[string]any, error) {
 	if len(files) > 0 {
 		var err error
 		prompt, err = stageCodexFiles(s.workDir, prompt, files)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	prompt, imagePaths, err := s.stageImages(prompt, images)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	s.stateMu.Lock()
-	s.recoveryUsed = false
 	if !s.preambleSent {
 		prompt = prependCodexPromptPreamble(prompt, s.promptPreamble)
-		s.preambleSent = true
 	}
 	s.stateMu.Unlock()
-
-	threadID := s.CurrentSessionID()
-	if threadID == "" {
-		return fmt.Errorf("codex app-server thread id is empty")
-	}
 
 	input := make([]map[string]any, 0, 1+len(imagePaths))
 	input = append(input, map[string]any{
@@ -667,11 +690,30 @@ func (s *appServerSession) send(prompt string, images []core.ImageAttachment, fi
 			"path": path,
 		})
 	}
-
-	return s.startTurn(threadID, input, options)
+	return input, nil
 }
 
-func (s *appServerSession) startTurn(threadID string, input []map[string]any, options *core.TurnOptions) error {
+func (s *appServerSession) startPreparedTurn(input []map[string]any, options *core.TurnOptions, clientID string) error {
+	if !s.alive.Load() {
+		return fmt.Errorf("session is closed")
+	}
+	threadID := s.CurrentSessionID()
+	if threadID == "" {
+		return fmt.Errorf("codex app-server thread id is empty")
+	}
+	s.recoveryMu.Lock()
+	s.recoveryFreshThread = false
+	signatureRecovered := s.activeRecovery != nil && s.activeRecovery.SignatureRecovered
+	s.recoveryMu.Unlock()
+	s.stateMu.Lock()
+	s.preambleSent = true
+	s.recoveryUsed = signatureRecovered
+	s.stateMu.Unlock()
+
+	return s.startTurn(threadID, input, options, clientID)
+}
+
+func (s *appServerSession) startTurn(threadID string, input []map[string]any, options *core.TurnOptions, clientID string) error {
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
@@ -680,6 +722,9 @@ func (s *appServerSession) startTurn(threadID string, input []map[string]any, op
 	s.stateMu.Unlock()
 	s.storeActiveTurnOptions(options)
 	params := s.turnStartParams(threadID, input, options)
+	if clientID != "" {
+		params["clientUserMessageId"] = clientID
+	}
 	s.beginTurnDiagnostic(params)
 
 	var resp turnStartResponse
@@ -1033,7 +1078,7 @@ func (s *appServerSession) rejectUnownedServerRequest(rawID json.RawMessage, met
 }
 
 func (s *appServerSession) handleApprovalRequest(rawID json.RawMessage, method string, paramsRaw json.RawMessage) {
-	requestID := string(rawID)
+	requestID := s.approvalRequestID(rawID)
 	var params map[string]any
 	if err := json.Unmarshal(paramsRaw, &params); err != nil {
 		return
@@ -1070,7 +1115,9 @@ func (s *appServerSession) handleApprovalRequest(rawID json.RawMessage, method s
 		ToolInputRaw: params,
 	})
 
+	s.approvalWorkers.Add(1)
 	go func() {
+		defer s.approvalWorkers.Done()
 		timer := time.NewTimer(5 * time.Minute)
 		defer timer.Stop()
 		var result core.PermissionResult
@@ -1097,7 +1144,7 @@ func (s *appServerSession) handleApprovalRequest(rawID json.RawMessage, method s
 }
 
 func (s *appServerSession) handlePermissionsApproval(rawID json.RawMessage, paramsRaw json.RawMessage) {
-	requestID := string(rawID)
+	requestID := s.approvalRequestID(rawID)
 	var params map[string]any
 	if err := json.Unmarshal(paramsRaw, &params); err != nil {
 		return
@@ -1117,7 +1164,9 @@ func (s *appServerSession) handlePermissionsApproval(rawID json.RawMessage, para
 		ToolInputRaw: params,
 	})
 
+	s.approvalWorkers.Add(1)
 	go func() {
+		defer s.approvalWorkers.Done()
 		timer := time.NewTimer(5 * time.Minute)
 		defer timer.Stop()
 		var result core.PermissionResult
@@ -1151,7 +1200,7 @@ func (s *appServerSession) handlePermissionsApproval(rawID json.RawMessage, para
 }
 
 func (s *appServerSession) handleRequestUserInput(rawID json.RawMessage, paramsRaw json.RawMessage) {
-	requestID := string(rawID)
+	requestID := s.approvalRequestID(rawID)
 	var params appServerRequestUserInputParams
 	if err := json.Unmarshal(paramsRaw, &params); err != nil {
 		_ = s.writeJSON(map[string]any{
@@ -1186,7 +1235,9 @@ func (s *appServerSession) handleRequestUserInput(rawID json.RawMessage, paramsR
 		Questions:    questions,
 	})
 
+	s.approvalWorkers.Add(1)
 	go func() {
+		defer s.approvalWorkers.Done()
 		timer := time.NewTimer(5 * time.Minute)
 		defer timer.Stop()
 		var result core.PermissionResult
@@ -1328,6 +1379,35 @@ func appServerRequestUserInputAnswerValues(raw any) []string {
 		return appServerRequestUserInputAnswerValues(v.Answers)
 	default:
 		return nil
+	}
+}
+
+// approvalRequestID isolates UI actions from request IDs reused by a replacement
+// native process. Keep the initial transport's IDs backward compatible.
+func (s *appServerSession) approvalRequestID(rawID json.RawMessage) string {
+	generation := s.transportGeneration.Load()
+	if generation <= 1 {
+		return string(rawID)
+	}
+	return fmt.Sprintf("transport-%d:%s", generation, rawID)
+}
+
+// drainTransportApprovals must run after the old readers have exited and stdin
+// has been detached. No new approval worker can then start, and all old writes
+// must finish before a replacement transport can be attached.
+func (s *appServerSession) drainTransportApprovals() error {
+	s.rejectPendingApprovals(io.EOF)
+	done := make(chan struct{})
+	go func() { s.approvalWorkers.Wait(); close(done) }()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-s.contextDone():
+		return s.contextErr()
+	case <-timer.C:
+		return fmt.Errorf("old transport approval workers did not finish")
 	}
 }
 
@@ -2029,7 +2109,7 @@ func (s *appServerSession) emit(event core.Event) {
 		return
 	default:
 	}
-	if !terminal {
+	if !terminal && event.Type != core.EventSessionRecovery {
 		s.diagnostics.dropped++
 		s.diagnostics.mu.Unlock()
 		slog.Warn("codex appserver: event channel full, dropping event", "type", event.Type)

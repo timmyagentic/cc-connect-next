@@ -22,7 +22,7 @@ type signatureRecovery struct {
 	once     sync.Once
 }
 
-const signatureRecoveryContinuation = "Continue the unfinished user request using the existing conversation and recorded tool results. Completed tool calls already ran; use their recorded results and do not repeat completed actions. Preserve the user's existing instructions and authorization. Return the requested result without mentioning this internal retry."
+const signatureRecoveryContinuation = "Continue the unfinished user request using the existing conversation and recorded tool results. Completed tool calls already ran; use their recorded results and do not repeat completed actions. If a tool result is missing or unreadable, inspect its current state or receipt before repeating an external action; if its outcome cannot be reconciled, ask the user instead of assuming it failed. Preserve the user's existing instructions and authorization. Return the requested result without mentioning this internal retry."
 
 func isSignatureError(err error) bool {
 	if err == nil {
@@ -194,9 +194,32 @@ func (s *appServerSession) restoreSignatureHistory(r *signatureRecovery) error {
 	s.stateMu.Lock()
 	s.currentTurn = ""
 	s.stateMu.Unlock()
-	slog.Info("codex app-server retrying original thread after clearing encrypted history", "thread_id", r.threadID)
 	input := []map[string]any{{"type": "text", "text": signatureRecoveryContinuation, "text_elements": []any{}}}
-	if err := s.startTurn(r.threadID, input, &options); err != nil {
+	checkpoint, clientID, err := s.signatureTurnCheckpoint(r.threadID, r.turnID, input)
+	if err != nil {
+		return fmt.Errorf("prepare retry checkpoint: %w", err)
+	}
+	if len(checkpoint) > 0 {
+		ready := make(chan error, 1)
+		s.emit(core.Event{Type: core.EventSessionRecovery, SessionID: r.threadID, RecoveryCheckpoint: checkpoint, RecoveryReady: ready, RecoverySilent: true})
+		timer := time.NewTimer(appServerRequestTimeout)
+		defer timer.Stop()
+		select {
+		case <-s.contextDone():
+			return s.contextErr()
+		case err := <-ready:
+			if err != nil {
+				return fmt.Errorf("persist retry checkpoint: %w", err)
+			}
+		case <-timer.C:
+			return fmt.Errorf("retry checkpoint was not acknowledged")
+		}
+	}
+	if !s.signatureRecoveryActive(r) {
+		return s.contextErr()
+	}
+	slog.Info("codex app-server retrying original thread after clearing encrypted history", "thread_id", r.threadID)
+	if err := s.startTurn(r.threadID, input, &options, clientID); err != nil {
 		return fmt.Errorf("retry original conversation: %w", err)
 	}
 	s.stateMu.Lock()
@@ -239,7 +262,7 @@ func (s *appServerSession) stopSignatureTransport(r *signatureRecovery) error {
 	case <-s.contextDone():
 		return s.contextErr()
 	case <-done:
-		return nil
+		return s.drainTransportApprovals()
 	case <-timer.C:
 		return fmt.Errorf("native process did not finish before history cleanup")
 	}

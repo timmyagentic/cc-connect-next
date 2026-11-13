@@ -77,6 +77,8 @@ Availability states:
 
 Unsupported runtime features remain visible with a reason and fallback. For example, native video can report `unavailable` while documenting file-delivery fallback when `FileSender` exists.
 
+`interrupted_chat_recovery` declares ordinary-chat recovery as conditional on native submission identity, persistent sessions, and a durable rich answer. Session `interrupted_turn_recovery` and platform `persistent_answer_preview` expose the concrete optional interfaces. Recovery may continue the already authorized Agent turn and update its original answer; it grants no new permission and never replays scheduler jobs. See [ordinary chat recovery](usage.md#ordinary-chat-recovery-after-restart).
+
 ## Permission and side-effect contract
 
 Built-in command permissions follow the real Engine dispatch path. Static privileged commands require `projects.admin_from`; dynamic Shell registration through `/commands addexec`, `/cron addexec`, and `/timer addexec` is admin-only. The Agent-facing `cc-connect-next daemon restart` tool is also admin-only and conditionally available only with the exact HMAC turn credential derived from a private per-Agent session secret; its client supplies no project, session, user, or platform routing. The `local-agent` Feedback tool uses the same credential to resolve trusted identity, returns a complete Draft with zero network I/O, and requires a separate one-time token bound to the initiating user/session before the shared Relay path is called. Every registered custom command with an `Exec` body is also admin-only at invocation, while Prompt-backed custom commands remain member operations. Project-level `disabled_commands` is reflected immediately; user-role policy and the concrete caller identity remain invocation-time checks, so the Manifest keeps them conditional instead of guessing identity from a platform session-key format.
@@ -336,3 +338,9 @@ error is handled internally. Cleanup persistence or retry failure is reported
 normally, and user stop cancels recovery. This feature reads and writes local
 history and continues a model request under existing permissions. The contract
 exposes no history, credentials, local paths or configured values.
+
+The action declares filesystem reads and writes: it persists a unique private
+original backup before rewriting history. Encrypted-only context may be discarded
+from the retry; the backup remains available for manual recovery but is not injected
+into the retry. Backup failure prevents modification. Subsequent model actions are
+not guaranteed exactly once. The same-thread restart checkpoint remains in use.

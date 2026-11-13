@@ -181,13 +181,13 @@ func prepareAgentTurnOverrides(sessions *SessionManager, session *Session, backe
 	}, nil
 }
 
-func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, prompt string, images []ImageAttachment, files []FileAttachment, overrides agentTurnOverrides) error {
+func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, prompt string, images []ImageAttachment, files []FileAttachment, overrides agentTurnOverrides, recovery ...*chatRecovery) error {
 	e.syncModelDefault(agent)
 	profile := overrides.profile
 	model := strings.TrimSpace(overrides.model)
 	reasoningEffort := strings.ToLower(strings.TrimSpace(overrides.reasoningEffort))
 	serviceTier := overrides.serviceTier
-	sender, supportsOptions := session.(TurnOptionsSession)
+	_, supportsOptions := session.(TurnOptionsSession)
 	if model != "" && !supportsOptions {
 		return ErrModelOverrideUnsupported
 	}
@@ -207,7 +207,7 @@ func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, p
 	needsOptions := model != "" || reasoningEffort != "" || profile != "" ||
 		supportsOptions && (overrides.restoreDefaults || hasSpeed || e.answerProfilesConfigured() || hasModelDefault)
 	if !needsOptions {
-		return session.Send(prompt, images, files)
+		return e.sendRecoverableTurn(session, TurnRecoveryInput{Prompt: prompt, Images: images, Files: files}, recovery)
 	}
 	if identity, ok := session.(ModelProviderSession); ok {
 		if _, switchesProvider := agent.(ProviderSwitcher); switchesProvider && agent.Name()+":"+identity.ModelProviderName() != modelProvider(agent) {
@@ -265,7 +265,7 @@ func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, p
 	} else {
 		slog.Debug("restoring default turn options", "project", e.name)
 	}
-	return sender.SendWithTurnOptions(prompt, images, files, options)
+	return e.sendRecoverableTurn(session, TurnRecoveryInput{Prompt: prompt, Images: images, Files: files, Options: options, UseOptions: true}, recovery)
 }
 
 func (p AnswerProfiles) configured() bool {

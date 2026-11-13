@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/timmyagentic/cc-connect-next/core"
 )
@@ -103,39 +105,133 @@ func cleanSignatureHistory(ctx context.Context, path, threadID string) (int, err
 	if err != nil || !bytes.Equal(current, data) {
 		return 0, fmt.Errorf("recovery history changed before cleanup")
 	}
+	if err := preserveSignatureHistory(path, data); err != nil {
+		return 0, fmt.Errorf("preserve original recovery history: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	current, err = os.ReadFile(path)
+	if err != nil || !bytes.Equal(current, data) {
+		return 0, fmt.Errorf("recovery history changed before replacement")
+	}
 	if err := core.AtomicWriteFile(path, cleaned.Bytes(), info.Mode().Perm()); err != nil {
 		return 0, fmt.Errorf("save cleaned recovery history: %w", err)
 	}
 	return removed, nil
 }
 
+// clearEncryptedState visits response items, not arbitrary application JSON.
+// The same schema applies to compacted replacement_history entries.
 func clearEncryptedState(value any) (any, int) {
-	removed := 0
-	switch item := value.(type) {
-	case map[string]any:
-		if item["type"] == "encrypted_content" || item["type"] == "compaction" {
-			return nil, 1
-		}
-		for key, child := range item {
-			if key == "encrypted_content" || key == "encrypted_function_args" {
-				delete(item, key)
-				removed++
-				continue
-			}
-			cleaned, count := clearEncryptedState(child)
-			item[key] = cleaned
-			removed += count
-		}
-	case []any:
-		cleaned := make([]any, 0, len(item))
-		for _, child := range item {
-			retained, count := clearEncryptedState(child)
-			removed += count
-			if retained != nil || count == 0 {
-				cleaned = append(cleaned, retained)
+	if items, ok := value.([]any); ok {
+		result := make([]any, 0, len(items))
+		removed := 0
+		for _, item := range items {
+			clean, n := clearEncryptedState(item)
+			removed += n
+			if clean != nil || n == 0 {
+				result = append(result, clean)
 			}
 		}
-		value = cleaned
+		return result, removed
 	}
-	return value, removed
+	item, ok := value.(map[string]any)
+	if !ok {
+		return value, 0
+	}
+	removed := 0
+	remove := func(key string) {
+		if _, exists := item[key]; exists {
+			delete(item, key)
+			removed++
+		}
+	}
+	switch item["type"] {
+	case "encrypted_content":
+		return nil, 1
+	case "compaction":
+		if _, encrypted := item["encrypted_content"]; encrypted {
+			// Drop a purely opaque native block, never a readable summary.
+			remove("encrypted_content")
+			plain := false
+			for key := range item {
+				if key != "type" && key != "id" {
+					plain = true
+				}
+			}
+			if !plain {
+				return nil, removed
+			}
+		}
+	case "reasoning":
+		remove("encrypted_content")
+	case "function_call", "custom_tool_call":
+		remove("encrypted_function_args")
+	case "message", "agent_message":
+		item["content"], removed = clearEncryptedBlocks(item["content"])
+	case "function_call_output", "custom_tool_call_output":
+		item["output"], removed = clearEncryptedBlocks(item["output"])
+	}
+	return item, removed
+}
+
+// Only explicit native content blocks are encrypted. Strings, structured tool
+// receipts and their fields (including schemas) are opaque application data.
+func clearEncryptedBlocks(value any) (any, int) {
+	items, ok := value.([]any)
+	if !ok {
+		return value, 0
+	}
+	result := make([]any, 0, len(items))
+	removed := 0
+	for _, block := range items {
+		if item, ok := block.(map[string]any); ok && item["type"] == "encrypted_content" {
+			removed++
+			continue
+		}
+		result = append(result, block)
+	}
+	return result, removed
+}
+
+// Each original gets its own private non-JSONL file, never replacing an earlier
+// backup or resembling a native rollout. Both data and directory entry must be
+// durable before modifying the original history.
+func preserveSignatureHistory(path string, data []byte) (resultErr error) {
+	dir := filepath.Dir(path)
+	backup, err := os.CreateTemp(dir, ".signature-original-*.bak")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if resultErr != nil {
+			if err := os.Remove(backup.Name()); err != nil {
+				slog.Warn("codex: cleanup incomplete history backup", "error", err)
+			}
+		}
+	}()
+	if err = backup.Chmod(0o600); err == nil {
+		_, err = backup.Write(data)
+	}
+	if err == nil {
+		err = backup.Sync()
+	}
+	closeErr := backup.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	directory, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = directory.Sync()
+	closeErr = directory.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
 }

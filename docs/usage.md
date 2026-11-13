@@ -79,7 +79,12 @@ When the local Codex app-server returns `thinking_signature_invalid` or
 native process, and removes encrypted state from the original history file.
 Plain messages, readable tool results and the native thread ID are retained.
 It reloads that same thread and retries the unfinished request once, using the
-recorded tool results. Encrypted-only context is discarded.
+recorded tool results. Encrypted-only context may be discarded from this retry.
+Before rewriting the original, a unique private (0600), hidden non-JSONL backup is
+persisted beside it. The backup is retained for manual recovery but is not injected
+into this retry. Backup failure stops recovery without modifying the original.
+Historical tools are not replayed, but subsequent model actions are not guaranteed
+exactly once. The same-thread daemon-restart checkpoint is preserved silently.
 
 The first signature error and recovery steps are handled internally. Cleanup or
 retry failure is reported normally. `/stop` cancels recovery. A running background
@@ -1272,6 +1277,14 @@ Exporting `CC_SESSION_KEY` in a normal terminal does not activate this path.
 If that active-turn endpoint is unavailable (including an older running
 daemon), the command fails without restarting; use the chat `/restart` command
 instead. `--force` is never accepted from an Agent turn.
+
+### Ordinary chat recovery after restart
+
+Local Codex `app_server` sessions with Feishu rich Card 2.0 and persistent session storage checkpoint accepted ordinary chat work. After restart and platform readiness, the bridge resumes the original Agent conversation and answer card without another user message. Completed native turns only redeliver their recorded answer; interrupted turns continue from existing history and reconcile external operations with missing receipts. Completed work, explicit `/stop`, `/cancel`, `/new`, and recalled requests do not resume.
+
+Recovery requires native `clientUserMessageId` and full turn history, verified with Codex 0.167.0. Changed conversation identity, provider, workspace, permission mode, or unreadable native history fails explicitly instead of creating another task. Durable startup supplements stay FIFO; accepted direct steering remains in native history. Cron, Timer, Heartbeat, and shell commands keep their existing behavior.
+
+Unfinished inputs (including required attachments) and minimal recovery metadata live beside the session file in a `.recovery` directory (`0700`, files `0600`) and are removed on completion or cancellation. Metadata contains no platform credentials; input files are private conversation data. Answer-card identity and update sequence are saved before remote updates, so a lost response cannot roll the sequence back. Other backends, platforms, and legacy cards keep their existing restart behavior.
 
 ---
 

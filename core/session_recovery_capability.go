@@ -16,12 +16,12 @@ func automaticSessionRecoveryCapability(session AgentSession) RuntimeFeatureCapa
 		}
 	}
 	capability := feature("automatic_session_recovery",
-		"After a confirmed signature failure, clear encrypted history and retry once per user Send in the same native thread. Preserve plain conversation and recorded tool results. The first failure is handled internally.",
-		"确认签名错误后清理加密历史，在同一个原生会话内重试，每次用户 Send 最多一次。保留普通对话和已记录的工具结果，首次错误在内部处理。",
+		"After a confirmed signature failure, clear encrypted history and retry once per user Send in the same native thread. Preserve plain conversation and recorded tool results. The first failure is handled internally. Before rewriting the original history, persist a private original backup. Encrypted-only context may be discarded from the retry; the backup is retained but not injected. Subsequent model actions are not guaranteed exactly once.",
+		"确认签名错误后清理加密历史，在同一个原生会话内重试，每次用户 Send 最多一次。保留普通对话和已记录的工具结果，首次错误在内部处理。改写原历史前先持久化私有原始备份；仅密文上下文可能从本次重试丢弃，备份保留但不会注入重试，不保证模型后续动作恰好执行一次。",
 		availability, CapabilityFallback{Mode: "fail-closed", Description: "Report failure when safe history cleanup, persistence or retry fails. User stop cancels recovery.", DescriptionZH: "安全清理历史、持久化或重试失败时报告错误。用户停止会取消恢复。"})
 	readOnly := false
 	capability.ReadOnly = &readOnly
 	capability.Permission = CapabilityPermissionConditional
-	capability.SideEffects = expandSideEffects([]string{"filesystem_read", "persistent_state", "agent_turn", "network"})
+	capability.SideEffects = expandSideEffects([]string{"filesystem_read", "filesystem_write", "persistent_state", "agent_turn", "network"})
 	return capability
 }

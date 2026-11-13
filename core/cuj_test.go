@@ -3534,6 +3534,44 @@ func TestCUJ_B6_LateSessionIDSurvivesFailureRetryAndHistory(t *testing.T) {
 	})
 }
 
+func TestCUJ_B7_SignatureRecoveryPreservesQueuedInputAndHistory(t *testing.T) {
+	backend := &recoveringJourneySession{events: make(chan Event, 8), release: make(chan struct{}), closed: make(chan struct{})}
+	backend.thread.Store("original-thread")
+	p := &stubPlatformEngine{n: "plain"}
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	key := "test:signature-recovery"
+	backend.onReady = recoveryDiskBindingCheck(path, key)
+	e := NewEngine("test", &resultAgent{session: backend}, []Platform{p}, path, LangEnglish)
+	e.SetDisplayConfig(DisplayCfg{ThinkingMessages: true, Mode: "full"})
+	defer e.cleanupInteractiveState(key)
+	wait := func(label string, check func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if check() {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("%s: sent=%v", label, p.getSent())
+	}
+	e.ReceiveMessage(p, &Message{SessionKey: key, Content: "Finish the original request", ReplyCtx: "original"})
+	wait("recovery status", func() bool { return strings.Contains(strings.Join(p.getSent(), "\n"), "Restoring the conversation") })
+	e.ReceiveMessage(p, &Message{SessionKey: key, Content: "Then check the saved result", ReplyCtx: "follow-up"})
+	close(backend.release)
+	wait("both answers", func() bool { return backend.sends.Load() == 2 && !e.sessions.GetOrCreateActive(key).Busy() })
+	visible := strings.Join(p.getSent(), "\n")
+	if strings.Count(visible, "Recovered answer using the recorded result") != 1 || strings.Count(visible, "Queued follow-up completed") != 1 {
+		t.Fatalf("recovery duplicated or lost answers: %s", visible)
+	}
+	p.clearSent()
+	e.ReceiveMessage(p, &Message{SessionKey: key, Content: "/history", ReplyCtx: "history"})
+	wait("history", func() bool {
+		text := strings.Join(p.getSent(), "\n")
+		return strings.Contains(text, "Finish the original request") && strings.Contains(text, "Then check the saved result") && strings.Contains(text, "Recovered answer")
+	})
+}
+
 // CUJ-J3: complete work, continue its topic, then deliberately finish silently.
 // Original answers and private completion messages are distinct user surfaces.
 func TestCUJ_J3_PrivateCompletionAcrossAgentBackends(t *testing.T) {
