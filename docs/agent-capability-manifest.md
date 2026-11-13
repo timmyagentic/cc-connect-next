@@ -325,3 +325,19 @@ keep their existing checks. Remove private executable paths before sharing a
 report publicly.
 
 The `card_action_hooks` platform capability reports whether a named `card.action` handler is configured for the current project. It includes command/network side effects and conditional permission without exposing handler commands, URLs or submitted data. See [custom card hooks](card-hooks.md).
+
+### Automatic context recovery
+
+The session feature `automatic_session_recovery` probes
+`AutomaticSessionRecoverySupport` without reading history or contacting the backend.
+Local app-server support is conditional, not a promise that a particular turn can
+recover; remote and unsupported sessions remain explicitly unavailable, and unbound
+queries remain conditional. The feature is not read-only: it reads local history,
+creates and persists a replacement conversation, and continues a model request over
+the network under existing permissions. It attempts recovery once per user Send,
+only for confirmed encrypted-context rejection, and fails closed on incomplete
+history, unknown tool outcomes, unsupported RPCs or persistence failure. Accepted or
+uncertain steer input blocks recovery. User stop cancels it. Imported historical
+tool calls are not executed again, but subsequent model choices are not an
+exactly-once guarantee. No history, secret, local path or current configured value
+is exposed in this contract. See [usage](usage.md#automatic-encrypted-context-recovery).

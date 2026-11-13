@@ -72,6 +72,8 @@ period while preserving the old session for `/list` and `/switch`.
 
 The built-in default is `0`, which always continues the previous session.
 
+### Automatic encrypted-context recovery
+
 The local Codex app-server adapter attempts one automatic recovery per user turn
 when the upstream explicitly rejects encrypted context (`thinking_signature_invalid`
 or `invalid_encrypted_content`). It waits for the failed native turn to finish,
@@ -85,7 +87,11 @@ unknown, a background command is still running, or a compacted/agent message has
 context available only as encrypted content. A turn that accepted a native steer
 also uses the normal failure path because the extra input may still be unpersisted.
 Restoration does not re-execute historical tool calls. The model receives their
-results and an instruction to continue the unfinished work. `/stop` cancels recovery.
+results and an instruction to continue the unfinished work under existing permissions;
+this is not an exactly-once guarantee for subsequent model tool choices. `/stop` cancels recovery.
+The runtime Manifest exposes `automatic_session_recovery` as conditional for local
+app-server sessions and unavailable for unsupported sessions. It reports no history,
+paths, credentials, or current configuration values. There is no new configuration switch.
 This requires an app-server supporting `thread/read`, `thread/backgroundTerminals/list`
 and `thread/inject_items`; unsupported versions report the original failure.
 

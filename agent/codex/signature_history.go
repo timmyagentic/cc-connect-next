@@ -40,7 +40,7 @@ type recoveryRolloutTool struct {
 // loadSignatureRecoveryHistory reads the local rollout of a definitively
 // failed turn. The caller resolves the path inside the agent's sessions
 // directory and must not start recovery while that turn is still running.
-func loadSignatureRecoveryHistory(ctx context.Context, path, threadID, turnID string) ([]json.RawMessage, error) {
+func loadSignatureRecoveryHistory(ctx context.Context, path, threadID, turnID string) (result []json.RawMessage, resultErr error) {
 	if threadID == "" || turnID == "" {
 		return nil, errors.New("recovery requires an exact thread and turn")
 	}
@@ -55,7 +55,12 @@ func loadSignatureRecoveryHistory(ctx context.Context, path, threadID, turnID st
 	if err != nil {
 		return nil, errors.New("recovery rollout could not be opened")
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil && resultErr == nil {
+			result = nil
+			resultErr = errors.New("recovery rollout could not be closed")
+		}
+	}()
 
 	records := bufio.NewScanner(f)
 	records.Buffer(make([]byte, 64*1024), signatureHistoryMaxLine)

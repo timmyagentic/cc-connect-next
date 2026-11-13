@@ -166,6 +166,9 @@ func (s *appServerSession) restoreSignatureHistory(r *signatureRecovery) error {
 	if err := s.request("thread/backgroundTerminals/list", map[string]any{"threadId": r.threadID}, &terminals); err != nil {
 		return fmt.Errorf("check unfinished commands: %w", err)
 	}
+	if terminals.Data == nil {
+		return fmt.Errorf("background command state is unavailable")
+	}
 	if len(terminals.Data) != 0 || terminals.NextCursor != nil {
 		return fmt.Errorf("background commands still have an unresolved outcome")
 	}

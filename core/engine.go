@@ -5943,8 +5943,13 @@ func (t *turnProcessor) handleToolResult(event Event, p Platform, hasRichCard bo
 }
 
 func (t *turnProcessor) persistAgentSessionID(id string) error {
-	if id == "" || t.session.GetAgentSessionID() == id {
+	if id == "" {
 		return nil
+	}
+	// An in-memory binding can survive a failed save. Never acknowledge it
+	// as durable merely because the requested ID already matches.
+	if t.session.GetAgentSessionID() == id {
+		return t.sessions.SaveWithError()
 	}
 	wasEmpty := t.session.GetAgentSessionID() == ""
 	agent := t.engine.agent
@@ -6918,7 +6923,7 @@ func (t *turnProcessor) run() {
 			// event.SessionID may be empty in some cases, causing the agent_session_id
 			// to not be persisted to disk, breaking session resume on next startup.
 			if state != nil && state.agentSession != nil {
-				t.persistAgentSessionID(state.agentSession.CurrentSessionID())
+				_ = t.persistAgentSessionID(state.agentSession.CurrentSessionID()) // SaveWithError logs persistence failures; ordinary turns remain best effort.
 			}
 
 			// Mark clean exit so unsolicited reader preserves buffered events.
@@ -8026,7 +8031,7 @@ func (failure *turnFailure) handle() {
 	agentSession := state.agentSession
 	state.mu.Unlock()
 	if agentSession != nil {
-		t.persistAgentSessionID(agentSession.CurrentSessionID())
+		_ = t.persistAgentSessionID(agentSession.CurrentSessionID()) // SaveWithError logs persistence failures; ordinary turns remain best effort.
 	}
 	state.mu.Lock()
 	state.eventsNeedResync = true
@@ -8797,7 +8802,7 @@ func (presentation *turnPresentation) handleText() {
 			}
 		}
 	}
-	presentation.processor.persistAgentSessionID(event.SessionID)
+	_ = presentation.processor.persistAgentSessionID(event.SessionID) // SaveWithError logs persistence failures; ordinary turns remain best effort.
 }
 
 type turnDelivery struct {
@@ -18115,7 +18120,7 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 		return sessions.SaveWithError()
 	}
 
-	saveRelaySessionID(agentSession.CurrentSessionID(), false)
+	_ = saveRelaySessionID(agentSession.CurrentSessionID(), false) // SaveWithError logs persistence failures; ordinary turns remain best effort.
 
 	overrides := agentTurnOverrides{serviceTier: sessions.ServiceTier(session), restoreDefaults: session.TurnDefaultsRequired()}
 	if err := e.sendAgentTurnWithOverrides(agent, agentSession, message, nil, nil, overrides); err != nil {
@@ -18136,7 +18141,7 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 				textParts = append(textParts, event.Content)
 			}
 			if event.SessionID != "" {
-				saveRelaySessionID(event.SessionID, false)
+				_ = saveRelaySessionID(event.SessionID, false) // SaveWithError logs persistence failures; ordinary turns remain best effort.
 			}
 		case EventToolResult:
 			out := strings.TrimSpace(event.Content)
@@ -18153,7 +18158,7 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 		case EventResult:
 			// Use agentSession.CurrentSessionID() for the same reason as above.
 			if currentID := agentSession.CurrentSessionID(); currentID != "" {
-				saveRelaySessionID(currentID, true)
+				_ = saveRelaySessionID(currentID, true) // SaveWithError logs persistence failures; ordinary turns remain best effort.
 			}
 			resp := event.Content
 			if resp == "" && len(textParts) > 0 {

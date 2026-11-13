@@ -283,3 +283,29 @@ func TestSignatureRecoveryEventSurvivesFullQueue(t *testing.T) {
 		t.Fatal("lost recovery event")
 	}
 }
+
+func TestSignatureRecoveryRejectsMissingBackgroundCommandState(t *testing.T) {
+	s, path := newSignatureTestSession(t)
+	stdin := &steerFakeStdin{}
+	var starts atomic.Int32
+	stdin.respond = func(id int64, request map[string]any) {
+		method := request["method"].(string)
+		result := map[string]any{}
+		if method == "thread/read" {
+			result["thread"] = map[string]any{"id": "thread-a", "path": path}
+		}
+		if method == "thread/start" {
+			starts.Add(1)
+			result["thread"] = map[string]any{"id": "thread-new"}
+		}
+		raw, _ := json.Marshal(result)
+		s.handleResponse(rpcResponseEnvelope{ID: id, Result: raw})
+	}
+	s.stdin = stdin
+	signatureTestNotify(s, "turn/completed", "thread-a", "turn-b", "failed", signatureTestError)
+	awaitSignatureEvent(t, s)
+	event := awaitSignatureEvent(t, s)
+	if event.Type != core.EventError || !strings.Contains(event.Error.Error(), "background command state is unavailable") || starts.Load() != 0 {
+		t.Fatalf("missing command state did not stop before replacement: %#v, starts=%d", event, starts.Load())
+	}
+}

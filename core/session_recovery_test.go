@@ -119,3 +119,25 @@ func recoveryDiskBindingCheck(path, key string) func() error {
 		return nil
 	}
 }
+
+func TestSessionRecoveryMatchingBindingStillRequiresDurableSave(t *testing.T) {
+	e := newTestEngine()
+	session := e.sessions.GetOrCreateActive("test:recovery-repeat")
+	e.sessions.storePath = filepath.Join(t.TempDir(), "blocked", "sessions.json")
+	if err := AtomicWriteFile(filepath.Dir(e.sessions.storePath), []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	processor := &turnProcessor{engine: e, session: session, sessions: e.sessions}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := processor.persistAgentSessionID("replacement"); err == nil {
+			t.Fatalf("attempt %d acknowledged an unpersisted binding", attempt)
+		}
+	}
+	e.sessions.storePath = filepath.Join(t.TempDir(), "sessions.json")
+	if err := processor.persistAgentSessionID("replacement"); err != nil {
+		t.Fatal(err)
+	}
+	if got := NewSessionManager(e.sessions.storePath).GetOrCreateActive("test:recovery-repeat").GetAgentSessionID(); got != "replacement" {
+		t.Fatalf("saved binding=%q", got)
+	}
+}
