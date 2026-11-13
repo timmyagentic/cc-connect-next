@@ -3660,3 +3660,36 @@ func TestCUJ_I5_ImageGallerySendBackKeepsTopicAndBatching(t *testing.T) {
 		}
 	}
 }
+
+func TestCUJ_CronServiceTierIsolation(t *testing.T) {
+	for _, mode := range []string{"reuse", "new_per_run"} {
+		t.Run(mode, func(t *testing.T) {
+			base := &cronModelAgent{model: "project-model", nativeModel: "project-model", nativeEffort: "high"}
+			agent := &cronSpeedAgent{base}
+			engine, platform := newCronModelEngine(t, agent, "")
+			active := engine.sessions.GetOrCreateActive("test:user")
+			if err := engine.sessions.SetServiceTier(active, "standard"); err != nil {
+				t.Fatal(err)
+			}
+			waitCronModelChat(t, engine, platform, base, "ordinary-before", 1)
+			job := cronModelJob("fast-task", "task-model")
+			job.SessionMode = mode
+			job.ReasoningEffort = "medium"
+			job.ServiceTier = "fast"
+			if err := engine.ExecuteCronJob(job); err != nil {
+				t.Fatal(err)
+			}
+			waitCronModelChat(t, engine, platform, base, "ordinary-after", 3)
+			calls, _, setters := base.snapshot()
+			if calls[1].options.ServiceTier != "fast" || calls[1].options.ReasoningEffort != "medium" || calls[1].model != "task-model" {
+				t.Fatalf("task options: %+v", calls[1])
+			}
+			if calls[2].options.ServiceTier != "standard" || calls[2].model != "project-model" {
+				t.Fatalf("ordinary options: %+v", calls[2])
+			}
+			if engine.sessions.ServiceTier(active) != "standard" || setters != 0 {
+				t.Fatal("task changed conversation or project defaults")
+			}
+		})
+	}
+}

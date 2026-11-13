@@ -142,3 +142,13 @@ make build-noweb
 ## 🙏 来源与许可证
 
 cc-connect-next 是从 [CC Connect](https://github.com/chenhg5/cc-connect) v1.4.1 派生的独立项目，保留完整 Git 历史，通过[逐项审计](docs/upstream-v1.5.0-beta.3-audit.md)引入上游改动。感谢 [@chenhg5](https://github.com/chenhg5) 与所有上游贡献者。归属声明见 [NOTICE](NOTICE)，MIT 许可条款见 [LICENSE](LICENSE)。
+
+### Per-task Codex speed
+
+Prompt cron jobs support `--service-tier` on creation and `cron edit <id> service_tier priority`.
+The optional `service_tier` field is applied to that task turn and validated against the model
+catalog. An empty value inherits the existing project/session setting. Shell jobs cannot use
+this field. For example, `cc-connect-next cron edit <id> reasoning_effort medium` and
+`cc-connect-next cron edit <id> service_tier priority` configure reasoning and speed independently.
+
+Use the model catalog's tier ID. For Luna the display name Fast maps to `priority`.
