@@ -180,6 +180,8 @@ type MsgKey string
 
 const (
 	MsgFolderUnsupported       MsgKey = "folder_unsupported"
+	MsgCardHookAccepted        MsgKey = "card_hook_accepted"
+	MsgCardHookUnavailable     MsgKey = "card_hook_unavailable"
 	MsgImageUnavailable        MsgKey = "image_unavailable"
 	MsgImageDeliveryIncomplete MsgKey = "image_delivery_incomplete"
 	MsgFileUnavailable         MsgKey = "file_unavailable"
@@ -1120,6 +1122,20 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "[暫不支援資料夾附件，請傳送個別檔案。]",
 		LangJapanese:           "[フォルダー添付は未対応です。個別のファイルを送信してください。]",
 		LangSpanish:            "[No se admiten carpetas adjuntas. Envía archivos individuales.]",
+	},
+	MsgCardHookAccepted: {
+		LangEnglish:            "Action received. Processing.",
+		LangChinese:            "已收到操作，正在处理。",
+		LangTraditionalChinese: "已收到操作，正在處理。",
+		LangJapanese:           "操作を受け付けました。処理中です。",
+		LangSpanish:            "Acción recibida. Procesando.",
+	},
+	MsgCardHookUnavailable: {
+		LangEnglish:            "This action could not be accepted. Please contact the operator.",
+		LangChinese:            "暂时无法受理此操作，请联系维护者。",
+		LangTraditionalChinese: "暫時無法受理此操作，請聯絡維護者。",
+		LangJapanese:           "この操作を受け付けられませんでした。管理者に連絡してください。",
+		LangSpanish:            "No se pudo aceptar esta acción. Contacta con el administrador.",
 	},
 	MsgImageUnavailable: {
 		LangEnglish:            "[Image unavailable: download failed or resource missing. Please resend.]",

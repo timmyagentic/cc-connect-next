@@ -1120,6 +1120,13 @@ func (e *Engine) reapIdleWorkspaces() {
 func (e *Engine) SetHooks(hm *HookManager) {
 	e.hooks = hm
 	for _, platform := range e.platforms {
+		if source, ok := platform.(CardActionHookSource); ok {
+			var handler func(string, HookEvent) error
+			if hm != nil {
+				handler = hm.DispatchNamed
+			}
+			source.SetCardActionHandler(handler)
+		}
 		if source, ok := platform.(MessageObservationSource); ok {
 			var observer func(HookEvent) error
 			if hm.handlesEvent(HookEventMessageObserved) {

@@ -142,7 +142,7 @@ Related configuration: `queue.max_depth`, `queue.busy_message_mode`, `projects.b
 
 Select a shell and run command or HTTP hooks on message, session, cron, permission, and error events.
 
-Related configuration: `shell`, `shell_profile`, `hooks.event`, `hooks.type`, `hooks.command`, `hooks.url`
+Related configuration: `shell`, `shell_profile`, `hooks.event`, `hooks.type`, `hooks.name`, `hooks.project`, `hooks.input`, `hooks.command`, `hooks.url`
 
 ## Option reference
 
@@ -911,7 +911,7 @@ enabled = true`
 
 ### `hooks.async`
 
-Run the hook asynchronously instead of blocking message handling. message.observed always waits for matching hooks before transport acknowledgement, regardless of this option.
+Run the hook asynchronously instead of blocking message handling. message.observed always waits for matching hooks before transport acknowledgement. Named card.action hooks always run asynchronously to release the platform callback promptly.
 
 - Source: `toml`
 - Placement: `[[hooks]]`
@@ -941,7 +941,7 @@ Set the shell command executed by a command hook.
 
 ### `hooks.event`
 
-Choose the event that triggers this hook. message.observed receives human mention routing metadata before Agent reply filtering. reply.completed reports routing IDs after successful non-silent group rich-mode reply delivery on supported platforms; it honors hooks.async and does not retry failed hooks.
+Choose the event that triggers this hook. message.observed receives human mention routing metadata before Agent reply filtering. reply.completed reports routing IDs after successful non-silent group rich-mode reply delivery on supported platforms; it honors hooks.async and does not retry failed hooks. card.action is routed only to its named project handler; wildcard subscriptions receive no card input.
 
 - Source: `toml`
 - Placement: `[[hooks]]`
@@ -952,6 +952,52 @@ Choose the event that triggers this hook. message.observed receives human mentio
 - Default source: `none`
 - Takes effect: `restart`
 - Example: `event = "value"`
+
+### `hooks.input`
+
+Choose command-hook input. env supplies CC_HOOK_* variables with empty stdin. json sends the complete event as JSON stdin and keeps only routing metadata in CC_HOOK_* variables. card.action command handlers require json. HTTP hooks always receive a JSON body and omit this option.
+
+- Source: `toml`
+- Placement: `[[hooks]]`
+- Scope: `global`
+- Type: `string`
+- Requirement: `conditional`
+- Default: `env for command; unset for HTTP`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Required when: `hooks.event = card.action and hooks.type = command`
+- Allowed values: `env`, `json`
+- Example: `input = "json"`
+
+### `hooks.name`
+
+Register a case-sensitive handler name using 1-64 letters, digits, dots, underscores or hyphens, starting with a letter. Names are unique within a project; card.action requires a name.
+
+- Source: `toml`
+- Placement: `[[hooks]]`
+- Scope: `global`
+- Type: `string`
+- Requirement: `conditional`
+- Default: `unset`
+- Default source: `runtime`
+- Takes effect: `restart`
+- Required when: `hooks.event = card.action`
+- Example: `name = "reply_confirmation"`
+
+### `hooks.project`
+
+Restrict this hook to one configured project. Required for card.action; omitted lifecycle hooks run in every project.
+
+- Source: `toml`
+- Placement: `[[hooks]]`
+- Scope: `global`
+- Type: `string`
+- Requirement: `conditional`
+- Default: `all projects`
+- Default source: `builtin`
+- Takes effect: `restart`
+- Required when: `hooks.event = card.action`
+- Example: `project = "my-project"`
 
 ### `hooks.timeout`
 

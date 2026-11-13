@@ -530,6 +530,24 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	notification.SideEffects = expandSideEffects([]string{"persistent_state", "network", "external_message"})
 	result.Capabilities = append(result.Capabilities, notification)
 
+	_, acceptsCardHooks := platform.(CardActionHookSource)
+	cardHookAvailability := platformAvailability(acceptsCardHooks)
+	if acceptsCardHooks && state == CapabilityAvailable {
+		if !e.hooks.handlesEvent(HookEventCardAction) {
+			cardHookAvailability = unavailable("No named card.action hook is configured for this project.", "当前项目未配置命名 card.action Hook。")
+		} else {
+			cardHookAvailability = conditional("Authenticated card buttons select a configured named handler in this project. Accepted handlers run asynchronously with submitted JSON data.", "通过身份与归属校验的卡片按钮选择当前项目已配置的命名处理器，以 JSON 数据异步执行。")
+		}
+	}
+	cardHook := feature("card_action_hooks",
+		"Dispatch explicit hook:<name> card actions with operator, route, opaque data and final form values to a locally configured command or HTTP handler.",
+		"将显式 hook:<name> 卡片动作及操作者、路由、业务数据和最终表单值交给本机配置的命令或 HTTP 处理器。",
+		cardHookAvailability, CapabilityFallback{Mode: "reject", Description: "Reject unknown or unavailable named handlers. Operation results and idempotency belong to the handler.", DescriptionZH: "拒绝未知或不可用的命名处理器。操作结果与幂等由处理器负责。"})
+	cardHook.Permission = CapabilityPermissionConditional
+	cardHook.ReadOnly = &readOnly
+	cardHook.SideEffects = expandSideEffects([]string{"shell_execution", "network"})
+	result.Capabilities = append(result.Capabilities, cardHook)
+
 	_, canObserve := platform.(MessageObservationSource)
 	observationAvailability := platformAvailability(canObserve)
 	if canObserve && state == CapabilityAvailable {

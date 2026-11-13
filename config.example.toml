@@ -484,12 +484,14 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 #   message.sent       — agent reply sent / Agent 回复发送完成
 #   reply.completed    — delivered group rich-mode reply IDs (Feishu/Lark)
 #                      — 群聊 rich 模式最终答复送达 ID；尽力交付，Hook 失败不重投
+#   card.action        — an explicitly named card handler receives an admitted action
+#                      — 已校验的卡片动作投递给明确注册的命名处理器
 #   session.started    — agent session spawned / Agent 会话启动
 #   session.ended      — agent session stopped / Agent 会话结束
 #   cron.triggered     — cron job fires / 定时任务触发
 #   permission.requested — agent asks for permission / Agent 请求权限
 #   error              — an error occurs / 发生错误
-#   *                  — match all events / 匹配所有事件
+#   *                  — match lifecycle events; excludes card.action / 匹配生命周期事件，排除 card.action
 #
 # Handler types / 处理器类型:
 #   command — run a shell command; event context in CC_HOOK_* env vars
@@ -503,6 +505,17 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 # command = "echo $CC_HOOK_USER_NAME >> /tmp/cc-messages.log"
 # async = true                    # default true; set false to block until done
 # timeout = 10                    # seconds; default 10s for command, 5s for http
+#
+# Named card actions use the bound project and JSON input. See docs/card-hooks.md.
+# 命名卡片动作使用绑定项目和 JSON 输入，详见 docs/card-hooks.md。
+# [[hooks]]
+# name = "reply_confirmation"
+# project = "my-project"         # must match an existing projects.name / 必须匹配现有项目名
+# event = "card.action"
+# type = "command"
+# command = "python3 /path/to/handle_reply.py"
+# input = "json"                 # full event on stdin / stdin 接收完整事件
+# timeout = 10                   # always asynchronous for card.action / 卡片动作始终异步
 #
 # Reply completion metadata only; see docs/reply-completed.md.
 # 仅答复送达元数据，详见 docs/reply-completed.md。

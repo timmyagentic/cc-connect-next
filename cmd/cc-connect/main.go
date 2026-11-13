@@ -711,6 +711,9 @@ func main() {
 			coreHooks := make([]core.HookConfig, len(cfg.Hooks))
 			for i, h := range cfg.Hooks {
 				coreHooks[i] = core.HookConfig{
+					Name:    h.Name,
+					Project: h.Project,
+					Input:   h.Input,
 					Event:   h.Event,
 					Type:    h.Type,
 					Command: h.Command,

@@ -363,6 +363,8 @@ func TestWriteConfigCapabilities_CommonNaturalLanguageIntentsReachExactOptions(t
 		{query: "管理后台端口", path: "management.port"},
 		{query: "项目空闲后重置会话", path: "projects.reset_on_idle_mins"},
 		{query: "启动后执行 hook", path: "hooks.event"},
+		{query: "确认后执行自定义操作", path: "hooks.name"},
+		{query: "Hook JSON 输入", path: "hooks.input"},
 		{query: "微信发送次数限制", path: "projects.platforms.options.burst_limit"},
 		{query: "日志文件最大多大", path: "CC_LOG_MAX_SIZE"},
 		{query: "daemon 安装时不要保存环境密钥", path: "CC_DAEMON_NO_CAPTURE_SECRETS"},

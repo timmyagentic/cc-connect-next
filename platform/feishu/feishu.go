@@ -363,6 +363,7 @@ type Platform struct {
 	messageObserver      func(core.HookEvent) error
 	lifecycleHandler     core.PlatformLifecycleHandler
 	cardNavHandler       core.CardNavigationHandler
+	cardHookHandler      func(string, core.HookEvent) error
 	cancel               context.CancelFunc
 	dedup                *core.MessageDedup
 	botOpenID            string
@@ -1207,6 +1208,7 @@ func (p *Platform) isBoundDirectUserCardAction(values map[string]any, userID str
 
 // onCardAction handles card.action.trigger callbacks via the official SDK event dispatcher.
 // form:receipt returns a private form submission on its originating card.
+// Card actions also support hook:<name> for explicitly configured local handlers.
 // Three command prefixes are supported:
 //   - nav:/xxx   — render a card page and update the original card in-place
 //   - act:/xxx   — execute an action, then render and update the card in-place
@@ -1252,6 +1254,9 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 	}
 
 	actionVal, _ := values["action"].(string)
+	if strings.HasPrefix(actionVal, "hook:") {
+		return p.dispatchCardHook(event.Event.Action, userID, chatID, messageID), nil
+	}
 	if actionVal == "form:receipt" {
 		return p.formReceipt(event.Event.Action, userID, chatID, messageID), nil
 	}
