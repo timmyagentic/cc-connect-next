@@ -26,9 +26,17 @@ func (p *Platform) dispatchCardHook(action *callback.CallBackAction, userID, cha
 	project := p.boundProjectName()
 	_, validSchema := callbackCardSchema(values)
 	name := strings.TrimPrefix(cardActionString(values, "action"), "hook:")
+	actionName := action.Name
+	if declared, exists := values["hook_action"]; exists {
+		var valid bool
+		actionName, valid = declared.(string)
+		if !valid {
+			return cardHookToast(core.MsgCardHookUnavailable, "error")
+		}
+	}
 	if !p.useInteractiveCard || project == "" || values[cardActionProjectKey] != project ||
 		!validSchema || !receiptChatID.MatchString(chatID) || !receiptMessageID.MatchString(messageID) ||
-		action.Tag != "button" || !core.ValidHookName(action.Name) || !core.ValidHookName(name) {
+		action.Tag != "button" || !core.ValidHookName(actionName) || !core.ValidHookName(name) {
 		return cardHookToast(core.MsgCardHookUnavailable, "error")
 	}
 	data, validData := values["data"].(map[string]any)
@@ -43,7 +51,7 @@ func (p *Platform) dispatchCardHook(action *callback.CallBackAction, userID, cha
 		formValues = map[string]any{}
 	}
 	extra := map[string]any{
-		"hook": name, "action": action.Name, "message_id": messageID, "chat_id": chatID,
+		"hook": name, "action": actionName, "message_id": messageID, "chat_id": chatID,
 		"data": data, "form_values": formValues,
 	}
 	payload, err := json.Marshal(extra)

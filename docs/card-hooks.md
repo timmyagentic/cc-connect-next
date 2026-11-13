@@ -28,6 +28,7 @@ Place this value on a Feishu button with `name = "confirmed"`. Use the actual pr
 ```json
 {
   "action": "hook:reply_confirmation",
+  "hook_action": "confirmed",
   "cc_project": "example",
   "cc_direct_user": "ou_owner",
   "cc_card_schema": "2.0",
@@ -38,7 +39,7 @@ Place this value on a Feishu button with `name = "confirmed"`. Use the actual pr
 }
 ```
 
-The button name becomes the action name. Ordinary buttons and form-submit buttons use the same route. A form-submit button must use Feishu's form-submit behavior so the callback includes its final form values. Each action may supply its own opaque `data` object. Group cards may omit `cc_direct_user` and use the existing sender/chat admission rules. Private cards outside a group allowlist require the explicit user binding.
+The explicit `hook_action` value becomes the action name. Feishu omits the component name from ordinary button callbacks, so those buttons require `hook_action`. Form-submit buttons may use their component name when `hook_action` is omitted. Each component name within a card must be unique. Ordinary buttons and form-submit buttons use the same route. A form-submit button must use Feishu's form-submit behavior so the callback includes its final form values. Each action may supply its own opaque `data` object. Group cards may omit `cc_direct_user` and use the existing sender/chat admission rules. Private cards outside a group allowlist require the explicit user binding.
 
 Only explicit named handlers receive these actions. Lifecycle wildcard hooks receive their existing lifecycle events. A missing or invalid handler produces an error toast. Accepted dispatch produces a localized processing toast. The handler owns subsequent business results and card updates.
 

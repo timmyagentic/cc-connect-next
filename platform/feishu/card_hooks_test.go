@@ -67,6 +67,9 @@ func TestCardHookRoutesNamedHandlerWithSubmittedValues(t *testing.T) {
 		t.Fatal("named hook did not receive callback")
 	}
 	event.Event.Action.FormValue = nil
+	// Feishu omits component names for buttons outside form containers.
+	event.Event.Action.Name = ""
+	event.Event.Action.Value["hook_action"] = "confirmed_reaction"
 	event.Event.Action.Value["data"] = map[string]any{"request_id": "opaque-request", "choice": "reaction"}
 	if _, err := p.onCardAction(event); err != nil {
 		t.Fatal(err)
@@ -74,7 +77,7 @@ func TestCardHookRoutesNamedHandlerWithSubmittedValues(t *testing.T) {
 	select {
 	case got := <-received:
 		form, ok := got.Extra["form_values"].(map[string]any)
-		if !ok || len(form) != 0 {
+		if !ok || len(form) != 0 || got.Extra["action"] != "confirmed_reaction" {
 			t.Fatalf("ordinary button form values = %#v, want empty object", got.Extra["form_values"])
 		}
 	case <-time.After(time.Second):
@@ -95,6 +98,8 @@ func TestCardHookRejectsInvalidOrUnboundCallbacks(t *testing.T) {
 		{"bad chat", func(e *callback.CardActionTriggerEvent) { e.Event.Context.OpenChatID = "" }},
 		{"bad message", func(e *callback.CardActionTriggerEvent) { e.Event.Context.OpenMessageID = "bad" }},
 		{"bad schema", func(e *callback.CardActionTriggerEvent) { e.Event.Action.Value["cc_card_schema"] = "unknown" }},
+		{"invalid declared action", func(e *callback.CardActionTriggerEvent) { e.Event.Action.Value["hook_action"] = "bad name" }},
+		{"nonstring declared action", func(e *callback.CardActionTriggerEvent) { e.Event.Action.Value["hook_action"] = 5 }},
 		{"missing name", func(e *callback.CardActionTriggerEvent) { e.Event.Action.Name = "" }},
 		{"input event", func(e *callback.CardActionTriggerEvent) { e.Event.Action.Tag = "input" }},
 		{"invalid hook name", func(e *callback.CardActionTriggerEvent) { e.Event.Action.Value["action"] = "hook:foo; echo bar" }},
