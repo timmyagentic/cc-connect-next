@@ -141,3 +141,31 @@ func TestSessionRecoveryMatchingBindingStillRequiresDurableSave(t *testing.T) {
 		t.Fatalf("saved binding=%q", got)
 	}
 }
+
+func TestProcessInteractiveEvents_SilentRetryPersistsWithoutRecoveryNotice(t *testing.T) {
+	p := &stubCompactProgressPlatform{stubPlatformEngine: stubPlatformEngine{n: "test"}, style: "card", supportPayload: true}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
+	e.SetDisplayConfig(DisplayCfg{CardMode: "rich", Mode: "full"})
+	key := "test:silent-retry"
+	session := e.sessions.GetOrCreateActive(key)
+	session.SetAgentSessionID("original", "stub")
+	backend := newControllableSession("original")
+	state := &interactiveState{agentSession: backend, platform: p, replyCtx: "original-reply"}
+	ready := make(chan error, 1)
+	backend.events <- Event{Type: EventSessionRecovery, SessionID: "original", RecoveryReady: ready, RecoverySilent: true}
+	backend.events <- Event{Type: EventResult, Content: "Finished", Done: true}
+	e.processInteractiveEvents(state, session, e.sessions, key, "original-message", time.Now(), nil, nil, state.replyCtx)
+	if err := <-ready; err != nil {
+		t.Fatal(err)
+	}
+	if got := NewSessionManager(e.sessions.storePath).GetOrCreateActive(key).GetAgentSessionID(); got != "original" {
+		t.Fatalf("binding=%s", got)
+	}
+	rendered := strings.Join(p.getPreviewEdits(), "\n")
+	if strings.Contains(rendered, "Restoring the conversation") || strings.Contains(rendered, "Conversation restored") {
+		t.Fatalf("internal checkpoint became a visible notice: %s", rendered)
+	}
+	if !strings.Contains(rendered, "Finished") {
+		t.Fatalf("final reply lost: %s", rendered)
+	}
+}

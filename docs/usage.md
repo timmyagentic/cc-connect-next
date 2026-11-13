@@ -74,26 +74,22 @@ The built-in default is `0`, which always continues the previous session.
 
 ### Automatic encrypted-context recovery
 
-The local Codex app-server adapter attempts one automatic recovery per user turn
-when the upstream explicitly rejects encrypted context (`thinking_signature_invalid`
-or `invalid_encrypted_content`). It waits for the failed native turn to finish,
-creates a fresh native thread, and imports the readable conversation and completed
-tool calls with their recorded results. The original thread remains available in
-history. The chat, pending-message queue, and reply card continue through recovery.
+When the local Codex app-server returns `thinking_signature_invalid` or
+`invalid_encrypted_content`, the adapter waits for that turn to end, closes its
+native process, and removes encrypted state from the original history file.
+Plain messages, readable tool results and the native thread ID are retained.
+It reloads that same thread and retries the unfinished request once, using the
+recorded tool results. Encrypted-only context may be discarded from this retry.
+Before rewriting the original, a unique private (0600), hidden non-JSONL backup is
+persisted beside it. The backup is retained for manual recovery but is not injected
+into this retry. Backup failure stops recovery without modifying the original.
+Historical tools are not replayed, but subsequent model actions are not guaranteed
+exactly once. The same-thread daemon-restart checkpoint is preserved silently.
 
-The replacement binding must be saved before another model request starts. Recovery
-stops with the original error when the history is incomplete, a tool outcome is
-unknown, a background command is still running, or a compacted/agent message has
-context available only as encrypted content. A turn that accepted a native steer
-also uses the normal failure path because the extra input may still be unpersisted.
-Restoration does not re-execute historical tool calls. The model receives their
-results and an instruction to continue the unfinished work under existing permissions;
-this is not an exactly-once guarantee for subsequent model tool choices. `/stop` cancels recovery.
-The runtime Manifest exposes `automatic_session_recovery` as conditional for local
-app-server sessions and unavailable for unsupported sessions. It reports no history,
-paths, credentials, or current configuration values. There is no new configuration switch.
-This requires an app-server supporting `thread/read`, `thread/backgroundTerminals/list`
-and `thread/inject_items`; unsupported versions report the original failure.
+The first signature error and recovery steps are handled internally. Cleanup or
+retry failure is reported normally. `/stop` cancels recovery. A running background
+command prevents cleanup until its outcome is known. The runtime Manifest exposes
+`automatic_session_recovery` for local app-server sessions.
 
 ### Model switch preserves history
 
@@ -1699,10 +1695,3 @@ tunneled through it.
 
 Full reference: [docs/telegram.md](./telegram.md#21-optional-use-a-proxy).
 This option was added in PR #389.
-
-When encrypted-context recovery replaces the native thread, its new submission
-checkpoint is persisted before adopting the new session binding and continuing.
-A restart between those writes repairs only the exact recorded predecessor binding;
-it then resumes the replacement without replaying the original request. An unrelated
-identity mismatch fails closed: the stale checkpoint group is removed and the user
-is asked to confirm unfinished work after platform readiness.

@@ -330,16 +330,17 @@ The `card_action_hooks` platform capability reports whether a named `card.action
 
 ### Automatic context recovery
 
-The session feature `automatic_session_recovery` probes
-`AutomaticSessionRecoverySupport` without reading history or contacting the backend.
-Local app-server support is conditional, not a promise that a particular turn can
-recover; remote and unsupported sessions remain explicitly unavailable, and unbound
-queries remain conditional. The feature is not read-only: it reads local history,
-creates and persists a replacement conversation, and continues a model request over
-the network under existing permissions. It attempts recovery once per user Send,
-only for confirmed encrypted-context rejection, and fails closed on incomplete
-history, unknown tool outcomes, unsupported RPCs or persistence failure. Accepted or
-uncertain steer input blocks recovery. User stop cancels it. Imported historical
-tool calls are not executed again, but subsequent model choices are not an
-exactly-once guarantee. No history, secret, local path or current configured value
-is exposed in this contract. See [usage](usage.md#automatic-encrypted-context-recovery).
+`automatic_session_recovery` queries `AutomaticSessionRecoverySupport` without
+reading history or contacting the backend. Local app-server support is conditional.
+Recovery clears encrypted state in the original history and retries once per user
+Send using the same native thread and recorded tool results. The initial signature
+error is handled internally. Cleanup persistence or retry failure is reported
+normally, and user stop cancels recovery. This feature reads and writes local
+history and continues a model request under existing permissions. The contract
+exposes no history, credentials, local paths or configured values.
+
+The action declares filesystem reads and writes: it persists a unique private
+original backup before rewriting history. Encrypted-only context may be discarded
+from the retry; the backup remains available for manual recovery but is not injected
+into the retry. Backup failure prevents modification. Subsequent model actions are
+not guaranteed exactly once. The same-thread restart checkpoint remains in use.

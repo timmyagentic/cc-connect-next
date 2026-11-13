@@ -232,10 +232,9 @@ func (s *appServerSession) startRecoveredTurn(cp codexTurnCheckpoint, input core
 	return s.startPreparedTurn(cp.Input, &options, cp.ClientID)
 }
 
-// A signature repair changes the native thread while keeping the same logical
-// user task. Hand the replacement checkpoint to the engine in the existing
-// binding event; its acknowledgement must cover both identities before start.
-func (s *appServerSession) signatureTurnCheckpoint(previousID string, input []map[string]any) (json.RawMessage, string, error) {
+// A same-thread signature retry must durably record its new submission and
+// consumed retry budget before any model work, including across a daemon restart.
+func (s *appServerSession) signatureTurnCheckpoint(previousID, failedTurnID string, input []map[string]any) (json.RawMessage, string, error) {
 	s.recoveryMu.Lock()
 	active := s.activeRecovery
 	var cp codexTurnCheckpoint
@@ -247,19 +246,16 @@ func (s *appServerSession) signatureTurnCheckpoint(previousID string, input []ma
 		return nil, "", nil
 	}
 	if cp.ThreadID != previousID || cp.ClientID == "" {
-		return nil, "", fmt.Errorf("signature recovery checkpoint does not match the replaced conversation")
+		return nil, "", fmt.Errorf("signature recovery checkpoint does not match the original conversation")
 	}
 	thread, err := s.readRecoveryThread()
 	if err != nil {
 		return nil, "", err
 	}
-	cp.ThreadID, cp.BoundaryID = thread.ID, ""
-	if len(thread.Turns) > 0 {
-		cp.BoundaryID = thread.Turns[len(thread.Turns)-1].ID
-		if cp.BoundaryID == "" {
-			return nil, "", fmt.Errorf("signature recovery replacement has an unidentified turn")
-		}
+	if thread.ID != previousID || len(thread.Turns) == 0 || thread.Turns[len(thread.Turns)-1].ID != failedTurnID || thread.Turns[len(thread.Turns)-1].Status != "failed" {
+		return nil, "", fmt.Errorf("signature retry history does not end at the confirmed failed turn")
 	}
+	cp.BoundaryID = failedTurnID
 	cp.ClientID, err = recoveryClientID()
 	if err != nil {
 		return nil, "", err

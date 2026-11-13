@@ -6937,7 +6937,7 @@ func (t *turnProcessor) run() {
 			if event.RecoveryReady != nil {
 				event.RecoveryReady <- err
 			}
-			if err == nil {
+			if err == nil && !event.RecoverySilent {
 				presentation.handleSessionRecovery()
 			}
 		case EventToolUse:

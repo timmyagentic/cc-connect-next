@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/timmyagentic/cc-connect-next/core"
 )
@@ -415,91 +414,46 @@ func TestRestartRecovery_MissingPriorBoundaryDoesNotReplayInput(t *testing.T) {
 	}
 }
 
-func TestRestartRecovery_SignatureReplacementRemainsRecoverableAfterRestart(t *testing.T) {
-	for _, nativeStatus := range []string{"unsubmitted", "interrupted", "completed"} {
-		t.Run(nativeStatus, func(t *testing.T) {
-			s, path := newSignatureTestSession(t)
-			s.mode, s.providerName = "suggest", "fixture-provider"
-			input := restartRecoveryTestInput()
-			input.Options = *s.turnOptions
-			original := codexTurnCheckpoint{
-				Version: 1, ThreadID: "thread-a", ClientID: "original-client",
-				InputHash: recoveryInputHash(input.Prompt, input.Images, input.Files),
-				Input:     []map[string]any{{"type": "text", "text": input.Prompt}},
-				WorkDir:   s.workDir, Mode: s.mode, Provider: s.providerName,
-			}
-			s.activeRecovery = &original
-			started := make(chan map[string]any, 1)
-			signatureTestRPC(s, path, func(method string, params map[string]any) bool {
-				if method == "turn/start" {
-					started <- params
-				}
-				return true
-			})
-			signatureTestNotify(s, "turn/completed", "thread-a", "turn-b", "failed", signatureTestError)
-			awaitSignatureEvent(t, s)
-			binding := awaitSignatureEvent(t, s)
-			var cp codexTurnCheckpoint
-			if binding.SessionID != "thread-new" || binding.RecoveryReady == nil || json.Unmarshal(binding.RecoveryCheckpoint, &cp) != nil {
-				t.Fatalf("replacement has no durable restart checkpoint: %#v", binding)
-			}
-			if cp.ThreadID != binding.SessionID || cp.BoundaryID != "" || cp.InputHash != original.InputHash || cp.ClientID == original.ClientID || !cp.SignatureRecovered {
-				t.Fatalf("checkpoint lost logical input or replacement identity: %+v", cp)
-			}
-			select {
-			case <-started:
-				t.Fatal("signature continuation ran before checkpoint acknowledgement")
-			default:
-			}
-			if nativeStatus == "unsubmitted" {
-				// The engine persisted the binding, but the process died before
-				// it could acknowledge it and send the native continuation.
-				s.cancel()
-			} else {
-				binding.RecoveryReady <- nil
-				select {
-				case params := <-started:
-					if params["threadId"] != cp.ThreadID || params["clientUserMessageId"] != cp.ClientID {
-						t.Fatalf("signature continuation ignored durable submission identity: %v", params)
-					}
-				case <-time.After(time.Second):
-					t.Fatal("signature continuation did not start")
-				}
-			}
-			done := make(chan struct{})
-			go func() { s.wg.Wait(); close(done) }()
-			awaitTerminalTest(t, done)
-			_ = s.Close()
-
+func TestRestartRecovery_SameThreadSignatureRetryRemainsRecoverable(t *testing.T) {
+	for _, status := range []string{"unsubmitted", "interrupted", "completed"} {
+		t.Run(status, func(t *testing.T) {
 			f := newRecoveryFixture(t)
-			f.threadID, f.workDir = cp.ThreadID, cp.WorkDir
-			if nativeStatus != "unsubmitted" {
-				f.turns = []recoveryTurn{{ID: "signature-turn", Status: nativeStatus, Items: []map[string]any{{"type": "userMessage", "clientId": cp.ClientID}}}}
-				if nativeStatus == "completed" {
-					f.turns[0].Items = append(f.turns[0].Items, map[string]any{"type": "agentMessage", "phase": "final_answer", "text": "Signature repair completed once"})
-				}
+			input := restartRecoveryTestInput()
+			_, s := beginRecoveryTurn(t, f, input)
+			f.turns[0].Status = "failed"
+			failedID := f.turns[0].ID
+			retryInput := []map[string]any{{"type": "text", "text": signatureRecoveryContinuation, "text_elements": []any{}}}
+			raw, clientID, err := s.signatureTurnCheckpoint(f.threadID, failedID, retryInput)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var cp codexTurnCheckpoint
+			if err := json.Unmarshal(raw, &cp); err != nil {
+				t.Fatal(err)
+			}
+			if cp.ThreadID != f.threadID || cp.BoundaryID != failedID || !cp.SignatureRecovered || cp.ClientID != clientID {
+				t.Fatalf("unsafe retry checkpoint: %+v", cp)
+			}
+			if status != "unsubmitted" {
+				f.turns = append(f.turns, recoveryTurn{ID: "retry-turn", Status: status, Items: []map[string]any{{"type": "userMessage", "clientId": clientID}, {"type": "agentMessage", "phase": "final_answer", "text": "Completed retry"}}})
+				f.starts = append(f.starts, map[string]any{"threadId": f.threadID})
 			}
 			restarted, _ := f.session()
-			if err := restarted.ResumeInterruptedTurn(binding.RecoveryCheckpoint, input, func(json.RawMessage) error { return nil }); err != nil {
-				t.Fatalf("restarting after signature repair lost the task: %v", err)
+			before := len(f.starts)
+			if err := restarted.ResumeInterruptedTurn(raw, input, func(json.RawMessage) error { return nil }); err != nil {
+				t.Fatal(err)
 			}
-			if nativeStatus == "completed" {
-				if len(f.starts) != 0 || (<-restarted.events).Content != "Signature repair completed once" {
-					t.Fatal("completed signature continuation was executed twice")
+			if status == "completed" {
+				if len(f.starts) != before || (<-restarted.events).Content != "Completed retry" {
+					t.Fatal("completed retry was rerun")
 				}
 				return
 			}
-			if len(f.starts) != 1 || f.starts[0]["threadId"] != cp.ThreadID {
-				t.Fatalf("restart used the failed original conversation: %v", f.starts)
+			if len(f.starts) != before+1 || f.starts[len(f.starts)-1]["threadId"] != f.threadID || !restarted.recoveryUsed {
+				t.Fatal("same-thread retry identity or once budget lost")
 			}
-			if nativeStatus == "unsubmitted" && f.starts[0]["input"].([]any)[0].(map[string]any)["text"] != signatureRecoveryContinuation {
-				t.Fatal("restart lost the unsent signature continuation input")
-			}
-			// A process restart must not reset the signature-repair budget for
-			// this logical task and start an unbounded replacement loop.
-			signatureTestNotify(restarted, "error", cp.ThreadID, appServerCurrentTurn(restarted), "", signatureTestError)
-			if event := awaitSignatureEvent(t, restarted); event.Type != core.EventError {
-				t.Fatalf("restart permitted a second signature recovery: %#v", event)
+			if restarted.deferSignatureRecovery(errors.New(signatureTestError), f.threadID, appServerCurrentTurn(restarted), true) {
+				t.Fatal("restart permitted second signature retry")
 			}
 		})
 	}

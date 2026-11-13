@@ -1,8 +1,7 @@
 package core
 
-// AutomaticSessionRecoverySupport reports structural support without reading
-// history, probing the backend, or exposing paths or configured values. Actual
-// recovery must independently validate the failed turn and complete history.
+// AutomaticSessionRecoverySupport reports local transport support without
+// reading history or contacting the backend.
 type AutomaticSessionRecoverySupport interface {
 	SupportsAutomaticSessionRecovery() bool
 }
@@ -13,16 +12,16 @@ func automaticSessionRecoveryCapability(session AgentSession) RuntimeFeatureCapa
 		provider, ok := session.(AutomaticSessionRecoverySupport)
 		availability = unavailable("This session does not support local automatic context recovery.", "当前会话不支持本地自动上下文恢复。")
 		if ok && provider.SupportsAutomaticSessionRecovery() {
-			availability = conditional("Local transport supports recovery; the failed turn, readable history, tool outcomes, backend RPCs, and durable binding must pass validation at recovery time.", "本地传输支持恢复；恢复时仍须验证失败回合、可读历史、工具结果、后端 RPC 和持久化绑定。")
+			availability = conditional("Local transport supports recovery after the failed turn ends and the native process releases its history.", "本地传输支持在失败回合结束、原生进程释放历史后恢复。")
 		}
 	}
 	capability := feature("automatic_session_recovery",
-		"Automatically attempt encrypted-context recovery once per user Send after a confirmed signature failure. Import readable history and recorded tool results into a new thread, persist its binding, then continue under existing instructions and permissions. Historical tools are not replayed; subsequent model tool choices are not an exactly-once guarantee.",
-		"确认签名校验失败后，每次用户 Send 最多自动恢复一次加密上下文。将可读历史及工具结果导入新会话，持久化绑定后按已有指令和权限继续。不会回放历史工具；不保证模型后续工具选择恰好执行一次。",
-		availability, CapabilityFallback{Mode: "fail-closed", Description: "Stop with the original failure if history, tool outcomes, required RPCs, or persistence are unavailable or ambiguous. Accepted or uncertain steer input disables recovery. User stop cancels recovery; no automatic retry after recovery fails.", DescriptionZH: "历史、工具结果、必要 RPC 或持久化不可用或不明确时保留原失败并停止。已接受或结果不明的 steer 输入禁止恢复；用户停止会取消恢复，恢复失败不自动重试。"})
+		"After a confirmed signature failure, clear encrypted history and retry once per user Send in the same native thread. Preserve plain conversation and recorded tool results. The first failure is handled internally. Before rewriting the original history, persist a private original backup. Encrypted-only context may be discarded from the retry; the backup is retained but not injected. Subsequent model actions are not guaranteed exactly once.",
+		"确认签名错误后清理加密历史，在同一个原生会话内重试，每次用户 Send 最多一次。保留普通对话和已记录的工具结果，首次错误在内部处理。改写原历史前先持久化私有原始备份；仅密文上下文可能从本次重试丢弃，备份保留但不会注入重试，不保证模型后续动作恰好执行一次。",
+		availability, CapabilityFallback{Mode: "fail-closed", Description: "Report failure when safe history cleanup, persistence or retry fails. User stop cancels recovery.", DescriptionZH: "安全清理历史、持久化或重试失败时报告错误。用户停止会取消恢复。"})
 	readOnly := false
 	capability.ReadOnly = &readOnly
 	capability.Permission = CapabilityPermissionConditional
-	capability.SideEffects = expandSideEffects([]string{"filesystem_read", "persistent_state", "agent_turn", "network"})
+	capability.SideEffects = expandSideEffects([]string{"filesystem_read", "filesystem_write", "persistent_state", "agent_turn", "network"})
 	return capability
 }
