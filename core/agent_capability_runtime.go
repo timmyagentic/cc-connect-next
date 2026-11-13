@@ -61,11 +61,12 @@ var agentToolDefinitions = []agentToolDefinition{
 			capabilityParam("prompt", "string", false, "Agent request executed on schedule; mutually exclusive with exec.", "按计划执行的 Agent 请求；与 exec 互斥。"),
 			capabilityParam("model", "string", false, "Optional model for prompt jobs only. Requires the active Agent's per_turn_model capability. Omit to inherit; edit model to an empty string to restore inheritance. Does not switch provider or change project/Agent defaults.", "仅用于 Prompt 任务的可选模型。要求当前 Agent 具备 per_turn_model 能力。省略时继承；edit model 为空串恢复继承。不切换 Provider，不修改项目/Agent 默认值。"),
 			capabilityParam("reasoning_effort", "string", false, "Optional reasoning effort for prompt jobs only: add --reasoning-effort <value> or edit reasoning_effort <value>. Requires per_turn_reasoning_effort. Can be set without model; supported values and Agent support are validated by the server. Omit to inherit; edit reasoning_effort to an empty string to restore inheritance. Does not change project/Agent defaults.", "仅用于 Prompt 任务的可选推理强度：add --reasoning-effort <value> 或 edit reasoning_effort <value>。要求 per_turn_reasoning_effort 能力。可独立于 model 设置；有效值与 Agent 支持由服务端校验。省略时继承；edit reasoning_effort 为空串恢复继承。不修改项目/Agent 默认值。"),
+			capabilityParam("service_tier", "string", false, "Optional prompt-only service tier: add --service-tier <catalog-id> or edit service_tier <catalog-id>. Use the effective model catalog's backend Value, not its display name (Fast may be priority). Omit or edit to an empty string to inherit. Requires a service-tier catalog and TurnOptionsSession at execution; no changes to chat/project defaults.", "仅用于 Prompt 任务的可选服务等级：add --service-tier <目录ID> 或 edit service_tier <目录ID>。使用有效模型目录的后端 Value，不使用显示名（Fast 可能对应 priority）。省略或编辑为空串恢复继承；执行时要求服务等级目录及 TurnOptionsSession，不修改聊天/项目默认值。"),
 			capabilityParam("exec", "string", false, "Shell command executed on schedule; mutually exclusive with prompt.", "按计划执行的 Shell 命令；与 prompt 互斥。"),
 			capabilityParam("job-id", "string", false, "Existing job identifier for info/edit/exec/del.", "info/edit/exec/del 使用的现有任务 ID。"),
 		},
 		effects:  []string{"scheduled_state", "persistent_state", "agent_turn", "shell_execution", "external_message", "network"},
-		fallback: CapabilityFallback{Mode: "reject", Description: "Explicit models or reasoning efforts on shell jobs or unsupported Agents are rejected; invalid reasoning efforts are rejected by the server. Omitted overrides inherit existing behavior; no automatic provider switch or replacement model or effort is selected.", DescriptionZH: "Shell 任务或不支持的 Agent 设置显式模型或推理强度时拒绝；无效推理强度由服务端拒绝。省略的覆盖值继承现有行为；不会自动切换 Provider 或选择替代模型或推理强度。"},
+		fallback: CapabilityFallback{Mode: "reject", Description: "Explicit model, reasoning efforts or service tier overrides on shell jobs or unsupported backends are rejected; invalid values are rejected rather than silently substituted. Omitted overrides inherit existing behavior; no automatic provider switch or replacement model or effort is selected.", DescriptionZH: "Shell 任务或不支持的后端设置显式模型、推理强度或服务等级时拒绝；无效值会被拒绝而非静默替换。省略的覆盖值继承现有行为；不会自动切换 Provider 或选择替代模型或推理强度。"},
 	},
 	{
 		id: "timer", invocation: "cc-connect-next timer <add|list|info|del> [options]",
@@ -297,6 +298,19 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 	reasoningCapability.ReadOnly = &reasoningReadOnly
 	reasoningCapability.SideEffects = expandSideEffects([]string{"agent_turn", "network"})
 	result.Capabilities = append(result.Capabilities, reasoningCapability)
+
+	_, hasTierCatalog := e.agent.(ServiceTierCatalog)
+	tierAvailability := conditional("The Agent declares a service-tier catalog; the effective model's allowed backend IDs and concrete session TurnOptions support are validated when the task runs.", "Agent 声明服务等级目录；任务执行时验证有效模型允许的后端 ID 及具体会话 TurnOptions 支持。")
+	if !hasTierCatalog {
+		tierAvailability = conditional("No Agent-level catalog is declared; an active session must provide a service-tier catalog and TurnOptions support or the explicit override is rejected.", "Agent 未声明服务等级目录；活动会话必须提供服务等级目录及 TurnOptions 支持，否则拒绝显式覆盖。")
+	}
+	tierCapability := feature("per_turn_service_tier", "Override the service tier for a prompt Cron job independently of model and reasoning effort, without changing chat/project defaults. Values are model-specific backend catalog IDs, not display names.", "为 Prompt Cron 任务独立覆盖服务等级，无需设置模型或推理强度，不修改聊天/项目默认值。取值是模型专属后端目录 ID，不是显示名。", tierAvailability,
+		CapabilityFallback{Mode: "reject", Description: "Omit or clear service_tier to inherit. Shell jobs, unavailable catalogs, unsupported sessions and invalid model tiers reject explicit values; never silently substitute a tier or provider.", DescriptionZH: "省略或清空 service_tier 时继承。Shell 任务、目录不可用、会话不支持或等级不适用于模型时拒绝显式值；不静默替换等级或 Provider。"})
+	tierCapability.Permission = CapabilityPermissionLocalAgent
+	tierReadOnly := false
+	tierCapability.ReadOnly = &tierReadOnly
+	tierCapability.SideEffects = expandSideEffects([]string{"agent_turn", "network"})
+	result.Capabilities = append(result.Capabilities, tierCapability)
 
 	type agentProbe struct {
 		id, description, zh, fallback, fallbackZH string

@@ -1142,6 +1142,16 @@ Replace `<supported-value>` with an effort supported by the active Agent. The se
 
 The Web cron editor exposes the same prompt-only effort field. When capability metadata supplies allowed values, it offers a dropdown with inheritance; otherwise it accepts text for server validation. Lists display the selected effort or inheritance. Switching a prompt job to shell clears model and effort in the same update as the task type; editing unrelated fields preserves unchanged legacy overrides.
 
+Prompt Cron jobs also accept `--service-tier <catalog-id>` independently of model and reasoning effort:
+
+```bash
+cc-connect-next cron add --cron "0 6 * * *" --prompt "Summarize updates" --service-tier priority
+cc-connect-next cron edit <job-id> service_tier priority
+cc-connect-next cron edit <job-id> service_tier ""  # Restore inheritance
+```
+
+Use the effective model's service-tier **backend ID**, not a display label: a catalog may name the `priority` ID “Fast”; `fast` is not a universal accepted ID. The example requires a model whose catalog supports `priority`. The CLI/API persists the optional string `service_tier`; a missing or empty value inherits the current chat/project/Agent defaults at execution. Non-empty values are prompt-only and incompatible with `--exec`. Execution requires a service-tier catalog and per-turn options support; an unavailable catalog or unsupported tier is rejected rather than silently replaced. The override applies only to that scheduled turn, including when queued, and does not modify conversation defaults, other jobs, model or provider. Full `cron info <job-id>` exposes the stored JSON field. Query `cc-connect-next capabilities --search "cron service tier"` for the runtime contract; allowed IDs are model-specific and are not hardcoded into generic CLI metadata.
+
 Persisted cron jobs and one-shot timers require a durable messaging target.
 Browser-connected Web/Bridge chat sessions are intentionally rejected because
 their adapter disappears when the tab or browser closes. In the Web cron

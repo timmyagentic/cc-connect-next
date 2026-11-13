@@ -57,7 +57,7 @@ func closeCronResponseBody(body io.Closer) {
 }
 
 func runCronAdd(args []string) {
-	var project, sessionKey, cronExpr, prompt, execCmd, desc, dataDir, sessionMode, model, reasoningEffort string
+	var project, sessionKey, cronExpr, prompt, execCmd, desc, dataDir, sessionMode, model, reasoningEffort, serviceTier string
 	var timeoutMins *int
 	var silent bool
 
@@ -91,6 +91,13 @@ func runCronAdd(args []string) {
 			}
 			i++
 			model = strings.TrimSpace(args[i])
+		case "--service-tier":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				fmt.Fprintln(os.Stderr, "Error: --service-tier requires a value")
+				os.Exit(1)
+			}
+			i++
+			serviceTier = strings.TrimSpace(args[i])
 		case "--reasoning-effort":
 			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
 				fmt.Fprintln(os.Stderr, "Error: --reasoning-effort requires a value")
@@ -169,6 +176,10 @@ func runCronAdd(args []string) {
 		fmt.Fprintln(os.Stderr, "Error: --model is only supported with --prompt")
 		os.Exit(1)
 	}
+	if serviceTier != "" && execCmd != "" {
+		fmt.Fprintln(os.Stderr, "Error: --service-tier is only supported with --prompt")
+		os.Exit(1)
+	}
 	if reasoningEffort != "" && execCmd != "" {
 		fmt.Fprintln(os.Stderr, "Error: --reasoning-effort is only supported with --prompt")
 		os.Exit(1)
@@ -193,6 +204,9 @@ func runCronAdd(args []string) {
 	}
 	if reasoningEffort != "" {
 		body["reasoning_effort"] = reasoningEffort
+	}
+	if serviceTier != "" {
+		body["service_tier"] = serviceTier
 	}
 	if silent {
 		body["silent"] = true
@@ -571,7 +585,7 @@ func runCronEdit(args []string) {
 		fmt.Fprintln(os.Stderr, "Run 'cc-connect-next cron edit --help' for usage.")
 		os.Exit(1)
 	}
-	if !valueSet || (valueStr == "" && field != "model" && field != "reasoning_effort") {
+	if !valueSet || (valueStr == "" && field != "model" && field != "reasoning_effort" && field != "service_tier") {
 		fmt.Fprintln(os.Stderr, "Error: value is required")
 		fmt.Fprintln(os.Stderr, "Run 'cc-connect-next cron edit --help' for usage.")
 		os.Exit(1)
@@ -684,6 +698,7 @@ Options:
       --model <id>           Prompt-only model for each run; omitted = inherit project default
       --reasoning-effort <value>  Prompt-only effort; omitted = inherit project default
                                 Model optional; supported values validated by server
+      --service-tier <tier>  Prompt-only service tier, validated against model catalog
       --exec <command>       Shell command (runs directly, mutually exclusive with --prompt)
       --desc <text>          Short description
       --session-mode <mode>  reuse (default) or new-per-run — fresh agent session each run
@@ -726,6 +741,7 @@ Editable Fields (string):
   cron_expr     Cron expression, e.g. "0 6 * * *"
   prompt        Task prompt (runs through agent)
   model         Prompt-only model ID; "" restores inheritance (Codex exec/app_server)
+  service_tier  Prompt-only service tier (catalog ID); "" restores inheritance
   reasoning_effort  Prompt-only effort; "" restores inheritance; model optional
                     Supported values are validated by the server
   exec          Shell command (runs directly)
@@ -756,6 +772,7 @@ Examples:
   cc-connect-next cron edit abc123 mute true
   cc-connect-next cron edit abc123 model gpt-5.4
   cc-connect-next cron edit abc123 model ""
+  cc-connect-next cron edit abc123 service_tier <catalog-tier-id>
   cc-connect-next cron edit abc123 reasoning_effort <value>
   cc-connect-next cron edit abc123 reasoning_effort ""`)
 }

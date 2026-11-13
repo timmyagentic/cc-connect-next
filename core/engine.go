@@ -649,6 +649,7 @@ type queuedMessage struct {
 	channelKey              string // platform-provided channel identifier (preferred over sessionKey extraction)
 	answerProfile           AnswerProfileName
 	modelOverride           string
+	serviceTierOverride     string
 	reasoningEffortOverride string
 	userMessageTimeMs       int64 // Feishu create_time ms (optional); see Message.UserMessageTimeMs
 }
@@ -2028,6 +2029,7 @@ type scheduledJobSpec struct {
 	sessionKey      string
 	prompt          string
 	model           string
+	serviceTier     string
 	reasoningEffort string
 	workDir         string
 	description     string
@@ -2086,6 +2088,7 @@ func (e *Engine) executeCronJob(job *CronJob, run *scheduledRun) error {
 		prompt:          job.Prompt,
 		model:           strings.TrimSpace(job.Model),
 		reasoningEffort: strings.ToLower(strings.TrimSpace(job.ReasoningEffort)),
+		serviceTier:     strings.TrimSpace(job.ServiceTier),
 		workDir:         job.WorkDir,
 		description:     job.Description,
 		mode:            job.Mode,
@@ -2233,6 +2236,7 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 		ModeOverride:            spec.mode,
 		ModelOverride:           spec.model,
 		ReasoningEffortOverride: spec.reasoningEffort,
+		ServiceTierOverride:     spec.serviceTier,
 		scheduledResult:         &scheduledTurnResult{},
 	}
 
@@ -3588,7 +3592,7 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 func (e *Engine) trySteerBusyMessage(p Platform, msg *Message, interactiveKey string, session *Session, sessions *SessionManager) bool {
 	// Explicit per-request options describe a separate turn. Plain supplements
 	// inherit the active turn, including one-shot options and changed defaults.
-	if msg.AnswerProfile != "" || msg.ModelOverride != "" || msg.ReasoningEffortOverride != "" {
+	if msg.AnswerProfile != "" || msg.ModelOverride != "" || msg.ReasoningEffortOverride != "" || msg.ServiceTierOverride != "" {
 		return false
 	}
 	e.interactiveMu.Lock()
@@ -3968,6 +3972,18 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 			return true
 		}
 	}
+	if msg.ServiceTierOverride != "" && state.agentSession != nil {
+		_, optionsOK := state.agentSession.(TurnOptionsSession)
+		turnAgent := state.agent
+		if turnAgent == nil {
+			turnAgent = e.agent
+		}
+		_, catalogOK := serviceTierCatalog(turnAgent, state.agentSession)
+		if !optionsOK || !catalogOK {
+			msg.scheduledResult.complete(fmt.Errorf("task service_tier is unsupported by this backend"))
+			return true
+		}
+	}
 	if msg.ReasoningEffortOverride != "" && state.agentSession != nil {
 		if _, ok := state.agentSession.(TurnOptionsSession); !ok {
 			e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgTaskReasoningNotSupported, msg.Content))
@@ -4023,6 +4039,7 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		answerProfile:           msg.AnswerProfile,
 		modelOverride:           msg.ModelOverride,
 		reasoningEffortOverride: msg.ReasoningEffortOverride,
+		serviceTierOverride:     msg.ServiceTierOverride,
 		userMessageTimeMs:       msg.UserMessageTimeMs,
 	})
 	if session != nil {
@@ -4657,6 +4674,14 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			return
 		}
 	}
+	if msg.ServiceTierOverride != "" {
+		_, optionsOK := state.agentSession.(TurnOptionsSession)
+		_, catalogOK := serviceTierCatalog(agent, state.agentSession)
+		if !optionsOK || !catalogOK {
+			msg.scheduledResult.complete(fmt.Errorf("task service_tier is unsupported by this backend"))
+			return
+		}
+	}
 	if msg.ReasoningEffortOverride != "" {
 		if _, ok := state.agentSession.(TurnOptionsSession); !ok {
 			msg.scheduledResult.complete(ErrReasoningEffortOverrideUnsupported)
@@ -4729,6 +4754,9 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	state.sideText = ""
 	state.activeAnswerProfile = msg.AnswerProfile
 	speedTier := sessions.ServiceTier(session)
+	if msg.ServiceTierOverride != "" {
+		speedTier = msg.ServiceTierOverride
+	}
 	state.activeServiceTier = speedTier
 	as := state.agentSession // capture under lock to avoid race with cleanup
 	needResync := state.eventsNeedResync
@@ -4750,7 +4778,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			sendDone <- fmt.Errorf("agent session became nil")
 			return
 		}
-		overrides, err := e.prepareSessionTurnOverrides(agent, sessions, session, as, msg.SessionKey, msg.AnswerProfile, msg.ModelOverride, msg.ReasoningEffortOverride, speedTier)
+		overrides, err := e.prepareSessionTurnOverrides(agent, sessions, session, as, msg.SessionKey, msg.AnswerProfile, msg.ModelOverride, msg.ReasoningEffortOverride, speedTier, msg.ServiceTierOverride != "")
 		if err != nil {
 			finishMessageContextInput(state)
 			sendDone <- err
@@ -7629,6 +7657,9 @@ func (queue *turnQueue) handle() {
 		state.activeScheduled = false
 		state.contextSending = true
 		speedTier := sessions.ServiceTier(session)
+		if queued.serviceTierOverride != "" {
+			speedTier = queued.serviceTierOverride
+		}
 		state.activeServiceTier = speedTier
 		// Re-open the steer adoption window for the queued turn.
 		state.presentationOpen = true
@@ -7707,7 +7738,7 @@ func (queue *turnQueue) handle() {
 				nextSend <- fmt.Errorf("agent session became nil")
 				return
 			}
-			overrides, err := e.prepareSessionTurnOverrides(turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
+			overrides, err := e.prepareSessionTurnOverrides(turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier, queued.serviceTierOverride != "")
 			if err != nil {
 				finishMessageContextInput(state)
 				nextSend <- err
@@ -9296,6 +9327,9 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.activeScheduled = false
 		state.contextSending = true
 		speedTier := sessions.ServiceTier(session)
+		if queued.serviceTierOverride != "" {
+			speedTier = queued.serviceTierOverride
+		}
 		state.activeServiceTier = speedTier
 		state.mu.Unlock()
 		state.steerMu.Unlock()
@@ -9354,7 +9388,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 				sendDone <- fmt.Errorf("agent session became nil")
 				return
 			}
-			overrides, err := e.prepareSessionTurnOverrides(turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
+			overrides, err := e.prepareSessionTurnOverrides(turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier, queued.serviceTierOverride != "")
 			if err != nil {
 				finishMessageContextInput(state)
 				sendDone <- err

@@ -155,13 +155,16 @@ type agentTurnOverrides struct {
 	restoreDefaults bool
 }
 
-func prepareAgentTurnOverrides(sessions *SessionManager, session *Session, backend AgentSession, profile AnswerProfileName, model, reasoningEffort, serviceTier string) (agentTurnOverrides, error) {
+func prepareAgentTurnOverrides(sessions *SessionManager, session *Session, backend AgentSession, profile AnswerProfileName, model, reasoningEffort, serviceTier string, taskServiceTier ...bool) (agentTurnOverrides, error) {
 	model = strings.TrimSpace(model)
 	reasoningEffort = strings.ToLower(strings.TrimSpace(reasoningEffort))
-	if model != "" || reasoningEffort != "" {
+	if model != "" || reasoningEffort != "" || (len(taskServiceTier) > 0 && taskServiceTier[0]) {
 		if _, ok := backend.(TurnOptionsSession); !ok {
 			if reasoningEffort != "" {
 				return agentTurnOverrides{}, ErrReasoningEffortOverrideUnsupported
+			}
+			if model == "" {
+				return agentTurnOverrides{}, ErrTurnOptionsUnsupported
 			}
 			return agentTurnOverrides{}, ErrModelOverrideUnsupported
 		}
@@ -253,7 +256,7 @@ func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, p
 		}
 	}
 	if model != "" || reasoningEffort != "" {
-		slog.Info("using task options for one turn", "project", e.name, "model", options.Model, "reasoning_effort", options.ReasoningEffort)
+		slog.Info("using task options for one turn", "project", e.name, "model", options.Model, "reasoning_effort", options.ReasoningEffort, "service_tier", options.ServiceTier)
 	} else if profile != "" {
 		slog.Info("using one-shot answer profile",
 			"project", e.name,
