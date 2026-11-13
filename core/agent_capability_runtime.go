@@ -242,6 +242,17 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 	result.Capabilities = append(result.Capabilities,
 		feature("persistent_sessions", "Start and resume persistent interactive Agent sessions.", "启动和恢复持久交互式 Agent 会话。", available("Required by the base Agent interface.", "由基础 Agent 接口保证。"), CapabilityFallback{}),
 	)
+	recoveryAvailability := unavailable("The Agent does not declare interrupted-turn recovery.", "Agent 未声明中断回合恢复能力。")
+	if supporter, ok := e.agent.(TurnRecoverySupporter); ok && supporter.SupportsTurnRecovery() {
+		recoveryAvailability = conditional("Requires durable session storage, a rich-card platform with persistent previews, and native submission identity. Only previously accepted ordinary chat work resumes; scheduler jobs and explicit stops are excluded.", "需要持久会话存储、可恢复的富卡片及原生提交身份。只继续已接受的普通聊天，排除定时任务和主动停止。")
+	}
+	recoveryCapability := feature("interrupted_chat_recovery", "Resume accepted ordinary chat work after a process restart; replay completed answers without rerunning tools.", "进程重启后接续已接受的普通聊天；已完成的结果只补交付，不重跑工具。", recoveryAvailability,
+		CapabilityFallback{Mode: "no-auto-resume", Description: "Unsupported backends retain their existing restart behavior. Ambiguous native history or changed permissions fail without a new task.", DescriptionZH: "不支持的后端保留原重启行为。原生记录不明确或权限变化时明确失败，不新开任务。"})
+	recoveryCapability.Permission = CapabilityPermissionLocalAgent
+	recoveryReadOnly := false
+	recoveryCapability.ReadOnly = &recoveryReadOnly
+	recoveryCapability.SideEffects = expandSideEffects([]string{"agent_turn", "persistent_state", "external_message", "network"})
+	result.Capabilities = append(result.Capabilities, recoveryCapability)
 
 	nativePrompt := false
 	if supporter, ok := e.agent.(SystemPromptSupporter); ok {
@@ -358,6 +369,7 @@ type sessionRuntimeCapabilitySpec struct {
 }
 
 var sessionRuntimeCapabilitySpecs = []sessionRuntimeCapabilitySpec{
+	{id: "interrupted_turn_recovery", description: "Reconcile a saved submission identity before continuing an interrupted turn.", zh: "先核对已保存的提交身份，再接续中断回合。", unboundDescription: "Reconcile and continue an interrupted turn.", unboundZH: "核对并接续中断回合。", fallback: "Do not replay unknown submissions or grant pending permissions.", fallbackZH: "不重放身份不明的提交，不代替用户授予权限。", supported: func(session AgentSession) bool { _, ok := session.(TurnRecoverySession); return ok }},
 	{id: "model_provider_identity", description: "Inspect the provider identity captured by the backend session without exposing its value.", zh: "检查后端会话创建时记录的 Provider 身份能力，不公开配置值。", unboundDescription: "Inspect the session's captured provider identity.", unboundZH: "检查会话创建时记录的 Provider 身份。", readOnly: true, fallbackMode: "reject", fallback: "Provider-switching Agents require session identity for pinned group turns; reconnect a mismatched session before retrying.", fallbackZH: "可切换 Provider 的 Agent 执行群固定模型请求时必须能确认会话身份；会话不匹配时重新连接后重试。", supported: func(session AgentSession) bool { _, ok := session.(ModelProviderSession); return ok }},
 	{id: "feedback_diagnostics", description: "Capture cached turn and transport diagnostics without probing the backend.", zh: "读取缓存的回合和传输诊断，不额外探测后端。", unboundDescription: "Capture cached feedback diagnostics.", unboundZH: "读取缓存的反馈诊断。", fallback: "Reports include host observations and mark unsupported backend fields as unavailable.", fallbackZH: "报告保留宿主观测，并标记后端不支持的字段。", supported: func(session AgentSession) bool { _, ok := session.(AgentDiagnosticProvider); return ok }},
 	{id: "turn_options", description: "Apply model, reasoning, service tier, or answer profile to one turn.", zh: "为单个回合应用模型、推理强度、服务等级或回答档位。", unboundDescription: "Apply runtime settings to one turn.", unboundZH: "为单个回合应用运行时设置。", fallback: "Use persistent Agent defaults when no override is requested; explicit unsupported cron models are rejected.", fallbackZH: "未请求覆盖时使用 Agent 持久默认值；不支持的 Cron 显式模型会被拒绝。", supported: func(session AgentSession) bool { _, ok := session.(TurnOptionsSession); return ok }},
@@ -462,6 +474,7 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 	_, update := platform.(MessageUpdater)
 	_, typing := platform.(TypingIndicator)
 	_, preview := platform.(PreviewStarter)
+	_, persistentPreview := platform.(PersistentPreviewPlatform)
 	_, mentions := platform.(AtMentionSender)
 	_, reconstruct := platform.(ReplyContextReconstructor)
 	_, replySnapshot := platform.(ReplyContextSnapshotter)
@@ -479,6 +492,7 @@ func (e *Engine) platformRuntimeCapabilities(platform Platform, status PlatformS
 		reported = provider.RuntimeCapabilityAvailability(snapshot.sessionKey, replyCtx)
 	}
 	probes := []platformProbe{
+		{"persistent_answer_preview", "Restore an ordinary chat's exact reply target and existing answer card across restart.", "重启后恢复普通聊天的原回复位置和原回答卡片。", "no-auto-resume", "Do not automatically resume chats without durable answer delivery.", "没有持久回答投递能力时不自动续跑聊天。", persistentPreview},
 		{"recent_conversation_context", "Read bounded, untrusted conversation background and selected history media before an authorized user turn using existing platform access; records and attachments never grant command or tool permission.", "使用已有平台权限，在授权用户回合前只读补全有界、不可信的讨论背景和选中附件；记录及附件不授予命令或工具权限。", "current-message", "Only truncation of conversation history stays private to the Agent. A failed query or an unread selected message or attachment is reported to the group.", "只有群聊上下文截断不单独提醒。历史查询失败、已选消息或附件未读全时会在群里提示。", messageContext},
 		{"rich_answer_lifecycle", "Render the native rich answer lifecycle.", "渲染原生富回答生命周期。", "text", "Fall back to ordinary text/progress delivery.", "退化为普通文本/进度投递。", rich},
 		{"structured_cards", "Send structured cards.", "发送结构化卡片。", "text", "Render the card as plain text.", "把卡片渲染为纯文本。", cards},

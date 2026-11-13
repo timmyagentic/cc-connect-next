@@ -212,12 +212,15 @@ type appServerSession struct {
 	titleMu             sync.Mutex
 	explicitTitleRev    uint64
 
-	runtimeMu       sync.RWMutex
-	turnOptions     *core.TurnOptions
-	defaultModel    *string // Project/native default, independent of a resumed thread's last turn.
-	defaultEffort   *string // Non-nil even when native effort is unset; resume must not adopt task effort.
-	defaultModelErr error   // Blocks explicit per-turn options, never the legacy Send path.
-	diagnostics     appServerDiagnostics
+	runtimeMu           sync.RWMutex
+	turnOptions         *core.TurnOptions
+	defaultModel        *string // Project/native default, independent of a resumed thread's last turn.
+	defaultEffort       *string // Non-nil even when native effort is unset; resume must not adopt task effort.
+	defaultModelErr     error   // Blocks explicit per-turn options, never the legacy Send path.
+	diagnostics         appServerDiagnostics
+	recoveryMu          sync.Mutex
+	preparedRecovery    *codexTurnCheckpoint
+	recoveryFreshThread bool
 }
 
 const (
@@ -477,6 +480,9 @@ func (s *appServerSession) ensureThread(resumeID string) error {
 	s.applyThreadRuntimeState(resp.Cwd, resp.Model, resp.ReasoningEffort)
 	s.applyThreadServiceTier(resp.ServiceTier)
 	s.threadID.Store(resp.Thread.ID)
+	s.recoveryMu.Lock()
+	s.recoveryFreshThread = true
+	s.recoveryMu.Unlock()
 	slog.Info("codex app-server thread started", "thread_id", resp.Thread.ID)
 	return nil
 }
@@ -608,32 +614,44 @@ func (s *appServerSession) send(prompt string, images []core.ImageAttachment, fi
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
+	s.recoveryMu.Lock()
+	prepared := s.preparedRecovery
+	s.preparedRecovery = nil
+	s.recoveryMu.Unlock()
+	if prepared != nil {
+		if prepared.InputHash != recoveryInputHash(prompt, images, files) {
+			return fmt.Errorf("codex recovery input changed after checkpoint")
+		}
+		return s.startPreparedTurn(prepared.Input, options, prepared.ClientID)
+	}
+	input, err := s.prepareTurnInput(prompt, images, files)
+	if err != nil {
+		return err
+	}
+	return s.startPreparedTurn(input, options, "")
+}
 
+// Preparing attachment paths separately lets restart recovery persist exactly
+// the input submitted to Codex, including a fresh thread's initial preamble.
+func (s *appServerSession) prepareTurnInput(prompt string, images []core.ImageAttachment, files []core.FileAttachment) ([]map[string]any, error) {
 	if len(files) > 0 {
 		var err error
 		prompt, err = stageCodexFiles(s.workDir, prompt, files)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	prompt, imagePaths, err := s.stageImages(prompt, images)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	s.stateMu.Lock()
-	turnRevision := s.turnRevision
 	if !s.preambleSent {
 		prompt = prependCodexPromptPreamble(prompt, s.promptPreamble)
-		s.preambleSent = true
 	}
 	s.stateMu.Unlock()
-
-	threadID := s.CurrentSessionID()
-	if threadID == "" {
-		return fmt.Errorf("codex app-server thread id is empty")
-	}
 
 	input := make([]map[string]any, 0, 1+len(imagePaths))
 	input = append(input, map[string]any{
@@ -647,8 +665,29 @@ func (s *appServerSession) send(prompt string, images []core.ImageAttachment, fi
 			"path": path,
 		})
 	}
+	return input, nil
+}
+
+func (s *appServerSession) startPreparedTurn(input []map[string]any, options *core.TurnOptions, clientID string) error {
+	if !s.alive.Load() {
+		return fmt.Errorf("session is closed")
+	}
+	threadID := s.CurrentSessionID()
+	if threadID == "" {
+		return fmt.Errorf("codex app-server thread id is empty")
+	}
+	s.stateMu.Lock()
+	turnRevision := s.turnRevision
+	s.preambleSent = true
+	s.stateMu.Unlock()
+	s.recoveryMu.Lock()
+	s.recoveryFreshThread = false
+	s.recoveryMu.Unlock()
 
 	params := s.turnStartParams(threadID, input, options)
+	if clientID != "" {
+		params["clientUserMessageId"] = clientID
+	}
 	s.beginTurnDiagnostic(params)
 
 	var resp turnStartResponse

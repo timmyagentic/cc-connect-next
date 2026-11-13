@@ -75,6 +75,8 @@ cc-connect-next.agent-capabilities/v1
 
 Manifest 会保留不支持的运行态能力条目，而不是静默删除。例如 Platform 不实现原生视频时，`video` 会显示 `unavailable`，同时说明存在 `FileSender` 时退化为文件投递。
 
+`interrupted_chat_recovery` 声明普通聊天恢复的条件，包括原生提交身份、持久会话和可恢复的富回答。Session 的 `interrupted_turn_recovery` 与平台的 `persistent_answer_preview` 暴露实际可选接口。恢复可以继续已授权的 Agent 回合并更新原回答，不授予新权限，也不重放定时任务。见[普通聊天重启恢复](usage.zh-CN.md#普通聊天的重启恢复)。
+
 ## 权限与副作用是真实运行契约
 
 内置命令权限直接遵循 Engine dispatch：

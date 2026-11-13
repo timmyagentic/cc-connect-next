@@ -436,6 +436,7 @@ type RateLimitCfg struct {
 
 // Engine routes messages between platforms and the agent for a single project.
 type Engine struct {
+	chatRecoveryStarts    map[string][]func() // guarded by platformLifecycleMu
 	name                  string
 	agent                 Agent
 	platforms             []Platform
@@ -631,6 +632,7 @@ type workspaceInitFlow struct {
 // Startup supplements are retried when the active turn is ready; independent
 // requests and definitive steer failures run after the current turn completes.
 type queuedMessage struct {
+	chatRecovery            *chatRecovery
 	pendingSteer            *Message // accepted startup supplement; also identifies it across concurrent recalls
 	feedbackText            string
 	messageID               string
@@ -653,7 +655,10 @@ type queuedMessage struct {
 
 // interactiveState tracks a running interactive agent session and its permission state.
 type interactiveState struct {
-	feedbackTurn *feedbackTurn // guarded by mu; diagnostic state has its own mutex
+	chatRecovery             *chatRecovery // guarded by mu
+	restartSuspended         bool          // daemon shutdown, distinct from a user stop
+	preserveQueuedOnShutdown bool
+	feedbackTurn             *feedbackTurn // guarded by mu; diagnostic state has its own mutex
 	// capabilityBriefSent flips after the capability brief has been
 	// prepended to a prompt for this state (guarded by mu).
 	capabilityBriefSent      bool
@@ -922,6 +927,14 @@ func (s *interactiveState) markStopped() {
 		return
 	}
 	s.stopped = true
+	if !s.restartSuspended {
+		s.chatRecovery.finish()
+	}
+	if !s.preserveQueuedOnShutdown {
+		for _, q := range s.pendingMessages {
+			q.chatRecovery.finish()
+		}
+	}
 	if s.stopCh == nil {
 		s.stopCh = make(chan struct{})
 	}
@@ -954,6 +967,9 @@ func (s *interactiveState) cancelTurnSilently(messageID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.discardTurnMessageID = messageID
+	if s.currentMessageID == messageID {
+		s.chatRecovery.finish()
+	}
 	if s.turnCancelCh != nil && s.turnCancelMessageID == messageID && !s.turnCancelClosed {
 		close(s.turnCancelCh)
 		s.turnCancelClosed = true
@@ -2568,6 +2584,7 @@ func (e *Engine) ExecuteHeartbeat(sessionKey, prompt string, silent bool) error 
 }
 
 func (e *Engine) Start() error {
+	e.restoreChatRecoveries()
 	var startErrs []error
 	readyCount := 0
 	pendingCount := 0
@@ -2619,11 +2636,22 @@ func (e *Engine) Stop() error {
 		activeStates = append(activeStates, state)
 	}
 	e.platformLifecycleMu.Unlock()
+	e.interactiveMu.Lock()
+	for _, state := range e.interactiveStates {
+		state.mu.Lock()
+		state.preserveQueuedOnShutdown = !state.stopped
+		state.restartSuspended = !state.stopped && !state.activeScheduled && state.chatRecovery != nil && !state.chatRecovery.closed()
+		state.mu.Unlock()
+	}
+	e.interactiveMu.Unlock()
 
 	// Wake foreground turns while the engine context and platform clients are
 	// still usable. Rich-card turns need this window to replace their in-flight
 	// card with a terminal error state before platform shutdown.
 	for _, state := range activeStates {
+		state.mu.Lock()
+		state.restartSuspended = !state.stopped && !state.activeScheduled && state.chatRecovery != nil && !state.chatRecovery.closed()
+		state.mu.Unlock()
 		state.markStopped()
 	}
 	activeTurnsDone := make(chan struct{})
@@ -2747,6 +2775,7 @@ func (e *Engine) onPlatformReady(p Platform) {
 	}
 	slog.Info("platform ready", "project", e.name, "platform", p.Name())
 	e.initPlatformCapabilities(p)
+	e.startChatRecoveries(p)
 	go e.updates().recoverReceipts()
 }
 
@@ -2911,6 +2940,7 @@ func (e *Engine) removeQueuedMessageByID(messageID string) (string, bool) {
 		cancelDispatchedSteer := false
 		for _, queued := range pending {
 			if queued.messageID == messageID {
+				queued.chatRecovery.finish()
 				if queued.pendingSteer != nil {
 					queued.pendingSteer.Recalled = true
 					cancelDispatchedSteer = queued.pendingSteer.steerDispatching
@@ -3662,6 +3692,7 @@ func (e *Engine) deliverSteerMessage(p Platform, msg *Message, state *interactiv
 			"msg_id", msg.MessageID,
 			"user", msg.UserName,
 		)
+		e.updateRecoveryReply(state, p, msg, cardHandle)
 		committed := e.commitSteerPresentation(interactiveKey, steerHandoff{
 			feedbackText:      feedbackUserContent(msg),
 			messageID:         msg.MessageID,
@@ -3777,6 +3808,7 @@ func (e *Engine) steerQueuedMessagesLocked(state *interactiveState, steerable St
 				continue
 			}
 			if handled {
+				state.pendingMessages[i].chatRecovery.finish()
 				state.pendingMessages = append(state.pendingMessages[:i], state.pendingMessages[i+1:]...)
 			} else {
 				// Definitive rejection keeps its original FIFO position. Unknown
@@ -3945,7 +3977,7 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 
 	// Admission stores input without sending it. Startup supplements use
 	// native Steer once ready; separate requests use Send after EventResult.
-	if e.isStaleUserMessageLocked(state, msg.UserMessageTimeMs) {
+	if (msg.chatRecovery == nil || !msg.chatRecovery.resuming) && e.isStaleUserMessageLocked(state, msg.UserMessageTimeMs) {
 		snap := userMessageWatermarkSnapshotLocked(state)
 		e.logStaleUserMessageDropped("reject_before_queue", msg, interactiveKey, snap)
 		return true
@@ -3955,12 +3987,25 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.TForText(MsgQueueFull, msg.Content), depth))
 		return true // handled: queue-full reply sent
 	}
+	recoveryAgent := state.agent
+	if recoveryAgent == nil {
+		recoveryAgent = e.agent
+	}
+	recovery, err := e.beginChatRecovery(p, msg, session, recoveryAgent, interactiveKey, state.workspaceDir)
+	if err != nil {
+		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgError), recoveryError(err)))
+		return true
+	}
 	var pendingSteer *Message
-	if msg.steerWhenReady {
+	// A durable startup supplement remains FIFO. Native steering has no
+	// pre-submission receipt here; replaying its separate checkpoint after a
+	// lost steer acknowledgement could execute the same input twice.
+	if msg.steerWhenReady && recovery == nil {
 		copy := *msg
 		pendingSteer = &copy
 	}
 	state.pendingMessages = append(state.pendingMessages, queuedMessage{
+		chatRecovery:            recovery,
 		pendingSteer:            pendingSteer,
 		feedbackText:            feedbackUserContent(msg),
 		messageID:               msg.MessageID,
@@ -4006,7 +4051,7 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		case state.handoffSignalChLocked() <- struct{}{}:
 		default:
 		}
-	} else {
+	} else if msg.chatRecovery == nil || !msg.chatRecovery.resuming {
 		e.reply(p, msg.ReplyCtx, e.i18n.TForText(MsgMessageQueued, msg.Content))
 	}
 	return true
@@ -4508,12 +4553,22 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 		return
 	}
 
+	recovery, recoveryErr := e.beginChatRecovery(p, msg, session, agent, interactiveKey, workspaceDir)
+	if recoveryErr != nil {
+		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgError), recoveryError(recoveryErr)))
+		return
+	}
+	if recovery != nil && recovery.closed() {
+		return
+	}
 	turnStart := time.Now()
 
 	turnRichCardCopy := e.i18n.RichCardCopyForText(msg.Content)
 	feedbackTurn := e.beginFeedbackTurn(p, msg, session, agent)
 	e.i18n.DetectAndSet(msg.Content)
-	session.AddHistory("user", msg.Content)
+	if !recovery.hadHistory() {
+		session.AddHistory("user", msg.Content)
+	}
 	// Persist user message immediately so crashes between user input and
 	// assistant reply don't lose it (the assistant-side Save below depends
 	// on the turn completing without a process crash).
@@ -4524,7 +4579,27 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	if agent != e.agent {
 		agentOverride = agent
 	}
+	e.interactiveMu.Lock()
+	if placeholder := e.interactiveStates[interactiveKey]; placeholder != nil {
+		placeholder.mu.Lock()
+		placeholder.chatRecovery = recovery
+		placeholder.mu.Unlock()
+	}
+	e.interactiveMu.Unlock()
+	if err := recovery.saveHistory(); err != nil {
+		recovery.finish()
+		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgError), recoveryError(err)))
+		return
+	}
 	state := e.getOrCreateInteractiveStateWith(interactiveKey, p, msg.ReplyCtx, session, sessions, agentOverride, ccSessionKey, msg.Content)
+	state.mu.Lock()
+	state.chatRecovery = recovery
+	state.mu.Unlock()
+	defer func() {
+		if !state.suspendedForRestart() && !e.isChatRecoveryShutdown() {
+			state.recoveryTurn().finish()
+		}
+	}()
 
 	// Set workspaceDir on the state for idle reaper identification
 	if workspaceDir != "" {
@@ -4636,7 +4711,10 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// turn ended abnormally (eventsNeedResync=true, the default).
 	e.stopUnsolicitedReader(state)
 
-	historyContext := e.prepareMessageContext(p, msg.ReplyCtx, session, state, msg.Content, msg.MessageID)
+	historyContext := preparedMessageContext{}
+	if !recovery.resumesNativeTurn() {
+		historyContext = e.prepareMessageContext(p, msg.ReplyCtx, session, state, msg.Content, msg.MessageID)
+	}
 	if historyContext.Err != nil {
 		finishMessageContextInput(state)
 		msg.scheduledResult.complete(historyContext.Err)
@@ -4679,7 +4757,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			sendDone <- err
 			return
 		}
-		err = e.sendAgentTurnWithOverrides(agent, as, promptContent, append(append([]ImageAttachment(nil), msg.Images...), historyContext.Images...), append(scopeFileAttachments(msg.Files, msg.MessageID), historyContext.Files...), overrides)
+		err = e.sendAgentTurnWithOverrides(agent, as, promptContent, append(append([]ImageAttachment(nil), msg.Images...), historyContext.Images...), append(scopeFileAttachments(msg.Files, msg.MessageID), historyContext.Files...), overrides, recovery)
 		if err == nil {
 			acceptMessageContext(session, sessions, historyContext)
 		}
@@ -6376,7 +6454,7 @@ func (t *turnProcessor) run() {
 		discardSilentTurn()
 		return
 	}
-	cardMessageID = startRichCard(state.platform, state.replyCtx)
+	cardMessageID = e.recoverPreview(state, state.platform, func() any { return startRichCard(state.platform, state.replyCtx) })
 
 	// Send instant confirmation reply if enabled and no streaming card is active.
 	// Streaming cards provide their own "processing" indicator, so instant reply
@@ -6569,6 +6647,10 @@ func (t *turnProcessor) run() {
 			discardSilentTurn()
 		},
 		onStop: func() {
+			if state.suspendedForRestart() {
+				sp.discard()
+				return
+			}
 			t.scheduledResult.complete(context.Canceled)
 			if state.shouldDiscardTurn(msgID) {
 				discardSilentTurn()
@@ -6591,6 +6673,10 @@ func (t *turnProcessor) run() {
 			e.steerQueuedMessages(state, sessionKey, session, sessions)
 		},
 		onSendError: func(err error) {
+			if state.suspendedForRestart() {
+				sp.discard()
+				return
+			}
 			t.scheduledResult.complete(err)
 			e.recordFeedbackFailure(state, "prompt_send", err)
 			slog.Error("failed to send prompt", "error", err, "session_key", sessionKey)
@@ -6633,6 +6719,10 @@ func (t *turnProcessor) run() {
 			}
 		},
 		onEngineDone: func() {
+			if state.suspendedForRestart() {
+				sp.discard()
+				return
+			}
 			t.scheduledResult.complete(e.ctx.Err())
 			if state.shouldDiscardTurn(msgID) {
 				discardSilentTurn()
@@ -6710,6 +6800,10 @@ func (t *turnProcessor) run() {
 
 		if state.shouldDiscardTurn(msgID) {
 			discardSilentTurn()
+			return
+		}
+		if state.suspendedForRestart() {
+			sp.discard()
 			return
 		}
 		if state.isStopped() {
@@ -7217,6 +7311,7 @@ func (completion *turnCompletion) handle() bool {
 	} else {
 		e.completeFeedbackTurn(state, response.base)
 	}
+	state.recoveryTurn().finish()
 	completion.commit(response, triggerAutoCompress, tokenEstimate)
 	t.scheduledResult.complete(completion.event.Error)
 	// A reused session can immediately drain ordinary queued messages. Their
@@ -7513,6 +7608,7 @@ func (queue *turnQueue) handle() {
 		state.platform = queued.platform
 		state.replyCtx = queued.replyCtx
 		state.currentMessageID = queued.messageID
+		state.chatRecovery = queued.chatRecovery
 		state.currentReplyUserID = queued.userID
 		state.fromVoice = queued.fromVoice
 		state.currentUserID = queued.userID
@@ -7594,7 +7690,7 @@ func (queue *turnQueue) handle() {
 				nextSend <- err
 				return
 			}
-			err = e.sendAgentTurnWithOverrides(turnAgent, as, queuedPrompt, append(append([]ImageAttachment(nil), queued.images...), historyContext.Images...), append(append([]FileAttachment(nil), queued.files...), historyContext.Files...), overrides)
+			err = e.sendAgentTurnWithOverrides(turnAgent, as, queuedPrompt, append(append([]ImageAttachment(nil), queued.images...), historyContext.Images...), append(append([]FileAttachment(nil), queued.files...), historyContext.Files...), overrides, queued.chatRecovery)
 			if err == nil {
 				acceptMessageContext(session, sessions, historyContext)
 			}
@@ -7670,7 +7766,7 @@ func (queue *turnQueue) handle() {
 				}
 			}
 		}
-		cardMessageID = startRichCard(queued.platform, queued.replyCtx)
+		cardMessageID = e.recoverPreview(state, queued.platform, func() any { return startRichCard(queued.platform, queued.replyCtx) })
 
 		// Send instant reply for queued turn if no streaming card is active.
 		if e.instantReply.Enabled && streamCard == nil && cardMessageID == nil {
@@ -7681,10 +7777,13 @@ func (queue *turnQueue) handle() {
 			e.send(queued.platform, queued.replyCtx, replyContent)
 		}
 
-		session.AddHistory("user", queued.content)
+		if !queued.chatRecovery.hadHistory() {
+			session.AddHistory("user", queued.content)
+		}
 		// Persist queued user message immediately (mirror of the
 		// initial AddHistory("user",...) save above).
 		sessions.Save()
+		_ = queued.chatRecovery.saveHistory()
 
 		if idleTimer != nil {
 			if !idleTimer.Stop() {
@@ -8345,6 +8444,7 @@ func (presentation *turnPresentation) handleThinking() bool {
 					slog.Debug("rich card: failed to create initial thinking card", "platform", p.Name(), "error", err)
 				} else {
 					cardMessageID = handle
+					_ = e.checkpointChatPreview(presentation.processor.state, p, handle)
 					lastRichCardInput = ""
 					lastRichCardPreview = ""
 				}
@@ -8472,6 +8572,7 @@ func (presentation *turnPresentation) handleToolUse() bool {
 					slog.Debug("rich card: failed to create initial tool card", "platform", p.Name(), "error", err)
 				} else {
 					cardMessageID = handle
+					_ = e.checkpointChatPreview(presentation.processor.state, p, handle)
 					lastRichCardInput = ""
 					lastRichCardPreview = ""
 				}
@@ -8645,6 +8746,7 @@ func (presentation *turnPresentation) handleText() {
 								slog.Debug("rich card: failed to create initial text card", "platform", p.Name(), "error", err)
 							} else {
 								cardMessageID = handle
+								_ = e.checkpointChatPreview(presentation.processor.state, p, handle)
 								lastRichCardInput = ""
 								lastRichCardPreview = ""
 							}
@@ -8672,6 +8774,7 @@ func (presentation *turnPresentation) handleText() {
 								slog.Debug("rich card: failed to create deferred text card", "platform", p.Name(), "error", err)
 							} else {
 								cardMessageID = handle
+								_ = e.checkpointChatPreview(presentation.processor.state, p, handle)
 								richAnswerStarted = true
 								richAnswerStartedAt = time.Now()
 								lastRichCardUpdate = time.Now()
@@ -8821,6 +8924,7 @@ func (d *turnDelivery) deliver() {
 	setCardMessageID := func(handle any) {
 		cardMessageID = handle
 		*d.cardMessageID = handle
+		_ = e.checkpointChatPreview(d.processor.state, p, handle)
 	}
 	cardThinkingText := d.cardThinkingText
 	cardToolCalls := d.cardToolCalls
@@ -9069,11 +9173,16 @@ func (d *turnDelivery) deliver() {
 // messages can no longer be delivered to the agent.
 func (e *Engine) notifyDroppedQueuedMessages(state *interactiveState, reason error) {
 	state.mu.Lock()
+	if state.preserveQueuedOnShutdown {
+		state.mu.Unlock()
+		return
+	}
 	remaining := state.pendingMessages
 	state.pendingMessages = nil
 	state.mu.Unlock()
 	display, _ := e.displayRuntimeSnapshot()
 	for _, q := range remaining {
+		q.chatRecovery.finish()
 		message := fmt.Sprintf(e.i18n.TForText(MsgError, q.content), reason)
 		copy := e.i18n.RichCardCopyForText(q.content)
 		phase := richCardFailurePhase(reason)
@@ -9135,6 +9244,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.platform = queued.platform
 		state.replyCtx = queued.replyCtx
 		state.currentMessageID = queued.messageID
+		state.chatRecovery = queued.chatRecovery
 		state.currentReplyUserID = queued.userID
 		state.fromVoice = queued.fromVoice
 		state.currentUserID = queued.userID
@@ -9184,7 +9294,11 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 
 		drainEvents(as.Events())
 
-		session.AddHistory("user", queued.content)
+		if !queued.chatRecovery.hadHistory() {
+			session.AddHistory("user", queued.content)
+		}
+		sessions.Save()
+		_ = queued.chatRecovery.saveHistory()
 
 		sendDone := make(chan error, 1)
 		go func() {
@@ -9199,7 +9313,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 				sendDone <- err
 				return
 			}
-			err = e.sendAgentTurnWithOverrides(turnAgent, as, prompt, append(append([]ImageAttachment(nil), queued.images...), historyContext.Images...), append(append([]FileAttachment(nil), queued.files...), historyContext.Files...), overrides)
+			err = e.sendAgentTurnWithOverrides(turnAgent, as, prompt, append(append([]ImageAttachment(nil), queued.images...), historyContext.Images...), append(append([]FileAttachment(nil), queued.files...), historyContext.Files...), overrides, queued.chatRecovery)
 			if err == nil {
 				acceptMessageContext(session, sessions, historyContext)
 			}
@@ -12618,6 +12732,10 @@ func (e *Engine) stopInteractiveSessionWithOptions(sessionKey string, notifyQueu
 	pending := state.pending
 	state.pending = nil
 	agentSession := state.agentSession
+	state.chatRecovery.finish()
+	for _, queued := range state.pendingMessages {
+		queued.chatRecovery.finish()
+	}
 	closeTarget := sessionCloseTarget{platform: state.platform, replyCtx: state.replyCtx, userStop: true}
 	currentMessageID := state.currentMessageID
 	cancelPreparation := state.contextPreparationCancel

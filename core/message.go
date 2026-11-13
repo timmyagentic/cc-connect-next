@@ -309,6 +309,7 @@ type LocationAttachment struct {
 
 // Message represents a unified incoming message from any platform.
 type Message struct {
+	chatRecovery     *chatRecovery
 	steerWhenReady   bool   // ordinary supplement deferred until the active turn finishes starting
 	steerDispatching bool   // pending supplement passed to the backend; guarded by interactiveState.mu
 	feedbackText     string // captured before aliases, quotes and injected context
