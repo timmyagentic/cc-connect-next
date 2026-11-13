@@ -418,6 +418,8 @@ type Event struct {
 	// Optional native submission checkpoint for a replacement conversation.
 	// The engine durably adopts this before acknowledging RecoveryReady.
 	RecoveryCheckpoint json.RawMessage `json:"-"`
+	// RecoverySilent checkpoints an internal retry without a visible recovery notice.
+	RecoverySilent bool `json:"-"`
 }
 
 // HistoryEntry is one turn in a conversation.
