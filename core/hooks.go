@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ const (
 	HookEventMessageReceived     HookEventType = "message.received"
 	HookEventMessageSent         HookEventType = "message.sent"
 	HookEventReplyCompleted      HookEventType = "reply.completed"
+	HookEventCardAction          HookEventType = "card.action"
 	HookEventSessionStarted      HookEventType = "session.started"
 	HookEventSessionEnded        HookEventType = "session.ended"
 	HookEventCronTriggered       HookEventType = "cron.triggered"
@@ -52,6 +54,9 @@ const (
 
 // HookConfig is the user-facing configuration for a single hook rule.
 type HookConfig struct {
+	Name    string `toml:"name" json:"name,omitempty"`
+	Project string `toml:"project" json:"project,omitempty"`
+	Input   string `toml:"input" json:"input,omitempty"` // "env" (default) or "json" for command hooks
 	Event   string `toml:"event" json:"event"`
 	Type    string `toml:"type" json:"type"` // "command" or "http"
 	Command string `toml:"command" json:"command,omitempty"`
@@ -102,7 +107,20 @@ type HookManager struct {
 // NewHookManager creates a manager for the given project name.
 func NewHookManager(project string, hooks []HookConfig, shell, shellFlag, shellProfile string) *HookManager {
 	valid := make([]HookConfig, 0, len(hooks))
+	nameCounts := make(map[string]int)
 	for _, h := range hooks {
+		if h.Name != "" && (h.Project == "" || h.Project == project) {
+			nameCounts[h.Project+"\x00"+h.Name]++
+		}
+	}
+	for _, h := range hooks {
+		if h.Project != "" && h.Project != project {
+			continue
+		}
+		if h.Name != "" && nameCounts[h.Project+"\x00"+h.Name] != 1 {
+			slog.Warn("hooks: skipping duplicate named hook", "project", project, "name", h.Name)
+			continue
+		}
 		if err := validateHookConfig(h); err != nil {
 			slog.Warn("hooks: skipping invalid config", "project", project, "error", err)
 			continue
@@ -119,7 +137,40 @@ func NewHookManager(project string, hooks []HookConfig, shell, shellFlag, shellP
 	}
 }
 
+var hookNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_.-]{0,63}$`)
+
+// ValidHookName reports whether a name can identify a configured card handler.
+func ValidHookName(name string) bool {
+	return hookNamePattern.MatchString(name)
+}
+
+// ValidateHookBinding validates the named routing and command input contract.
+// Both configuration loading and direct runtime construction use these checks.
+func ValidateHookBinding(h HookConfig) error {
+	if h.Name != "" && !ValidHookName(h.Name) {
+		return fmt.Errorf("name must be a 1-64 character identifier starting with a letter")
+	}
+	if h.Input != "" && h.Input != "env" && h.Input != "json" {
+		return fmt.Errorf("input must be env or json")
+	}
+	if h.Type != string(HookHandlerCommand) && h.Input != "" {
+		return fmt.Errorf("input is only supported for command hooks")
+	}
+	if strings.EqualFold(h.Event, string(HookEventCardAction)) {
+		if h.Name == "" || strings.TrimSpace(h.Project) == "" {
+			return fmt.Errorf("card.action requires name and project")
+		}
+		if h.Type == string(HookHandlerCommand) && h.Input != "json" {
+			return fmt.Errorf("card.action command hooks require input=json")
+		}
+	}
+	return nil
+}
+
 func validateHookConfig(h HookConfig) error {
+	if err := ValidateHookBinding(h); err != nil {
+		return err
+	}
 	if h.Event == "" {
 		return fmt.Errorf("event is required")
 	}
@@ -143,7 +194,7 @@ func validateHookConfig(h HookConfig) error {
 
 // Emit dispatches an event to all matching hooks.
 func (hm *HookManager) Emit(event HookEvent) {
-	if hm == nil {
+	if hm == nil || strings.EqualFold(string(event.Event), string(HookEventCardAction)) {
 		return
 	}
 	event.Project = hm.project
@@ -176,7 +227,7 @@ func (hm *HookManager) Emit(event HookEvent) {
 // that acknowledge events use the returned error to retain delivery for retry.
 // Consumers must persist idempotently before returning success.
 func (hm *HookManager) EmitSync(event HookEvent) error {
-	if hm == nil {
+	if hm == nil || strings.EqualFold(string(event.Event), string(HookEventCardAction)) {
 		return nil
 	}
 	event.Project = hm.project
@@ -194,8 +245,49 @@ func (hm *HookManager) EmitSync(event HookEvent) error {
 	return errors.Join(errs...)
 }
 
+// DispatchNamed accepts a card action for one configured handler in this project.
+// Execution is asynchronous even when Async is false, so platform callback
+// acknowledgements are independent of a local process or remote HTTP endpoint.
+func (hm *HookManager) DispatchNamed(name string, event HookEvent) error {
+	if hm == nil || event.Event != HookEventCardAction {
+		return fmt.Errorf("named card hook is unavailable")
+	}
+	for _, hook := range hm.Hooks() {
+		if hook.Name != name || hook.Project != hm.project || !strings.EqualFold(hook.Event, string(HookEventCardAction)) {
+			continue
+		}
+		event.Project = hm.project
+		if event.Timestamp.IsZero() {
+			event.Timestamp = time.Now()
+		}
+		// Capture callback-owned maps before returning to the platform. This also
+		// rejects non-JSON data before reporting that the callback was accepted.
+		body, err := json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("named card hook payload is invalid")
+		}
+		var snapshot HookEvent
+		if err := json.Unmarshal(body, &snapshot); err != nil {
+			return fmt.Errorf("named card hook payload is invalid")
+		}
+		if snapshot.Extra == nil {
+			snapshot.Extra = make(map[string]any)
+		}
+		snapshot.Extra["hook"] = hook.Name
+		go func() { _ = hm.execute(&hook, snapshot) }()
+		return nil
+	}
+	return fmt.Errorf("named card hook is unavailable")
+}
+
 func (hm *HookManager) handlesEvent(event HookEventType) bool {
 	for _, hook := range hm.Hooks() {
+		if event == HookEventCardAction {
+			if hook.Name != "" && hook.Project == hm.project && strings.EqualFold(hook.Event, string(event)) {
+				return true
+			}
+			continue
+		}
 		if matchEvent(hook.Event, string(event)) {
 			return true
 		}
@@ -229,7 +321,22 @@ func (hm *HookManager) executeCommand(h *HookConfig, event HookEvent) error {
 
 	cmd := shellExecCommand(ctx, hm.shell, hm.shellFlag, hm.shellProfile, h.Command)
 	cmd.WaitDelay = 2 * time.Second
-	cmd.Env = append(os.Environ(), eventToEnv(event)...)
+	envEvent := event
+	if h.Input == "json" {
+		body, err := json.Marshal(event)
+		if err != nil {
+			return fmt.Errorf("hooks: encode command input: %w", err)
+		}
+		cmd.Stdin = bytes.NewReader(body)
+		// Keep submitted data in stdin rather than duplicating it in the process
+		// environment, which has substantially smaller platform size limits.
+		envEvent.Content, envEvent.Error, envEvent.UserName = "", "", ""
+		envEvent.Extra = nil
+	}
+	cmd.Env = append(os.Environ(), eventToEnv(envEvent)...)
+	if h.Input == "json" {
+		cmd.Env = append(cmd.Env, "CC_HOOK_CONTENT=", "CC_HOOK_ERROR=", "CC_HOOK_USER_NAME=", "CC_HOOK_EXTRA=")
+	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

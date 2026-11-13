@@ -323,3 +323,5 @@ reset. Do not repeat authorization or restart solely on this report. No new
 configuration or native build dependency is required; other operating systems
 keep their existing checks. Remove private executable paths before sharing a
 report publicly.
+
+The `card_action_hooks` platform capability reports whether a named `card.action` handler is configured for the current project. It includes command/network side effects and conditional permission without exposing handler commands, URLs or submitted data. See [custom card hooks](card-hooks.md).

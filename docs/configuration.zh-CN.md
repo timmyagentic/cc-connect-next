@@ -142,7 +142,7 @@
 
 选择 Shell，并在消息、会话、Cron、权限和错误事件上运行命令或 HTTP Hook。
 
-相关配置： `shell`, `shell_profile`, `hooks.event`, `hooks.type`, `hooks.command`, `hooks.url`
+相关配置： `shell`, `shell_profile`, `hooks.event`, `hooks.type`, `hooks.name`, `hooks.project`, `hooks.input`, `hooks.command`, `hooks.url`
 
 ## 配置项参考
 
@@ -911,7 +911,7 @@ enabled = true`
 
 ### `hooks.async`
 
-异步运行 Hook，避免阻塞消息处理。message.observed 始终等待匹配 Hook 完成后再确认传输事件，不受此选项影响。
+异步运行 Hook，避免阻塞消息处理。message.observed 始终等待匹配 Hook 完成后再确认传输事件。命名 card.action Hook 始终异步执行，让平台回调及时返回。
 
 - 来源：`toml`
 - 配置位置：`[[hooks]]`
@@ -941,7 +941,7 @@ enabled = true`
 
 ### `hooks.event`
 
-选择触发该 Hook 的事件。message.observed 在 Agent 回复过滤前提供真人提及元数据；支持的平台通过 reply.completed 在群聊 rich 模式非静默答复成功投递后提供路由 ID，遵循 hooks.async，Hook 失败不重投。
+选择触发该 Hook 的事件。message.observed 在 Agent 回复过滤前提供真人提及元数据；支持的平台通过 reply.completed 在群聊 rich 模式非静默答复成功投递后提供路由 ID，遵循 hooks.async，Hook 失败不重投。card.action 只投递给其命名项目处理器，通配订阅不接收卡片输入。
 
 - 来源：`toml`
 - 配置位置：`[[hooks]]`
@@ -952,6 +952,52 @@ enabled = true`
 - 默认值来源：`none`
 - 生效方式：`restart`
 - 示例: `event = "value"`
+
+### `hooks.input`
+
+选择命令 Hook 输入。env 通过 CC_HOOK_* 环境变量传入事件，stdin 为空；json 通过 stdin 传入完整事件 JSON，环境变量仅含路由元数据。card.action 命令处理器必须使用 json。HTTP Hook 始终接收 JSON 请求正文并省略此选项。
+
+- 来源：`toml`
+- 配置位置：`[[hooks]]`
+- 作用域：`global`
+- 类型：`string`
+- 要求：`条件必填`
+- 默认值：`env for command; unset for HTTP`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 必填条件: `hooks.event = card.action and hooks.type = command`
+- 允许值: `env`, `json`
+- 示例: `input = "json"`
+
+### `hooks.name`
+
+注册区分大小写的处理器名称，由字母开头的 1-64 个字母、数字、点、下划线或连字符组成。同项目内名称唯一；card.action 必填。
+
+- 来源：`toml`
+- 配置位置：`[[hooks]]`
+- 作用域：`global`
+- 类型：`string`
+- 要求：`条件必填`
+- 默认值：`unset`
+- 默认值来源：`runtime`
+- 生效方式：`restart`
+- 必填条件: `hooks.event = card.action`
+- 示例: `name = "reply_confirmation"`
+
+### `hooks.project`
+
+将 Hook 限定到一个已配置项目。card.action 必填；生命周期 Hook 省略时作用于全部项目。
+
+- 来源：`toml`
+- 配置位置：`[[hooks]]`
+- 作用域：`global`
+- 类型：`string`
+- 要求：`条件必填`
+- 默认值：`all projects`
+- 默认值来源：`builtin`
+- 生效方式：`restart`
+- 必填条件: `hooks.event = card.action`
+- 示例: `project = "my-project"`
 
 ### `hooks.timeout`
 

@@ -17,6 +17,7 @@ import (
 	"sync"
 
 	"github.com/BurntSushi/toml"
+	"github.com/timmyagentic/cc-connect-next/core"
 	"github.com/timmyagentic/cc-connect-next/internal/privacyguard"
 	"github.com/timmyagentic/cc-connect-next/internal/updatechannel"
 )
@@ -299,6 +300,9 @@ type BridgeConfig struct {
 
 // HookConfig is a single event hook rule.
 type HookConfig struct {
+	Name    string `toml:"name,omitempty"`
+	Project string `toml:"project,omitempty"`
+	Input   string `toml:"input,omitempty"`
 	Event   string `toml:"event"`             // event name or "*"
 	Type    string `toml:"type"`              // "command" or "http"
 	Command string `toml:"command,omitempty"` // shell command (type=command)
@@ -1354,7 +1358,26 @@ func (c *Config) validateInternal(permissive bool) error {
 			return fmt.Errorf("config: commands[%d] must set exactly one of prompt or exec", i)
 		}
 	}
+	hookNames := make(map[string]bool)
+	projectNames := make(map[string]bool)
+	for _, project := range c.Projects {
+		projectNames[project.Name] = true
+	}
 	for i, hook := range c.Hooks {
+		binding := core.HookConfig{Name: hook.Name, Project: hook.Project, Event: hook.Event, Type: hook.Type, Input: hook.Input}
+		if err := core.ValidateHookBinding(binding); err != nil {
+			return fmt.Errorf("config: hooks[%d]: %w", i, err)
+		}
+		if hook.Project != "" && !projectNames[hook.Project] {
+			return fmt.Errorf("config: hooks[%d].project must name a configured project", i)
+		}
+		if hook.Name != "" {
+			key := hook.Project + "\x00" + hook.Name
+			if hookNames[key] {
+				return fmt.Errorf("config: hooks[%d].name is duplicated in this project", i)
+			}
+			hookNames[key] = true
+		}
 		if strings.TrimSpace(hook.Event) == "" {
 			return fmt.Errorf("config: hooks[%d].event is required", i)
 		}
