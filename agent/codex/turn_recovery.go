@@ -16,15 +16,16 @@ import (
 // Unlike a received turn ID it is available BEFORE turn/start, so an accepted
 // submission with a lost RPC response can still be identified exactly.
 type codexTurnCheckpoint struct {
-	Version    int              `json:"version"`
-	ThreadID   string           `json:"thread_id"`
-	BoundaryID string           `json:"boundary_id,omitempty"`
-	ClientID   string           `json:"client_id"`
-	InputHash  string           `json:"input_hash"`
-	Input      []map[string]any `json:"input"`
-	WorkDir    string           `json:"work_dir"`
-	Mode       string           `json:"mode"`
-	Provider   string           `json:"provider"`
+	Version            int              `json:"version"`
+	ThreadID           string           `json:"thread_id"`
+	BoundaryID         string           `json:"boundary_id,omitempty"`
+	ClientID           string           `json:"client_id"`
+	InputHash          string           `json:"input_hash"`
+	Input              []map[string]any `json:"input"`
+	WorkDir            string           `json:"work_dir"`
+	Mode               string           `json:"mode"`
+	Provider           string           `json:"provider"`
+	SignatureRecovered bool             `json:"signature_recovered,omitempty"`
 }
 
 type recoveryThread struct {
@@ -215,6 +216,9 @@ func (s *appServerSession) ResumeInterruptedTurn(raw json.RawMessage, input core
 const interruptedTurnContinuation = "The cc-connect-next process restarted while the previous user task was unfinished. Continue that same task from this conversation's existing history and the current workspace. First reconcile any tool operation whose result was interrupted: inspect its state or receipt before repeating an external action. Preserve the user's scope, decisions, and permission requirements. Do not repeat completed work, resend a delivered message, or treat the restart as approval. If the task already finished, return its verified result; otherwise complete the remaining authorized work."
 
 func (s *appServerSession) startRecoveredTurn(cp codexTurnCheckpoint, input core.TurnRecoveryInput) error {
+	s.recoveryMu.Lock()
+	s.activeRecovery = &cp
+	s.recoveryMu.Unlock()
 	if !input.UseOptions {
 		return s.startPreparedTurn(cp.Input, nil, cp.ClientID)
 	}
@@ -226,6 +230,50 @@ func (s *appServerSession) startRecoveredTurn(cp codexTurnCheckpoint, input core
 		options.Model = s.DefaultTurnOptions().Model
 	}
 	return s.startPreparedTurn(cp.Input, &options, cp.ClientID)
+}
+
+// A signature repair changes the native thread while keeping the same logical
+// user task. Hand the replacement checkpoint to the engine in the existing
+// binding event; its acknowledgement must cover both identities before start.
+func (s *appServerSession) signatureTurnCheckpoint(previousID string, input []map[string]any) (json.RawMessage, string, error) {
+	s.recoveryMu.Lock()
+	active := s.activeRecovery
+	var cp codexTurnCheckpoint
+	if active != nil {
+		cp = *active
+	}
+	s.recoveryMu.Unlock()
+	if active == nil {
+		return nil, "", nil
+	}
+	if cp.ThreadID != previousID || cp.ClientID == "" {
+		return nil, "", fmt.Errorf("signature recovery checkpoint does not match the replaced conversation")
+	}
+	thread, err := s.readRecoveryThread()
+	if err != nil {
+		return nil, "", err
+	}
+	cp.ThreadID, cp.BoundaryID = thread.ID, ""
+	if len(thread.Turns) > 0 {
+		cp.BoundaryID = thread.Turns[len(thread.Turns)-1].ID
+		if cp.BoundaryID == "" {
+			return nil, "", fmt.Errorf("signature recovery replacement has an unidentified turn")
+		}
+	}
+	cp.ClientID, err = recoveryClientID()
+	if err != nil {
+		return nil, "", err
+	}
+	cp.Input = input
+	cp.SignatureRecovered = true
+	raw, err := json.Marshal(cp)
+	if err != nil {
+		return nil, "", err
+	}
+	s.recoveryMu.Lock()
+	s.activeRecovery = &cp
+	s.recoveryMu.Unlock()
+	return raw, cp.ClientID, nil
 }
 
 func checkpointTurn(cp codexTurnCheckpoint, turns []recoveryTurn) (*recoveryTurn, error) {

@@ -1700,8 +1700,9 @@ tunneled through it.
 Full reference: [docs/telegram.md](./telegram.md#21-optional-use-a-proxy).
 This option was added in PR #389.
 
-If encrypted-context recovery replaces the native thread during an in-flight
-chat, that turn's earlier restart checkpoint cannot be transferred to the new
-identity. A subsequent daemon restart fails closed: it logs the identity mismatch
-and removes that stale turn and its queued checkpoint group rather than replaying
-old input. A later independent turn creates a fresh recoverable checkpoint.
+When encrypted-context recovery replaces the native thread, its new submission
+checkpoint is persisted before adopting the new session binding and continuing.
+A restart between those writes repairs only the exact recorded predecessor binding;
+it then resumes the replacement without replaying the original request. An unrelated
+identity mismatch fails closed: the stale checkpoint group is removed and the user
+is asked to confirm unfinished work after platform readiness.

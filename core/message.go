@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -414,6 +415,9 @@ type Event struct {
 
 	// The consumer acknowledges the durable SessionID before recovery continues.
 	RecoveryReady chan error `json:"-"`
+	// Optional native submission checkpoint for a replacement conversation.
+	// The engine durably adopts this before acknowledging RecoveryReady.
+	RecoveryCheckpoint json.RawMessage `json:"-"`
 }
 
 // HistoryEntry is one turn in a conversation.

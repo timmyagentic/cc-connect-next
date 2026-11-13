@@ -6933,7 +6933,7 @@ func (t *turnProcessor) run() {
 				continue
 			}
 		case EventSessionRecovery:
-			err := t.persistAgentSessionID(event.SessionID)
+			err := t.adoptRecoveredSession(event)
 			if event.RecoveryReady != nil {
 				event.RecoveryReady <- err
 			}
@@ -13046,7 +13046,7 @@ func (e *Engine) processCompressEvents(state *interactiveState, session *Session
 			}
 		case EventSessionRecovery:
 			processor := &turnProcessor{engine: e, state: state, session: session, sessions: sessions}
-			err := processor.persistAgentSessionID(event.SessionID)
+			err := processor.adoptRecoveredSession(event)
 			if event.RecoveryReady != nil {
 				event.RecoveryReady <- err
 			}

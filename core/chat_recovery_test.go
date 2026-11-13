@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -591,4 +592,196 @@ func TestChatRecovery_ProjectIdentityCannotConsumeOtherCheckpoint(t *testing.T) 
 	e2 := recoveryEngine(t, "project-a", store, ledger, p)
 	recoveryWait(t, "owning project recovers", func() bool { return p.finalContains("handle-1", "original project answer") })
 	stopRecoveryEngine(t, e2)
+}
+
+// A signature repair replaces the native conversation during the same bridge
+// turn. Its acknowledgement must establish both durable identities before the
+// replacement native thread can execute anything.
+type replacingRecoveryAgent struct {
+	recoveryNativeAgent
+	mu   sync.Mutex
+	last *replacingRecoverySession
+}
+
+type replacingRecoverySession struct {
+	*recoveryNativeSession
+	thread atomic.Value
+}
+
+func (a *replacingRecoveryAgent) StartSession(ctx context.Context, id string) (AgentSession, error) {
+	backend, err := a.recoveryNativeAgent.StartSession(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	s := &replacingRecoverySession{recoveryNativeSession: backend.(*recoveryNativeSession)}
+	s.thread.Store(s.id)
+	a.mu.Lock()
+	a.last = s
+	a.mu.Unlock()
+	return s, nil
+}
+
+func (s *replacingRecoverySession) CurrentSessionID() string { return s.thread.Load().(string) }
+
+func (a *replacingRecoveryAgent) replaceThread(id string) <-chan error {
+	a.mu.Lock()
+	s := a.last
+	a.mu.Unlock()
+	s.thread.Store(id)
+	checkpoint, _ := json.Marshal(id)
+	ready := make(chan error, 1)
+	s.events <- Event{Type: EventSessionRecovery, SessionID: id, RecoveryCheckpoint: checkpoint, RecoveryReady: ready}
+	return ready
+}
+
+func replacingRecoveryEngine(t *testing.T, store string, ledger *recoveryNativeLedger, p *recoveryCardPlatform) (*Engine, *replacingRecoveryAgent) {
+	t.Helper()
+	a := &replacingRecoveryAgent{recoveryNativeAgent: recoveryNativeAgent{ledger: ledger}}
+	e := NewEngine("project", a, []Platform{p}, store, LangEnglish)
+	e.SetDisplayConfig(DisplayCfg{Mode: "full", CardMode: "rich"})
+	if err := e.Start(); err != nil {
+		t.Fatal(err)
+	}
+	return e, a
+}
+
+func readOnlyChatCheckpoint(t *testing.T, store string) (string, map[string]json.RawMessage) {
+	t.Helper()
+	paths, err := filepath.Glob(store + ".recovery/*/state.json")
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("expected one durable chat checkpoint: paths=%v err=%v", paths, err)
+	}
+	b, err := os.ReadFile(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]json.RawMessage
+	if err := json.Unmarshal(b, &saved); err != nil {
+		t.Fatal(err)
+	}
+	return paths[0], saved
+}
+
+func TestChatRecovery_SignatureReplacementAcknowledgementSurvivesRestart(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "sessions.json")
+	ledger := &recoveryNativeLedger{answer: "continued from replacement thread"}
+	p := newRecoveryCardPlatform()
+	e, agent := replacingRecoveryEngine(t, store, ledger, p)
+	e.ReceiveMessage(p, recoveryUserMessage("m1", "original task before signature repair"))
+	recoveryWait(t, "original turn", func() bool { n, _, _ := ledger.counts(); return n == 1 && p.startCount() == 1 })
+	select {
+	case err := <-agent.replaceThread("native-replacement"):
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("replacement thread did not receive its durability acknowledgement")
+	}
+	if got := NewSessionManager(store).GetOrCreateActive("recovery-chat:alice").GetAgentSessionID(); got != "native-replacement" {
+		t.Fatalf("replacement was acknowledged before its session binding persisted: %q", got)
+	}
+	_, saved := readOnlyChatCheckpoint(t, store)
+	if string(saved["native"]) != `"native-replacement"` || string(saved["agent_session_id"]) != `"native-replacement"` || string(saved["replaces_agent_session_id"]) != `"native-1"` {
+		t.Fatalf("replacement acknowledgement left a stale durable checkpoint: %s", saved)
+	}
+	stopRecoveryEngine(t, e)
+	e2 := recoveryEngine(t, "project", store, ledger, p)
+	recoveryWait(t, "replacement thread resumes on the original card", func() bool { return p.finalContains("handle-1", "continued from replacement thread") })
+	ledger.mu.Lock()
+	ids := append([]string(nil), ledger.starts...)
+	ledger.mu.Unlock()
+	if len(ids) != 2 || ids[1] != "native-replacement" {
+		t.Fatalf("restart resumed the rejected original thread: %v", ids)
+	}
+	if sends, recovered, _ := ledger.counts(); sends != 1 || recovered != 1 {
+		t.Fatalf("replacement replayed the original request: sends=%d recoveries=%d", sends, recovered)
+	}
+	stopRecoveryEngine(t, e2)
+}
+
+func TestChatRecovery_ReplacementJournalRepairsOnlyExactPredecessorBinding(t *testing.T) {
+	for _, binding := range []string{"native-1", "unrelated-thread"} {
+		t.Run(binding, func(t *testing.T) {
+			store := filepath.Join(t.TempDir(), "sessions.json")
+			ledger := &recoveryNativeLedger{answer: "replacement recovered"}
+			p := newRecoveryCardPlatform()
+			e := recoveryEngine(t, "project", store, ledger, p)
+			e.ReceiveMessage(p, recoveryUserMessage("m1", "work through a native replacement"))
+			recoveryWait(t, "original turn", func() bool { n, _, _ := ledger.counts(); return n == 1 && p.startCount() == 1 })
+			stopRecoveryEngine(t, e)
+
+			// Fault injection: only the first of the replacement's two durable
+			// writes reached disk before the process exited.
+			path, saved := readOnlyChatCheckpoint(t, store)
+			saved["native"] = json.RawMessage(`"native-replacement"`)
+			saved["agent_session_id"] = json.RawMessage(`"native-replacement"`)
+			saved["replaces_agent_session_id"] = json.RawMessage(`"native-1"`)
+			b, err := json.Marshal(saved)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, b, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if binding != "native-1" {
+				storeManager := NewSessionManager(store)
+				storeManager.GetOrCreateActive("recovery-chat:alice").SetAgentSessionID(binding, "recovery-native")
+				if err := storeManager.SaveWithError(); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			e2 := recoveryEngine(t, "project", store, ledger, p)
+			if binding == "native-1" {
+				recoveryWait(t, "exact predecessor is repaired and the replacement answers", func() bool { return p.finalContains("handle-1", "replacement recovered") })
+				if got := NewSessionManager(store).GetOrCreateActive("recovery-chat:alice").GetAgentSessionID(); got != "native-replacement" {
+					t.Fatalf("repair was not persisted: %q", got)
+				}
+			} else {
+				time.Sleep(50 * time.Millisecond)
+				if _, recovered, starts := ledger.counts(); recovered != 0 || starts != 1 {
+					t.Fatalf("foreign binding was adopted: recoveries=%d native starts=%d", recovered, starts)
+				}
+				if got := NewSessionManager(store).GetOrCreateActive("recovery-chat:alice").GetAgentSessionID(); got != binding {
+					t.Fatalf("foreign binding was overwritten: %q", got)
+				}
+			}
+			stopRecoveryEngine(t, e2)
+		})
+	}
+}
+
+func TestChatRecovery_ReplacementSessionSaveFailureIsNotAcknowledged(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "sessions.json")
+	ledger := &recoveryNativeLedger{}
+	p := newRecoveryCardPlatform()
+	e, agent := replacingRecoveryEngine(t, store, ledger, p)
+	e.ReceiveMessage(p, recoveryUserMessage("m1", "task before persistence failure"))
+	recoveryWait(t, "original turn", func() bool { n, _, _ := ledger.counts(); return n == 1 && p.startCount() == 1 })
+	blocked := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.sessions.mu.Lock()
+	e.sessions.storePath = filepath.Join(blocked, "sessions.json")
+	e.sessions.mu.Unlock()
+	select {
+	case err := <-agent.replaceThread("native-replacement"):
+		if err == nil {
+			t.Fatal("replacement native execution received success before the new session binding was durable")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("persistence failure was not acknowledged")
+	}
+	e.sessions.mu.Lock()
+	e.sessions.storePath = store
+	e.sessions.mu.Unlock()
+	if got := NewSessionManager(store).GetOrCreateActive("recovery-chat:alice").GetAgentSessionID(); got != "native-1" {
+		t.Fatalf("fault did not preserve the old durable binding: %q", got)
+	}
+	_, saved := readOnlyChatCheckpoint(t, store)
+	if string(saved["native"]) != `"native-replacement"` {
+		t.Fatalf("replacement checkpoint must precede the failed session save: %s", saved["native"])
+	}
+	stopRecoveryEngine(t, e)
 }

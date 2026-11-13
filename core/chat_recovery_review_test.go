@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestChatRecovery_HistoryMarkerRequiresDurableSession(t *testing.T) {
@@ -87,4 +89,42 @@ func TestChatRecovery_ChangedNativeIdentityClearsStaleGroup(t *testing.T) {
 		t.Fatal("native work replayed")
 	}
 
+}
+
+func TestChatRecovery_ReplacementKeepsQueuedRequestAfterRestart(t *testing.T) {
+	store := filepath.Join(t.TempDir(), "sessions.json")
+	ledger := &recoveryNativeLedger{answer: "replacement original completed"}
+	p := newRecoveryCardPlatform()
+	e, agent := replacingRecoveryEngine(t, store, ledger, p)
+	e.ReceiveMessage(p, recoveryUserMessage("m1", "original"))
+	recoveryWait(t, "original start", func() bool { n, _, _ := ledger.counts(); return n == 1 && p.startCount() == 1 })
+	e.ReceiveMessage(p, recoveryUserMessage("m2", "queued independent work"))
+	select {
+	case err := <-agent.replaceThread("native-replacement"):
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("replacement acknowledgment timeout")
+	}
+	stopRecoveryEngine(t, e)
+	ledger.mu.Lock()
+	ledger.autoReply = true
+	ledger.mu.Unlock()
+	e2 := recoveryEngine(t, "project", store, ledger, p)
+	recoveryWait(t, "replacement then queued", func() bool {
+		n, r, _ := ledger.counts()
+		return n == 2 && r == 1 && p.finalContains("handle-1", "replacement original completed")
+	})
+	ledger.mu.Lock()
+	starts := append([]string(nil), ledger.starts...)
+	sends := append([]string(nil), ledger.sends...)
+	ledger.mu.Unlock()
+	if len(starts) != 2 || starts[1] != "native-replacement" {
+		t.Fatalf("wrong native starts: %v", starts)
+	}
+	if !strings.Contains(sends[1], "queued independent work") {
+		t.Fatalf("queued input changed: %v", sends)
+	}
+	stopRecoveryEngine(t, e2)
 }

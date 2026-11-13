@@ -224,6 +224,7 @@ type appServerSession struct {
 	diagnostics         appServerDiagnostics
 	recoveryMu          sync.Mutex
 	preparedRecovery    *codexTurnCheckpoint
+	activeRecovery      *codexTurnCheckpoint
 	recoveryFreshThread bool
 }
 
@@ -621,6 +622,7 @@ func (s *appServerSession) send(prompt string, images []core.ImageAttachment, fi
 	s.recoveryMu.Lock()
 	prepared := s.preparedRecovery
 	s.preparedRecovery = nil
+	s.activeRecovery = prepared
 	s.recoveryMu.Unlock()
 	if prepared != nil {
 		if prepared.InputHash != recoveryInputHash(prompt, images, files) {
@@ -680,22 +682,19 @@ func (s *appServerSession) startPreparedTurn(input []map[string]any, options *co
 	if threadID == "" {
 		return fmt.Errorf("codex app-server thread id is empty")
 	}
-	s.stateMu.Lock()
-	s.recoveryUsed = false
-	s.preambleSent = true
-	s.stateMu.Unlock()
 	s.recoveryMu.Lock()
 	s.recoveryFreshThread = false
+	signatureRecovered := s.activeRecovery != nil && s.activeRecovery.SignatureRecovered
 	s.recoveryMu.Unlock()
+	s.stateMu.Lock()
+	s.preambleSent = true
+	s.recoveryUsed = signatureRecovered
+	s.stateMu.Unlock()
 
-	return s.startTurnWithClientID(threadID, input, options, clientID)
+	return s.startTurn(threadID, input, options, clientID)
 }
 
-func (s *appServerSession) startTurn(threadID string, input []map[string]any, options *core.TurnOptions) error {
-	return s.startTurnWithClientID(threadID, input, options, "")
-}
-
-func (s *appServerSession) startTurnWithClientID(threadID string, input []map[string]any, options *core.TurnOptions, clientID string) error {
+func (s *appServerSession) startTurn(threadID string, input []map[string]any, options *core.TurnOptions, clientID string) error {
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
