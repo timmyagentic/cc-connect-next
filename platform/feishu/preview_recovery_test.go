@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -289,5 +290,35 @@ func TestTurnReplyRecovery_RejectsForeignOrMismatchedRoute(t *testing.T) {
 		if _, err := router.RestoreTurnReplyCtx(foreign); err == nil {
 			t.Errorf("accepted invalid turn reply route change %v", change)
 		}
+	}
+}
+
+func TestTurnReplyRecovery_RejectsMalformedOrMismatchedSessionTail(t *testing.T) {
+	p, _ := newPreviewRecoveryFixture(t)
+	for _, tail := range []string{"", "root:", "thread:", "unexpected:route", "ou_foreign"} {
+		rc := replyContext{messageID: "om_source", chatID: "oc_chat", directUserID: "ou_owner", sessionKey: "feishu:oc_chat:" + tail}
+		if _, err := p.SnapshotTurnReplyCtx(rc); err == nil {
+			t.Errorf("accepted inconsistent session tail %q", tail)
+		}
+	}
+}
+
+func TestPreviewRecovery_SequenceExhaustionStopsBeforeHTTP(t *testing.T) {
+	p, f := newPreviewRecoveryFixture(t)
+	h := &feishuPreviewHandle{messageID: "om_answer", chatID: "oc_chat", cardID: "card_original", sequence: math.MaxInt - 1}
+	if err := p.CheckpointPreview(h, f.save); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.StreamRichCardText(context.Background(), h, "last valid update"); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.StreamRichCardText(context.Background(), h, "must not overflow"); err == nil {
+		t.Fatal("sequence overflow accepted")
+	}
+	if len(f.requests) != 1 {
+		t.Fatalf("sequence exhaustion sent requests: %d", len(f.requests))
+	}
+	if _, err := p.RestorePreview(f.snapshot, f.save); err == nil {
+		t.Fatal("exhausted checkpoint restored")
 	}
 }

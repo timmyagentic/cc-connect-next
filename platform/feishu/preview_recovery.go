@@ -164,8 +164,13 @@ func (p *interactivePlatform) validateTurnReplyContext(rc replyContext) error {
 		return fmt.Errorf("%s: inconsistent turn reply target", p.tag())
 	}
 	if len(parts) == 3 {
-		if kind, id, ok := parseThreadTarget(parts[2]); ok && (!validRecoveryID(id) || (kind == "thread" && id != rc.threadID)) {
-			return fmt.Errorf("%s: turn reply checkpoint has inconsistent thread identity", p.tag())
+		kind, id, thread := parseThreadTarget(parts[2])
+		if thread {
+			if !validRecoveryID(id) || (kind == "thread" && id != rc.threadID) {
+				return fmt.Errorf("%s: turn reply checkpoint has inconsistent thread identity", p.tag())
+			}
+		} else if !validRecoveryID(parts[2]) || (rc.directUserID != "" && parts[2] != rc.directUserID) {
+			return fmt.Errorf("%s: turn reply checkpoint has inconsistent recipient identity", p.tag())
 		}
 	}
 	return nil
@@ -176,7 +181,7 @@ func validRecoveryID(id string) bool {
 		return false
 	}
 	for _, ch := range id {
-		if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-') {
+		if (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') && (ch < '0' || ch > '9') && ch != '_' && ch != '-' {
 			return false
 		}
 	}

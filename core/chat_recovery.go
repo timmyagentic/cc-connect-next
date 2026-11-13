@@ -55,7 +55,11 @@ func writeChatRecoveryFile(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
+	defer func() {
+		if err := os.Remove(f.Name()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("chat recovery: cleanup temporary checkpoint", "error", err)
+		}
+	}()
 	if err = f.Chmod(0o600); err == nil {
 		_, err = f.Write(b)
 	}
@@ -93,7 +97,9 @@ func (r *chatRecovery) finish() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.state.Closed {
-		_ = os.RemoveAll(r.dir)
+		if err := os.RemoveAll(r.dir); err != nil {
+			slog.Warn("chat recovery: cleanup closed checkpoint", "error", err)
+		}
 		return
 	}
 	r.state.Closed = true
@@ -270,7 +276,11 @@ func (e *Engine) restoreChatRecoveries() {
 			slog.Warn("chat recovery: unreadable checkpoint", "error", err)
 			continue
 		}
-		if r.state.Version != 1 || r.state.Project != e.name || r.state.Closed {
+		if r.state.Version != 1 || r.state.Project != e.name {
+			continue
+		}
+		if r.state.Closed {
+			r.finish()
 			continue
 		}
 		if err := read("message.json", &r.message); err != nil {
@@ -332,7 +342,27 @@ func (e *Engine) reserveChatRecovery(group []*chatRecovery) {
 	}
 	session := sessions.GetOrCreateActive(saved.SessionKey)
 	if saved.AgentSessionID != "" && session.GetAgentSessionID() != saved.AgentSessionID {
-		slog.Warn("chat recovery: native session identity changed", "session", session.ID)
+		// A signature recovery or explicit switch may have replaced the native
+		// thread. Never attach an old submission receipt to the new identity,
+		// or execute later FIFO inputs past an unresolved earlier operation.
+		slog.Warn("chat recovery: native session identity changed; abandoning stale checkpoint group", "session", session.ID)
+		if replyCtx, err := platform.RestoreTurnReplyCtx(saved.Reply); err == nil {
+			// Platform clients are not started during reservation. Report the
+			// safe degradation only after this platform becomes ready.
+			e.platformLifecycleMu.Lock()
+			if e.chatRecoveryStarts == nil {
+				e.chatRecoveryStarts = make(map[string][]func())
+			}
+			e.chatRecoveryStarts[p.Name()] = append(e.chatRecoveryStarts[p.Name()], func() {
+				e.reply(p, replyCtx, e.i18n.T(MsgChatRecoveryIdentityChanged))
+			})
+			e.platformLifecycleMu.Unlock()
+		} else {
+			slog.Warn("chat recovery: cannot report changed identity", "error", err)
+		}
+		for _, r := range group {
+			r.finish()
+		}
 		return
 	}
 	if !session.TryLock() {
@@ -454,9 +484,13 @@ func (e *Engine) updateRecoveryReply(state *interactiveState, p Platform, msg *M
 	}
 }
 
-func (r *chatRecovery) saveHistory() error {
+func (r *chatRecovery) saveHistory(sessions *SessionManager) error {
 	if r == nil {
+		sessions.Save()
 		return nil
+	}
+	if err := sessions.SaveWithError(); err != nil {
+		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

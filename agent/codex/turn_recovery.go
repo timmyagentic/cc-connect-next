@@ -91,6 +91,9 @@ func (s *appServerSession) readRecoveryThread() (recoveryThread, error) {
 	if response.Thread.ID != id {
 		return response.Thread, fmt.Errorf("codex recovery thread identity mismatch")
 	}
+	if response.Thread.Turns == nil {
+		return response.Thread, fmt.Errorf("codex recovery requires an explicit complete turn list")
+	}
 	// A loaded active thread might still execute tools or await permission.
 	// Never turn recovery into steering or approve an outstanding request.
 	if response.Thread.Status.Type != "idle" {
@@ -269,9 +272,10 @@ func recoveredAnswer(turn recoveryTurn) (string, error) {
 		if kind == "agentMessage" {
 			body, _ := item["text"].(string)
 			phase, _ := item["phase"].(string)
-			if phase == "final_answer" {
+			switch phase {
+			case "final_answer":
 				final = append(final, body)
-			} else if phase == "" {
+			case "":
 				legacy = append(legacy, body)
 			}
 		} else if kind != "reasoning" && kind != "userMessage" && kind != "plan" {
