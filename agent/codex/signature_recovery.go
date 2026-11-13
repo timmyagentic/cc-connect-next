@@ -22,7 +22,7 @@ type signatureRecovery struct {
 	once     sync.Once
 }
 
-const signatureRecoveryContinuation = "Continue the unfinished user request using the imported conversation and recorded tool results. The previous model request failed because its encrypted context was rejected. Completed tool calls already ran; use their recorded results and do not repeat completed actions. Preserve the user's existing instructions and authorization."
+const signatureRecoveryContinuation = "Continue the unfinished user request using the existing conversation and recorded tool results. Completed tool calls already ran; use their recorded results and do not repeat completed actions. Preserve the user's existing instructions and authorization. Return the requested result without mentioning this internal retry."
 
 func isSignatureError(err error) bool {
 	if err == nil {
@@ -66,7 +66,7 @@ func (s *appServerSession) deferSignatureRecovery(err error, threadID, turnID st
 		s.stateMu.Unlock()
 		return r.threadID == threadID && r.turnID == turnID
 	}
-	if s.recoveryUsed || s.unsafeRecoveryTurn == turnID || s.pendingSteers != 0 || !s.alive.Load() || s.currentTurn != turnID {
+	if s.recoveryUsed || !s.alive.Load() || s.currentTurn != turnID {
 		s.stateMu.Unlock()
 		return false
 	}
@@ -128,9 +128,8 @@ func (s *appServerSession) recoverSignature(r *signatureRecovery) {
 	if !s.signatureRecoveryActive(r) {
 		return
 	}
-	s.emit(core.Event{Type: core.EventSessionRecovery})
 	if err := s.restoreSignatureHistory(r); err != nil {
-		s.failSignatureRecovery(r, err, false)
+		s.failSignatureRecovery(r, err, true)
 	}
 }
 
@@ -157,8 +156,6 @@ func (s *appServerSession) restoreSignatureHistory(r *signatureRecovery) error {
 	if err != nil {
 		return err
 	}
-	// A completed shell tool can have left a background command running. Its
-	// outcome belongs to the old thread and cannot be assumed by a replacement.
 	var terminals struct {
 		Data       []json.RawMessage `json:"data"`
 		NextCursor *string           `json:"nextCursor"`
@@ -166,78 +163,41 @@ func (s *appServerSession) restoreSignatureHistory(r *signatureRecovery) error {
 	if err := s.request("thread/backgroundTerminals/list", map[string]any{"threadId": r.threadID}, &terminals); err != nil {
 		return fmt.Errorf("check unfinished commands: %w", err)
 	}
-	if terminals.Data == nil {
-		return fmt.Errorf("background command state is unavailable")
+	if terminals.Data == nil || len(terminals.Data) != 0 || terminals.NextCursor != nil {
+		return fmt.Errorf("background command outcomes are unavailable or unfinished")
 	}
-	if len(terminals.Data) != 0 || terminals.NextCursor != nil {
-		return fmt.Errorf("background commands still have an unresolved outcome")
+	options := s.signatureRecoveryOptions()
+	if err := s.stopSignatureTransport(r); err != nil {
+		return err
 	}
-	items, err := loadSignatureRecoveryHistory(s.ctx, path, r.threadID, r.turnID)
-	if err != nil {
+	if _, err := cleanSignatureHistory(s.ctx, path, r.threadID); err != nil {
 		return err
 	}
 	if !s.signatureRecoveryActive(r) {
 		return s.contextErr()
 	}
-	options := s.signatureRecoveryOptions()
-	params := s.threadRequestParams()
-	params["model"] = options.Model
-	params["cwd"] = s.GetWorkDir()
-	if options.ReasoningEffort != "" {
-		params["config"] = map[string]any{"model_reasoning_effort": options.ReasoningEffort}
+	if err := s.connect(); err != nil {
+		return err
 	}
-	params["serviceTier"] = nullableTurnOption(options.ServiceTier)
-	var replacement threadStartResponse
-	if err := s.request("thread/start", params, &replacement); err != nil {
-		return fmt.Errorf("start replacement conversation: %w", err)
+	if err := s.initialize(); err != nil {
+		return err
 	}
-	newID := replacement.Thread.ID
-	if newID == "" || newID == r.threadID {
-		return fmt.Errorf("replacement conversation did not return a fresh identity")
+	if err := s.ensureThread(r.threadID); err != nil {
+		return err
+	}
+	if s.CurrentSessionID() != r.threadID {
+		return fmt.Errorf("recovery changed the original thread identity")
 	}
 	if !s.signatureRecoveryActive(r) {
 		return s.contextErr()
 	}
-	if err := s.request("thread/inject_items", map[string]any{"threadId": newID, "items": items}, nil); err != nil {
-		return fmt.Errorf("import recovery history: %w", err)
-	}
-	// Publish the new binding only after its complete history is acknowledged.
-	// Keeping the same AgentSession preserves the engine's lock, queue and card.
 	s.stateMu.Lock()
-	if s.recovery != r || !s.alive.Load() || (s.ctx != nil && s.ctx.Err() != nil) {
-		s.stateMu.Unlock()
-		return s.contextErr()
-	}
-	s.threadID.Store(newID)
 	s.currentTurn = ""
-	s.pendingMsgs = nil
 	s.stateMu.Unlock()
-	ready := make(chan error, 1)
-	s.emit(core.Event{Type: core.EventSessionRecovery, SessionID: newID, RecoveryReady: ready})
-	// No new model request may run until the caller has durably adopted the
-	// replacement. /stop before acknowledgement therefore cannot lose new work.
-	ackTimer := time.NewTimer(appServerRequestTimeout)
-	defer ackTimer.Stop()
-	select {
-	case <-s.contextDone():
-		return s.contextErr()
-	case err := <-ready:
-		if err != nil {
-			return fmt.Errorf("persist restored conversation: %w", err)
-		}
-	case <-ackTimer.C:
-		return fmt.Errorf("restored conversation was not acknowledged")
-	}
-	if !s.signatureRecoveryActive(r) {
-		return s.contextErr()
-	}
-	slog.Info("codex app-server conversation restored after signature failure", "previous_thread_id", r.threadID, "thread_id", newID)
+	slog.Info("codex app-server retrying original thread after clearing encrypted history", "thread_id", r.threadID)
 	input := []map[string]any{{"type": "text", "text": signatureRecoveryContinuation, "text_elements": []any{}}}
-	if err := s.startTurn(newID, input, &options); err != nil {
-		// An RPC timeout can hide an accepted turn. Retire this transport so
-		// later input cannot accidentally steer or duplicate an unknown turn.
-		s.failSignatureRecovery(r, fmt.Errorf("continue restored conversation: %w", err), true)
-		return nil
+	if err := s.startTurn(r.threadID, input, &options); err != nil {
+		return fmt.Errorf("retry original conversation: %w", err)
 	}
 	s.stateMu.Lock()
 	if s.recovery == r {
@@ -245,6 +205,44 @@ func (s *appServerSession) restoreSignatureHistory(r *signatureRecovery) error {
 	}
 	s.stateMu.Unlock()
 	return nil
+}
+
+// Close the dedicated native process before editing its rollout. A live
+// app-server keeps the rejected history in memory and can write it back.
+func (s *appServerSession) stopSignatureTransport(r *signatureRecovery) error {
+	s.stateMu.Lock()
+	if s.recovery != r || !s.alive.Load() {
+		s.stateMu.Unlock()
+		return s.contextErr()
+	}
+	s.restartingTransport = true
+	s.stateMu.Unlock()
+	defer func() {
+		s.stateMu.Lock()
+		s.restartingTransport = false
+		s.stateMu.Unlock()
+	}()
+
+	s.procMu.Lock()
+	stdin, done := s.stdin, s.transportDone
+	s.stdin = nil
+	s.procMu.Unlock()
+	if stdin == nil || done == nil {
+		return fmt.Errorf("local recovery transport is unavailable")
+	}
+	if err := stdin.Close(); err != nil {
+		return fmt.Errorf("close recovery transport: %w", err)
+	}
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-s.contextDone():
+		return s.contextErr()
+	case <-done:
+		return nil
+	case <-timer.C:
+		return fmt.Errorf("native process did not finish before history cleanup")
+	}
 }
 
 func (s *appServerSession) signatureRecoveryOptions() core.TurnOptions {

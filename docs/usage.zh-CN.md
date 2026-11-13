@@ -68,19 +68,14 @@ reset_on_idle_mins = 60
 
 ### 自动恢复加密上下文
 
-本地 Codex app-server 遇到明确的 `thinking_signature_invalid` 或
-`invalid_encrypted_content` 时，每次用户 Send 最多尝试恢复一次。它等待原生回合明确失败结束，
-读取可回放历史，把用户对话和已完成工具调用及结果导入新的原生会话，原会话历史保持不变。
-新的绑定必须持久化成功后才能继续模型请求；聊天、排队消息和回复卡片仍属于原逻辑回合。
+本地 Codex app-server 返回 `thinking_signature_invalid` 或
+`invalid_encrypted_content` 时，适配器等待当前回合结束、关闭原生进程，清理原历史文件中的
+加密状态。普通对话、可读工具结果和原生会话 ID 都会保留。随后重新加载同一会话，
+利用已有工具结果续接未完成的请求，每次用户请求最多重试一次。仅以密文保存的上下文会被丢弃。
 
-历史不完整、工具结果不明、后台命令尚未结束、压缩历史含不可读上下文、必要 RPC 不支持或
-持久化失败时，会保留原错误并停止恢复，不自动重试。已接受或结果不明的原生 steer 输入
-也禁止恢复，避免遗漏尚未落盘的补充指令。恢复不重新执行历史工具，只导入结果并要求模型
-按已有指令和权限继续；这不保证模型后续工具选择恰好执行一次。`/stop` 会取消恢复。
-需要后端支持 `thread/read`、`thread/backgroundTerminals/list` 和 `thread/inject_items`。
-
-运行态 Manifest 通过 `automatic_session_recovery` 声明此能力：本地 app-server 为有条件可用，
-不支持的会话明确标为不可用。Manifest 不公开历史、路径、凭据或当前配置值；没有新增配置开关。
+首次签名错误和恢复步骤在内部处理。清理或重试失败时正常显示错误。`/stop` 会取消恢复。
+仍有后台命令运行时，会停止清理，避免丢失执行结果。运行态 Manifest 通过
+`automatic_session_recovery` 声明本地 app-server 支持情况。
 
 ### 切换模型时保留历史
 

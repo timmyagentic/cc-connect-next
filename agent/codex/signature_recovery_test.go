@@ -1,12 +1,14 @@
 package codex
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,297 +17,211 @@ import (
 
 const signatureTestError = `{"error":{"code":"thinking_signature_invalid","message":"Encrypted content could not be verified"}}`
 
-func newSignatureTestSession(t *testing.T) (*appServerSession, string) {
-	t.Helper()
-	s := newTerminalTestSession(t)
-	s.threadID.Store("thread-a")
-	s.currentTurn = "turn-b"
-	s.workDir = t.TempDir()
-	s.codexHome = t.TempDir()
-	s.model = "original-model"
-	s.turnOptions = &core.TurnOptions{Model: "task-model", ReasoningEffort: "high", ServiceTier: "fast"}
-	dir := filepath.Join(s.codexHome, "sessions")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(dir, "thread-a.jsonl")
-	data := strings.Join([]string{
-		recoveryTestMeta, recoveryTestContext, recoveryTestItem(recoveryTestInput),
-		recoveryTestItem(`{"type":"reasoning","encrypted_content":"rejected-state"}`),
-		recoveryTestItem(`{"type":"function_call","name":"completed_write","arguments":"{}","call_id":"write-1"}`),
-		recoveryTestItem(`{"type":"function_call_output","call_id":"write-1","output":"Committed receipt 123"}`),
-		recoveryTestDone, "",
-	}, "\n")
-	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	return s, path
-}
-
-func signatureTestNotify(s *appServerSession, method, thread, turn, status, message string) {
-	params := map[string]any{"threadId": thread, "turnId": turn}
-	if method == "error" {
-		params["error"] = map[string]any{"message": message}
-		params["willRetry"] = false
-	} else {
-		value := map[string]any{"id": turn, "status": status}
-		if message != "" {
-			value["error"] = map[string]any{"message": message}
-		}
-		params["turn"] = value
-	}
-	raw, _ := json.Marshal(params)
-	s.handleNotification(method, raw)
-}
-
-func awaitSignatureEvent(t *testing.T, s *appServerSession) core.Event {
-	t.Helper()
-	select {
-	case event := <-s.events:
-		return event
-	case <-time.After(3 * time.Second):
-		t.Fatal("timed out waiting for recovery event")
-		return core.Event{}
-	}
-}
-
-func signatureTestRPC(s *appServerSession, path string, onRequest func(string, map[string]any) bool) *steerFakeStdin {
-	stdin := &steerFakeStdin{}
-	stdin.respond = func(id int64, request map[string]any) {
-		method := request["method"].(string)
-		params := request["params"].(map[string]any)
-		if onRequest != nil && !onRequest(method, params) {
-			s.handleResponse(rpcResponseEnvelope{ID: id, Error: &rpcError{Message: "synthetic RPC failure"}})
-			return
-		}
-		var result any
-		switch method {
-		case "thread/read":
-			result = map[string]any{"thread": map[string]any{"id": "thread-a", "path": path}}
-		case "thread/backgroundTerminals/list":
-			result = map[string]any{"data": []any{}, "nextCursor": nil}
-		case "thread/start":
-			result = map[string]any{"thread": map[string]any{"id": "thread-new"}}
-		case "turn/start":
-			result = map[string]any{"turn": map[string]any{"id": "turn-new"}}
-		default:
-			result = map[string]any{}
-		}
-		raw, _ := json.Marshal(result)
-		s.handleResponse(rpcResponseEnvelope{ID: id, Result: raw})
-	}
-	s.stdin = stdin
-	return stdin
-}
-
 func TestSignatureErrorRecognition(t *testing.T) {
 	for _, value := range []string{signatureTestError, "invalid_encrypted_content: rejected", "stream disconnected before completion: invalid_encrypted_content: rejected", "unexpected status 400 Bad Request: " + signatureTestError} {
 		if !isSignatureError(errors.New(value)) {
 			t.Errorf("did not recognize %q", value)
 		}
 	}
-	for _, value := range []string{"upstream timed out", "tool output mentioned thinking_signature_invalid", `{"error":{"code":"quota_exceeded","message":"thinking_signature_invalid"}}`} {
+	for _, value := range []string{"network timeout", "mention of thinking_signature_invalid in another error", `{"error":{"code":"rate_limit"}}`} {
 		if isSignatureError(errors.New(value)) {
-			t.Errorf("incorrectly recognized %q", value)
+			t.Errorf("recognized unrelated error %q", value)
 		}
 	}
 }
 
-func TestSignatureRecoveryWaitsForFailedTurnAndDurableBinding(t *testing.T) {
-	s, path := newSignatureTestSession(t)
-	original, _ := os.ReadFile(path)
-	var imported atomic.Bool
-	var starts atomic.Int32
-	signatureTestRPC(s, path, func(method string, params map[string]any) bool {
-		if method == "thread/inject_items" {
-			items, _ := json.Marshal(params["items"])
-			if strings.Contains(string(items), "encrypted_content") || !strings.Contains(string(items), "Committed receipt 123") || strings.Count(string(items), "Continue the investigation") != 1 {
-				t.Error("import lost input/results or included rejected encryption")
-			}
-			imported.Store(true)
+// This subprocess implements only the native protocol used by the adapter.
+// The same on-disk fixture and launch log survive its transport reload.
+func TestSignatureRecoveryHelperProcess(t *testing.T) {
+	if os.Getenv("CC_SIGNATURE_HELPER") != "1" {
+		return
+	}
+	dir := os.Getenv("CC_SIGNATURE_DIR")
+	path := filepath.Join(dir, "sessions", "thread-a.jsonl")
+	first := true
+	if _, err := os.Stat(filepath.Join(dir, "failed")); err == nil {
+		first = false
+	}
+	log, err := os.OpenFile(filepath.Join(dir, "launches"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		os.Exit(2)
+	}
+	fmt.Fprintln(log, "launch")
+	log.Close()
+	out := json.NewEncoder(os.Stdout)
+	scan := bufio.NewScanner(os.Stdin)
+	for scan.Scan() {
+		var req struct {
+			ID     any            `json:"id"`
+			Method string         `json:"method"`
+			Params map[string]any `json:"params"`
 		}
-		if method == "turn/start" {
-			starts.Add(1)
-			input, _ := json.Marshal(params["input"])
-			if strings.Contains(string(input), "Continue the investigation") || params["model"] != "task-model" || params["effort"] != "high" || params["serviceTier"] != "fast" {
-				t.Error("continuation repeated the user request or lost task settings")
-			}
+		if json.Unmarshal(scan.Bytes(), &req) != nil {
+			os.Exit(3)
 		}
-		return true
-	})
-	signatureTestNotify(s, "error", "thread-a", "turn-b", "", signatureTestError)
-	s.handleNotification("thread/status/changed", json.RawMessage(`{"threadId":"thread-a","status":{"type":"idle"}}`))
+		if req.ID == nil {
+			continue
+		}
+		turnID := "turn-a"
+		if !first {
+			turnID = "turn-b"
+		}
+		result := any(map[string]any{})
+		switch req.Method {
+		case "thread/resume", "thread/read":
+			result = map[string]any{"thread": map[string]any{"id": "thread-a", "path": path}, "model": "original-model", "reasoningEffort": "high"}
+		case "thread/backgroundTerminals/list":
+			result = map[string]any{"data": []any{}, "nextCursor": nil}
+		case "turn/start":
+			result = map[string]any{"turn": map[string]any{"id": turnID}}
+		}
+		if err := out.Encode(map[string]any{"id": req.ID, "result": result}); err != nil {
+			os.Exit(4)
+		}
+		if req.Method != "turn/start" {
+			continue
+		}
+		data, err := json.Marshal(req.Params)
+		if err != nil {
+			os.Exit(5)
+		}
+		_ = os.WriteFile(filepath.Join(dir, "last-turn.json"), data, 0o600)
+		if first {
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				if _, err := os.Stat(filepath.Join(dir, "send-ready")); err == nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					os.Exit(6)
+				}
+				time.Sleep(time.Millisecond)
+			}
+			_ = os.WriteFile(filepath.Join(dir, "failed"), []byte("yes"), 0o600)
+		}
+		out.Encode(map[string]any{"method": "turn/started", "params": map[string]any{"threadId": "thread-a", "turn": map[string]any{"id": turnID}}})
+		failed := first || os.Getenv("CC_SIGNATURE_REFAIL") == "1"
+		if failed {
+			out.Encode(map[string]any{"method": "error", "params": map[string]any{"threadId": "thread-a", "turnId": turnID, "willRetry": false, "error": map[string]any{"message": signatureTestError}}})
+			out.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-a", "turn": map[string]any{"id": turnID, "status": "failed", "error": map[string]any{"message": signatureTestError}}}})
+		} else {
+			data, _ := os.ReadFile(path)
+			if strings.Contains(string(data), "bad-cipher") || !strings.Contains(string(data), "Committed receipt 123") {
+				os.Exit(7)
+			}
+			out.Encode(map[string]any{"method": "item/completed", "params": map[string]any{"threadId": "thread-a", "turnId": turnID, "item": map[string]any{"type": "agentMessage", "id": "answer", "text": "Recovered using receipt 123"}}})
+			out.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "thread-a", "turn": map[string]any{"id": turnID, "status": "completed"}}})
+		}
+	}
+	if first && os.Getenv("CC_SIGNATURE_HOLD_CLOSE") == "1" {
+		_ = os.WriteFile(filepath.Join(dir, "closing"), []byte("yes"), 0o600)
+		for {
+			time.Sleep(time.Second)
+		}
+	}
+	os.Exit(0)
+}
+
+func signatureProcessSession(t *testing.T, extra ...string) (*appServerSession, string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	source := recoveryTestMeta + "\n" + recoveryTestItem(`{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue the investigation"}]}`) + "\n" + recoveryTestItem(`{"type":"reasoning","encrypted_content":"bad-cipher"}`) + "\n" + recoveryTestItem(`{"type":"function_call","call_id":"a","name":"write","arguments":"{}"}`) + "\n" + recoveryTestItem(`{"type":"function_call_output","call_id":"a","output":"Committed receipt 123"}`) + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "sessions", "thread-a.jsonl"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := append([]string{"CC_SIGNATURE_HELPER=1", "CC_SIGNATURE_DIR=" + dir}, extra...)
+	s, err := newAppServerSession(context.Background(), appServerSessionParams{cliBin: executable, cliExtraArgs: []string{"-test.run=^TestSignatureRecoveryHelperProcess$", "--"}, codexHome: dir, workDir: dir, model: "original-model", effort: "high", resumeID: "thread-a", extraEnv: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if err := s.SendWithTurnOptions("Continue the investigation", nil, nil, core.TurnOptions{Model: "task-model", ReasoningEffort: "high", ServiceTier: "fast"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "send-ready"), []byte("yes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return s, dir
+}
+
+func TestSignatureRecoveryRetriesSameThreadWithoutIntermediateError(t *testing.T) {
+	s, dir := signatureProcessSession(t)
+	timer := time.NewTimer(8 * time.Second)
+	defer timer.Stop()
+	text := ""
+	for {
+		select {
+		case event := <-s.Events():
+			switch event.Type {
+			case core.EventError:
+				t.Fatalf("intermediate error surfaced: %v", event.Error)
+			case core.EventText:
+				text += event.Content
+			case core.EventResult:
+				if s.CurrentSessionID() != "thread-a" || !strings.Contains(text+event.Content, "Recovered using receipt 123") {
+					t.Fatalf("thread=%s,text=%q,event=%#v", s.CurrentSessionID(), text, event)
+				}
+				launches, _ := os.ReadFile(filepath.Join(dir, "launches"))
+				if strings.Count(string(launches), "launch") != 2 {
+					t.Fatalf("unexpected reloads %q", launches)
+				}
+				data, _ := os.ReadFile(filepath.Join(dir, "last-turn.json"))
+				var turn map[string]any
+				json.Unmarshal(data, &turn)
+				if turn["threadId"] != "thread-a" || turn["model"] != "task-model" || turn["serviceTier"] != "fast" {
+					t.Fatalf("retry lost options: %s", data)
+				}
+				return
+			}
+		case <-timer.C:
+			t.Fatal("timed out waiting for same-thread recovery")
+		}
+	}
+}
+
+func TestSignatureRecoverySecondFailureIsReportedOnce(t *testing.T) {
+	s, dir := signatureProcessSession(t, "CC_SIGNATURE_REFAIL=1")
 	select {
-	case event := <-s.events:
-		t.Fatalf("idle completed or recovered an unconfirmed failure: %#v", event)
-	case <-time.After(25 * time.Millisecond):
+	case event := <-s.Events():
+		if event.Type != core.EventError || !isSignatureError(event.Error) {
+			t.Fatalf("unexpected final event %#v", event)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("no final error")
 	}
-	signatureTestNotify(s, "turn/completed", "thread-a", "turn-b", "failed", signatureTestError)
-	if event := awaitSignatureEvent(t, s); event.Type != core.EventSessionRecovery || event.SessionID != "" {
-		t.Fatalf("unexpected starting event: %#v", event)
+	launches, _ := os.ReadFile(filepath.Join(dir, "launches"))
+	if strings.Count(string(launches), "launch") != 2 {
+		t.Fatalf("retry loop: %s", launches)
 	}
-	ready := awaitSignatureEvent(t, s)
-	if ready.Type != core.EventSessionRecovery || ready.SessionID != "thread-new" || ready.RecoveryReady == nil || !imported.Load() || starts.Load() != 0 {
-		t.Fatalf("replacement continued before binding acknowledgement: %#v", ready)
+	select {
+	case event := <-s.Events():
+		t.Fatalf("duplicate final event %#v", event)
+	case <-time.After(30 * time.Millisecond):
 	}
-	if err := s.Steer("another request", nil, nil); !errors.Is(err, core.ErrSteerNoActiveTurn) {
-		t.Fatalf("input was steered during recovery: %v", err)
-	}
-	ready.RecoveryReady <- nil
-	deadline := time.Now().Add(time.Second)
-	for appServerCurrentTurn(s) != "turn-new" && time.Now().Before(deadline) {
+}
+
+func TestSignatureRecoveryStopDuringReloadPreventsRetry(t *testing.T) {
+	s, dir := signatureProcessSession(t, "CC_SIGNATURE_HOLD_CLOSE=1")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "closing")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("reload did not start")
+		}
 		time.Sleep(time.Millisecond)
 	}
-	if starts.Load() != 1 {
-		t.Fatal("expected exactly one continuation request")
-	}
-	// A second signature failure in the same logical user turn is terminal.
-	signatureTestNotify(s, "error", "thread-new", "turn-new", "", signatureTestError)
-	if event := awaitSignatureEvent(t, s); event.Type != core.EventError || !strings.Contains(event.Error.Error(), "thinking_signature_invalid") {
-		t.Fatalf("second signature failure was not terminal: %#v", event)
-	}
-	after, _ := os.ReadFile(path)
-	if string(original) != string(after) {
-		t.Fatal("recovery rewrote original history")
-	}
-}
-
-func TestSignatureRecoverySuccessfulTerminalOverridesPendingError(t *testing.T) {
-	s, _ := newSignatureTestSession(t)
-	signatureTestNotify(s, "error", "thread-a", "turn-b", "", signatureTestError)
-	signatureTestNotify(s, "turn/completed", "thread-a", "turn-b", "completed", "")
-	if event := awaitSignatureEvent(t, s); event.Type != core.EventResult {
-		t.Fatalf("successful terminal unexpectedly started recovery: %#v", event)
-	}
-}
-
-func TestSignatureRecoveryCancelBeforeContinuation(t *testing.T) {
-	for _, phase := range []string{"thread/start", "thread/inject_items", "binding"} {
-		t.Run(phase, func(t *testing.T) {
-			s, path := newSignatureTestSession(t)
-			var starts atomic.Int32
-			signatureTestRPC(s, path, func(method string, _ map[string]any) bool {
-				if method == "turn/start" {
-					starts.Add(1)
-				}
-				if method == phase {
-					s.cancel()
-				}
-				return true
-			})
-			signatureTestNotify(s, "turn/completed", "thread-a", "turn-b", "failed", signatureTestError)
-			if phase == "binding" {
-				awaitSignatureEvent(t, s)
-				ready := awaitSignatureEvent(t, s)
-				if ready.RecoveryReady == nil {
-					t.Fatal("missing binding acknowledgement")
-				}
-				s.cancel()
-			}
-			done := make(chan struct{})
-			go func() { s.wg.Wait(); close(done) }()
-			awaitTerminalTest(t, done)
-			if starts.Load() != 0 {
-				t.Fatal("cancelled recovery started a model turn")
-			}
-			if phase != "binding" && s.CurrentSessionID() != "thread-a" {
-				t.Fatal("cancelled setup changed the current thread")
-			}
-		})
-	}
-}
-
-func TestSignatureRecoveryStartFailureRetiresTransport(t *testing.T) {
-	s, path := newSignatureTestSession(t)
-	signatureTestRPC(s, path, func(method string, _ map[string]any) bool { return method != "turn/start" })
-	signatureTestNotify(s, "turn/completed", "thread-a", "turn-b", "failed", signatureTestError)
-	awaitSignatureEvent(t, s)
-	ready := awaitSignatureEvent(t, s)
-	ready.RecoveryReady <- nil
-	if event := awaitSignatureEvent(t, s); event.Type != core.EventError || s.Alive() {
-		t.Fatalf("failed continuation left a reusable transport: %#v", event)
-	}
-}
-
-func TestSignatureRecoveryBindingFailureStopsBeforeModelRequest(t *testing.T) {
-	s, path := newSignatureTestSession(t)
-	var starts atomic.Int32
-	signatureTestRPC(s, path, func(method string, _ map[string]any) bool {
-		if method == "turn/start" {
-			starts.Add(1)
-		}
-		return true
-	})
-	signatureTestNotify(s, "turn/completed", "thread-a", "turn-b", "failed", signatureTestError)
-	awaitSignatureEvent(t, s)
-	ready := awaitSignatureEvent(t, s)
-	ready.RecoveryReady <- errors.New("disk unavailable")
-	if event := awaitSignatureEvent(t, s); event.Type != core.EventError || starts.Load() != 0 {
-		t.Fatalf("persistence failure continued work: %#v", event)
-	}
-}
-
-func TestSignatureRecoverySteerGuardIsScopedToTurn(t *testing.T) {
-	s, path := newSignatureTestSession(t)
-	s.unsafeRecoveryTurn = "previous-turn"
-	signatureTestRPC(s, path, nil)
-	signatureTestNotify(s, "turn/completed", "thread-a", "turn-b", "failed", signatureTestError)
-	if event := awaitSignatureEvent(t, s); event.Type != core.EventSessionRecovery {
-		t.Fatal("an earlier uncertain steer blocked a later independent turn")
-	}
-	s.cancel()
-
-	other, _ := newSignatureTestSession(t)
-	other.unsafeRecoveryTurn = "turn-b"
-	signatureTestNotify(other, "turn/completed", "thread-a", "turn-b", "failed", signatureTestError)
-	if event := awaitSignatureEvent(t, other); event.Type != core.EventError {
-		t.Fatal("recovery could lose accepted but unpersisted steer input")
-	}
-}
-
-func TestSignatureRecoveryEventSurvivesFullQueue(t *testing.T) {
-	s := newTerminalTestSession(t)
-	for i := 0; i < cap(s.events); i++ {
-		s.events <- core.Event{Type: core.EventThinking}
-	}
-	done := make(chan struct{})
-	go func() { s.emit(core.Event{Type: core.EventSessionRecovery, SessionID: "replacement"}); close(done) }()
-	select {
-	case <-done:
-		t.Fatal("recovery binding event was dropped")
-	case <-time.After(20 * time.Millisecond):
-	}
-	for i := 0; i < cap(s.events); i++ {
-		<-s.events
-	}
-	awaitTerminalTest(t, done)
-	if event := awaitSignatureEvent(t, s); event.Type != core.EventSessionRecovery {
-		t.Fatal("lost recovery event")
-	}
-}
-
-func TestSignatureRecoveryRejectsMissingBackgroundCommandState(t *testing.T) {
-	s, path := newSignatureTestSession(t)
-	stdin := &steerFakeStdin{}
-	var starts atomic.Int32
-	stdin.respond = func(id int64, request map[string]any) {
-		method := request["method"].(string)
-		result := map[string]any{}
-		if method == "thread/read" {
-			result["thread"] = map[string]any{"id": "thread-a", "path": path}
-		}
-		if method == "thread/start" {
-			starts.Add(1)
-			result["thread"] = map[string]any{"id": "thread-new"}
-		}
-		raw, _ := json.Marshal(result)
-		s.handleResponse(rpcResponseEnvelope{ID: id, Result: raw})
-	}
-	s.stdin = stdin
-	signatureTestNotify(s, "turn/completed", "thread-a", "turn-b", "failed", signatureTestError)
-	awaitSignatureEvent(t, s)
-	event := awaitSignatureEvent(t, s)
-	if event.Type != core.EventError || !strings.Contains(event.Error.Error(), "background command state is unavailable") || starts.Load() != 0 {
-		t.Fatalf("missing command state did not stop before replacement: %#v, starts=%d", event, starts.Load())
+	s.Close()
+	launches, _ := os.ReadFile(filepath.Join(dir, "launches"))
+	if strings.Count(string(launches), "launch") != 1 {
+		t.Fatalf("cancelled recovery restarted: %s", launches)
 	}
 }

@@ -563,8 +563,6 @@ const (
 	MsgConfigUpdated     MsgKey = "config_updated"
 	MsgConfigKeyNotFound MsgKey = "config_key_not_found"
 	MsgConfigReloaded    MsgKey = "config_reloaded"
-	MsgSessionRecovering MsgKey = "session_recovering"
-	MsgSessionRecovered  MsgKey = "session_recovered"
 
 	MsgDoctorRunning           MsgKey = "doctor_running"
 	MsgDoctorProcessName       MsgKey = "doctor_process_name"
@@ -3967,20 +3965,6 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 配置已重新載入\n\n顯示設定已更新：%v\nProvider 已同步：%d 個\n自訂命令已同步：%d 個\n聊天模型綁定已載入：%d 個",
 		LangJapanese:           "✅ 設定をリロードしました\n\n表示設定更新: %v\nプロバイダ同期: %d 件\nコマンド同期: %d 件\nチャットモデル設定: %d 件",
 		LangSpanish:            "✅ Configuración recargada\n\nPantalla actualizada: %v\nProveedores sincronizados: %d\nComandos sincronizados: %d\nModelos de chat cargados: %d",
-	},
-	MsgSessionRecovering: {
-		LangEnglish:            "Restoring the conversation after an encrypted-context error…",
-		LangChinese:            "会话加密上下文校验失败，正在恢复会话…",
-		LangTraditionalChinese: "會話加密上下文驗證失敗，正在恢復會話…",
-		LangJapanese:           "暗号化されたコンテキストのエラーから会話を復元しています…",
-		LangSpanish:            "Restaurando la conversación tras un error de contexto cifrado…",
-	},
-	MsgSessionRecovered: {
-		LangEnglish:            "Conversation restored. Continuing with the recorded results…",
-		LangChinese:            "会话已恢复，正在沿用已记录的结果继续处理…",
-		LangTraditionalChinese: "會話已恢復，正在沿用已記錄的結果繼續處理…",
-		LangJapanese:           "会話を復元しました。記録済みの結果を使って続行します…",
-		LangSpanish:            "Conversación restaurada. Continuando con los resultados registrados…",
 	},
 	MsgDoctorRunning: {
 		LangEnglish:            "🏥 Running diagnostics...",
