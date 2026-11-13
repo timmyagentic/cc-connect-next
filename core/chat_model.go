@@ -100,7 +100,7 @@ func (e *Engine) chatDefaultModel(agent Agent, sessionKey string, backend AgentS
 
 // A chat selection is a default layer, not an explicit task override. Resolve
 // it for each dequeued turn, preserving explicit task/profile model precedence.
-func (e *Engine) prepareSessionTurnOverrides(agent Agent, sessions *SessionManager, session *Session, backend AgentSession, sessionKey string, profile AnswerProfileName, model, reasoning, tier string) (agentTurnOverrides, error) {
+func (e *Engine) prepareSessionTurnOverrides(agent Agent, sessions *SessionManager, session *Session, backend AgentSession, sessionKey string, profile AnswerProfileName, model, reasoning, tier string, taskServiceTier ...bool) (agentTurnOverrides, error) {
 	profileModel, profileReasoning := "", ""
 	if configured, ok := e.answerProfile(profile); ok {
 		profileModel = strings.TrimSpace(configured.Model)
@@ -120,7 +120,7 @@ func (e *Engine) prepareSessionTurnOverrides(agent Agent, sessions *SessionManag
 			return agentTurnOverrides{}, err
 		}
 	}
-	return prepareAgentTurnOverrides(sessions, session, backend, profile, model, reasoning, tier)
+	return prepareAgentTurnOverrides(sessions, session, backend, profile, model, reasoning, tier, taskServiceTier...)
 }
 
 func (e *Engine) setChatModel(agent Agent, sessionKey, input string) (string, error) {

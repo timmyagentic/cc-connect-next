@@ -130,6 +130,7 @@ func validateCronModel(j *CronJob) error {
 }
 
 func validateCronReasoningEffort(j *CronJob) error {
+	j.ServiceTier = strings.TrimSpace(j.ServiceTier)
 	if j.ServiceTier != "" {
 		if j.IsShellJob() || strings.TrimSpace(j.Prompt) == "" {
 			return fmt.Errorf("service_tier is only supported for prompt jobs")
@@ -436,6 +437,7 @@ func updateJobField(job *CronJob, field string, value any) error {
 	case "service_tier":
 		if v, ok := value.(string); ok {
 			job.ServiceTier = strings.TrimSpace(v)
+			return nil
 		}
 	case "reasoning_effort":
 		if v, ok := value.(string); ok {
@@ -914,6 +916,47 @@ func (cs *CronScheduler) validateModelSupport(job *CronJob) error {
 	return nil
 }
 
+// validateServiceTier checks online projects before persistence. Offline projects
+// are revalidated at execution; the live session catalog remains authoritative.
+func (cs *CronScheduler) validateServiceTier(job *CronJob) error {
+	if job.ServiceTier == "" {
+		return nil
+	}
+	cs.mu.RLock()
+	engine := cs.engines[job.Project]
+	cs.mu.RUnlock()
+	if engine == nil {
+		return nil
+	}
+	catalog, ok := serviceTierCatalog(engine.agent, nil)
+	if !ok {
+		// A concrete session may provide a live catalog even when the Agent does not.
+		// Validate that path at execution rather than rejecting valid registration.
+		return nil
+	}
+	model := strings.TrimSpace(job.Model)
+	if model == "" {
+		var err error
+		model, err = engine.chatDefaultModel(engine.agent, job.SessionKey, nil)
+		if err != nil {
+			return fmt.Errorf("project %q: resolve service_tier model: %w", job.Project, err)
+		}
+		if model == "" {
+			model = defaultTurnOptions(engine.agent).Model
+		}
+	}
+	caps, err := catalog.ServiceTierCapabilities(model)
+	if err != nil {
+		return fmt.Errorf("project %q: validate service_tier: %w", job.Project, err)
+	}
+	for _, option := range caps.Options {
+		if option.Value == job.ServiceTier {
+			return nil
+		}
+	}
+	return fmt.Errorf("project %q: invalid service_tier %q for model %q", job.Project, job.ServiceTier, caps.Model)
+}
+
 func (cs *CronScheduler) validateOverrides(job *CronJob) error {
 	if err := validateCronModel(job); err != nil {
 		return err
@@ -922,6 +965,9 @@ func (cs *CronScheduler) validateOverrides(job *CronJob) error {
 		return err
 	}
 	if err := cs.validateModelSupport(job); err != nil {
+		return err
+	}
+	if err := cs.validateServiceTier(job); err != nil {
 		return err
 	}
 	effort := strings.ToLower(strings.TrimSpace(job.ReasoningEffort))

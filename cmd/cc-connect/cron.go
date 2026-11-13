@@ -741,7 +741,7 @@ Editable Fields (string):
   cron_expr     Cron expression, e.g. "0 6 * * *"
   prompt        Task prompt (runs through agent)
   model         Prompt-only model ID; "" restores inheritance (Codex exec/app_server)
-  service_tier  Prompt-only service tier (e.g. fast); "" restores inheritance
+  service_tier  Prompt-only service tier (catalog ID); "" restores inheritance
   reasoning_effort  Prompt-only effort; "" restores inheritance; model optional
                     Supported values are validated by the server
   exec          Shell command (runs directly)
@@ -772,7 +772,7 @@ Examples:
   cc-connect-next cron edit abc123 mute true
   cc-connect-next cron edit abc123 model gpt-5.4
   cc-connect-next cron edit abc123 model ""
-  cc-connect-next cron edit abc123 service_tier fast
+  cc-connect-next cron edit abc123 service_tier <catalog-tier-id>
   cc-connect-next cron edit abc123 reasoning_effort <value>
   cc-connect-next cron edit abc123 reasoning_effort ""`)
 }

@@ -344,3 +344,7 @@ original backup before rewriting history. Encrypted-only context may be discarde
 from the retry; the backup remains available for manual recovery but is not injected
 into the retry. Backup failure prevents modification. Subsequent model actions are
 not guaranteed exactly once. The same-thread restart checkpoint remains in use.
+
+### Per-Cron service tier
+
+The `cron` tool declares an optional prompt-only `service_tier` string (`add --service-tier`, `edit service_tier`). Empty restores inheritance. Values are effective-model backend catalog IDs, not labels: Fast may map to `priority`. The `per_turn_service_tier` runtime feature remains conditional until the catalog and concrete session's `TurnOptionsSession` support are validated. Missing support, unavailable catalogs, shell jobs and invalid tiers reject explicit overrides. The tool changes scheduled persistent state; execution performs an Agent turn and network I/O, under the existing cron permission boundaries. It does not change model/provider or chat/project defaults. Generic metadata does not publish a static allowed-values list; see the bilingual usage examples.

@@ -1572,6 +1572,7 @@ func (m *ManagementServer) handleCron(w http.ResponseWriter, r *http.Request) {
 			Prompt:          req.Prompt,
 			Model:           req.Model,
 			ReasoningEffort: req.ReasoningEffort,
+			ServiceTier:     req.ServiceTier,
 			Exec:            req.Exec,
 			WorkDir:         req.WorkDir,
 			Description:     req.Description,

@@ -3974,7 +3974,11 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 	}
 	if msg.ServiceTierOverride != "" && state.agentSession != nil {
 		_, optionsOK := state.agentSession.(TurnOptionsSession)
-		_, catalogOK := serviceTierCatalog(e.agent, state.agentSession)
+		turnAgent := state.agent
+		if turnAgent == nil {
+			turnAgent = e.agent
+		}
+		_, catalogOK := serviceTierCatalog(turnAgent, state.agentSession)
 		if !optionsOK || !catalogOK {
 			msg.scheduledResult.complete(fmt.Errorf("task service_tier is unsupported by this backend"))
 			return true
@@ -4774,7 +4778,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 			sendDone <- fmt.Errorf("agent session became nil")
 			return
 		}
-		overrides, err := e.prepareSessionTurnOverrides(agent, sessions, session, as, msg.SessionKey, msg.AnswerProfile, msg.ModelOverride, msg.ReasoningEffortOverride, speedTier)
+		overrides, err := e.prepareSessionTurnOverrides(agent, sessions, session, as, msg.SessionKey, msg.AnswerProfile, msg.ModelOverride, msg.ReasoningEffortOverride, speedTier, msg.ServiceTierOverride != "")
 		if err != nil {
 			finishMessageContextInput(state)
 			sendDone <- err
@@ -7734,7 +7738,7 @@ func (queue *turnQueue) handle() {
 				nextSend <- fmt.Errorf("agent session became nil")
 				return
 			}
-			overrides, err := e.prepareSessionTurnOverrides(turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
+			overrides, err := e.prepareSessionTurnOverrides(turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier, queued.serviceTierOverride != "")
 			if err != nil {
 				finishMessageContextInput(state)
 				nextSend <- err
@@ -9384,7 +9388,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 				sendDone <- fmt.Errorf("agent session became nil")
 				return
 			}
-			overrides, err := e.prepareSessionTurnOverrides(turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier)
+			overrides, err := e.prepareSessionTurnOverrides(turnAgent, sessions, session, as, queued.msgSessionKey, queued.answerProfile, queued.modelOverride, queued.reasoningEffortOverride, speedTier, queued.serviceTierOverride != "")
 			if err != nil {
 				finishMessageContextInput(state)
 				sendDone <- err
