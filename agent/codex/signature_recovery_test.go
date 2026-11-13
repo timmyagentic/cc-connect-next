@@ -82,6 +82,9 @@ func signatureTestRPC(s *appServerSession, path string, onRequest func(string, m
 		switch method {
 		case "thread/read":
 			result = map[string]any{"thread": map[string]any{"id": "thread-a", "path": path}}
+			if params["threadId"] == "thread-new" && params["includeTurns"] == true {
+				result = map[string]any{"thread": map[string]any{"id": "thread-new", "status": map[string]string{"type": "idle"}, "turns": []any{}}}
+			}
 		case "thread/backgroundTerminals/list":
 			result = map[string]any{"data": []any{}, "nextCursor": nil}
 		case "thread/start":

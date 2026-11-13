@@ -212,8 +212,13 @@ func (s *appServerSession) restoreSignatureHistory(r *signatureRecovery) error {
 	s.currentTurn = ""
 	s.pendingMsgs = nil
 	s.stateMu.Unlock()
+	input := []map[string]any{{"type": "text", "text": signatureRecoveryContinuation, "text_elements": []any{}}}
+	checkpoint, clientID, err := s.signatureTurnCheckpoint(r.threadID, input)
+	if err != nil {
+		return fmt.Errorf("prepare restored conversation checkpoint: %w", err)
+	}
 	ready := make(chan error, 1)
-	s.emit(core.Event{Type: core.EventSessionRecovery, SessionID: newID, RecoveryReady: ready})
+	s.emit(core.Event{Type: core.EventSessionRecovery, SessionID: newID, RecoveryCheckpoint: checkpoint, RecoveryReady: ready})
 	// No new model request may run until the caller has durably adopted the
 	// replacement. /stop before acknowledgement therefore cannot lose new work.
 	ackTimer := time.NewTimer(appServerRequestTimeout)
@@ -232,8 +237,7 @@ func (s *appServerSession) restoreSignatureHistory(r *signatureRecovery) error {
 		return s.contextErr()
 	}
 	slog.Info("codex app-server conversation restored after signature failure", "previous_thread_id", r.threadID, "thread_id", newID)
-	input := []map[string]any{{"type": "text", "text": signatureRecoveryContinuation, "text_elements": []any{}}}
-	if err := s.startTurn(newID, input, &options); err != nil {
+	if err := s.startTurn(newID, input, &options, clientID); err != nil {
 		// An RPC timeout can hide an accepted turn. Retire this transport so
 		// later input cannot accidentally steer or duplicate an unknown turn.
 		s.failSignatureRecovery(r, fmt.Errorf("continue restored conversation: %w", err), true)

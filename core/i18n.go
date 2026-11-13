@@ -556,15 +556,16 @@ const (
 	MsgSkillsHint             MsgKey = "skills_hint"
 	MsgSkillsTelegramMenuHint MsgKey = "skills_telegram_menu_hint"
 
-	MsgConfigTitle       MsgKey = "config_title"
-	MsgConfigHint        MsgKey = "config_hint"
-	MsgConfigGetUsage    MsgKey = "config_get_usage"
-	MsgConfigSetUsage    MsgKey = "config_set_usage"
-	MsgConfigUpdated     MsgKey = "config_updated"
-	MsgConfigKeyNotFound MsgKey = "config_key_not_found"
-	MsgConfigReloaded    MsgKey = "config_reloaded"
-	MsgSessionRecovering MsgKey = "session_recovering"
-	MsgSessionRecovered  MsgKey = "session_recovered"
+	MsgConfigTitle                 MsgKey = "config_title"
+	MsgConfigHint                  MsgKey = "config_hint"
+	MsgConfigGetUsage              MsgKey = "config_get_usage"
+	MsgConfigSetUsage              MsgKey = "config_set_usage"
+	MsgConfigUpdated               MsgKey = "config_updated"
+	MsgConfigKeyNotFound           MsgKey = "config_key_not_found"
+	MsgConfigReloaded              MsgKey = "config_reloaded"
+	MsgChatRecoveryIdentityChanged MsgKey = "chat_recovery_identity_changed"
+	MsgSessionRecovering           MsgKey = "session_recovering"
+	MsgSessionRecovered            MsgKey = "session_recovered"
 
 	MsgDoctorRunning           MsgKey = "doctor_running"
 	MsgDoctorProcessName       MsgKey = "doctor_process_name"
@@ -3967,6 +3968,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ 配置已重新載入\n\n顯示設定已更新：%v\nProvider 已同步：%d 個\n自訂命令已同步：%d 個\n聊天模型綁定已載入：%d 個",
 		LangJapanese:           "✅ 設定をリロードしました\n\n表示設定更新: %v\nプロバイダ同期: %d 件\nコマンド同期: %d 件\nチャットモデル設定: %d 件",
 		LangSpanish:            "✅ Configuración recargada\n\nPantalla actualizada: %v\nProveedores sincronizados: %d\nComandos sincronizados: %d\nModelos de chat cargados: %d",
+	},
+	MsgChatRecoveryIdentityChanged: {
+		LangEnglish:            "Restart recovery stopped because the conversation identity changed. The interrupted request and its queued requests were not replayed. Check their current results and confirm which unfinished work should continue.",
+		LangChinese:            "会话身份已变化，重启恢复已停止。中断请求及其排队请求未被重放。请先检查当前结果，再确认哪些未完成工作需要继续。",
+		LangTraditionalChinese: "會話身分已變更，重啟恢復已停止。中斷請求及其排隊請求未被重放。請先檢查目前結果，再確認哪些未完成工作需要繼續。",
+		LangJapanese:           "会話の識別情報が変わったため、再起動後の復元を停止しました。中断したリクエストと待機中のリクエストは再実行していません。現在の結果を確認してから、続行する未完了の作業を確認してください。",
+		LangSpanish:            "La recuperación tras el reinicio se detuvo porque cambió la identidad de la conversación. No se repitieron la solicitud interrumpida ni las solicitudes en cola. Revisa sus resultados actuales y confirma qué trabajo pendiente debe continuar.",
 	},
 	MsgSessionRecovering: {
 		LangEnglish:            "Restoring the conversation after an encrypted-context error…",
