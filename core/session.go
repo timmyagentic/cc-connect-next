@@ -773,9 +773,14 @@ func (sm *SessionManager) deleteByIDLocked(id string) {
 
 // Save persists current state to disk. Safe to call from outside (e.g. after message processing).
 func (sm *SessionManager) Save() {
+	_ = sm.SaveWithError()
+}
+
+// SaveWithError lets a continuation wait for its session binding to reach disk.
+func (sm *SessionManager) SaveWithError() error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	_ = sm.saveLocked()
+	return sm.saveLocked()
 }
 
 // saveLocked logs persistence failures even when a caller retains its in-memory

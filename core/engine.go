@@ -5942,9 +5942,9 @@ func (t *turnProcessor) handleToolResult(event Event, p Platform, hasRichCard bo
 	}
 }
 
-func (t *turnProcessor) persistAgentSessionID(id string) {
+func (t *turnProcessor) persistAgentSessionID(id string) error {
 	if id == "" || t.session.GetAgentSessionID() == id {
-		return
+		return nil
 	}
 	wasEmpty := t.session.GetAgentSessionID() == ""
 	agent := t.engine.agent
@@ -5962,7 +5962,7 @@ func (t *turnProcessor) persistAgentSessionID(id string) {
 			t.sessions.SetSessionName(id, name)
 		}
 	}
-	t.sessions.Save()
+	return t.sessions.SaveWithError()
 }
 
 func (e *Engine) processInteractiveEvents(state *interactiveState, session *Session, sessions *SessionManager, sessionKey string, msgID string, turnStart time.Time, stopTypingFn func(), sendDone <-chan error, replyCtx any, scheduledResult ...*scheduledTurnResult) {
@@ -6833,6 +6833,14 @@ func (t *turnProcessor) run() {
 		case EventThinking:
 			if presentation.handleThinking() {
 				continue
+			}
+		case EventSessionRecovery:
+			err := t.persistAgentSessionID(event.SessionID)
+			if event.RecoveryReady != nil {
+				event.RecoveryReady <- err
+			}
+			if err == nil {
+				presentation.handleSessionRecovery()
 			}
 		case EventToolUse:
 			if presentation.handleToolUse() {
@@ -8294,6 +8302,34 @@ type turnPresentation struct {
 	richAnswerStartedAt        *time.Time
 	cardThinkingText           *string
 	cardToolCalls              *[]cardToolEntry
+}
+
+func (presentation *turnPresentation) handleSessionRecovery() {
+	e := presentation.processor.engine
+	key := MsgSessionRecovering
+	if presentation.event.SessionID != "" {
+		key = MsgSessionRecovered
+	}
+	notice := e.i18n.T(key)
+	if presentation.hasRichCard && presentation.richCardPreviewEnabled {
+		card := presentation.buildResolvedRichCard(CardStatusThinking, "thinking", *presentation.toolSteps, notice, true, "")
+		if *presentation.cardMessageID == nil {
+			if starter, ok := presentation.platform.(PreviewStarter); ok {
+				if handle, err := starter.SendPreviewStart(e.ctx, presentation.replyCtx, card); err == nil {
+					*presentation.cardMessageID = handle
+				}
+			}
+		} else if updater, ok := presentation.platform.(MessageUpdater); ok {
+			_ = updater.UpdateMessage(e.ctx, *presentation.cardMessageID, card)
+		}
+		*presentation.lastRichCardUpdate = time.Time{}
+		*presentation.lastRichCardInput = ""
+		*presentation.lastRichCardPreview = ""
+		return
+	}
+	if presentation.display.ThinkingMessages && !presentation.progress.AppendEvent(ProgressEntryThinking, notice, "", notice) {
+		presentation.sendWorkspace(presentation.platform, presentation.replyCtx, notice)
+	}
 }
 
 func (presentation *turnPresentation) handleThinking() bool {
@@ -12878,6 +12914,12 @@ func (e *Engine) processCompressEvents(state *interactiveState, session *Session
 		case EventText:
 			if !auto && event.Content != "" {
 				textParts = append(textParts, event.Content)
+			}
+		case EventSessionRecovery:
+			processor := &turnProcessor{engine: e, state: state, session: session, sessions: sessions}
+			err := processor.persistAgentSessionID(event.SessionID)
+			if event.RecoveryReady != nil {
+				event.RecoveryReady <- err
 			}
 		case EventToolResult:
 			if !auto {
@@ -18052,9 +18094,9 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 	if createdFresh {
 		e.initializeFreshSessionTitle(agentSession, message)
 	}
-	saveRelaySessionID := func(id string, force bool) {
+	saveRelaySessionID := func(id string, force bool) error {
 		if id == "" {
-			return
+			return nil
 		}
 		changed := false
 		if force {
@@ -18064,13 +18106,13 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 			changed = session.CompareAndSetAgentSessionID(id, agent.Name())
 		}
 		if !changed {
-			return
+			return nil
 		}
 		pendingName := session.GetName()
 		if pendingName != "" && pendingName != "session" && pendingName != "default" {
 			sessions.SetSessionName(id, pendingName)
 		}
-		sessions.Save()
+		return sessions.SaveWithError()
 	}
 
 	saveRelaySessionID(agentSession.CurrentSessionID(), false)
@@ -18084,6 +18126,11 @@ func (e *Engine) HandleRelay(ctx context.Context, fromProject, sourceSessionKey,
 	var textParts []string
 	for event := range agentSession.Events() {
 		switch event.Type {
+		case EventSessionRecovery:
+			err := saveRelaySessionID(event.SessionID, true)
+			if event.RecoveryReady != nil {
+				event.RecoveryReady <- err
+			}
 		case EventText:
 			if event.Content != "" {
 				textParts = append(textParts, event.Content)
@@ -18194,11 +18241,16 @@ func (e *Engine) drainRelaySession(agentSession AgentSession, session *Session, 
 				closeRelayAgentSession(agentSession, relaySessionKey)
 				return
 			}
+			var bindingErr error
 			if ev.SessionID != "" {
 				session.SetAgentSessionID(ev.SessionID, agentName)
-				sessions.Save()
+				bindingErr = sessions.SaveWithError()
 			}
 			switch ev.Type {
+			case EventSessionRecovery:
+				if ev.RecoveryReady != nil {
+					ev.RecoveryReady <- bindingErr
+				}
 			case EventResult:
 				slog.Info("relay: background drain completed (agent finished turn)",
 					"relay_key", relaySessionKey)
