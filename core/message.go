@@ -342,6 +342,7 @@ type Message struct {
 	ModeOverride            string               // if set, temporarily override agent permission mode for this message
 	AnswerProfile           AnswerProfileName    // optional one-shot answer profile for this message
 	ModelOverride           string               // optional model for this turn only; never changes Agent defaults
+	ServiceTierOverride     string               // optional service tier for this turn only
 	ReasoningEffortOverride string               // optional reasoning effort for this turn only
 	scheduledResult         *scheduledTurnResult // completion receipt for a model-pinned scheduled turn
 	// IsCardAction marks a command synthesized from an interactive-card click.

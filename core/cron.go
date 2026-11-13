@@ -28,6 +28,7 @@ type CronJob struct {
 	Prompt          string    `json:"prompt"`
 	Model           string    `json:"model,omitempty"`            // per-run prompt model; empty = inherit project/session defaults
 	ReasoningEffort string    `json:"reasoning_effort,omitempty"` // per-run prompt effort; empty = inherit project/session defaults
+	ServiceTier     string    `json:"service_tier,omitempty"`     // per-run service tier; empty = inherit project/session defaults
 	Exec            string    `json:"exec,omitempty"`             // shell command; mutually exclusive with Prompt
 	WorkDir         string    `json:"work_dir,omitempty"`         // working directory for exec; empty = agent work_dir
 	Description     string    `json:"description"`
@@ -129,6 +130,14 @@ func validateCronModel(j *CronJob) error {
 }
 
 func validateCronReasoningEffort(j *CronJob) error {
+	if j.ServiceTier != "" {
+		if j.IsShellJob() || strings.TrimSpace(j.Prompt) == "" {
+			return fmt.Errorf("service_tier is only supported for prompt jobs")
+		}
+		if strings.ContainsAny(j.ServiceTier, " \t\r\n") {
+			return fmt.Errorf("invalid service_tier %q", j.ServiceTier)
+		}
+	}
 	if strings.TrimSpace(j.ReasoningEffort) != "" && (j.IsShellJob() || strings.TrimSpace(j.Prompt) == "") {
 		return fmt.Errorf("reasoning_effort is only supported for prompt jobs")
 	}
@@ -424,6 +433,10 @@ func updateJobField(job *CronJob, field string, value any) error {
 			job.Model = strings.TrimSpace(v)
 			return nil
 		}
+	case "service_tier":
+		if v, ok := value.(string); ok {
+			job.ServiceTier = strings.TrimSpace(v)
+		}
 	case "reasoning_effort":
 		if v, ok := value.(string); ok {
 			job.ReasoningEffort = strings.ToLower(strings.TrimSpace(v))
@@ -697,10 +710,11 @@ func (cs *CronScheduler) UpdateJobFields(id string, updates map[string]any) erro
 		}
 		_, modelChanged := updates["model"]
 		_, effortChanged := updates["reasoning_effort"]
+		_, tierChanged := updates["service_tier"]
 		_, promptChanged := updates["prompt"]
 		_, execChanged := updates["exec"]
 		_, enabledChanged := updates["enabled"]
-		if modelChanged || effortChanged || promptChanged || execChanged || projectChanged || (enabledChanged && candidate.Enabled) {
+		if modelChanged || effortChanged || tierChanged || promptChanged || execChanged || projectChanged || (enabledChanged && candidate.Enabled) {
 			return cs.validateOverrides(candidate)
 		}
 		return nil

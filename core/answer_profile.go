@@ -253,7 +253,7 @@ func (e *Engine) sendAgentTurnWithOverrides(agent Agent, session AgentSession, p
 		}
 	}
 	if model != "" || reasoningEffort != "" {
-		slog.Info("using task options for one turn", "project", e.name, "model", options.Model, "reasoning_effort", options.ReasoningEffort)
+		slog.Info("using task options for one turn", "project", e.name, "model", options.Model, "reasoning_effort", options.ReasoningEffort, "service_tier", options.ServiceTier)
 	} else if profile != "" {
 		slog.Info("using one-shot answer profile",
 			"project", e.name,
