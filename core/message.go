@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -309,6 +310,7 @@ type LocationAttachment struct {
 
 // Message represents a unified incoming message from any platform.
 type Message struct {
+	chatRecovery     *chatRecovery
 	steerWhenReady   bool   // ordinary supplement deferred until the active turn finishes starting
 	steerDispatching bool   // pending supplement passed to the backend; guarded by interactiveState.mu
 	feedbackText     string // captured before aliases, quotes and injected context
@@ -413,6 +415,9 @@ type Event struct {
 
 	// The consumer acknowledges the durable SessionID before recovery continues.
 	RecoveryReady chan error `json:"-"`
+	// Optional native submission checkpoint for a replacement conversation.
+	// The engine durably adopts this before acknowledging RecoveryReady.
+	RecoveryCheckpoint json.RawMessage `json:"-"`
 }
 
 // HistoryEntry is one turn in a conversation.

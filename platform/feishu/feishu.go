@@ -5277,6 +5277,7 @@ type feishuPreviewHandle struct {
 	sequence    int    // cardkit-v1 streaming text monotonic counter (++ before use; first call = 1)
 	status      core.CardStatus
 	lastContent string
+	checkpoint  func() error // called with mu held, before a persisted handle is updated remotely
 }
 
 func (p *Platform) FinalReplyHookRoute(rctx, deliveredHandle any) (sourceID, answerID, chatID string) {
@@ -5999,7 +6000,9 @@ func (p *Platform) StreamRichCardText(ctx context.Context, previewHandle any, fu
 		return core.ErrNotSupported
 	}
 
-	h.sequence++
+	if err := h.reserveSequenceLocked(); err != nil {
+		return fmt.Errorf("%s: checkpoint streaming card: %w", p.tag(), err)
+	}
 	apiPath := fmt.Sprintf("/open-apis/cardkit/v1/cards/%s/elements/%s/content",
 		h.cardID, richCardMainTextElementID)
 	body := map[string]any{
@@ -6083,6 +6086,9 @@ func (p *Platform) UpdateMessage(ctx context.Context, previewHandle any, content
 	if cardID != "" {
 		return p.updateCardEntity(ctx, h, cardJSON)
 	}
+	if err := h.checkpointBeforeUpdate(); err != nil {
+		return fmt.Errorf("%s: checkpoint inline card: %w", p.tag(), err)
+	}
 	return p.patchCardMessage(ctx, h.messageID, cardJSON)
 }
 
@@ -6113,6 +6119,9 @@ func (p *Platform) UpdateMessageWithStatusFooter(ctx context.Context, previewHan
 	h.mu.Unlock()
 	if cardID != "" {
 		return p.updateCardEntity(ctx, h, cardJSON)
+	}
+	if err := h.checkpointBeforeUpdate(); err != nil {
+		return fmt.Errorf("%s: checkpoint inline card: %w", p.tag(), err)
 	}
 	return p.patchCardMessage(ctx, h.messageID, cardJSON)
 }
@@ -6151,7 +6160,9 @@ func (p *Platform) updateCardEntity(ctx context.Context, h *feishuPreviewHandle,
 	if h.cardID == "" {
 		return fmt.Errorf("%s: updateCardEntity: cardID not set", p.tag())
 	}
-	h.sequence++
+	if err := h.reserveSequenceLocked(); err != nil {
+		return fmt.Errorf("%s: checkpoint card entity: %w", p.tag(), err)
+	}
 	cardID := h.cardID
 	seq := h.sequence
 
@@ -8033,6 +8044,10 @@ func (p *Platform) SetPreviewStatus(previewHandle any, status core.CardStatus) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	if err := h.checkpointBeforeUpdate(); err != nil {
+		slog.Debug("feishu: checkpoint preview status failed", "error", err)
+		return
+	}
 	resp, err := p.client.Im.Message.Patch(ctx, larkim.NewPatchMessageReqBuilder().
 		MessageId(h.messageID).
 		Body(larkim.NewPatchMessageReqBodyBuilder().
