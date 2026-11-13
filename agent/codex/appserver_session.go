@@ -201,11 +201,15 @@ type appServerSession struct {
 	wg        sync.WaitGroup
 	readDone  chan struct{} // stdout must drain before cmd.Wait closes its pipe
 
-	stateMu      sync.Mutex
-	pendingMsgs  []string
-	currentTurn  string
-	turnRevision uint64 // prevents a late turn/start response from reviving a finished turn
-	preambleSent bool
+	stateMu            sync.Mutex
+	pendingMsgs        []string
+	currentTurn        string
+	turnRevision       uint64 // prevents a late turn/start response from reviving a finished turn
+	preambleSent       bool
+	recovery           *signatureRecovery
+	recoveryUsed       bool // one attempt per Send; a recovered native turn is part of the same Send
+	pendingSteers      int
+	unsafeRecoveryTurn string // accepted or uncertain steer input may not have reached the rollout yet
 	// initialTitleHandled prevents later turns from replacing a fresh thread's
 	// first user-facing title. Resumed threads start with this already set.
 	initialTitleHandled bool
@@ -220,6 +224,7 @@ type appServerSession struct {
 	diagnostics         appServerDiagnostics
 	recoveryMu          sync.Mutex
 	preparedRecovery    *codexTurnCheckpoint
+	activeRecovery      *codexTurnCheckpoint
 	recoveryFreshThread bool
 }
 
@@ -617,6 +622,7 @@ func (s *appServerSession) send(prompt string, images []core.ImageAttachment, fi
 	s.recoveryMu.Lock()
 	prepared := s.preparedRecovery
 	s.preparedRecovery = nil
+	s.activeRecovery = prepared
 	s.recoveryMu.Unlock()
 	if prepared != nil {
 		if prepared.InputHash != recoveryInputHash(prompt, images, files) {
@@ -676,14 +682,26 @@ func (s *appServerSession) startPreparedTurn(input []map[string]any, options *co
 	if threadID == "" {
 		return fmt.Errorf("codex app-server thread id is empty")
 	}
-	s.stateMu.Lock()
-	turnRevision := s.turnRevision
-	s.preambleSent = true
-	s.stateMu.Unlock()
 	s.recoveryMu.Lock()
 	s.recoveryFreshThread = false
+	signatureRecovered := s.activeRecovery != nil && s.activeRecovery.SignatureRecovered
 	s.recoveryMu.Unlock()
+	s.stateMu.Lock()
+	s.preambleSent = true
+	s.recoveryUsed = signatureRecovered
+	s.stateMu.Unlock()
 
+	return s.startTurn(threadID, input, options, clientID)
+}
+
+func (s *appServerSession) startTurn(threadID string, input []map[string]any, options *core.TurnOptions, clientID string) error {
+	if !s.alive.Load() {
+		return fmt.Errorf("session is closed")
+	}
+	s.stateMu.Lock()
+	turnRevision := s.turnRevision
+	s.stateMu.Unlock()
+	s.storeActiveTurnOptions(options)
 	params := s.turnStartParams(threadID, input, options)
 	if clientID != "" {
 		params["clientUserMessageId"] = clientID
@@ -712,8 +730,6 @@ func (s *appServerSession) startPreparedTurn(input []map[string]any, options *co
 	s.currentTurn = resp.Turn.ID
 	s.pendingMsgs = s.pendingMsgs[:0]
 	s.stateMu.Unlock()
-	s.storeActiveTurnOptions(options)
-
 	return nil
 }
 
@@ -889,13 +905,25 @@ func (s *appServerSession) Steer(prompt string, images []core.ImageAttachment, f
 	// Snapshot the active turn under the state lock. No preamble handling:
 	// a turn in flight implies the preamble decision was already made by the
 	// Send that started it.
-	s.stateMu.Lock()
-	expectedTurn := s.currentTurn
-	s.stateMu.Unlock()
 	threadID := s.CurrentSessionID()
+	s.stateMu.Lock()
+	if s.recovery != nil {
+		s.stateMu.Unlock()
+		return core.ErrSteerNoActiveTurn
+	}
+	expectedTurn := s.currentTurn
+	if expectedTurn != "" && threadID != "" {
+		s.pendingSteers++
+	}
+	s.stateMu.Unlock()
 	if threadID == "" || expectedTurn == "" {
 		return core.ErrSteerNoActiveTurn
 	}
+	defer func() {
+		s.stateMu.Lock()
+		s.pendingSteers--
+		s.stateMu.Unlock()
+	}()
 
 	input := make([]map[string]any, 0, 1+len(imagePaths))
 	input = append(input, map[string]any{
@@ -920,6 +948,11 @@ func (s *appServerSession) Steer(prompt string, images []core.ImageAttachment, f
 	// still recognized as "accepted" rather than misreported as a failure.
 	var raw json.RawMessage
 	rpcErr, responded := s.requestClassified("turn/steer", params, &raw, appServerRequestTimeout)
+	if rpcErr == nil || !responded {
+		s.stateMu.Lock()
+		s.unsafeRecoveryTurn = expectedTurn
+		s.stateMu.Unlock()
+	}
 	if rpcErr != nil {
 		if !responded {
 			// Timeout / transport failure: the input may or may not be inside
@@ -1564,9 +1597,10 @@ func (s *appServerSession) waitLoop() {
 func (s *appServerSession) finishTransport(err error) {
 	s.stateMu.Lock()
 	s.alive.Store(false)
-	active := s.currentTurn != ""
+	active := s.currentTurn != "" || s.recovery != nil
 	if active {
 		s.currentTurn = ""
+		s.recovery = nil
 		s.pendingMsgs = nil
 		s.turnRevision++
 	}
@@ -1632,8 +1666,14 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 		var notif turnNotification
 		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsActiveTurn(method, notif.ThreadID, notif.Turn.ID) {
 			s.observeTerminalProtocol()
+			if s.finishSignatureRecoveryTurn(notif) {
+				return
+			}
 			if notif.Turn.Error != nil && strings.TrimSpace(notif.Turn.Error.Message) != "" {
-				s.failTurn(classifyCodexError(fmt.Errorf("%s", notif.Turn.Error.Message)))
+				err := classifyCodexError(fmt.Errorf("%s", notif.Turn.Error.Message))
+				if notif.Turn.Status != "failed" || !s.deferSignatureRecovery(err, notif.ThreadID, notif.Turn.ID, true) {
+					s.failTurn(err)
+				}
 				return
 			}
 			s.completeTurn()
@@ -1648,6 +1688,9 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 		}
 		if err := json.Unmarshal(paramsRaw, &notif); err == nil && notif.Status.Type == "idle" && s.ownsThread(method, notif.ThreadID) {
 			s.observeTerminalProtocol()
+			if s.signatureRecoveryWaiting(notif.ThreadID) {
+				return
+			}
 			// In codex 0.125+, thread going idle signals turn completion.
 			s.completeTurn()
 		}
@@ -1657,7 +1700,10 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsActiveTurn(method, notif.ThreadID, notif.TurnID) {
 			message := strings.TrimSpace(notif.errorMessage())
 			if message != "" && !notif.WillRetry {
-				s.failTurn(classifyCodexError(fmt.Errorf("%s", message)))
+				err := classifyCodexError(fmt.Errorf("%s", message))
+				if !s.deferSignatureRecovery(err, notif.ThreadID, notif.TurnID, false) {
+					s.failTurn(err)
+				}
 			}
 		}
 	}
@@ -1950,6 +1996,7 @@ func (s *appServerSession) completeTurn() {
 		return
 	}
 	s.currentTurn = ""
+	s.recovery = nil
 	s.turnRevision++
 	s.stateMu.Unlock()
 	s.flushPendingAsText()
@@ -1959,6 +2006,7 @@ func (s *appServerSession) completeTurn() {
 func (s *appServerSession) failTurn(err error) {
 	s.stateMu.Lock()
 	s.currentTurn = ""
+	s.recovery = nil
 	s.turnRevision++
 	s.pendingMsgs = nil
 	s.stateMu.Unlock()
@@ -2015,7 +2063,7 @@ func (s *appServerSession) emit(event core.Event) {
 		return
 	default:
 	}
-	if !terminal {
+	if !terminal && event.Type != core.EventSessionRecovery {
 		s.diagnostics.dropped++
 		s.diagnostics.mu.Unlock()
 		slog.Warn("codex appserver: event channel full, dropping event", "type", event.Type)
@@ -2030,7 +2078,9 @@ func (s *appServerSession) emit(event core.Event) {
 	case s.events <- event:
 		s.diagnostics.mu.Lock()
 		s.diagnostics.highWater = max(s.diagnostics.highWater, cap(s.events))
-		s.diagnostics.terminalDelivered = true
+		if terminal {
+			s.diagnostics.terminalDelivered = true
+		}
 		s.diagnostics.mu.Unlock()
 	case <-s.contextDone():
 	}

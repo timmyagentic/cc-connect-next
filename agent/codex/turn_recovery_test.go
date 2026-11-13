@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/timmyagentic/cc-connect-next/core"
 )
@@ -33,6 +34,7 @@ func newRecoveryFixture(t *testing.T) *recoveryRPCFixture {
 func (f *recoveryRPCFixture) session() (*appServerSession, *steerFakeStdin) {
 	f.t.Helper()
 	s, stdin := cronModelAppServer(f.t, "fixture-model")
+	s.threadID.Store(f.threadID)
 	s.workDir, s.mode, s.providerName = f.workDir, "suggest", "fixture-provider"
 	s.preambleSent, s.pendingMsgs = true, nil
 	stdin.respond = func(id int64, request map[string]any) {
@@ -69,7 +71,7 @@ func (f *recoveryRPCFixture) session() (*appServerSession, *steerFakeStdin) {
 	return s, stdin
 }
 
-func recoveryTestInput() core.TurnRecoveryInput {
+func restartRecoveryTestInput() core.TurnRecoveryInput {
 	return core.TurnRecoveryInput{Prompt: "Finish the authorized task", UseOptions: true, Options: core.TurnOptions{Model: "fixture-model", ReasoningEffort: "high", ServiceTier: "fast"}}
 }
 
@@ -88,7 +90,7 @@ func beginRecoveryTurn(t *testing.T, f *recoveryRPCFixture, input core.TurnRecov
 
 func TestRestartRecovery_CompletedNativeTurnReplaysOnlyFinalWithoutExecuting(t *testing.T) {
 	f := newRecoveryFixture(t)
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	raw, _ := beginRecoveryTurn(t, f, input)
 	turn := &f.turns[0]
 	turn.Status = "completed"
@@ -113,7 +115,7 @@ func TestRestartRecovery_CompletedNativeTurnReplaysOnlyFinalWithoutExecuting(t *
 
 func TestRestartRecovery_AcceptedSubmissionWithLostResponseIsNotRepeated(t *testing.T) {
 	f := newRecoveryFixture(t)
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	s, _ := f.session()
 	raw, err := s.PrepareTurnRecovery(input)
 	if err != nil {
@@ -138,7 +140,7 @@ func TestRestartRecovery_InterruptedTurnPersistsContinuationBeforeStarting(t *te
 	for _, status := range []string{"interrupted", "inProgress"} {
 		t.Run(status, func(t *testing.T) {
 			f := newRecoveryFixture(t)
-			input := recoveryTestInput()
+			input := restartRecoveryTestInput()
 			raw, _ := beginRecoveryTurn(t, f, input)
 			f.turns[0].Status = status
 			// Accepted steering shares the original turn and must not erase
@@ -172,7 +174,7 @@ func TestRestartRecovery_InterruptedTurnPersistsContinuationBeforeStarting(t *te
 
 func TestRestartRecovery_SaveFailureNeverStartsContinuation(t *testing.T) {
 	f := newRecoveryFixture(t)
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	raw, _ := beginRecoveryTurn(t, f, input)
 	f.turns[0].Status = "interrupted"
 	restored, _ := f.session()
@@ -187,7 +189,7 @@ func TestRestartRecovery_RepeatedRestartReconcilesContinuationSubmission(t *test
 	for _, continuationStarted := range []bool{false, true} {
 		t.Run(fmt.Sprintf("accepted=%t", continuationStarted), func(t *testing.T) {
 			f := newRecoveryFixture(t)
-			input := recoveryTestInput()
+			input := restartRecoveryTestInput()
 			raw, _ := beginRecoveryTurn(t, f, input)
 			f.turns[0].Status = "interrupted"
 			restored, _ := f.session()
@@ -244,7 +246,7 @@ func TestRestartRecovery_ForeignAndFailedHistoryNeverStartsWork(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newRecoveryFixture(t)
-			input := recoveryTestInput()
+			input := restartRecoveryTestInput()
 			raw, _ := beginRecoveryTurn(t, f, input)
 			restored, _ := f.session()
 			tc.mutate(f, restored)
@@ -264,7 +266,7 @@ func TestRestartRecovery_PreparedSubmissionKeepsOriginalWireInputAndClientID(t *
 	s, stdin := f.session()
 	s.recoveryFreshThread, s.preambleSent = true, false
 	s.promptPreamble = "Keep project instructions"
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	input.Files = []core.FileAttachment{{FileName: "evidence.txt", Data: []byte("fixture evidence")}}
 	raw, err := s.PrepareTurnRecovery(input)
 	if err != nil {
@@ -295,7 +297,7 @@ func TestRestartRecovery_PreparedSubmissionKeepsOriginalWireInputAndClientID(t *
 func TestRestartRecovery_UnsubmittedInputUsesSavedAttachmentPath(t *testing.T) {
 	f := newRecoveryFixture(t)
 	s, _ := f.session()
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	input.Files = []core.FileAttachment{{FileName: "evidence.txt", Data: []byte("fixture evidence")}}
 	raw, err := s.PrepareTurnRecovery(input)
 	if err != nil {
@@ -317,7 +319,7 @@ func TestRestartRecovery_UnsubmittedInputUsesSavedAttachmentPath(t *testing.T) {
 func TestRestartRecovery_InputChangedAfterCheckpointDoesNotSubmit(t *testing.T) {
 	f := newRecoveryFixture(t)
 	s, _ := f.session()
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	if _, err := s.PrepareTurnRecovery(input); err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +337,7 @@ func TestRestartRecovery_PreparationFailureDoesNotSubmit(t *testing.T) {
 	if err := os.WriteFile(f.workDir, []byte("not a directory"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	input.Files = []core.FileAttachment{{FileName: "evidence.txt", Data: []byte("fixture")}}
 	if _, err := s.PrepareTurnRecovery(input); err == nil || len(f.starts) != 0 {
 		t.Fatalf("attachment preparation failure was ignored: %v", err)
@@ -344,7 +346,7 @@ func TestRestartRecovery_PreparationFailureDoesNotSubmit(t *testing.T) {
 
 func TestRestartRecovery_UnmaterializedOrUnreadableHistoryDoesNotRebuildThread(t *testing.T) {
 	f := newRecoveryFixture(t)
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	s, _ := f.session()
 	s.recoveryFreshThread = true
 	raw, err := s.PrepareTurnRecovery(input)
@@ -363,7 +365,7 @@ func TestRestartRecovery_UnmaterializedOrUnreadableHistoryDoesNotRebuildThread(t
 
 func TestRestartRecovery_DurableInputRoundTripRetainsIdentity(t *testing.T) {
 	f := newRecoveryFixture(t)
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	input.Images, input.Files = []core.ImageAttachment{}, []core.FileAttachment{}
 	raw, _ := beginRecoveryTurn(t, f, input)
 	f.turns[0].Status = "interrupted"
@@ -380,7 +382,7 @@ func TestRestartRecovery_DurableInputRoundTripRetainsIdentity(t *testing.T) {
 
 func TestRestartRecovery_LegacySendPreservesOriginalOptionsBehavior(t *testing.T) {
 	f := newRecoveryFixture(t)
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	input.UseOptions = false
 	s, _ := f.session()
 	raw, err := s.PrepareTurnRecovery(input)
@@ -404,11 +406,101 @@ func TestRestartRecovery_LegacySendPreservesOriginalOptionsBehavior(t *testing.T
 func TestRestartRecovery_MissingPriorBoundaryDoesNotReplayInput(t *testing.T) {
 	f := newRecoveryFixture(t)
 	f.turns = []recoveryTurn{{ID: "prior-turn", Status: "completed"}}
-	input := recoveryTestInput()
+	input := restartRecoveryTestInput()
 	raw, _ := beginRecoveryTurn(t, f, input)
 	f.turns = f.turns[1:]
 	restored, _ := f.session()
 	if err := restored.ResumeInterruptedTurn(raw, input, nil); err == nil || len(f.starts) != 1 {
 		t.Fatalf("history rewrite was accepted: %v", err)
+	}
+}
+
+func TestRestartRecovery_SignatureReplacementRemainsRecoverableAfterRestart(t *testing.T) {
+	for _, nativeStatus := range []string{"unsubmitted", "interrupted", "completed"} {
+		t.Run(nativeStatus, func(t *testing.T) {
+			s, path := newSignatureTestSession(t)
+			s.mode, s.providerName = "suggest", "fixture-provider"
+			input := restartRecoveryTestInput()
+			input.Options = *s.turnOptions
+			original := codexTurnCheckpoint{
+				Version: 1, ThreadID: "thread-a", ClientID: "original-client",
+				InputHash: recoveryInputHash(input.Prompt, input.Images, input.Files),
+				Input:     []map[string]any{{"type": "text", "text": input.Prompt}},
+				WorkDir:   s.workDir, Mode: s.mode, Provider: s.providerName,
+			}
+			s.activeRecovery = &original
+			started := make(chan map[string]any, 1)
+			signatureTestRPC(s, path, func(method string, params map[string]any) bool {
+				if method == "turn/start" {
+					started <- params
+				}
+				return true
+			})
+			signatureTestNotify(s, "turn/completed", "thread-a", "turn-b", "failed", signatureTestError)
+			awaitSignatureEvent(t, s)
+			binding := awaitSignatureEvent(t, s)
+			var cp codexTurnCheckpoint
+			if binding.SessionID != "thread-new" || binding.RecoveryReady == nil || json.Unmarshal(binding.RecoveryCheckpoint, &cp) != nil {
+				t.Fatalf("replacement has no durable restart checkpoint: %#v", binding)
+			}
+			if cp.ThreadID != binding.SessionID || cp.BoundaryID != "" || cp.InputHash != original.InputHash || cp.ClientID == original.ClientID || !cp.SignatureRecovered {
+				t.Fatalf("checkpoint lost logical input or replacement identity: %+v", cp)
+			}
+			select {
+			case <-started:
+				t.Fatal("signature continuation ran before checkpoint acknowledgement")
+			default:
+			}
+			if nativeStatus == "unsubmitted" {
+				// The engine persisted the binding, but the process died before
+				// it could acknowledge it and send the native continuation.
+				s.cancel()
+			} else {
+				binding.RecoveryReady <- nil
+				select {
+				case params := <-started:
+					if params["threadId"] != cp.ThreadID || params["clientUserMessageId"] != cp.ClientID {
+						t.Fatalf("signature continuation ignored durable submission identity: %v", params)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("signature continuation did not start")
+				}
+			}
+			done := make(chan struct{})
+			go func() { s.wg.Wait(); close(done) }()
+			awaitTerminalTest(t, done)
+			_ = s.Close()
+
+			f := newRecoveryFixture(t)
+			f.threadID, f.workDir = cp.ThreadID, cp.WorkDir
+			if nativeStatus != "unsubmitted" {
+				f.turns = []recoveryTurn{{ID: "signature-turn", Status: nativeStatus, Items: []map[string]any{{"type": "userMessage", "clientId": cp.ClientID}}}}
+				if nativeStatus == "completed" {
+					f.turns[0].Items = append(f.turns[0].Items, map[string]any{"type": "agentMessage", "phase": "final_answer", "text": "Signature repair completed once"})
+				}
+			}
+			restarted, _ := f.session()
+			if err := restarted.ResumeInterruptedTurn(binding.RecoveryCheckpoint, input, func(json.RawMessage) error { return nil }); err != nil {
+				t.Fatalf("restarting after signature repair lost the task: %v", err)
+			}
+			if nativeStatus == "completed" {
+				if len(f.starts) != 0 || (<-restarted.events).Content != "Signature repair completed once" {
+					t.Fatal("completed signature continuation was executed twice")
+				}
+				return
+			}
+			if len(f.starts) != 1 || f.starts[0]["threadId"] != cp.ThreadID {
+				t.Fatalf("restart used the failed original conversation: %v", f.starts)
+			}
+			if nativeStatus == "unsubmitted" && f.starts[0]["input"].([]any)[0].(map[string]any)["text"] != signatureRecoveryContinuation {
+				t.Fatal("restart lost the unsent signature continuation input")
+			}
+			// A process restart must not reset the signature-repair budget for
+			// this logical task and start an unbounded replacement loop.
+			signatureTestNotify(restarted, "error", cp.ThreadID, appServerCurrentTurn(restarted), "", signatureTestError)
+			if event := awaitSignatureEvent(t, restarted); event.Type != core.EventError {
+				t.Fatalf("restart permitted a second signature recovery: %#v", event)
+			}
+		})
 	}
 }

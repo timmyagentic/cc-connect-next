@@ -410,6 +410,7 @@ func (e *Engine) sessionRuntimeCapabilities(session AgentSession) RuntimeAdapter
 		}
 		result.Capabilities = append(result.Capabilities, capability)
 	}
+	result.Capabilities = append(result.Capabilities, automaticSessionRecoveryCapability(session))
 	return result
 }
 
@@ -429,6 +430,7 @@ func (e *Engine) unboundSessionRuntimeCapabilities() RuntimeAdapterCapabilities 
 		}
 		result.Capabilities = append(result.Capabilities, capability)
 	}
+	result.Capabilities = append(result.Capabilities, automaticSessionRecoveryCapability(nil))
 	return result
 }
 

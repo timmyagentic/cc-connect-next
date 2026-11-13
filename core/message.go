@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -376,6 +377,7 @@ const (
 	EventError             EventType = "error"              // error occurred
 	EventPermissionRequest EventType = "permission_request" // agent requests permission via stdio protocol
 	EventThinking          EventType = "thinking"           // thinking/processing status
+	EventSessionRecovery   EventType = "session_recovery"   // restoring a failed conversation without ending the user turn
 )
 
 // UserQuestion represents a structured question from AskUserQuestion.
@@ -410,6 +412,12 @@ type Event struct {
 	Error        error
 	Metadata     map[string]any // optional metadata from agent (e.g. compaction_continue)
 	Synthetic    bool           // true if this is a synthetic/generated message (not from real user)
+
+	// The consumer acknowledges the durable SessionID before recovery continues.
+	RecoveryReady chan error `json:"-"`
+	// Optional native submission checkpoint for a replacement conversation.
+	// The engine durably adopts this before acknowledging RecoveryReady.
+	RecoveryCheckpoint json.RawMessage `json:"-"`
 }
 
 // HistoryEntry is one turn in a conversation.

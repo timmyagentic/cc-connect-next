@@ -17,20 +17,21 @@ import (
 // Only ordinary, resumable chats with an updatable durable answer participate.
 // Scheduler receipts remain observations and are never used to replay work.
 type chatRecoveryState struct {
-	Version        int             `json:"version"`
-	Project        string          `json:"project"`
-	Platform       string          `json:"platform"`
-	SessionID      string          `json:"session_id"`
-	SessionKey     string          `json:"session_key"`
-	InteractiveKey string          `json:"interactive_key"`
-	Workspace      string          `json:"workspace,omitempty"`
-	AgentSessionID string          `json:"agent_session_id,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	Reply          json.RawMessage `json:"reply"`
-	Native         json.RawMessage `json:"native,omitempty"`
-	Preview        json.RawMessage `json:"preview,omitempty"`
-	HistorySaved   bool            `json:"history_saved"`
-	Closed         bool            `json:"closed,omitempty"`
+	Version                int             `json:"version"`
+	Project                string          `json:"project"`
+	Platform               string          `json:"platform"`
+	SessionID              string          `json:"session_id"`
+	SessionKey             string          `json:"session_key"`
+	InteractiveKey         string          `json:"interactive_key"`
+	Workspace              string          `json:"workspace,omitempty"`
+	AgentSessionID         string          `json:"agent_session_id,omitempty"`
+	ReplacesAgentSessionID string          `json:"replaces_agent_session_id,omitempty"`
+	CreatedAt              time.Time       `json:"created_at"`
+	Reply                  json.RawMessage `json:"reply"`
+	Native                 json.RawMessage `json:"native,omitempty"`
+	Preview                json.RawMessage `json:"preview,omitempty"`
+	HistorySaved           bool            `json:"history_saved"`
+	Closed                 bool            `json:"closed,omitempty"`
 }
 
 type chatRecovery struct {
@@ -332,8 +333,17 @@ func (e *Engine) reserveChatRecovery(group []*chatRecovery) {
 	}
 	session := sessions.GetOrCreateActive(saved.SessionKey)
 	if saved.AgentSessionID != "" && session.GetAgentSessionID() != saved.AgentSessionID {
-		slog.Warn("chat recovery: native session identity changed", "session", session.ID)
-		return
+		if saved.ReplacesAgentSessionID == "" || session.GetAgentSessionID() != saved.ReplacesAgentSessionID {
+			slog.Warn("chat recovery: native session identity changed", "session", session.ID)
+			return
+		}
+		// The replacement checkpoint is written before the session file. A
+		// crash between those writes may leave precisely its predecessor bound.
+		session.SetAgentSessionID(saved.AgentSessionID, agent.Name())
+		if err := sessions.SaveWithError(); err != nil {
+			slog.Error("chat recovery: persist replacement binding", "error", err)
+			return
+		}
 	}
 	if !session.TryLock() {
 		return
@@ -528,4 +538,31 @@ func (r *chatRecovery) resumesNativeTurn() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.resuming && len(r.state.Native) > 0
+}
+
+func (t *turnProcessor) adoptRecoveredSession(event Event) error {
+	if event.SessionID == "" {
+		return nil
+	} // presentation-only recovery-start event
+	if t.state != nil {
+		if r := t.state.recoveryTurn(); r != nil && !r.closed() {
+			if len(event.RecoveryCheckpoint) == 0 || event.SessionID == "" {
+				return errors.New("replacement conversation has no durable submission checkpoint")
+			}
+			r.mu.Lock()
+			if r.state.Closed {
+				r.mu.Unlock()
+				return errors.New("chat recovery was cancelled")
+			}
+			r.state.ReplacesAgentSessionID = r.state.AgentSessionID
+			r.state.AgentSessionID = event.SessionID
+			r.state.Native = append(json.RawMessage(nil), event.RecoveryCheckpoint...)
+			err := r.saveLocked()
+			r.mu.Unlock()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return t.persistAgentSessionID(event.SessionID)
 }
