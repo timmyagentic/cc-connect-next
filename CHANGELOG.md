@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v0.3.6 (2026-11-16)
+
+- Promote v0.3.6-beta.14 to stable without runtime changes.
+- Improve Feishu catch-up and explicit references, Card 2.0 form receipts, and ordinary-message steering.
+- Add optional scheduled-task history, per-task service tiers, and named card / observation / reply-completed hooks.
+- Add scoped local Codex restart and encrypted-context recovery, and fix npm installer exit after redirects.
+- See [release notes](changelogs/v0.3.6.md) for compatibility, recovery safeguards, and verification boundaries.
+
 ## v0.3.6-beta.3 (2026-11-04)
 
 - Fix the form receipt Unicode range condition to pass staticcheck without changing validation behavior.
