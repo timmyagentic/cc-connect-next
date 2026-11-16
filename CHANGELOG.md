@@ -2,7 +2,14 @@
 
 ## Unreleased
 
-## v0.3.7-beta.1 (2026-11-16)
+## v0.3.7-beta.2 (2026-11-16)
+
+- Publish the isolated Cron backend feature from #240 after correcting two lint findings.
+- No backend behavior change: simplify an embedded selector and check test cleanup errors.
+- Supersedes the unpublished beta.1 candidate; stable latest remains v0.3.6.
+- See [release notes](changelogs/v0.3.7-beta.2.md).
+
+## v0.3.7-beta.1 (2026-11-16, unpublished)
 
 - Add per-task Codex backend selection for isolated Prompt Cron jobs (#240).
 - Expose backend inheritance and overrides in CLI, APIs, capability manifests, and the Web editor.

@@ -24,5 +24,5 @@ func (a *Agent) WithSessionBackend(backend string) (core.Agent, error) {
 }
 
 func (a *backendAgent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
-	return a.Agent.startSession(ctx, sessionID, a.backendOverride)
+	return a.startSession(ctx, sessionID, a.backendOverride)
 }
