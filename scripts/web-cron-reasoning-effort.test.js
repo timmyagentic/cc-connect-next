@@ -71,7 +71,7 @@ test('Cron editor fetches runtime and tool metadata and sends effort in the atom
   assert.match(api, /sections: 'runtime,tools'/);
   assert.match(api, /reasoning_effort\?: string/);
   assert.match(page, /getCronCapabilities\(form.project\)/);
-  assert.match(page, /const updates: Record<string, any> = \{ \.\.\.modelFields, \.\.\.reasoningFields \}/);
+  assert.match(page, /const updates: Record<string, any> = \{ \.\.\.modelFields, \.\.\.reasoningFields, \.\.\.backendFields \}/);
   assert.match(page, /await updateCronJob\(editJob.id, updates\)/);
   assert.match(page, /_type: 'exec' as const, model: '', reasoning_effort: ''/);
   assert.match(page, /delete body.reasoning_effort/);

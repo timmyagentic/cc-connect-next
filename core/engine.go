@@ -2030,6 +2030,7 @@ type scheduledJobSpec struct {
 	prompt          string
 	model           string
 	serviceTier     string
+	backend         string
 	reasoningEffort string
 	workDir         string
 	description     string
@@ -2073,13 +2074,20 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 }
 
 func (e *Engine) executeCronJob(job *CronJob, run *scheduledRun) error {
+	if err := validateCronBackend(job); err != nil {
+		return err
+	}
 	silent := false
 	newSession := job.UsesNewSessionPerRun()
 	if e.cronScheduler != nil {
 		silent = e.cronScheduler.IsSilent(job)
 		newSession = e.cronScheduler.UsesNewSession(job)
 	}
+	if job.Backend != "" && !newSession {
+		return fmt.Errorf("backend requires session_mode=new_per_run to isolate the task from ordinary chat")
+	}
 	return e.executeScheduledJob(scheduledJobSpec{
+		backend:         strings.TrimSpace(job.Backend),
 		historyRun:      run,
 		kind:            "cron",
 		hookEvent:       HookEventCronTriggered,
@@ -2266,6 +2274,13 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 		} else {
 			slog.Warn(spec.kind+": workspace agent creation failed, using global",
 				"work_dir", spec.workDir, "session_key", sessionKey, "error", workspaceErr)
+		}
+	}
+
+	if spec.backend != "" {
+		agent, err = agentWithSessionBackend(agent, spec.backend)
+		if err != nil {
+			return err
 		}
 	}
 

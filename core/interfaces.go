@@ -542,6 +542,14 @@ type Agent interface {
 	Stop() error
 }
 
+// SessionBackendProvider selects a transport for an isolated scheduled session.
+// WithSessionBackend must be side-effect free: it must not change the Agent's
+// defaults, providers, credentials, or existing sessions. The returned adapter
+// retains the original Agent's optional capabilities.
+type SessionBackendProvider interface {
+	WithSessionBackend(backend string) (Agent, error)
+}
+
 // AgentSession represents a running interactive agent session with a persistent process.
 type AgentSession interface {
 	// Send sends a user message (with optional images and files) to the running agent process.

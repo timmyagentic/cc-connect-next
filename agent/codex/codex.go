@@ -531,6 +531,10 @@ func (a *Agent) SupportsPerTurnModel() bool { return true }
 func (a *Agent) SupportsPerTurnReasoningEffort() bool { return true }
 
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
+	return a.startSession(ctx, sessionID, "")
+}
+
+func (a *Agent) startSession(ctx context.Context, sessionID, backendOverride string) (core.AgentSession, error) {
 	a.mu.Lock()
 	mode := a.mode
 	model := a.model
@@ -538,6 +542,9 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	reasoningEffort := a.reasoningEffort
 	serviceTier := a.serviceTier
 	backend := a.backend
+	if backendOverride != "" {
+		backend = backendOverride
+	}
 	appServerURL := a.appServerURL
 	codexHome := a.codexHome
 	systemPrompt := a.systemPrompt

@@ -57,7 +57,7 @@ func closeCronResponseBody(body io.Closer) {
 }
 
 func runCronAdd(args []string) {
-	var project, sessionKey, cronExpr, prompt, execCmd, desc, dataDir, sessionMode, model, reasoningEffort, serviceTier string
+	var project, sessionKey, cronExpr, prompt, execCmd, desc, dataDir, sessionMode, model, reasoningEffort, serviceTier, backend string
 	var timeoutMins *int
 	var silent bool
 
@@ -91,6 +91,13 @@ func runCronAdd(args []string) {
 			}
 			i++
 			model = strings.TrimSpace(args[i])
+		case "--backend":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				fmt.Fprintln(os.Stderr, "Error: --backend requires a value")
+				os.Exit(1)
+			}
+			i++
+			backend = strings.TrimSpace(args[i])
 		case "--service-tier":
 			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
 				fmt.Fprintln(os.Stderr, "Error: --service-tier requires a value")
@@ -176,6 +183,10 @@ func runCronAdd(args []string) {
 		fmt.Fprintln(os.Stderr, "Error: --model is only supported with --prompt")
 		os.Exit(1)
 	}
+	if backend != "" && execCmd != "" {
+		fmt.Fprintln(os.Stderr, "Error: --backend is only supported with --prompt")
+		os.Exit(1)
+	}
 	if serviceTier != "" && execCmd != "" {
 		fmt.Fprintln(os.Stderr, "Error: --service-tier is only supported with --prompt")
 		os.Exit(1)
@@ -201,6 +212,9 @@ func runCronAdd(args []string) {
 	}
 	if model != "" {
 		body["model"] = model
+	}
+	if backend != "" {
+		body["backend"] = backend
 	}
 	if reasoningEffort != "" {
 		body["reasoning_effort"] = reasoningEffort
@@ -244,6 +258,7 @@ func runCronAdd(args []string) {
 	} else {
 		fmt.Printf("Prompt: %s\n", result["prompt"])
 		fmt.Printf("Model: %s\n", cronModelDisplay(result))
+		fmt.Printf("Backend: %s\n", cronBackendDisplay(result))
 		fmt.Printf("Reasoning effort: %s\n", cronReasoningEffortDisplay(result))
 	}
 }
@@ -251,6 +266,13 @@ func runCronAdd(args []string) {
 func cronModelDisplay(job map[string]any) string {
 	if model, ok := job["model"].(string); ok && strings.TrimSpace(model) != "" {
 		return model
+	}
+	return "inherit project default"
+}
+
+func cronBackendDisplay(job map[string]any) string {
+	if backend, ok := job["backend"].(string); ok && strings.TrimSpace(backend) != "" {
+		return backend
 	}
 	return "inherit project default"
 }
@@ -351,6 +373,7 @@ func runCronList(args []string) {
 		fmt.Printf("  %s %s  %s  %s\n", enabled, id, expr, display)
 		if execCmd == "" {
 			fmt.Printf("    Model: %s\n", cronModelDisplay(j))
+			fmt.Printf("    Backend: %s\n", cronBackendDisplay(j))
 			fmt.Printf("    Reasoning effort: %s\n", cronReasoningEffortDisplay(j))
 		}
 	}
@@ -512,6 +535,10 @@ func runCronInfo(args []string) {
 			fmt.Fprintf(os.Stderr, "Error: invalid JSON response: %v\n", err)
 			os.Exit(1)
 		}
+		if field == "backend" {
+			fmt.Println(cronBackendDisplay(result))
+			return
+		}
 		if field == "reasoning_effort" {
 			fmt.Println(cronReasoningEffortDisplay(result))
 			return
@@ -585,7 +612,7 @@ func runCronEdit(args []string) {
 		fmt.Fprintln(os.Stderr, "Run 'cc-connect-next cron edit --help' for usage.")
 		os.Exit(1)
 	}
-	if !valueSet || (valueStr == "" && field != "model" && field != "reasoning_effort" && field != "service_tier") {
+	if !valueSet || (valueStr == "" && field != "model" && field != "reasoning_effort" && field != "service_tier" && field != "backend") {
 		fmt.Fprintln(os.Stderr, "Error: value is required")
 		fmt.Fprintln(os.Stderr, "Run 'cc-connect-next cron edit --help' for usage.")
 		os.Exit(1)
@@ -654,7 +681,8 @@ func parseCronEditValue(field, valueStr string) (any, error) {
 		return v, nil
 	default:
 		// String fields: project, session_key, cron_expr, prompt, exec,
-		// work_dir, description, session_mode, mode, model, reasoning_effort (empty = inherit)
+		// work_dir, description, session_mode, mode, model, reasoning_effort,
+		// service_tier, backend (empty = inherit)
 		return valueStr, nil
 	}
 }
@@ -696,6 +724,8 @@ Options:
   -c, --cron <expr>          Cron expression, e.g. "0 6 * * *"
       --prompt <text>        Task prompt (runs through agent)
       --model <id>           Prompt-only model for each run; omitted = inherit project default
+      --backend <backend>    Prompt-only session backend; Codex: exec or app_server
+                            Requires new-per-run; omitted = inherit project backend
       --reasoning-effort <value>  Prompt-only effort; omitted = inherit project default
                                 Model optional; supported values validated by server
       --service-tier <tier>  Prompt-only service tier, validated against model catalog
@@ -713,6 +743,7 @@ Examples:
   cc-connect-next cron add --cron "0 9 * * *" --prompt "Daily standup reminder" --silent
   cc-connect-next cron add --cron "0 9 * * *" --prompt "Daily report" --model gpt-5.4
   cc-connect-next cron add --cron "0 9 * * *" --prompt "Daily report" --reasoning-effort <value>
+  cc-connect-next cron add --cron "0 6 * * *" --prompt "Daily report" --session-mode new-per-run --backend exec
   cc-connect-next cron add 0 6 * * * Collect GitHub trending data and send me a summary`)
 }
 
@@ -741,6 +772,8 @@ Editable Fields (string):
   cron_expr     Cron expression, e.g. "0 6 * * *"
   prompt        Task prompt (runs through agent)
   model         Prompt-only model ID; "" restores inheritance (Codex exec/app_server)
+  backend       Prompt-only session backend; Codex exec/app_server; requires new_per_run
+                "" restores project backend inheritance
   service_tier  Prompt-only service tier (catalog ID); "" restores inheritance
   reasoning_effort  Prompt-only effort; "" restores inheritance; model optional
                     Supported values are validated by the server
@@ -773,6 +806,8 @@ Examples:
   cc-connect-next cron edit abc123 model gpt-5.4
   cc-connect-next cron edit abc123 model ""
   cc-connect-next cron edit abc123 service_tier <catalog-tier-id>
+  cc-connect-next cron edit abc123 backend exec
+  cc-connect-next cron edit abc123 backend ""
   cc-connect-next cron edit abc123 reasoning_effort <value>
   cc-connect-next cron edit abc123 reasoning_effort ""`)
 }

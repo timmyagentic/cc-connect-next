@@ -28,6 +28,7 @@ type CronJob struct {
 	Prompt          string    `json:"prompt"`
 	Model           string    `json:"model,omitempty"`            // per-run prompt model; empty = inherit project/session defaults
 	ReasoningEffort string    `json:"reasoning_effort,omitempty"` // per-run prompt effort; empty = inherit project/session defaults
+	Backend         string    `json:"backend,omitempty"`          // per-run backend; empty = inherit project backend
 	ServiceTier     string    `json:"service_tier,omitempty"`     // per-run service tier; empty = inherit project/session defaults
 	Exec            string    `json:"exec,omitempty"`             // shell command; mutually exclusive with Prompt
 	WorkDir         string    `json:"work_dir,omitempty"`         // working directory for exec; empty = agent work_dir
@@ -90,6 +91,9 @@ func NormalizeCronSessionMode(s string) string {
 }
 
 func validateCronJob(j *CronJob) error {
+	if err := validateCronBackend(j); err != nil {
+		return err
+	}
 	if err := validateCronModel(j); err != nil {
 		return err
 	}
@@ -118,6 +122,16 @@ func validateCronJob(j *CronJob) error {
 	}
 	if j.TimeoutMins != nil && *j.TimeoutMins < 0 {
 		return fmt.Errorf("timeout_mins must be >= 0")
+	}
+	return nil
+}
+
+func validateCronBackend(j *CronJob) error {
+	if j.Backend == "" {
+		return nil
+	}
+	if j.IsShellJob() || strings.TrimSpace(j.Prompt) == "" {
+		return fmt.Errorf("backend is only supported for prompt jobs")
 	}
 	return nil
 }
@@ -383,6 +397,9 @@ func (s *CronStore) updateFields(id string, updates map[string]any, validate fun
 				return nil, err
 			}
 		}
+		if err := validateCronBackend(candidate); err != nil {
+			return nil, err
+		}
 		if err := validateCronModel(candidate); err != nil {
 			return nil, err
 		}
@@ -427,6 +444,11 @@ func updateJobField(job *CronJob, field string, value any) error {
 	case "prompt":
 		if v, ok := value.(string); ok {
 			job.Prompt = v
+			return nil
+		}
+	case "backend":
+		if v, ok := value.(string); ok {
+			job.Backend = strings.TrimSpace(v)
 			return nil
 		}
 	case "model":
@@ -713,10 +735,12 @@ func (cs *CronScheduler) UpdateJobFields(id string, updates map[string]any) erro
 		_, modelChanged := updates["model"]
 		_, effortChanged := updates["reasoning_effort"]
 		_, tierChanged := updates["service_tier"]
+		_, backendChanged := updates["backend"]
+		_, sessionChanged := updates["session_mode"]
 		_, promptChanged := updates["prompt"]
 		_, execChanged := updates["exec"]
 		_, enabledChanged := updates["enabled"]
-		if modelChanged || effortChanged || tierChanged || promptChanged || execChanged || projectChanged || (enabledChanged && candidate.Enabled) {
+		if backendChanged || sessionChanged || modelChanged || effortChanged || tierChanged || promptChanged || execChanged || projectChanged || (enabledChanged && candidate.Enabled) {
 			return cs.validateOverrides(candidate)
 		}
 		return nil
@@ -958,6 +982,22 @@ func (cs *CronScheduler) validateServiceTier(job *CronJob) error {
 }
 
 func (cs *CronScheduler) validateOverrides(job *CronJob) error {
+	if err := validateCronBackend(job); err != nil {
+		return err
+	}
+	if backend := strings.TrimSpace(job.Backend); backend != "" {
+		if !cs.UsesNewSession(job) {
+			return fmt.Errorf("backend requires session_mode=new_per_run to isolate the task from ordinary chat")
+		}
+		cs.mu.RLock()
+		engine := cs.engines[job.Project]
+		cs.mu.RUnlock()
+		if engine != nil {
+			if _, err := agentWithSessionBackend(engine.agent, backend); err != nil {
+				return fmt.Errorf("project %q: %w", job.Project, err)
+			}
+		}
+	}
 	if err := validateCronModel(job); err != nil {
 		return err
 	}

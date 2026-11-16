@@ -614,6 +614,7 @@ type CronAddRequest struct {
 	Model           string `json:"model,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	ServiceTier     string `json:"service_tier,omitempty"`
+	Backend         string `json:"backend,omitempty"`
 	Exec            string `json:"exec"`
 	WorkDir         string `json:"work_dir"`
 	Description     string `json:"description"`
@@ -695,6 +696,7 @@ func (s *APIServer) handleCronAdd(w http.ResponseWriter, r *http.Request) {
 		Model:           req.Model,
 		ReasoningEffort: req.ReasoningEffort,
 		ServiceTier:     req.ServiceTier,
+		Backend:         req.Backend,
 		Exec:            req.Exec,
 		WorkDir:         req.WorkDir,
 		Description:     req.Description,

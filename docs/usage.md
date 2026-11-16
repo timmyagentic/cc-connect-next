@@ -1152,6 +1152,18 @@ cc-connect-next cron edit <job-id> service_tier ""  # Restore inheritance
 
 Use the effective model's service-tier **backend ID**, not a display label: a catalog may name the `priority` ID “Fast”; `fast` is not a universal accepted ID. The example requires a model whose catalog supports `priority`. The CLI/API persists the optional string `service_tier`; a missing or empty value inherits the current chat/project/Agent defaults at execution. Non-empty values are prompt-only and incompatible with `--exec`. Execution requires a service-tier catalog and per-turn options support; an unavailable catalog or unsupported tier is rejected rather than silently replaced. The override applies only to that scheduled turn, including when queued, and does not modify conversation defaults, other jobs, model or provider. Full `cron info <job-id>` exposes the stored JSON field. Query `cc-connect-next capabilities --search "cron service tier"` for the runtime contract; allowed IDs are model-specific and are not hardcoded into generic CLI metadata.
 
+Prompt Cron jobs can select a session backend independently of the project. For Codex, use `exec` or `app_server` with a fresh session for each run:
+
+```bash
+cc-connect-next cron add --cron "0 6 * * *" --prompt "Investigate pending alerts" --session-mode new-per-run --backend exec
+cc-connect-next cron edit <job-id> session_mode new_per_run
+cc-connect-next cron edit <job-id> backend exec
+cc-connect-next cron info <job-id> backend
+cc-connect-next cron edit <job-id> backend ""  # Restore the project backend
+```
+
+The optional `backend` field defaults to project inheritance. An explicit backend requires the effective Cron session mode to be `new_per_run`, either on the job or through the global Cron default. The Agent validates the backend when the job is registered and again when it runs. Unsupported values, unsupported Agents and shell jobs reject the override. The project backend continues to serve ordinary chat, and each scheduled session closes after execution. `cron list` and the single-field `cron info` query display the selected backend or inheritance; full `cron info` preserves the stored JSON. A management PATCH converting the job to shell must also clear `backend` in the same update. The Web Cron editor offers inheritance, `exec` and `app_server`; selecting an explicit backend selects a fresh session for each run. Converting to shell clears the backend in the same update.
+
 Persisted cron jobs and one-shot timers require a durable messaging target.
 Browser-connected Web/Bridge chat sessions are intentionally rejected because
 their adapter disappears when the tab or browser closes. In the Web cron
