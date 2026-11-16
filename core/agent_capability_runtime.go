@@ -62,6 +62,7 @@ var agentToolDefinitions = []agentToolDefinition{
 			capabilityParam("model", "string", false, "Optional model for prompt jobs only. Requires the active Agent's per_turn_model capability. Omit to inherit; edit model to an empty string to restore inheritance. Does not switch provider or change project/Agent defaults.", "仅用于 Prompt 任务的可选模型。要求当前 Agent 具备 per_turn_model 能力。省略时继承；edit model 为空串恢复继承。不切换 Provider，不修改项目/Agent 默认值。"),
 			capabilityParam("reasoning_effort", "string", false, "Optional reasoning effort for prompt jobs only: add --reasoning-effort <value> or edit reasoning_effort <value>. Requires per_turn_reasoning_effort. Can be set without model; supported values and Agent support are validated by the server. Omit to inherit; edit reasoning_effort to an empty string to restore inheritance. Does not change project/Agent defaults.", "仅用于 Prompt 任务的可选推理强度：add --reasoning-effort <value> 或 edit reasoning_effort <value>。要求 per_turn_reasoning_effort 能力。可独立于 model 设置；有效值与 Agent 支持由服务端校验。省略时继承；edit reasoning_effort 为空串恢复继承。不修改项目/Agent 默认值。"),
 			capabilityParam("service_tier", "string", false, "Optional prompt-only service tier: add --service-tier <catalog-id> or edit service_tier <catalog-id>. Use the effective model catalog's backend Value, not its display name (Fast may be priority). Omit or edit to an empty string to inherit. Requires a service-tier catalog and TurnOptionsSession at execution; no changes to chat/project defaults.", "仅用于 Prompt 任务的可选服务等级：add --service-tier <目录ID> 或 edit service_tier <目录ID>。使用有效模型目录的后端 Value，不使用显示名（Fast 可能对应 priority）。省略或编辑为空串恢复继承；执行时要求服务等级目录及 TurnOptionsSession，不修改聊天/项目默认值。"),
+			capabilityParam("backend", "string", false, "Optional prompt-only session backend: add --backend <value> or edit backend <value>. Codex supports exec and app_server. Requires effective new_per_run and SessionBackendProvider support; invalid values and shell jobs are rejected. Omit or edit to an empty string to inherit the project backend. Applies only to that task session.", "仅用于 Prompt 任务的可选会话后端：add --backend <值> 或 edit backend <值>。Codex 支持 exec 和 app_server。要求有效会话模式为 new_per_run 且 Agent 提供 SessionBackendProvider；无效值和 Shell 任务会被拒绝。省略或编辑为空串时继承项目后端，仅作用于该任务会话。"),
 			capabilityParam("exec", "string", false, "Shell command executed on schedule; mutually exclusive with prompt.", "按计划执行的 Shell 命令；与 prompt 互斥。"),
 			capabilityParam("job-id", "string", false, "Existing job identifier for info/edit/exec/del.", "info/edit/exec/del 使用的现有任务 ID。"),
 		},
@@ -311,6 +312,18 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 	tierCapability.ReadOnly = &tierReadOnly
 	tierCapability.SideEffects = expandSideEffects([]string{"agent_turn", "network"})
 	result.Capabilities = append(result.Capabilities, tierCapability)
+
+	_, hasSessionBackend := e.agent.(SessionBackendProvider)
+	backendAvailability := interfaceAvailability(hasSessionBackend,
+		"The Agent supports a task-scoped backend adapter; valid values are checked before each run.", "Agent 支持任务专属后端适配器；每轮执行前验证有效值。",
+		"The Agent does not implement SessionBackendProvider; explicit Cron backends are rejected.", "Agent 未实现 SessionBackendProvider；Cron 显式后端会被拒绝。")
+	backendCapability := feature("cron_backend", "Select a backend for a new-per-run prompt Cron session while retaining the project backend for ordinary chat.", "为 new_per_run Prompt Cron 会话选择后端，普通聊天继续使用项目后端。", backendAvailability,
+		CapabilityFallback{Mode: "reject", Description: "Omit or clear backend to inherit. Explicit overrides require a new-per-run prompt job and Agent support; unsupported backends reject the task.", DescriptionZH: "省略或清空 backend 时继承。显式覆盖要求 new_per_run Prompt 任务与 Agent 支持；不支持的后端会拒绝任务。"})
+	backendCapability.Permission = CapabilityPermissionLocalAgent
+	backendReadOnly := false
+	backendCapability.ReadOnly = &backendReadOnly
+	backendCapability.SideEffects = expandSideEffects([]string{"agent_process", "agent_turn", "network"})
+	result.Capabilities = append(result.Capabilities, backendCapability)
 
 	type agentProbe struct {
 		id, description, zh, fallback, fallbackZH string

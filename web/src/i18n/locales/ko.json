@@ -137,7 +137,12 @@
     "reasoningEffortInherit": "프로젝트 / Agent 추론 강도 상속",
     "reasoningEffortHint": "선택 사항이며 모델 지정 없이 설정할 수 있습니다. 비워 두면 프로젝트 / Agent 기본값을 상속합니다. 지원되는 값은 서버에서 검증합니다.",
     "reasoningEffortPromptOnly": "추론 강도 지정은 Prompt 작업에서만 사용할 수 있습니다.",
-    "reasoningEffortUnsupported": "이 Agent는 작업별 추론 강도를 지원하지 않습니다. 상속하려면 비워 두세요."
+    "reasoningEffortUnsupported": "이 Agent는 작업별 추론 강도를 지원하지 않습니다. 상속하려면 비워 두세요.",
+    "backend": "백엔드",
+    "backendInherit": "프로젝트 백엔드 상속",
+    "backendHint": "백엔드를 선택하면 실행할 때마다 새 세션을 사용합니다. Codex는 exec와 app_server를 지원합니다.",
+    "backendPromptOnly": "백엔드는 프롬프트 작업에서만 지정할 수 있습니다.",
+    "backendUnsupported": "이 Agent는 작업별 백엔드 선택을 지원하지 않습니다. 값을 비우면 설정을 상속합니다.",
   },
   "heartbeat": {
     "title": "하트비트",

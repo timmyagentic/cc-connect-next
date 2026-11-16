@@ -137,7 +137,12 @@
     "reasoningEffortInherit": "Heredar esfuerzo del proyecto / Agent",
     "reasoningEffortHint": "Opcional e independiente del modelo. Un valor vacío hereda el predeterminado del proyecto / Agent. El servidor valida los valores admitidos.",
     "reasoningEffortPromptOnly": "El esfuerzo de razonamiento solo se puede especificar en tareas Prompt.",
-    "reasoningEffortUnsupported": "Este Agent no admite esfuerzo de razonamiento por tarea. Borre el valor para heredar."
+    "reasoningEffortUnsupported": "Este Agent no admite esfuerzo de razonamiento por tarea. Borre el valor para heredar.",
+    "backend": "Backend",
+    "backendInherit": "Heredar el backend del proyecto",
+    "backendHint": "Al seleccionar un backend, cada ejecución usa una sesión nueva. Codex admite exec y app_server.",
+    "backendPromptOnly": "El backend solo se puede elegir para trabajos de prompt.",
+    "backendUnsupported": "Este Agent no permite elegir el backend por tarea. Borre el valor para heredar la configuración.",
   },
   "heartbeat": {
     "title": "Latido",

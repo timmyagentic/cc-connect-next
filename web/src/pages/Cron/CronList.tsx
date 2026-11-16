@@ -10,6 +10,7 @@ import { listProjects, type ProjectSummary } from '@/api/projects';
 import { listSessions } from '@/api/sessions';
 import { buildScheduledSessionTargets, type ScheduledSessionTarget } from './sessionTargets.js';
 import { cronModelFields, cronModelAvailability } from './modelFields.js';
+import { cronBackendFields, cronBackendAvailability } from './backendFields.js';
 import { cronReasoningEffortFields, cronReasoningEffortCapability } from './reasoningEffortFields.js';
 import { formatTime, cn } from '@/lib/utils';
 
@@ -173,12 +174,14 @@ interface JobForm {
   mode: string;
   model: string;
   reasoning_effort: string;
+  backend: string;
+  session_mode: string;
   _type: 'prompt' | 'exec';
 }
 
 const emptyForm: JobForm = {
   project: '', session_key: '', cron_expr: '', prompt: '', exec: '',
-  description: '', silent: false, enabled: true, mode: '', model: '', reasoning_effort: '', _type: 'prompt',
+  description: '', silent: false, enabled: true, mode: '', model: '', reasoning_effort: '', backend: '', session_mode: '', _type: 'prompt',
 };
 
 /* ── Main page ── */
@@ -196,12 +199,20 @@ export default function CronList() {
   const [sessionTargets, setSessionTargets] = useState<ScheduledSessionTarget[]>([]);
 
   const [modelAvailability, setModelAvailability] = useState<string>();
+  const [backendAvailability, setBackendAvailability] = useState<string>();
   const [reasoningCapability, setReasoningCapability] = useState<ReturnType<typeof cronReasoningEffortCapability>>({ state: undefined, values: [] });
   const isEdit = !!editJob;
   const modelUnsupported = form._type === 'prompt' && !!form.model.trim() && modelAvailability === 'unavailable';
   const reasoningUnsupported = form._type === 'prompt' && !!form.reasoning_effort.trim()
     && reasoningCapability.state === 'unavailable'
     && (!editJob || form.project !== editJob.project || form.reasoning_effort !== (editJob.reasoning_effort || ''));
+  const backendUnsupported = form._type === 'prompt' && !!form.backend
+    && backendAvailability === 'unavailable'
+    && (!editJob || form.project !== editJob.project || form.backend !== (editJob.backend || ''));
+  const backendOptions = ['exec', 'app_server'].map(value => ({ value, label: value }));
+  if (form.backend && !backendOptions.some(option => option.value === form.backend)) {
+    backendOptions.unshift({ value: form.backend, label: form.backend });
+  }
   const reasoningOptions = reasoningCapability.values.map(value => ({ value, label: value }));
   if (form.reasoning_effort && !reasoningCapability.values.includes(form.reasoning_effort)) {
     reasoningOptions.unshift({ value: form.reasoning_effort, label: form.reasoning_effort });
@@ -209,12 +220,14 @@ export default function CronList() {
 
   useEffect(() => {
     setModelAvailability(undefined);
+    setBackendAvailability(undefined);
     setReasoningCapability({ state: undefined, values: [] });
     if (!form.project) return;
     let cancelled = false;
     getCronCapabilities(form.project).then(manifest => {
       if (!cancelled) {
         setModelAvailability(cronModelAvailability(manifest));
+        setBackendAvailability(cronBackendAvailability(manifest));
         setReasoningCapability(cronReasoningEffortCapability(manifest));
       }
     }).catch(() => { /* Save-time validation remains authoritative when discovery fails. */ });
@@ -274,21 +287,24 @@ export default function CronList() {
       mode: job.mode || '',
       model: job.model || '',
       reasoning_effort: job.reasoning_effort || '',
+      backend: job.backend || '',
+      session_mode: job.session_mode || '',
       _type: job.exec ? 'exec' : 'prompt',
     });
     setShowForm(true);
   };
 
   const handleSave = async () => {
-    if (modelUnsupported || reasoningUnsupported) return;
+    if (modelUnsupported || reasoningUnsupported || backendUnsupported) return;
     setSaving(true);
     const activePrompt = form._type === 'prompt' ? form.prompt : '';
     const activeExec   = form._type === 'exec'   ? form.exec   : '';
     try {
       const modelFields = cronModelFields(form._type, form.model, editJob || undefined);
       const reasoningFields = cronReasoningEffortFields(form._type, form.reasoning_effort, editJob || undefined);
+      const backendFields = cronBackendFields(form._type, form.backend, editJob || undefined);
       if (isEdit && editJob) {
-        const updates: Record<string, any> = { ...modelFields, ...reasoningFields };
+        const updates: Record<string, any> = { ...modelFields, ...reasoningFields, ...backendFields };
         if (form.cron_expr !== editJob.cron_expr) updates.cron_expr = form.cron_expr;
         if (form.description !== editJob.description) updates.description = form.description;
         if (activePrompt !== editJob.prompt) updates.prompt = activePrompt;
@@ -298,6 +314,7 @@ export default function CronList() {
         if (form.silent !== !!editJob.silent) updates.silent = form.silent;
         if (form.enabled !== editJob.enabled) updates.enabled = form.enabled;
         if ((form.mode || '') !== (editJob.mode || '')) updates.mode = form.mode;
+        if (form.session_mode !== (editJob.session_mode || '')) updates.session_mode = form.session_mode;
         if (Object.keys(updates).length > 0) {
           await updateCronJob(editJob.id, updates);
         }
@@ -306,7 +323,8 @@ export default function CronList() {
         delete body._type;
         delete body.model;
         delete body.reasoning_effort;
-        Object.assign(body, modelFields, reasoningFields);
+        delete body.backend;
+        Object.assign(body, modelFields, reasoningFields, backendFields);
         if (!body.prompt) delete body.prompt;
         if (!body.exec) delete body.exec;
         await createCronJob(body);
@@ -314,7 +332,7 @@ export default function CronList() {
       setShowForm(false);
       fetchData();
     } catch (e: any) {
-      alert(['cron.modelPromptOnly', 'cron.reasoningEffortPromptOnly'].includes(e.message) ? t(e.message) : e.message);
+      alert(['cron.modelPromptOnly', 'cron.reasoningEffortPromptOnly', 'cron.backendPromptOnly'].includes(e.message) ? t(e.message) : e.message);
     } finally {
       setSaving(false);
     }
@@ -407,6 +425,12 @@ export default function CronList() {
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium w-12 shrink-0 text-gray-400">{t('cron.model')}</span>
                     <span className="break-all">{job.model || t('cron.modelInherit')}</span>
+                  </div>
+                )}
+                {job.prompt && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium w-12 shrink-0 text-gray-400">{t('cron.backend')}</span>
+                    <span className="break-all">{job.backend || t('cron.backendInherit')}</span>
                   </div>
                 )}
                 {job.prompt && (
@@ -530,7 +554,7 @@ export default function CronList() {
               </button>
               <button
                 type="button"
-                onClick={() => setForm({ ...form, _type: 'exec' as const, model: '', reasoning_effort: '' })}
+                onClick={() => setForm({ ...form, _type: 'exec' as const, model: '', reasoning_effort: '', backend: '' })}
                 className={cn(
                   'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all',
                   form._type === 'exec'
@@ -570,6 +594,20 @@ export default function CronList() {
               />
               <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{t('cron.modelHint')}</p>
               {modelAvailability === 'unavailable' && <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">{t('cron.modelUnsupported')}</p>}
+            </div>
+          )}
+
+          {form._type === 'prompt' && (
+            <div>
+              <Select
+                label={t('cron.backend')}
+                value={form.backend}
+                onChange={backend => setForm({ ...form, backend, session_mode: backend ? 'new_per_run' : form.session_mode })}
+                options={backendOptions}
+                placeholder={t('cron.backendInherit')}
+              />
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">{t('cron.backendHint')}</p>
+              {backendAvailability === 'unavailable' && <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">{t('cron.backendUnsupported')}</p>}
             </div>
           )}
 
@@ -628,7 +666,7 @@ export default function CronList() {
 
           <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-white/[0.06]">
             <Button variant="secondary" onClick={() => setShowForm(false)}>{t('common.cancel')}</Button>
-            <Button onClick={handleSave} loading={saving} disabled={modelUnsupported || reasoningUnsupported}>
+            <Button onClick={handleSave} loading={saving} disabled={modelUnsupported || reasoningUnsupported || backendUnsupported}>
               {isEdit ? t('common.save') : t('cron.add')}
             </Button>
           </div>

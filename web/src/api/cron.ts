@@ -17,6 +17,7 @@ export interface CronJob {
   mode: string;
   model?: string;
   reasoning_effort?: string;
+  backend?: string;
   timeout_mins: number | null;
   created_at: string;
   last_run: string;

@@ -270,3 +270,7 @@ CLI 展示自己的进程链；聊天中的 doctor 在服务进程中执行。�
 ### 逐 Cron 服务等级
 
 `cron` 工具声明 Prompt 专属可选字符串 `service_tier`（`add --service-tier`、`edit service_tier`）；空串恢复继承。值为有效模型目录的后端 ID 而非显示名，例如 Fast 可能对应 `priority`。运行能力 `per_turn_service_tier` 保持有条件可用，直到验证目录及具体会话的 `TurnOptionsSession` 支持。能力缺失、目录不可用、Shell 任务及无效等级均拒绝显式覆盖。工具修改任务持久状态，执行时产生 Agent 回合和网络请求，沿用已有 Cron 权限边界；不改变模型、Provider 或聊天/项目默认值。通用元数据不发布静态 allowed-values 列表，示例见双语使用说明。
+
+### 逐 Cron 会话后端
+
+`cron` 工具声明 Prompt 专属可选字符串 `backend`（`add --backend`、`edit backend`）。省略或空串继承项目后端。运行能力 `cron_backend` 探测 `SessionBackendProvider`。显式覆盖要求有效会话模式为 `new_per_run`，后端取值由 Agent 校验；Codex 支持 `exec` 和 `app_server`。选择仅应用于该独立任务会话，普通聊天继续使用项目后端。工具持久化任务设置，执行时启动 Agent 进程、运行回合并可能访问网络。无效值、缺少该能力的 Agent 和 Shell 任务会拒绝覆盖。契约不公开当前配置值或凭据。

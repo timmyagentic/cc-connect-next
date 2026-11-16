@@ -1039,6 +1039,18 @@ cc-connect-next cron edit <job-id> service_tier ""  # 恢复继承
 
 必须使用有效模型服务等级目录的**后端 ID**，不能直接用显示名：目录中 Fast 可能对应 `priority`，`fast` 并非通用有效 ID。示例要求模型目录支持 `priority`。CLI/API 持久化可选字符串 `service_tier`，省略或清空后在执行时继承当前聊天/项目/Agent 默认值。非空值仅用于 Prompt，与 `--exec` 互斥。执行要求服务等级目录和逐回合选项支持；目录不可用或模型不支持该等级时拒绝，不静默替换。覆盖仅作用于该定时回合（包括排队执行），不修改聊天默认值、其他任务、模型或 Provider。完整 `cron info <job-id>` 返回保存的 JSON 字段。可查询 `cc-connect-next capabilities --search "cron service tier"`；有效 ID 随模型变化，通用 CLI 元数据不硬编码目录。
 
+Prompt Cron 任务可以单独选择会话后端。Codex 支持 `exec` 和 `app_server`，显式设置后每次使用独立会话：
+
+```bash
+cc-connect-next cron add --cron "0 6 * * *" --prompt "调查待处理告警" --session-mode new-per-run --backend exec
+cc-connect-next cron edit <job-id> session_mode new_per_run
+cc-connect-next cron edit <job-id> backend exec
+cc-connect-next cron info <job-id> backend
+cc-connect-next cron edit <job-id> backend ""  # 恢复继承项目后端
+```
+
+可选字段 `backend` 省略或为空时继承项目后端。显式设置要求有效 Cron 会话模式为 `new_per_run`，可以来自任务配置或全局 Cron 默认值。Agent 在登记任务和执行前均校验后端，无效值、缺少该能力的 Agent 以及 Shell 任务会拒绝覆盖。普通聊天继续使用项目后端，定时会话在执行后关闭。`cron list` 和单字段 `cron info` 显示已选后端或继承状态，完整 `cron info` 保持保存的 JSON 结构。通过 Management PATCH 转换为 Shell 时，需要在同一次更新中清空 `backend`。 Web Cron 编辑器提供继承、`exec` 和 `app_server` 选项；指定后端时同步选择每次运行新建会话，切换为 Shell 时在同一次更新中清空后端。
+
 持久 Cron 和一次性 Timer 必须使用可持久主动投递的消息目标。浏览器连接型
 Web/Bridge 聊天会话会被明确拒绝，因为关闭标签页或浏览器后 adapter 即会消失。
 在 Web 定时任务编辑器中，请选择飞书、Telegram 或 Discord 等持久平台会话。
