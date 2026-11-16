@@ -142,7 +142,7 @@
     "backendInherit": "Inherit project backend",
     "backendHint": "Selecting a backend uses a fresh session for each run. Codex supports exec and app_server.",
     "backendPromptOnly": "Backend overrides are only available for prompt jobs.",
-    "backendUnsupported": "This Agent does not support task backend selection. Clear the backend to inherit.",
+    "backendUnsupported": "This Agent does not support task backend selection. Clear the backend to inherit."
   },
   "heartbeat": {
     "title": "Heartbeat",

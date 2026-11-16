@@ -142,7 +142,7 @@
     "backendInherit": "繼承專案後端",
     "backendHint": "指定後端時，每次執行使用獨立會話。Codex 支援 exec 和 app_server。",
     "backendPromptOnly": "只有 Prompt 任務可單獨設定後端。",
-    "backendUnsupported": "目前 Agent 不支援任務後端選擇。清空後端可恢復繼承。",
+    "backendUnsupported": "目前 Agent 不支援任務後端選擇。清空後端可恢復繼承。"
   },
   "heartbeat": {
     "title": "心跳",

@@ -142,7 +142,7 @@
     "backendInherit": "Heredar el backend del proyecto",
     "backendHint": "Al seleccionar un backend, cada ejecución usa una sesión nueva. Codex admite exec y app_server.",
     "backendPromptOnly": "El backend solo se puede elegir para trabajos de prompt.",
-    "backendUnsupported": "Este Agent no permite elegir el backend por tarea. Borre el valor para heredar la configuración.",
+    "backendUnsupported": "Este Agent no permite elegir el backend por tarea. Borre el valor para heredar la configuración."
   },
   "heartbeat": {
     "title": "Latido",

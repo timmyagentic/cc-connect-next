@@ -142,7 +142,7 @@
     "backendInherit": "プロジェクト設定を継承",
     "backendHint": "バックエンドを選ぶと実行ごとに新しいセッションを使用します。Codex は exec と app_server に対応しています。",
     "backendPromptOnly": "バックエンドはプロンプトジョブでのみ指定できます。",
-    "backendUnsupported": "この Agent はジョブ別のバックエンド選択に対応していません。空欄にすると設定を継承します。",
+    "backendUnsupported": "この Agent はジョブ別のバックエンド選択に対応していません。空欄にすると設定を継承します。"
   },
   "heartbeat": {
     "title": "ハートビート",
