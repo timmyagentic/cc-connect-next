@@ -20,7 +20,11 @@ func TestCronBackendExecRetainsConfigurationWithoutChangingAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	}()
 	exec, ok := session.(*codexSession)
 	if !ok {
 		t.Fatalf("expected exec session, got %T", session)
