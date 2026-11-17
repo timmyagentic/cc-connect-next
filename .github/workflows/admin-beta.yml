@@ -1,0 +1,63 @@
+name: Admin Beta
+run-name: Beta · ${{ inputs.job_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Release Admin job ID
+        required: true
+        type: string
+      verify_only:
+        description: Validate the current branch without merging or publishing
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+
+concurrency:
+  group: admin-beta
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_ADMIN_GITHUB_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Configure repository authentication
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_ADMIN_GITHUB_TOKEN }}
+        run: |
+          test -n "$GH_TOKEN"
+          gh auth setup-git
+          git config user.name 'timmyagentic release admin'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Validate, merge and publish Beta
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_ADMIN_GITHUB_TOKEN }}
+          RELEASE_JOB_ID: ${{ inputs.job_id }}
+          VERIFY_ONLY: ${{ inputs.verify_only }}
+        run: |
+          if [ "$VERIFY_ONLY" = "true" ]; then
+            python3 scripts/admin-beta.py verify-only
+          else
+            python3 scripts/admin-beta.py
+          fi
