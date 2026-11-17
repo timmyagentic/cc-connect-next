@@ -274,3 +274,9 @@ CLI 展示自己的进程链；聊天中的 doctor 在服务进程中执行。�
 ### 逐 Cron 会话后端
 
 `cron` 工具声明 Prompt 专属可选字符串 `backend`（`add --backend`、`edit backend`）。省略或空串继承项目后端。运行能力 `cron_backend` 探测 `SessionBackendProvider`。显式覆盖要求有效会话模式为 `new_per_run`，后端取值由 Agent 校验；Codex 支持 `exec` 和 `app_server`。选择仅应用于该独立任务会话，普通聊天继续使用项目后端。工具持久化任务设置，执行时启动 Agent 进程、运行回合并可能访问网络。无效值、缺少该能力的 Agent 和 Shell 任务会拒绝覆盖。契约不公开当前配置值或凭据。
+
+`scheduled_progress_hook` 运行能力要求显式订阅 `scheduled.progress`，通配 Hook
+不会启用它。它通过有界异步工作器发布合并后的执行元数据，声明命令或网络副作用
+及跳过降级；不改变任务结果，不宣称业务完成或通知送达。事件格式、频率和恢复
+契约见[定时执行进度](scheduled-progress.md)，能力清单不公开处理器命令、URL
+或当前执行数据。

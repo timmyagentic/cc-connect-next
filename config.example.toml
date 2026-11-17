@@ -489,9 +489,11 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 #   session.started    — agent session spawned / Agent 会话启动
 #   session.ended      — agent session stopped / Agent 会话结束
 #   cron.triggered     — cron job fires / 定时任务触发
+#   scheduled.progress — bounded Cron/Timer execution metadata; explicit subscription only
+#                      — 有界的 Cron/Timer 执行元数据，须显式订阅
 #   permission.requested — agent asks for permission / Agent 请求权限
 #   error              — an error occurs / 发生错误
-#   *                  — match lifecycle events; excludes card.action / 匹配生命周期事件，排除 card.action
+#   *                  — excludes card.action and scheduled.progress / 排除卡片动作与执行进度
 #
 # Handler types / 处理器类型:
 #   command — run a shell command; event context in CC_HOOK_* env vars
@@ -525,6 +527,16 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 # command = "python3 /path/to/handle_reply.py" # reads CC_HOOK_EXTRA
 # async = true                  # honors normal Hook delivery; failure is not retried
 # timeout = 2
+#
+# Optional execution progress; see docs/scheduled-progress.md.
+# 可选执行进度，详见 docs/scheduled-progress.md。
+# [[hooks]]
+# project = "my-project"
+# event = "scheduled.progress"
+# type = "command"
+# command = "python3 /path/to/update_progress.py"
+# input = "json"
+# timeout = 3                   # always asynchronous and coalesced / 始终异步并合并进度
 #
 # Observation consumers must persist idempotently before returning; see docs/message-observed.md.
 # 观察消费者返回前须幂等落盘，详见 docs/message-observed.md。

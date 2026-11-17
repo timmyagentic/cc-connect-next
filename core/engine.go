@@ -2049,6 +2049,7 @@ type scheduledJobSpec struct {
 type scheduledTurnResult struct {
 	completed bool
 	err       error
+	progress  *scheduledProgress
 }
 
 func (r *scheduledTurnResult) complete(err error) {
@@ -2057,6 +2058,7 @@ func (r *scheduledTurnResult) complete(err error) {
 	}
 	r.completed = true
 	r.err = err
+	r.progress.finish(err)
 }
 
 func (r *scheduledTurnResult) result() error {
@@ -2157,12 +2159,14 @@ func (e *Engine) executeTimerJob(job *TimerJob, run *scheduledRun) error {
 
 // executeScheduledJob owns the shared Cron/Timer platform resolution,
 // proactive target, notification, workspace, session, and prompt lifecycle.
-func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
+func (e *Engine) executeScheduledJob(spec scheduledJobSpec) (result error) {
 	finishWork, workErr := e.beginUpdateWork()
 	if workErr != nil {
 		return workErr
 	}
 	defer finishWork()
+	progress := newScheduledProgress(e.hooks, spec)
+	defer func() { progress.finish(result) }()
 
 	e.hooks.Emit(HookEvent{
 		Event:      spec.hookEvent,
@@ -2245,7 +2249,7 @@ func (e *Engine) executeScheduledJob(spec scheduledJobSpec) error {
 		ModelOverride:           spec.model,
 		ReasoningEffortOverride: spec.reasoningEffort,
 		ServiceTierOverride:     spec.serviceTier,
-		scheduledResult:         &scheduledTurnResult{},
+		scheduledResult:         &scheduledTurnResult{progress: progress},
 	}
 
 	agent := e.agent
@@ -6888,6 +6892,7 @@ func (t *turnProcessor) run() {
 		// post-boundary stream lands in the successor card, not the frozen one.
 		applySteerHandoffs()
 		e.observeFeedbackEvent(state, event)
+		t.scheduledResult.observe(event)
 
 		state.mu.Lock()
 		p := state.platform

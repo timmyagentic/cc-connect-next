@@ -911,7 +911,7 @@ enabled = true`
 
 ### `hooks.async`
 
-异步运行 Hook，避免阻塞消息处理。message.observed 始终等待匹配 Hook 完成后再确认传输事件。命名 card.action Hook 始终异步执行，让平台回调及时返回。
+异步运行 Hook，避免阻塞消息处理。message.observed 始终等待匹配 Hook 完成后再确认传输事件。命名 card.action Hook 始终异步执行，让平台回调及时返回。scheduled.progress 始终在每次执行独立的有界工作器中运行，不受此设置影响。
 
 - 来源：`toml`
 - 配置位置：`[[hooks]]`
@@ -941,7 +941,7 @@ enabled = true`
 
 ### `hooks.event`
 
-选择触发该 Hook 的事件。message.observed 在 Agent 回复过滤前提供真人提及元数据；支持的平台通过 reply.completed 在群聊 rich 模式非静默答复成功投递后提供路由 ID，遵循 hooks.async，Hook 失败不重投。card.action 只投递给其命名项目处理器，通配订阅不接收卡片输入。
+选择触发该 Hook 的事件。message.observed 在 Agent 回复过滤前提供真人提及元数据；支持的平台通过 reply.completed 在群聊 rich 模式非静默答复成功投递后提供路由 ID，遵循 hooks.async，Hook 失败不重投。card.action 只投递给其命名项目处理器，通配订阅不接收卡片输入。scheduled.progress 必须显式订阅，发布合并后的执行元数据，不阻塞 Cron/Timer 任务；通配订阅不接收进度。
 
 - 来源：`toml`
 - 配置位置：`[[hooks]]`

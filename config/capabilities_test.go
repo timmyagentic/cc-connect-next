@@ -336,3 +336,22 @@ func TestCapabilityCatalog_ReplyCompletedHookIsDiscoverable(t *testing.T) {
 	}
 	t.Fatal("hooks.event missing from catalog")
 }
+
+func TestCapabilityCatalog_ScheduledProgressHookIsDiscoverable(t *testing.T) {
+	found := 0
+	for _, option := range CapabilityCatalog("test").Options {
+		if option.Path != "hooks.event" && option.Path != "hooks.async" {
+			continue
+		}
+		found++
+		if !strings.Contains(option.Description, "scheduled.progress") || !strings.Contains(option.DescriptionZH, "scheduled.progress") {
+			t.Fatalf("scheduled progress missing bilingual contract: %#v", option)
+		}
+		if option.Path == "hooks.event" && (!strings.Contains(option.Description, "explicit subscription") || !strings.Contains(option.DescriptionZH, "通配订阅不接收进度")) {
+			t.Fatalf("scheduled progress opt-in contract missing: %#v", option)
+		}
+	}
+	if found != 2 {
+		t.Fatal("scheduled progress hook options missing from catalog")
+	}
+}
