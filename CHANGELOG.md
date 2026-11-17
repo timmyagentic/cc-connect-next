@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.3.7-beta.3 (2026-11-17)
+
+- Add an opt-in, non-blocking scheduled progress hook for Cron and Timer jobs (#244).
+- Progress events are coalesced and omit prompt, tool arguments, and response content.
+- See [release notes](changelogs/v0.3.7-beta.3.md).
+
 ## v0.3.7-beta.2 (2026-11-16)
 
 - Publish the isolated Cron backend feature from #240 after correcting two lint findings.
