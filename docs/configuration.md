@@ -911,7 +911,7 @@ enabled = true`
 
 ### `hooks.async`
 
-Run the hook asynchronously instead of blocking message handling. message.observed always waits for matching hooks before transport acknowledgement. Named card.action hooks always run asynchronously to release the platform callback promptly.
+Run the hook asynchronously instead of blocking message handling. message.observed always waits for matching hooks before transport acknowledgement. Named card.action hooks always run asynchronously to release the platform callback promptly. scheduled.progress always runs in a bounded per-execution worker, regardless of this setting.
 
 - Source: `toml`
 - Placement: `[[hooks]]`
@@ -941,7 +941,7 @@ Set the shell command executed by a command hook.
 
 ### `hooks.event`
 
-Choose the event that triggers this hook. message.observed receives human mention routing metadata before Agent reply filtering. reply.completed reports routing IDs after successful non-silent group rich-mode reply delivery on supported platforms; it honors hooks.async and does not retry failed hooks. card.action is routed only to its named project handler; wildcard subscriptions receive no card input.
+Choose the event that triggers this hook. message.observed receives human mention routing metadata before Agent reply filtering. reply.completed reports routing IDs after successful non-silent group rich-mode reply delivery on supported platforms; it honors hooks.async and does not retry failed hooks. card.action is routed only to its named project handler; wildcard subscriptions receive no card input. scheduled.progress requires an explicit subscription and publishes coalesced execution metadata without blocking Cron/Timer tasks; wildcard subscriptions receive no progress.
 
 - Source: `toml`
 - Placement: `[[hooks]]`

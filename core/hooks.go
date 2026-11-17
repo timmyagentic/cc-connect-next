@@ -28,6 +28,7 @@ const (
 	HookEventSessionEnded        HookEventType = "session.ended"
 	HookEventCronTriggered       HookEventType = "cron.triggered"
 	HookEventTimerTriggered      HookEventType = "timer.triggered"
+	HookEventScheduledProgress   HookEventType = "scheduled.progress"
 	HookEventPermissionRequested HookEventType = "permission.requested"
 	HookEventError               HookEventType = "error"
 )

@@ -352,3 +352,11 @@ The `cron` tool declares an optional prompt-only `service_tier` string (`add --s
 ### Per-Cron backend
 
 The `cron` tool declares an optional prompt-only `backend` string (`add --backend`, `edit backend`). Omitted or empty values inherit the project backend. The `cron_backend` runtime feature probes `SessionBackendProvider`. An explicit override requires effective `new_per_run` mode and a backend accepted by the Agent; Codex accepts `exec` and `app_server`. The backend is applied to that isolated task session, while ordinary chat continues through the project backend. The tool persists the scheduled setting. Execution starts an Agent process and turn and can use network I/O. Invalid values, unsupported Agents and shell jobs reject the override. The contract publishes no configured values or credentials.
+
+The `scheduled_progress_hook` runtime feature is conditional on an explicit
+`scheduled.progress` subscription; wildcard hooks do not enable it. It publishes
+coalesced execution metadata through a bounded asynchronous worker, with command
+or network side effects and a skip fallback. It neither changes task results nor
+asserts business completion or delivery. See [scheduled progress](scheduled-progress.md)
+for the payload, timing and recovery contract; the manifest exposes no handler
+commands, URLs or current execution data.

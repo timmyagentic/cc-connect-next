@@ -324,6 +324,7 @@ func (e *Engine) agentRuntimeCapabilities() RuntimeAdapterCapabilities {
 	backendCapability.ReadOnly = &backendReadOnly
 	backendCapability.SideEffects = expandSideEffects([]string{"agent_process", "agent_turn", "network"})
 	result.Capabilities = append(result.Capabilities, backendCapability)
+	result.Capabilities = append(result.Capabilities, e.scheduledProgressCapability())
 
 	type agentProbe struct {
 		id, description, zh, fallback, fallbackZH string
