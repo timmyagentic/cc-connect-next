@@ -183,3 +183,7 @@ cc-connect-next-new
 !scripts/certificates/
 scripts/certificates/*
 !scripts/certificates/DeveloperIDG2CA.cer
+
+# Cloud release entry and its focused tests
+!scripts/admin-beta.py
+!scripts/test_admin_beta.py
