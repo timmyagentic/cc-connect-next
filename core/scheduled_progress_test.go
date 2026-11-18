@@ -58,6 +58,9 @@ func TestScheduledProgress_SlowHookCoalescesAndRetainsTerminal(t *testing.T) {
 		p.observe(Event{Type: EventToolUse, ToolName: "SECRET_TOOL", ToolInput: "SECRET_ARGUMENT"})
 	}
 	p.observe(Event{Type: EventThinking, Content: "SECRET_THINKING"})
+	p.observe(Event{Type: EventThinking, ThinkingKind: ThinkingText, Content: "SECRET_COMMENTARY"})
+	p.observe(Event{Type: EventThinking, ThinkingKind: ThinkingItem})
+	p.observe(Event{Type: EventThinking, ThinkingKind: ThinkingItem})
 	p.observe(Event{Type: EventText, Content: "SECRET_RESULT"})
 	p.finish(nil)
 	p.finish(errors.New("late failure"))
@@ -72,7 +75,7 @@ func TestScheduledProgress_SlowHookCoalescesAndRetainsTerminal(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("observer did not terminate")
 	}
-	if requests.Load() != 2 || last.Extra["tool_count"] != float64(10000) || last.Extra["thinking_count"] != float64(1) || last.Extra["status"] != "succeeded" || last.Extra["phase"] != "finished" {
+	if requests.Load() != 2 || last.Extra["tool_count"] != float64(10000) || last.Extra["thinking_count"] != float64(3) || last.Extra["status"] != "succeeded" || last.Extra["phase"] != "finished" {
 		t.Fatalf("wrong terminal snapshot: %#v (%d calls)", last, requests.Load())
 	}
 	if first.Extra["run_id"] == "" || first.Extra["run_id"] != last.Extra["run_id"] || last.Extra["sequence"].(float64) <= first.Extra["sequence"].(float64) || last.SessionKey != "test:owner" || last.Project != "test" {

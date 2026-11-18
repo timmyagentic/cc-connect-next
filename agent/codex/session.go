@@ -246,6 +246,7 @@ func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 
+	reasoning := newExecReasoning(getenvFromList(cs.extraEnv, "CODEX_HOME"), cs.CurrentSessionID())
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("codexSession: start: %w", err)
 	}
@@ -253,7 +254,7 @@ func (cs *codexSession) send(prompt string, images []core.ImageAttachment, files
 	cs.addCmd(cmd)
 
 	cs.wg.Add(1)
-	go cs.readLoop(cmd, stdout, &stderrBuf)
+	go cs.readLoop(cmd, stdout, &stderrBuf, reasoning)
 
 	return nil
 }
@@ -390,7 +391,7 @@ func (cs *codexSession) buildExecArgsWithTurnOptions(prompt string, imagePaths [
 	return args
 }
 
-func (cs *codexSession) readLoop(cmd *exec.Cmd, stdout io.ReadCloser, stderrBuf *bytes.Buffer) {
+func (cs *codexSession) readLoop(cmd *exec.Cmd, stdout io.ReadCloser, stderrBuf *bytes.Buffer, reasoning *execReasoning) {
 	defer cs.wg.Done()
 	defer func() {
 		defer cs.removeCmd(cmd)
@@ -411,31 +412,73 @@ func (cs *codexSession) readLoop(cmd *exec.Cmd, stdout io.ReadCloser, stderrBuf 
 		}
 	}()
 
-	if err := readJSONLines(stdout, func(line []byte) error {
-		lineText := string(line)
-		if lineText == "" {
-			return nil
-		}
-
-		slog.Debug("codexSession: raw", "line", truncate(lineText, 500))
-
-		var raw map[string]any
-		if err := json.Unmarshal(line, &raw); err != nil {
-			slog.Debug("codexSession: non-JSON line", "line", lineText)
-			return nil
-		}
-
-		cs.handleEvent(raw)
-		return nil
-	}); err != nil {
+	if err := cs.readExecEvents(stdout, reasoning); err != nil {
 		slog.Error("codexSession: read stdout error", "error", err)
 		evt := core.Event{Type: core.EventError, Error: fmt.Errorf("read stdout: %w", err)}
 		select {
 		case cs.events <- evt:
 		case <-cs.ctx.Done():
-			return
 		}
 	}
+}
+
+func (cs *codexSession) readExecEvents(stdout io.Reader, reasoning *execReasoning) error {
+	defer reasoning.close()
+	// Omitted summaries can produce no stdout at all between tools. Keep the
+	// rollout cursor and all outgoing events on this one turn's reader.
+	lines := make(chan []byte)
+	var readErr error
+	go func() {
+		defer close(lines)
+		readErr = readJSONLines(stdout, func(line []byte) error {
+			lines <- line
+			return nil
+		})
+	}()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	var terminal map[string]any
+	flush := func(settle bool) {
+		reasoning.poll(terminal != nil)
+		cs.emitExecReasoning(reasoning)
+		if terminal != nil && (reasoning.complete || settle) {
+			cs.handleEvent(terminal)
+			terminal = nil
+			ticker.Stop()
+		}
+	}
+read:
+	for {
+		select {
+		case <-ticker.C:
+			flush(true)
+		case line, ok := <-lines:
+			if !ok {
+				if terminal != nil {
+					flush(true)
+				}
+				break read
+			}
+			slog.Debug("codexSession: raw", "line", truncate(string(line), 500))
+			var raw map[string]any
+			if err := json.Unmarshal(line, &raw); err != nil {
+				slog.Debug("codexSession: non-JSON line")
+				continue
+			}
+			reasoning.observe(raw)
+			cs.emitExecReasoning(reasoning)
+			switch raw["type"] {
+			case "turn.completed", "turn.failed":
+				// If the file is still flushing, try again on EOF or the
+				// next tick. A lingering CLI must not hold the result open.
+				terminal = raw
+				flush(false)
+			default:
+				cs.handleEvent(raw)
+			}
+		}
+	}
+	return readErr
 }
 
 func readJSONLines(r io.Reader, handle func([]byte) error) error {
@@ -538,7 +581,7 @@ func (cs *codexSession) flushPendingAsThinking() {
 		if cs.ctx.Err() != nil {
 			return
 		}
-		evt := core.Event{Type: core.EventThinking, Content: text}
+		evt := core.Event{Type: core.EventThinking, ThinkingKind: core.ThinkingText, Content: text}
 		select {
 		case cs.events <- evt:
 		case <-cs.ctx.Done():
@@ -627,7 +670,7 @@ func (cs *codexSession) handleItemCompleted(raw map[string]any) {
 	case "reasoning":
 		text := extractItemText(item, "summary", "summary_text")
 		if text != "" {
-			evt := core.Event{Type: core.EventThinking, Content: text}
+			evt := core.Event{Type: core.EventThinking, ThinkingKind: core.ThinkingText, Content: text}
 			select {
 			case cs.events <- evt:
 			case <-cs.ctx.Done():

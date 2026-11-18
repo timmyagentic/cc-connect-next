@@ -91,7 +91,7 @@ func (p *scheduledProgress) observe(event Event) {
 	}
 	switch event.Type {
 	case EventThinking:
-		if strings.TrimSpace(event.Content) == "" || isEllipsisOnly(event.Content) {
+		if !event.countsAsThinking() {
 			return
 		}
 		p.current.thinking++

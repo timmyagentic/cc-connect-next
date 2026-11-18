@@ -40,11 +40,15 @@ The envelope contains `event`, `project`, `timestamp` and the original scheduled
 | `thinking_count`, `tool_count` | Anonymous event counts; no reasoning, tool names, arguments, outputs or answer text |
 | `model`, `reasoning_effort` | Explicit scheduled overrides when set; absent values are unknown/inherited |
 
-Shell jobs emit start/end snapshots with zero Agent-event counts. Prompt jobs
-count nonempty, non-placeholder thinking events and tool-use events from the
-existing Agent event stream. These are event counts, not a normalized transcript
-metric across different backends. `answer` means the Agent is producing text;
-the text itself is never included and may still need business validation.
+Shell jobs emit start/end snapshots with zero Agent-event counts. Codex prompt
+jobs count completed reasoning items even when their summaries are empty.
+The app-server supplies item IDs directly. The exec adapter also reads its
+current turn's local transcript because the CLI can omit these items from JSON
+output. When that transcript is unavailable, exec counts the reasoning items
+present in its output. Intermediate agent messages are excluded. Other agents
+count meaningful thinking events from their own streams. Tool-use events have
+their own count. The `answer` phase marks the start of answer text. The Hook
+publishes only execution metadata.
 
 Successful prompt completion is emitted after the turn's normal result commit.
 It is detached before a reused session drains ordinary messages. Start/setup

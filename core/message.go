@@ -395,9 +395,19 @@ type UserQuestionOption struct {
 	Description string `json:"description"`
 }
 
+// ThinkingKind distinguishes an observed reasoning item from intermediate
+// text. Adapters without a structured item stream keep their text-based counts.
+type ThinkingKind string
+
+const (
+	ThinkingItem ThinkingKind = "item" // a completed item, possibly without a readable summary
+	ThinkingText ThinkingKind = "text" // text for legacy presentation, with no increment to the counter
+)
+
 // Event represents a single piece of agent output streamed back to the engine.
 type Event struct {
 	Type         EventType
+	ThinkingKind ThinkingKind `json:"-"` // only used for EventThinking
 	Content      string
 	ToolName     string         // populated for EventToolUse, EventPermissionRequest
 	ToolInput    string         // human-readable summary of tool input
@@ -421,6 +431,17 @@ type Event struct {
 	RecoveryCheckpoint json.RawMessage `json:"-"`
 	// RecoverySilent checkpoints an internal retry without a visible recovery notice.
 	RecoverySilent bool `json:"-"`
+}
+
+func (e Event) countsAsThinking() bool {
+	switch e.ThinkingKind {
+	case ThinkingItem:
+		return true
+	case ThinkingText:
+		return false
+	default:
+		return strings.TrimSpace(e.Content) != "" && !isEllipsisOnly(e.Content)
+	}
 }
 
 // HistoryEntry is one turn in a conversation.
