@@ -266,7 +266,7 @@ jobs:
           channel_relation() {
             local current_tagged
             current_tagged="$(npm view "cc-connect-next@${npm_tag}" version --registry=https://registry.npmjs.org 2>/dev/null || true)"
-            node ../scripts/release-channel-policy.js --relation "$version" "$current_tagged"
+            node ../scripts/release-channel-policy.js --npm-relation "$npm_tag" "$version" "$current_tagged"
           }
           channel_is_current() {
             local relation
@@ -344,7 +344,7 @@ jobs:
             published="$(npm view "cc-connect-next@${version}" version --registry=https://registry.npmjs.org 2>/dev/null || true)"
             tagged="$(npm view "cc-connect-next@${npm_tag}" version --registry=https://registry.npmjs.org 2>/dev/null || true)"
             if [ "$published" = "$version" ]; then
-              tag_relation="$(node ../scripts/release-channel-policy.js --relation "$version" "$tagged")"
+              tag_relation="$(node ../scripts/release-channel-policy.js --npm-relation "$npm_tag" "$version" "$tagged")"
               case "$tag_relation" in
                 equal|older)
                   echo "npm registry serves ${version}; ${npm_tag} is at ${tagged}"

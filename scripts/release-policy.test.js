@@ -10,6 +10,7 @@ const { releasePolicyForVersion } = require("./check-release-version.js");
 const {
   compareReleaseVersions,
   newestReleaseVersion,
+  npmChannelRelation,
   releaseChannelRelation,
 } = require("./release-channel-policy.js");
 
@@ -58,6 +59,16 @@ test("release channel ordering follows SemVer precedence", () => {
   );
 });
 
+test("the corrected npm beta can replace only the misnumbered releases", () => {
+  for (const wrongVersion of ["1.0.13-beta.5", "1.0.13-beta.6"]) {
+    assert.equal(npmChannelRelation("beta", "0.3.7-beta.4", wrongVersion), "newer");
+    assert.equal(npmChannelRelation("latest", "0.3.7-beta.4", wrongVersion), "older");
+    assert.equal(npmChannelRelation("beta", "0.3.7-beta.5", wrongVersion), "older");
+  }
+  assert.equal(npmChannelRelation("beta", "0.3.7-beta.4", "0.3.7-beta.5"), "older");
+  assert.equal(npmChannelRelation("beta", "0.3.7-beta.4", "1.0.13-beta.7"), "older");
+});
+
 test("release reruns preserve newer npm tags and GitHub Latest", () => {
   assert.match(
     workflow,
@@ -99,7 +110,13 @@ test("idempotent npm reruns remove stale staging tags", () => {
   assert.ok(stagingRemoval > stagingLookup, "reruns must remove a stale staging tag when present");
 });
 
-function runNpmPublication({ existing = false, channel = "1.0.13-beta.4", converged = channel, staging = false } = {}) {
+function runNpmPublication({
+  version = "1.0.13-beta.5",
+  existing = false,
+  channel = "1.0.13-beta.4",
+  converged = channel,
+  staging = false,
+} = {}) {
   const step = workflow
     .split("      - name: Publish npm package idempotently\n")[1]
     .split("      - name: Verify the public npm registry\n")[0]
@@ -112,14 +129,14 @@ function runNpmPublication({ existing = false, channel = "1.0.13-beta.4", conver
     sleep() { waited=true; }
     node() {
       if [ "$1" = "-p" ]; then
-        echo 1.0.13-beta.5
+        echo "$RELEASE_VERSION"
       else
         command node "$@"
       fi
     }
     npm() {
       case "$1:$2" in
-        view:cc-connect-next@1.0.13-beta.5) [ "$EXISTING" = true ] ;;
+        "view:cc-connect-next@$RELEASE_VERSION") [ "$EXISTING" = true ] ;;
         view:cc-connect-next@beta)
           if [ "$waited" = true ]; then echo "$CONVERGED"; else echo "$CHANNEL"; fi ;;
         view:cc-connect-next@latest) echo 0.3.6 ;;
@@ -141,6 +158,7 @@ function runNpmPublication({ existing = false, channel = "1.0.13-beta.4", conver
     env: {
       PATH: process.env.PATH,
       NPM_DIST_TAG: "beta",
+      RELEASE_VERSION: version,
       NODE_AUTH_TOKEN: "fixture",
       GITHUB_RUN_ID: "42",
       EXISTING: String(existing),
@@ -153,6 +171,13 @@ function runNpmPublication({ existing = false, channel = "1.0.13-beta.4", conver
 
 test("fresh npm publish leaves channel propagation to the public readback", () => {
   const result = runNpmPublication();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /npm publish --access public --tag beta --provenance/);
+  assert.doesNotMatch(result.stdout, /dist-tag add/);
+});
+
+test("correction publishes directly to beta even while the misnumbered tag is public", () => {
+  const result = runNpmPublication({ version: "0.3.7-beta.4", channel: "1.0.13-beta.6" });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /npm publish --access public --tag beta --provenance/);
   assert.doesNotMatch(result.stdout, /dist-tag add/);

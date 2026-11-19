@@ -66,6 +66,15 @@ function releaseChannelRelation(candidate, current) {
   return compared > 0 ? "newer" : compared < 0 ? "older" : "equal";
 }
 
+function npmChannelRelation(channel, candidate, current) {
+  // Let the corrective beta replace the two releases assigned to the wrong version line.
+  if (channel === "beta" && candidate === "0.3.7-beta.4" &&
+      (current === "1.0.13-beta.5" || current === "1.0.13-beta.6")) {
+    return "newer";
+  }
+  return releaseChannelRelation(candidate, current);
+}
+
 function newestReleaseVersion(values) {
   let newest = "";
   for (const value of values) {
@@ -85,13 +94,17 @@ function main() {
     process.stdout.write(`${releaseChannelRelation(args[0], args[1] || "")}\n`);
     return;
   }
+  if (mode === "--npm-relation" && (args.length === 2 || args.length === 3)) {
+    process.stdout.write(`${npmChannelRelation(...args)}\n`);
+    return;
+  }
   if (mode === "--max" && args.length === 0) {
     const versions = fs.readFileSync(0, "utf8").split(/\s+/);
     process.stdout.write(`${newestReleaseVersion(versions)}\n`);
     return;
   }
   throw new Error(
-    "usage: release-channel-policy.js --relation <candidate> [current] | --max"
+    "usage: release-channel-policy.js --relation <candidate> [current] | --npm-relation <channel> <candidate> [current] | --max"
   );
 }
 
@@ -107,5 +120,6 @@ if (require.main === module) {
 module.exports = {
   compareReleaseVersions,
   newestReleaseVersion,
+  npmChannelRelation,
   releaseChannelRelation,
 };
