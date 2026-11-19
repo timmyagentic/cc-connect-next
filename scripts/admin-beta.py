@@ -162,6 +162,8 @@ def tests():
     if REPO.endswith('/cc-connect-next'):
         run('pnpm', '--dir', 'web', 'install', '--frozen-lockfile', env=environment)
         run('pnpm', '--dir', 'web', 'build', env=environment)
+        run('go', 'run', 'github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4',
+            'run', './...', env=environment)
         run('go', 'test', '-race', './...', env=environment)
         run('go', 'test', '-tags=smoke', './tests/e2e/...', env=environment)
         run('go', 'test', '-tags=regression', './tests/e2e/...', env=environment)
