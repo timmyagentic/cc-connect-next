@@ -38,9 +38,9 @@
 
 ### 按群或私聊持久配置模型和推理强度 (`chat-model-bindings`)
 
-在 config.toml 中统一保存各群或私聊模型和推理强度；聊天选择与手工编辑共用项目内配置，reload 后修改及删除从后续回合生效。
+在 config.toml 中统一保存各群或私聊模型和推理强度。聊天选择与手工编辑共用项目配置，reload 后修改、删除及项目绑定开关从后续回合生效。
 
-相关配置： `projects.chat_models.platform`, `projects.chat_models.chat_id`, `projects.chat_models.user_id`, `projects.chat_models.model`, `projects.chat_models.reasoning_effort`, `projects.chat_models.provider`, `projects.chat_models.agent`
+相关配置： `projects.chat_models_enabled`, `projects.chat_models.platform`, `projects.chat_models.chat_id`, `projects.chat_models.user_id`, `projects.chat_models.model`, `projects.chat_models.reasoning_effort`, `projects.chat_models.provider`, `projects.chat_models.agent`
 
 ### 命令、别名与内容策略 (`customization`)
 
@@ -2742,6 +2742,20 @@ enabled = true`
 - 必填条件: `projects.chat_models.chat_id is unset`
 - 冲突: `projects.chat_models.chat_id`
 - 示例: `user_id = "ou_example_user"`
+
+### `projects.chat_models_enabled`
+
+应用本项目的群聊或私聊模型与推理强度绑定。设为 false 后聊天跟随项目默认设置，已保存的绑定可在重新开启时恢复。
+
+- 来源：`toml`
+- 配置位置：`[[projects]]`
+- 作用域：`project`
+- 类型：`boolean`
+- 要求：`可选`
+- 默认值：`true`
+- 默认值来源：`builtin`
+- 生效方式：`reload`
+- 示例: `chat_models_enabled = false`
 
 ### `projects.disabled_commands`
 

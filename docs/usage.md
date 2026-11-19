@@ -492,6 +492,8 @@ reasoning_effort = "low"
 
 Set at least one of `model` or `reasoning_effort`; either can be pinned alone. Omitted or empty fields inherit their defaults. Choose effort from the active Agent’s `/reasoning` catalog.
 
+Set `chat_models_enabled = false` directly under the project's `[[projects]]` and run `/config reload` to pause all its chat model and reasoning bindings. The following turns use the project defaults. The saved preferences take effect again after setting the switch to `true` or removing it and reloading. The default is `true`.
+
 Set exactly one of `chat_id` (group/channel ID) or `user_id` (private-chat user's ID). Duplicate bindings for the same project/platform/chat are rejected. `provider` is a provider name configured for this project, without an Agent prefix. Empty or omitted `provider` means the native provider, **not** inheritance from the currently active provider. `agent` may be omitted to use the project's Agent type; chat commands save it explicitly so a later adapter change cannot silently reuse the binding with a different Agent. Model and effort share the entry’s Agent/Provider identity. Reset the other pinned field before selecting a different Provider. The binding checks the provider identity and does not switch providers.
 
 After manually editing or deleting entries, run `/config reload` in the affected bot/project. Deleting a field restores its default, and deleting an entry restores both defaults. Reload reports the number of chat entries loaded. The next independent turn uses the reloaded settings, including when it starts from the queue. A running turn keeps its settings. An invalid configuration is reported without replacing the existing binding table.

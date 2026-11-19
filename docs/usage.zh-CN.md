@@ -489,6 +489,8 @@ reasoning_effort = "low"
 
 可选等级取自当前 Agent 的 `/reasoning` 列表。聊天 effort 需要已验证的私聊或群聊身份及逐回合强度能力（目前 Codex `exec` 和 `app_server` 支持）。隔离规则与聊天模型相同，按项目、平台和聊天绑定：群内覆盖全部成员及话题，私聊在各机器人/项目内按已验证用户隔离。绑定跨 `/new`、`/reset` 和重启保留。模型和强度统一保存在 `config.toml` 的 `[[projects.chat_models]]`，但独立设置和重置。手工修改 `reasoning_effort` 后执行 `/config reload`；不再向项目 JSON 状态写回聊天强度。
 
+在对应的 `[[projects]]` 下设置 `chat_models_enabled = false` 并执行 `/config reload`，可暂停该项目的聊天模型和推理强度绑定，后续回合跟随项目默认设置。改回 `true` 或删除开关并重新加载后，已保存的绑定恢复生效。默认值为 `true`。
+
 `/effort` 是 `/reasoning` 的别名。旧的 `group` 子命令仍作为 `chat` 的兼容别名，因此 `/reasoning group [<level>|reset]` 和 `/effort group [<level>|reset]` 在已验证的私聊和群聊中都可使用。
 
 任务或回答档位显式指定的推理强度在该回合优先。仅指定模型的档位仍继承聊天推理强度，仅指定推理强度的档位仍继承聊天模型。运行中的回合和并入该回合的普通消息沿用原强度，排队的独立回合启动时读取最新设置。不支持的强度、后端或 Provider 或会话不匹配，以及保存失败均会报错。请执行 `/reasoning chat <level>` 重新选择，或执行 `/reasoning chat reset`。对话的 Provider 连接过期时，重新连接或使用 `/new`。

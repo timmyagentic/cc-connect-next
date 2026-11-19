@@ -38,9 +38,9 @@ Related configuration: `cron.silent`, `cron.session_mode`, `projects.heartbeat.e
 
 ### Persistent models and effort for groups and private chats (`chat-model-bindings`)
 
-Keep each chat's model and reasoning effort together in config.toml. Chat selections and manual edits use the same project-scoped settings; reload applies edits and removals to subsequent turns.
+Keep each chat's model and reasoning effort together in config.toml. Chat selections and manual edits use the same project-scoped settings. Reload applies edits, removals and the project-wide binding switch to subsequent turns.
 
-Related configuration: `projects.chat_models.platform`, `projects.chat_models.chat_id`, `projects.chat_models.user_id`, `projects.chat_models.model`, `projects.chat_models.reasoning_effort`, `projects.chat_models.provider`, `projects.chat_models.agent`
+Related configuration: `projects.chat_models_enabled`, `projects.chat_models.platform`, `projects.chat_models.chat_id`, `projects.chat_models.user_id`, `projects.chat_models.model`, `projects.chat_models.reasoning_effort`, `projects.chat_models.provider`, `projects.chat_models.agent`
 
 ### Commands, aliases, and content policy (`customization`)
 
@@ -2742,6 +2742,20 @@ Bind a private-chat user's platform ID, rather than a private conversation ID. S
 - Required when: `projects.chat_models.chat_id is unset`
 - Conflicts with: `projects.chat_models.chat_id`
 - Example: `user_id = "ou_example_user"`
+
+### `projects.chat_models_enabled`
+
+Apply this project's saved chat model and reasoning effort bindings. False makes chats follow project defaults and keeps the saved bindings for reactivation.
+
+- Source: `toml`
+- Placement: `[[projects]]`
+- Scope: `project`
+- Type: `boolean`
+- Requirement: `optional`
+- Default: `true`
+- Default source: `builtin`
+- Takes effect: `reload`
+- Example: `chat_models_enabled = false`
 
 ### `projects.disabled_commands`
 

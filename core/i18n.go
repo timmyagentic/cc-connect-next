@@ -343,6 +343,7 @@ const (
 	MsgModelNotSupported                MsgKey = "model_not_supported"
 	MsgModelChatOnly                    MsgKey = "model_chat_only"
 	MsgModelChatStorageUnavailable      MsgKey = "model_chat_storage_unavailable"
+	MsgChatModelBindingsDisabled        MsgKey = "chat_model_bindings_disabled"
 	MsgModelChatUnsupported             MsgKey = "model_chat_unsupported"
 	MsgModelChatProviderChanged         MsgKey = "model_chat_provider_changed"
 	MsgModelChatSessionProviderChanged  MsgKey = "model_chat_session_provider_changed"
@@ -2822,6 +2823,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "本聊天模型的持久化儲存無法使用，設定未變更。",
 		LangJapanese:           "このチャットのモデルの永続ストレージを利用できないため、設定は変更されませんでした。",
 		LangSpanish:            "El almacenamiento persistente del modelo de este chat no está disponible. No se cambió el ajuste.",
+	},
+	MsgChatModelBindingsDisabled: {
+		LangEnglish:            "Chat model and reasoning bindings are disabled for this project. This chat follows the project defaults.",
+		LangChinese:            "本项目已关闭聊天模型和推理强度绑定。当前聊天跟随项目默认设置。",
+		LangTraditionalChinese: "本專案已關閉聊天模型和推理強度綁定。目前聊天跟隨專案預設設定。",
+		LangJapanese:           "このプロジェクトではチャットごとのモデルと推論強度の設定が無効です。このチャットはプロジェクトの既定値を使います。",
+		LangSpanish:            "Las asignaciones de modelo y razonamiento por chat están desactivadas en este proyecto. Este chat usa los valores predeterminados del proyecto.",
 	},
 	MsgModelChatUnsupported: {
 		LangEnglish:            "A fixed model for this chat requires per-turn model support from the current backend. This backend does not support it; no fallback model will be used.",

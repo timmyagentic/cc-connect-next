@@ -59,7 +59,7 @@ func (e *Engine) setGroupReasoning(agent Agent, sessionKey, input string) (strin
 	}
 	target := strings.ToLower(strings.TrimSpace(input))
 	if target == "reset" {
-		return "", e.projectState.SaveGroupReasoningBinding(key, GroupReasoningBinding{})
+		return "", e.chatPreferenceSaveError(e.projectState.SaveGroupReasoningBinding(key, GroupReasoningBinding{}))
 	}
 	if !supportsGroupReasoning(agent) {
 		return "", fmt.Errorf("%s", e.i18n.T(MsgReasoningGroupUnsupported))
@@ -68,7 +68,7 @@ func (e *Engine) setGroupReasoning(agent Agent, sessionKey, input string) (strin
 		return "", fmt.Errorf("%s", e.i18n.T(MsgReasoningGroupUsage))
 	}
 	if err := e.projectState.SaveGroupReasoningBinding(key, GroupReasoningBinding{Effort: target, Provider: modelProvider(agent)}); err != nil {
-		return "", err
+		return "", e.chatPreferenceSaveError(err)
 	}
 	return target, nil
 }
