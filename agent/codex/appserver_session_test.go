@@ -15,6 +15,29 @@ import (
 	"github.com/timmyagentic/cc-connect-next/core"
 )
 
+func TestAppServerSession_CountsCompletedReasoningWithEmptySummaryOncePerTurn(t *testing.T) {
+	s := &appServerSession{events: make(chan core.Event, 16)}
+	s.threadID.Store("root")
+	for _, turn := range []string{"first", "second"} {
+		started := notificationProbe(t, map[string]any{"threadId": "root", "turn": map[string]string{"id": turn}})
+		item := map[string]any{"type": "reasoning", "id": "r1", "summary": []string{""}}
+		completion := notificationProbe(t, map[string]any{"threadId": "root", "turnId": turn, "item": item})
+		s.handleNotification("turn/started", started)
+		s.handleNotification("item/started", completion)
+		s.handleNotification("item/completed", completion)
+		s.handleNotification("turn/started", started)
+		s.handleNotification("item/completed", completion)
+	}
+	if got := len(s.events); got != 2 {
+		t.Fatalf("two turns completing the same local ID emitted %d events, want 2", got)
+	}
+	for range 2 {
+		if event := <-s.events; event.Type != core.EventThinking || event.ThinkingKind != core.ThinkingItem || event.Content != "" {
+			t.Fatalf("expected an anonymous reasoning completion, got %#v", event)
+		}
+	}
+}
+
 func TestAppServerSession_UsageLimitErrorNotificationIsClassified(t *testing.T) {
 	s := &appServerSession{events: make(chan core.Event, 1)}
 	s.handleNotification("error", json.RawMessage(`{"message":"No remaining credits for this account"}`))

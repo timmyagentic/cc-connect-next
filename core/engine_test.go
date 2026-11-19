@@ -1836,6 +1836,8 @@ func TestProcessInteractiveEvents_RichCardStartsImmediatelyAndHidesThinking(t *t
 	}
 	e.interactiveStates[sessionKey] = state
 
+	agentSession.events <- Event{Type: EventThinking, ThinkingKind: ThinkingText, Content: "Checking the repository"}
+	agentSession.events <- Event{Type: EventThinking, ThinkingKind: ThinkingItem}
 	agentSession.events <- Event{Type: EventThinking, Content: "Inspecting event routing"}
 	agentSession.events <- Event{Type: EventText, Content: "answer"}
 	agentSession.events <- Event{Type: EventResult, Content: "answer", Done: true}
@@ -1850,11 +1852,15 @@ func TestProcessInteractiveEvents_RichCardStartsImmediatelyAndHidesThinking(t *t
 		t.Fatalf("first rich card must be the immediate state before any agent event, got %q", starts[0])
 	}
 	rendered := strings.Join(append(starts, p.getPreviewEdits()...), "\n")
-	if strings.Contains(rendered, "Inspecting event routing") {
+	if strings.Contains(rendered, "Inspecting event routing") || strings.Contains(rendered, "Checking the repository") {
 		t.Fatalf("rich card must not retain reasoning content, got %q", rendered)
 	}
-	if !strings.Contains(rendered, "Kind:thinking") {
-		t.Fatalf("rich card should expose an anonymous reasoning count, got %q", rendered)
+	maxThinking := 0
+	for _, edit := range p.getPreviewEdits() {
+		maxThinking = max(maxThinking, strings.Count(edit, "Kind:thinking"))
+	}
+	if maxThinking != 2 {
+		t.Fatalf("expected 2 thinking steps from the empty-summary item and legacy reasoning, got %d", maxThinking)
 	}
 }
 

@@ -8522,10 +8522,10 @@ func (presentation *turnPresentation) handleThinking() bool {
 		*presentation.silentHold = silentHold
 		*presentation.cardThinkingText = cardThinkingText
 	}()
-	if isEllipsisOnly(event.Content) {
-		return false
-	}
 	if hasRichCard {
+		if !event.countsAsThinking() {
+			return false
+		}
 		// Rich mode records an anonymous event count only. Raw reasoning is
 		// never copied into card state, even when legacy thinking_messages is
 		// enabled for other platforms.
@@ -8556,6 +8556,9 @@ func (presentation *turnPresentation) handleThinking() bool {
 				lastRichCardPreview = ""
 			}
 		}
+		return false
+	}
+	if strings.TrimSpace(event.Content) == "" || isEllipsisOnly(event.Content) {
 		return false
 	}
 	// When thinking messages are hidden, behavior depends on display mode:

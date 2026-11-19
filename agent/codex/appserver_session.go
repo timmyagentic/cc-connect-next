@@ -207,7 +207,8 @@ type appServerSession struct {
 	stateMu             sync.Mutex
 	pendingMsgs         []string
 	currentTurn         string
-	turnRevision        uint64 // prevents a late turn/start response from reviving a finished turn
+	completedReasoning  map[string]struct{} // item IDs scoped to currentTurn, protected by stateMu
+	turnRevision        uint64              // prevents a late turn/start response from reviving a finished turn
 	preambleSent        bool
 	recovery            *signatureRecovery
 	recoveryUsed        bool // one attempt per Send; a recovered native turn is part of the same Send
@@ -746,10 +747,18 @@ func (s *appServerSession) startTurn(threadID string, input []map[string]any, op
 		s.stateMu.Unlock()
 		return fmt.Errorf("codex app-server connection closed during turn/start: %w", io.EOF)
 	}
-	s.currentTurn = resp.Turn.ID
-	s.pendingMsgs = s.pendingMsgs[:0]
+	s.startTurnLocked(resp.Turn.ID)
 	s.stateMu.Unlock()
 	return nil
+}
+
+// The start response and turn/started notification can arrive in either order.
+func (s *appServerSession) startTurnLocked(id string) {
+	if s.currentTurn != id {
+		s.currentTurn = id
+		s.pendingMsgs = s.pendingMsgs[:0]
+		clear(s.completedReasoning)
+	}
 }
 
 // SetSessionTitle persists a user-facing Codex thread name. Naming is
@@ -1691,8 +1700,7 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 		var notif turnNotification
 		if err := json.Unmarshal(paramsRaw, &notif); err == nil && s.ownsThread(method, notif.ThreadID) {
 			s.stateMu.Lock()
-			s.currentTurn = notif.Turn.ID
-			s.pendingMsgs = s.pendingMsgs[:0]
+			s.startTurnLocked(notif.Turn.ID)
 			s.stateMu.Unlock()
 		}
 
@@ -1847,9 +1855,25 @@ func (s *appServerSession) handleItemCompleted(item map[string]any) {
 	switch itemType {
 	case "reasoning":
 		text := appServerReasoningText(item)
-		if text != "" {
-			s.emit(core.Event{Type: core.EventThinking, Content: text})
+		id, _ := item["id"].(string)
+		if id == "" {
+			// Older servers may supply readable reasoning without an item ID.
+			if text != "" {
+				s.emit(core.Event{Type: core.EventThinking, Content: text})
+			}
+			return
 		}
+		s.stateMu.Lock()
+		if _, seen := s.completedReasoning[id]; seen {
+			s.stateMu.Unlock()
+			return
+		}
+		if s.completedReasoning == nil {
+			s.completedReasoning = make(map[string]struct{})
+		}
+		s.completedReasoning[id] = struct{}{}
+		s.stateMu.Unlock()
+		s.emit(core.Event{Type: core.EventThinking, ThinkingKind: core.ThinkingItem, Content: text})
 
 	case "agentMessage":
 		text, _ := item["text"].(string)
@@ -2067,7 +2091,7 @@ func (s *appServerSession) flushPendingAsThinking() {
 
 	for _, text := range msgs {
 		if strings.TrimSpace(text) != "" {
-			s.emit(core.Event{Type: core.EventThinking, Content: text})
+			s.emit(core.Event{Type: core.EventThinking, ThinkingKind: core.ThinkingText, Content: text})
 		}
 	}
 }
