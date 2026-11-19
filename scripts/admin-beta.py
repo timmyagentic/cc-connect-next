@@ -70,10 +70,9 @@ def next_version(current, tags, private_beta=None):
     stable = max((version[:3] for version in versions if version[3] is None), default=(0, 0, 0))
     if base <= stable:
         base = (stable[0], stable[1], stable[2] + 1)
-    if REPO.endswith('/cc-connect-next'):
-        newer = [version[:3] for version in versions if version[3] is not None]
-        base = max([base, *newer])
-    if private_beta and (previous := semver(private_beta)):
+    # CC Connect Next takes its base from the repository and the stable floor.
+    # Only QuotaMonitor's own private feed can advance its base.
+    if REPO.endswith('/quota-monitor') and private_beta and (previous := semver(private_beta)):
         base = max(base, previous[:3])
         versions.append(previous)
     seq = max((version[3] or 0 for version in versions if version[:3] == base), default=0) + 1
