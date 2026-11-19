@@ -832,6 +832,8 @@ hide_agent_footer = true         # Strip equivalent model/token/context lines em
 
 [[projects]]
 name = "my-backend"
+# chat_models_enabled = false  # Pause saved chat model and reasoning bindings (default true).
+#                              # 暂停已保存的聊天模型和推理强度绑定，默认开启。
 # reply_footer = false             # Hide the default "model · effort:x · ⏱ 12.3s" footer on plain replies
 #                                   # and rich cards alike (default: true / visible)
 #                                   # 在普通回复与 rich 卡片中隐藏默认显示的「model · effort:x · ⏱ 12.3秒」

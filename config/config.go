@@ -622,12 +622,13 @@ type ProjectConfig struct {
 	// project: "queue" or "steer". Empty inherits the global setting. Useful
 	// because one process can host projects with different agent backends,
 	// and only some backends support native steering.
-	BusyMessageMode string             `toml:"busy_message_mode,omitempty"`
-	Agent           AgentConfig        `toml:"agent"`
-	Platforms       []PlatformConfig   `toml:"platforms"`
-	ChatModels      []ChatModelConfig  `toml:"chat_models,omitempty"`
-	Heartbeat       HeartbeatConfig    `toml:"heartbeat"`
-	AutoCompress    AutoCompressConfig `toml:"auto_compress"`
+	BusyMessageMode   string             `toml:"busy_message_mode,omitempty"`
+	Agent             AgentConfig        `toml:"agent"`
+	Platforms         []PlatformConfig   `toml:"platforms"`
+	ChatModelsEnabled *bool              `toml:"chat_models_enabled,omitempty"`
+	ChatModels        []ChatModelConfig  `toml:"chat_models,omitempty"`
+	Heartbeat         HeartbeatConfig    `toml:"heartbeat"`
+	AutoCompress      AutoCompressConfig `toml:"auto_compress"`
 	// ResetOnIdleMins automatically rotates to a new cc-connect-next session after
 	// the current session has been inactive for the specified number of minutes.
 	// 0 or nil disables the behavior.

@@ -84,7 +84,14 @@ func validateChatModels(prefix string, proj ProjectConfig) error {
 	return nil
 }
 
+func chatModelsEnabled(proj ProjectConfig) bool {
+	return proj.ChatModelsEnabled == nil || *proj.ChatModelsEnabled
+}
+
 func chatModelMap(proj ProjectConfig) map[string]core.ChatModelBinding {
+	if !chatModelsEnabled(proj) {
+		return nil
+	}
 	bindings := make(map[string]core.ChatModelBinding, len(proj.ChatModels))
 	for _, c := range proj.ChatModels {
 		bindings[c.key()] = c.binding(proj.Agent.Type)
@@ -138,6 +145,9 @@ func saveChatPreference(projectName, key string, model *core.ChatModelBinding, r
 	raw, cfg, idx, err := readChatModelConfig(projectName)
 	if err != nil {
 		return nil, err
+	}
+	if !chatModelsEnabled(cfg.Projects[idx]) {
+		return nil, core.ErrChatModelBindingsDisabled
 	}
 	binding := chatModelMap(cfg.Projects[idx])[key]
 	if model != nil {

@@ -2,10 +2,20 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
+
+var ErrChatModelBindingsDisabled = errors.New("chat model bindings are disabled")
+
+func (e *Engine) chatPreferenceSaveError(err error) error {
+	if errors.Is(err, ErrChatModelBindingsDisabled) {
+		return e.chatModelFailure(MsgChatModelBindingsDisabled)
+	}
+	return err
+}
 
 // Only trusted, localized routing failures may bypass generic backend-error
 // redaction to explain how to recover on a rich-card platform.
@@ -132,7 +142,7 @@ func (e *Engine) setChatModel(agent Agent, sessionKey, input string) (string, er
 		return "", fmt.Errorf("%s", e.i18n.T(MsgModelChatStorageUnavailable))
 	}
 	if strings.EqualFold(input, "reset") {
-		return "", e.projectState.SaveChatModelBinding(key, ChatModelBinding{})
+		return "", e.chatPreferenceSaveError(e.projectState.SaveChatModelBinding(key, ChatModelBinding{}))
 	}
 	switcher, ok := agent.(ModelSwitcher)
 	if !ok || !supportsChatModel(agent) {
@@ -157,7 +167,7 @@ func (e *Engine) setChatModel(agent Agent, sessionKey, input string) (string, er
 		return "", fmt.Errorf("%s", e.i18n.Tf(MsgModelChatUnknown, input))
 	}
 	if err := e.projectState.SaveChatModelBinding(key, ChatModelBinding{Model: target, Provider: provider}); err != nil {
-		return "", err
+		return "", e.chatPreferenceSaveError(err)
 	}
 	return target, nil
 }

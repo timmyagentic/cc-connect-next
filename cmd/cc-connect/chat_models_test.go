@@ -517,6 +517,42 @@ func TestChatModelConfigWiring_StartupCommandManualReloadAndRestart(t *testing.T
 	}
 	assertVisible("/model", "Current model: `manual`")
 	assertVisible("/reasoning", "Fixed reasoning effort for this chat: `low`")
+	disabled := strings.Replace(edited, "[[projects]]\n", "[[projects]]\nchat_models_enabled = false\n", 1)
+	if err := os.WriteFile(path, []byte(disabled), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err = reloadConfig(path, "demo", engine)
+	if err != nil || result.ChatModelsUpdated != 0 {
+		t.Fatalf("disabled reload=%+v, %v", result, err)
+	}
+	assertVisible("/model", "Current model: `default-model`")
+	assertVisible("/reasoning", "Reasoning effort for this chat: following the workspace/project default")
+	assertVisible("/model selected", "Chat model and reasoning bindings are disabled")
+	assertVisible("/reasoning chat reset", "Chat model and reasoning bindings are disabled")
+	saved, err := os.ReadFile(path)
+	if err != nil || string(saved) != disabled {
+		t.Fatalf("disabled commands changed the saved preferences, read error: %v", err)
+	}
+	restarted = core.NewProjectStateStore(statePath)
+	if err := configureChatModels(restarted, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := restarted.ChatModelBinding("feishu:group-a"); ok {
+		t.Fatal("restart applied a disabled model binding")
+	}
+	if _, ok := restarted.GroupReasoningBinding("feishu:group-a"); ok {
+		t.Fatal("restart applied a disabled reasoning binding")
+	}
+	enabled := strings.Replace(disabled, "chat_models_enabled = false", "chat_models_enabled = true", 1)
+	if err := os.WriteFile(path, []byte(enabled), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err = reloadConfig(path, "demo", engine)
+	if err != nil || result.ChatModelsUpdated != 1 {
+		t.Fatalf("enabled reload=%+v, %v", result, err)
+	}
+	assertVisible("/model", "Current model: `manual`")
+	assertVisible("/reasoning", "Fixed reasoning effort for this chat: `low`")
 	if err := os.WriteFile(path, []byte(edited+"\n[broken"), 0600); err != nil {
 		t.Fatal(err)
 	}

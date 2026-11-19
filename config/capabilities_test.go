@@ -162,6 +162,19 @@ func TestCapabilityCatalog_CodexDesktopCLIIntent(t *testing.T) {
 
 func TestCapabilityCatalog_ChatModelsIntentAndContract(t *testing.T) {
 	catalog := CapabilityCatalog("v-test")
+	t.Run("project binding switch", func(t *testing.T) {
+		result := core.SearchConfigCatalog(catalog, "关闭聊天模型绑定")
+		for _, option := range result.Options {
+			if option.Path != "projects.chat_models_enabled" {
+				continue
+			}
+			if option.Type != "boolean" || option.Default != "true" || option.ApplyMode != core.ConfigApplyReload {
+				t.Fatalf("chat model switch contract = %#v", option)
+			}
+			return
+		}
+		t.Fatal("disabling chat model bindings did not find the project switch")
+	})
 	for _, query := range []string{"按群配置模型", "每个群不同模型", "私聊模型", "group model"} {
 		result := core.SearchConfigCatalog(catalog, query)
 		found := false
