@@ -157,15 +157,16 @@ func TestExecReasoningRejectsUnverifiableResume(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			home := t.TempDir()
 			path := reasoningRollout(t, home, "thread")
-			if kind == "missing at launch" {
+			switch kind {
+			case "missing at launch":
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
 				}
-			} else if kind == "wrong metadata" {
+			case "wrong metadata":
 				if err := os.WriteFile(path, []byte(`{"type":"session_meta","payload":{"id":"other"}}`+"\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
-			} else if kind == "backup suffix" {
+			case "backup suffix":
 				if err := os.Rename(path, path+".bak"); err != nil {
 					t.Fatal(err)
 				}
