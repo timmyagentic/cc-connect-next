@@ -85,11 +85,16 @@ func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messag
 				label = "file " + resource.Name
 			}
 			reason := ""
+			source := forwardedResourceSource{containerID: entry.ID, messageID: resource.MessageID}
 			switch {
 			case rc.contextTimeMs <= 0 || entry.Time.Before(start) || entry.Time.After(cutoff):
 				reason = "message outside authorized snapshot"
-			case entry.ID == "" || resource.MessageID != entry.ID || strings.TrimSpace(resource.Key) == "":
+			case entry.ID == "" || resource.MessageID == "" || strings.TrimSpace(resource.Key) == "":
 				reason = "invalid resource source"
+			case resource.MessageID != entry.ID && !rc.forwardedResourceSources[source]:
+				reason = "invalid resource source"
+			case p.isMessageRecalled(resource.MessageID):
+				reason = "source was recalled"
 			case resource.Kind != "image" && resource.Kind != "file":
 				reason = "unsupported resource kind"
 			case ctx.Err() != nil:
@@ -109,6 +114,10 @@ func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messag
 			data, err := downloader.downloadResourceBytes(ctx, resource.MessageID, resource.Key, resource.Kind)
 			if err != nil || len(data) == 0 {
 				contextMediaUnavailable(entry, label, "download failed or size limit")
+				continue
+			}
+			if resource.MessageID != entry.ID && p.isMessageRecalled(resource.MessageID) {
+				contextMediaUnavailable(entry, label, "source was recalled")
 				continue
 			}
 			if resource.Kind == "image" {

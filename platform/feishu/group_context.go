@@ -150,13 +150,19 @@ func (p *Platform) LoadMessageContext(ctx context.Context, target any, after tim
 	defer func() {
 		err = errors.Join(err, referenceErr)
 		finishGroupContext(&result, p.groupContext.maxMessages)
+		p.expandGroupContextForwards(ctx, rctx, result.Messages, forwardIDs)
+		rctx.forwardedResourceSources = make(map[forwardedResourceSource]bool)
 		for _, entry := range result.Messages {
 			if entry.Referenced && entry.Time.Before(rctx.mediaStart) {
 				rctx.mediaStart = entry.Time
 			}
+			if forwardIDs[entry.ID] {
+				for _, resource := range entry.Resources {
+					rctx.forwardedResourceSources[forwardedResourceSource{containerID: entry.ID, messageID: resource.MessageID}] = true
+				}
+			}
 		}
 		result.MediaTarget = rctx
-		p.expandGroupContextForwards(ctx, rctx, result.Messages, forwardIDs)
 	}()
 	cutoff := time.UnixMilli(rctx.contextTimeMs)
 	if rctx.contextTimeMs <= 0 {

@@ -76,17 +76,20 @@ func TestGroupContextCommonTypesParseWithoutIO(t *testing.T) {
 	}
 }
 
-func TestGroupContextForwardRootResourcesAndImageBinaryPayload(t *testing.T) {
+func TestGroupContextForwardDownloadsAttachmentsByChildMessageID(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	root := contextTypedMessage("outer", "merge_forward", `{}`, now.Add(-time.Minute))
 	text := contextTypedMessage("child-text", "text", `{"text":"original decision"}`, now.Add(-time.Hour))
-	image := contextTypedMessage("child-image", "image", `{"image_key":"one"}`, now.Add(-time.Hour))
+	image := contextTypedMessage("child-image", "post", `{"content":[[{"tag":"img","image_key":"one"}]]}`, now.Add(-time.Hour))
 	nested := contextTypedMessage("nested", "merge_forward", `{}`, now.Add(-time.Hour))
 	second := contextTypedMessage("nested-image", "image", `{"image_key":"two"}`, now.Add(-time.Hour))
 	second["upper_message_id"] = "nested"
+	file := contextTypedMessage("nested-file", "file", `{"file_key":"report","file_name":"report.pdf"}`, now.Add(-time.Hour))
+	file["upper_message_id"] = "nested"
 	deleted := contextTypedMessage("removed", "image", `{"image_key":"never"}`, now)
 	deleted["deleted"] = true
 	png := []byte("\x89PNG\r\n\x1a\nbinary-image-payload")
+	pdf := []byte("%PDF-1.7\nreport")
 	var downloads, gets int
 	p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -97,16 +100,29 @@ func TestGroupContextForwardRootResourcesAndImageBinaryPayload(t *testing.T) {
 			if r.URL.Query().Get("with_sender_name") != "true" {
 				t.Error("forward source did not request supplied names")
 			}
-			writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{root, text, image, nested, second, deleted}}})
-		default:
+			writeJSON(t, w, map[string]any{"code": 0, "data": map[string]any{"items": []any{root, text, image, nested, second, file, deleted}}})
+		case "/open-apis/im/v1/messages/child-image/resources/one", "/open-apis/im/v1/messages/nested-image/resources/two":
 			downloads++
 			if r.URL.Query().Get("type") != "image" {
 				t.Error("wrong resource type")
 			}
 			w.Header().Set("Content-Type", "image/png")
 			_, _ = w.Write(png)
+		case "/open-apis/im/v1/messages/nested-file/resources/report":
+			downloads++
+			if r.URL.Query().Get("type") != "file" {
+				t.Error("wrong resource type")
+			}
+			w.Header().Set("Content-Type", "application/pdf")
+			_, _ = w.Write(pdf)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			writeJSON(t, w, map[string]any{"code": 234003, "msg": "File not in msg."})
 		}
-	}, "/open-apis/im/v1/messages/outer", "/open-apis/im/v1/messages/outer/resources/one", "/open-apis/im/v1/messages/outer/resources/two")
+	}, "/open-apis/im/v1/messages/outer",
+		"/open-apis/im/v1/messages/child-image/resources/one", "/open-apis/im/v1/messages/nested-image/resources/two",
+		"/open-apis/im/v1/messages/nested-file/resources/report", "/open-apis/im/v1/messages/outer/resources/one",
+		"/open-apis/im/v1/messages/outer/resources/two", "/open-apis/im/v1/messages/outer/resources/report")
 	target := contextMediaTarget(now)
 	loaded, err := p.LoadMessageContext(context.Background(), target, time.Time{})
 	if err != nil || loaded.Incomplete || len(loaded.Messages) != 1 || downloads != 0 || gets != 1 {
@@ -118,11 +134,11 @@ func TestGroupContextForwardRootResourcesAndImageBinaryPayload(t *testing.T) {
 			t.Fatalf("missing %q: %s", want, entry.Text)
 		}
 	}
-	if strings.Contains(entry.Text, "removed") || entry.Incomplete || len(entry.Resources) != 2 {
+	if strings.Contains(entry.Text, "removed") || entry.Incomplete || len(entry.Resources) != 3 {
 		t.Fatalf("wrong forward tree: %+v", entry)
 	}
-	got, err := p.HydrateMessageContext(context.Background(), target, loaded.Messages)
-	if err != nil || len(got) != 1 || got[0].ID != "outer" || got[0].Incomplete || len(got[0].Images) != 2 || downloads != 2 {
+	got, err := p.HydrateMessageContext(context.Background(), loaded.MediaTarget, loaded.Messages)
+	if err != nil || len(got) != 1 || got[0].ID != "outer" || got[0].Incomplete || len(got[0].Images) != 2 || len(got[0].Files) != 1 || downloads != 3 {
 		t.Fatalf("hydrate = %+v %v downloads=%d", got, err, downloads)
 	}
 	for _, img := range got[0].Images {
@@ -130,8 +146,25 @@ func TestGroupContextForwardRootResourcesAndImageBinaryPayload(t *testing.T) {
 			t.Fatalf("invalid image payload: %+v", img)
 		}
 	}
-	if len(loaded.Messages[0].Images) != 0 {
+	attachment := got[0].Files[0]
+	if !bytes.Equal(attachment.Data, pdf) || attachment.MessageID != "nested-file" || attachment.FileName != "report.pdf" {
+		t.Fatalf("wrong forwarded file: %+v", attachment)
+	}
+	if len(loaded.Messages[0].Images)+len(loaded.Messages[0].Files) != 0 {
 		t.Fatal("hydration mutated its input")
+	}
+
+	unverified := entry
+	unverified.ID = "different-forward"
+	out, err := p.HydrateMessageContext(context.Background(), loaded.MediaTarget, []core.ContextMessage{unverified})
+	if err != nil || !out[0].Incomplete || len(out[0].Images)+len(out[0].Files) != 0 || downloads != 3 {
+		t.Fatalf("downloaded resources outside their verified forward: %+v %v", out, err)
+	}
+
+	p.markMessageRecalled("nested-image")
+	out, err = p.HydrateMessageContext(context.Background(), loaded.MediaTarget, loaded.Messages)
+	if err != nil || !out[0].Incomplete || len(out[0].Images) != 1 || len(out[0].Files) != 1 || downloads != 5 {
+		t.Fatalf("a recalled child should not prevent other downloads: %+v %v", out, err)
 	}
 }
 
