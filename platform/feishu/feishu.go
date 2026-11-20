@@ -271,6 +271,8 @@ type replyContext struct {
 	bootstrapQueued bool
 	bootstrapWait   <-chan struct{}
 	bootstrapDone   chan struct{}
+
+	forwardedResourceSources map[forwardedResourceSource]bool // verified links from this history read
 }
 
 type cardActionTargetSnapshot struct {

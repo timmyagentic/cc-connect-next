@@ -18,6 +18,13 @@ const (
 	groupContextForwardTimeout  = 3 * time.Second
 )
 
+// A forwarded attachment is authorized by its container in the current chat,
+// but the resource API addresses it by the child that owns the attachment.
+type forwardedResourceSource struct {
+	containerID string
+	messageID   string
+}
+
 func (p *Platform) expandGroupContextForwards(ctx context.Context, target replyContext, entries []core.ContextMessage, forwardIDs map[string]bool) {
 	ctx, cancel := context.WithTimeout(ctx, groupContextForwardTimeout)
 	defer cancel()
@@ -137,7 +144,7 @@ func (p *Platform) appendGroupContextForward(ctx context.Context, entry *core.Co
 		if item.Body != nil {
 			raw = stringValue(item.Body.Content)
 		}
-		child := parseGroupContextContent(stringValue(item.MsgType), raw, entry.ID)
+		child := parseGroupContextContent(stringValue(item.MsgType), raw, id)
 		child.Text = replaceContextMentions(child.Text, item.Mentions)
 		offset := contextImageCount(entry.Resources)
 		var replacements []string
