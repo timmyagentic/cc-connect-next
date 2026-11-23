@@ -332,20 +332,7 @@ export function applyLanguage(value) {
         String(button.dataset.language === language),
       ),
     );
-  updateDemoProgress();
   return language;
-}
-function updateDemoProgress() {
-  const progress = document.querySelector("#demo-progress");
-  if (!progress) return;
-  const tabs = [...document.querySelectorAll("[data-demo]")];
-  const index = tabs.findIndex(tab => tab.getAttribute("aria-selected") === "true");
-  const step = tabs[index];
-  if (!step) return;
-  const name = step.querySelector("[data-i18n]").textContent;
-  progress.textContent = (index + 1) + " / " + tabs.length + " · " + name;
-  const labels = language === "en" ? ["Add a follow-up", "See the result", "Replay"] : ["补充一句要求", "查看最终回复", "重新演示"];
-  document.querySelector("#demo-next").textContent = labels[index];
 }
 function initialize() {
   let saved;
@@ -361,8 +348,14 @@ function initialize() {
       } catch {}
     }),
   );
+  document.addEventListener("product-language", event => {
+    const next = event.detail === "en" ? "en" : "zh-CN";
+    applyLanguage(next);
+    try { localStorage.setItem("cc-connect-next-language", next); } catch {}
+  });
   const menu = document.querySelector(".menu-toggle");
   const nav = document.getElementById("navigation");
+  if (menu && nav) {
   const close = () => {
     menu.setAttribute("aria-expanded", "false");
     nav.classList.remove("is-open");
@@ -382,40 +375,7 @@ function initialize() {
       menu.focus();
     }
   });
-  const tabs = [...document.querySelectorAll("[data-demo]")];
-  const select = (tab, focus = false) => {
-    tabs.forEach((item) => {
-      item.setAttribute("aria-selected", String(item === tab));
-      item.tabIndex = item === tab ? 0 : -1;
-      document.getElementById(item.getAttribute("aria-controls")).hidden =
-        item !== tab;
-    });
-    updateDemoProgress();
-    if (focus) tab.focus();
-  };
-  const demoNavigation = document.querySelector(".demo-navigation");
-  if (demoNavigation && tabs.length) {
-    demoNavigation.hidden = false;
-    document.querySelector("#demo-next").addEventListener("click", () => {
-      const index = tabs.findIndex(item => item.getAttribute("aria-selected") === "true");
-      select(tabs[(index + 1) % tabs.length]);
-    });
   }
-  tabs.forEach((tab, index) => {
-    tab.addEventListener("click", () => select(tab));
-    tab.addEventListener("keydown", (event) => {
-      let next;
-      if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
-      if (event.key === "ArrowLeft")
-        next = (index + tabs.length - 1) % tabs.length;
-      if (event.key === "Home") next = 0;
-      if (event.key === "End") next = tabs.length - 1;
-      if (next !== undefined) {
-        event.preventDefault();
-        select(tabs[next], true);
-      }
-    });
-  });
   document.querySelectorAll("[data-copy]").forEach((button) =>
     button.addEventListener("click", async () => {
       const target = document.getElementById(button.dataset.copy);

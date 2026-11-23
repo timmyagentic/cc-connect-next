@@ -26,125 +26,16 @@
 <meta name="twitter:image:alt" content="CC Connect Next — 在聊天里，把工作继续做完。">
 <link rel="stylesheet" href="/viewport.css">
 <script src="/viewport.js" defer></script>
+<link rel="stylesheet" id="react-aria-pressable-style" href="/product-ui/product.css">
+<script type="module" src="/product-ui/product.js" integrity="sha384-242+3OYuYs9IdmG38Yu+ZvdwRT52FHZNAeRoZY3O7meJH1CrVysrm/GOaa00hiN8"></script>
 </head>
-<body data-page="Home" class="brand-site brand-cc viewport-home" data-viewport-page>
+<body data-page="Home" class="brand-site brand-cc viewport-home" data-viewport-page data-product-edition="cc">
 <a class="skip" href="#main">
 <span data-i18n="skip">跳到正文</span>
 </a>
-<header class="site-header">
-<div class="container header-inner">
-<div class="studio-identity"><a class="studio-home" href="https://timmyagentic.si/">timmyagentic</a><a class="brand" href="/">
-<img class="icon" src="/icons/terminal-2.svg" width="24" height="24" alt="" aria-hidden="true">
-<span>cc connect <strong>next</strong>
-</span>
-</a></div>
-<nav id="navigation" aria-label="Navigation">
-<a data-i18n="navHow" href="/#how">如何使用</a>
-<a data-i18n="navDocs" href="/docs">使用指南</a>
-<a href="https://github.com/timmyagentic/cc-connect-next">GitHub</a>
-</nav>
-<div class="languages" role="group" aria-label="Language">
-<button data-language="zh-CN" aria-pressed="true" aria-label="简体中文">中</button>
-<button data-language="en" aria-pressed="false" aria-label="English">EN</button>
-</div>
-<button class="menu-toggle" aria-label="Navigation" aria-expanded="false" aria-controls="navigation">
-<img class="icon" src="/icons/menu-2.svg" width="24" height="24" alt="" aria-hidden="true">
-</button>
-</div>
-</header>
+<div class="pi-surface" data-product-surface="header"><header class="pi-header pi-scoped"><div class="pi-container pi-header-row"><div class="pi-identity"><a class="pi-publisher" href="https://timmyagentic.si/">timmyagentic</a><span aria-hidden="true">/</span><a class="pi-brand" href="/">CC Connect Next</a></div><nav class="pi-desktop-nav" aria-label="主导航"><a href="/#how">如何使用</a><a href="/docs">使用指南</a><a href="https://github.com/timmyagentic/cc-connect-next">GitHub</a></nav><div class="pi-nav-end"><button data-slot="button" class="button button--md button--primary pi-lang" data-rac="" type="button" tabindex="0" data-react-aria-pressable="true" aria-label="Switch to English" id="react-aria-_product-header-R_7_">EN</button><button data-slot="dropdown-trigger" class="dropdown__trigger pi-mobile-toggle" data-rac="" type="button" tabindex="0" aria-haspopup="true" aria-expanded="false" id="react-aria-_product-header-R_b_" data-react-aria-pressable="true" aria-label="打开导航"><svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-menu" aria-hidden="true"><path d="M4 5h16"></path><path d="M4 12h16"></path><path d="M4 19h16"></path></svg></button></div></div></header></div>
 <main id="main">
-<section class="hero container" aria-labelledby="hero-title">
-<div class="hero-intro">
-<h1 id="hero-title">
-<span data-i18n="heroFirst">在聊天里用</span>
-<br>
-<span data-i18n="heroSecond">本机的编程 Agent。</span>
-</h1>
-<p data-i18n="heroBody" class="hero-description">从飞书、Telegram 或 Slack 发起任务，查看回复，给进行中的工作补一句要求。代码留在自己的电脑上。</p>
-</div>
-<section class="demo-section" aria-labelledby="demo-heading">
-<div class="demo-container">
-<h2 data-i18n="demoHeading" id="demo-heading" class="sr-only">从一句话，到继续推进。</h2>
-<div class="demo-tabs" role="tablist" aria-label="Demo steps">
-<button id="tab-start" data-demo="start" role="tab" aria-controls="panel-start" aria-selected="true" tabindex="0">
-<span class="demo-step-no" aria-hidden="true">01</span><span data-i18n="demoTabstart">发起任务</span>
-</button>
-<button id="tab-steer" data-demo="steer" role="tab" aria-controls="panel-steer" aria-selected="false" tabindex="-1">
-<span class="demo-step-no" aria-hidden="true">02</span><span data-i18n="demoTabsteer">中途补充</span>
-</button>
-<button id="tab-result" data-demo="result" role="tab" aria-controls="panel-result" aria-selected="false" tabindex="-1">
-<span class="demo-step-no" aria-hidden="true">03</span><span data-i18n="demoTabresult">查看结果</span>
-</button>
-</div>
-<div class="demo-window">
-<div class="demo-topbar">
-<img class="icon" src="/icons/message-circle.svg" width="24" height="24" alt="" aria-hidden="true">
-<span>cc connect next</span>
-<span data-i18n="demoLabel" class="demo-label">交互示例 · 不连接你的机器</span>
-</div>
-<div id="panel-start" role="tabpanel" aria-labelledby="tab-start" class="demo-panel" tabindex="0" >
-<div class="message user-message">
-<span data-i18n="userLabelstart" class="message-label">你</span>
-<p data-i18n="requeststart">看看登录页的表单报错，先定位原因。</p>
-</div>
-<div class="message agent-message">
-<span data-i18n="agentLabelstart" class="message-label">你的本地 Agent</span>
-<p data-i18n="startResponse">已收到。接下来读取表单代码，检查校验和错误提示。</p>
-<p data-i18n="startStatus" class="message-status">处理中 · 在本地工作区执行</p>
-</div>
-</div>
-<div id="panel-steer" role="tabpanel" aria-labelledby="tab-steer" class="demo-panel" tabindex="0" hidden>
-<div class="message user-message">
-<span data-i18n="userLabelsteer" class="message-label">你</span>
-<p data-i18n="requeststeer">看看登录页的表单报错，先定位原因。</p>
-</div>
-<div class="message user-message">
-<p data-i18n="directionsteer">补充：保留现有布局，只修输入校验。</p>
-</div>
-<div class="message agent-message">
-<span data-i18n="agentLabelsteer" class="message-label">你的本地 Agent</span>
-<p data-i18n="steerResponse">已把补充要求并入当前任务，保留布局，只调整校验逻辑。</p>
-<p data-i18n="steerStatus" class="message-status">示例：Codex 原生 steer · 其他后端可能排队</p>
-</div>
-</div>
-<div id="panel-result" role="tabpanel" aria-labelledby="tab-result" class="demo-panel" tabindex="0" hidden>
-<div class="message user-message">
-<span data-i18n="userLabelresult" class="message-label">你</span>
-<p data-i18n="requestresult">看看登录页的表单报错，先定位原因。</p>
-</div>
-<div class="message user-message">
-<p data-i18n="directionresult">补充：保留现有布局，只修输入校验。</p>
-</div>
-<div class="message agent-message">
-<span data-i18n="agentLabelresult" class="message-label">你的本地 Agent</span>
-<p data-i18n="resultResponse">已修复：空输入会显示提示，有效输入继续提交。原有布局保持不变。</p>
-<p data-i18n="resultStatus" class="message-status">示例结果 · 可继续追问、检查差异或安排下一步</p>
-</div>
-</div>
-</div>
-<p data-i18n="demoFoot" class="demo-foot">示例展示消息流转；实际能力取决于所选 Agent、平台和配置。</p>
-<div class="demo-navigation" hidden>
-  <output id="demo-progress" aria-live="polite"></output>
-  <button id="demo-next" type="button"></button>
-</div>
-</div>
-</section>
-<div class="hero-install">
-<div class="install-command">
-<code id="install-command">npm install -g cc-connect-next</code>
-<button data-copy="install-command" aria-label="Copy install command">
-<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
-<span data-copy-label>
-<span data-i18n="copy">复制</span>
-</span>
-</button>
-</div>
-<div class="hero-links">
-<a data-i18n="start" class="text-link" href="/docs">安装与接入指南</a>
-<span data-i18n="platformNote">macOS · Linux · Windows · 开源</span>
-</div>
-</div>
-</section>
+<div class="pi-surface" data-product-surface="hero"><section class="pi-hero cc-hero" aria-labelledby="hero-title"><div class="pi-container pi-split"><div class="pi-copy"><span class="chip chip--default chip--sm chip--secondary pi-mark" data-slot="chip"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-terminal" aria-hidden="true"><path d="M12 19h8"></path><path d="m4 17 6-6-6-6"></path></svg><span class="chip__label" data-slot="chip-label">CC Connect Next</span></span><h1 id="hero-title">在聊天里用<br/>本机的编程 Agent。</h1><p class="pi-lead">从飞书、Telegram 或 Slack 发起任务，查看回复，给进行中的工作补一句要求。代码留在自己的电脑上。</p><div class="pi-actions"><a href="/docs#agent-install" class="pi-action pi:inline-flex pi:items-center pi:justify-center pi:gap-2 pi-primary">打开安装指南<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open" aria-hidden="true"><path d="M12 5v16"></path><path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z"></path></svg></a></div><div class="pi-command"><code tabindex="0">npm install -g cc-connect-next</code><button data-slot="button" class="button button--md button--primary pi-icon-button" data-rac="" type="button" tabindex="0" data-react-aria-pressable="true" aria-label="复制安装命令" id="react-aria-_product-hero-R_1a5_"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-copy" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button></div></div><article class="cc-chat"><div class="cc-chat-bar"><span><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-messages-square" aria-hidden="true"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"></path></svg> <!-- -->本地 Agent 对话</span><small>交互示例 · 不连接你的机器</small></div><div><template><div class="pi-tabs-shell"></div></template><div data-slot="tabs" class="tabs pi-tabs" data-rac="" data-orientation="horizontal"><div class="pi-tabs-shell"><div data-slot="tabs-list" class="tabs__list pi-tab-list" data-rac="" data-collection="react-aria-_product-hero-R_d9_" id="react-aria-_product-hero-R_d9H1_" aria-label="选择对话阶段" role="tablist" aria-orientation="horizontal" data-orientation="horizontal"><div data-slot="tabs-tab" class="tabs__tab pi-tab" data-rac="" tabindex="-1" data-collection="react-aria-_product-hero-R_d9_" data-key="start" data-react-aria-pressable="true" id="react-aria-_product-hero-R_d9H1_-tab-start" aria-selected="true" aria-controls="react-aria-_product-hero-R_d9H1_-tabpanel-start" role="tab" data-selected="true"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-send" aria-hidden="true"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"></path><path d="m21.854 2.147-10.94 10.939"></path></svg>发起任务<div data-animation-ready="false" data-slot="tabs-indicator" class="tabs__indicator pi-tab-indicator" data-rac=""></div></div><div data-slot="tabs-tab" class="tabs__tab pi-tab" data-rac="" tabindex="-1" data-collection="react-aria-_product-hero-R_d9_" data-key="steer" data-react-aria-pressable="true" id="react-aria-_product-hero-R_d9H1_-tab-steer" aria-selected="false" role="tab"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-corner-down-right" aria-hidden="true"><path d="m15 10 5 5-5 5"></path><path d="M4 4v7a4 4 0 0 0 4 4h12"></path></svg>中途补充</div><div data-slot="tabs-tab" class="tabs__tab pi-tab" data-rac="" tabindex="-1" data-collection="react-aria-_product-hero-R_d9_" data-key="result" data-react-aria-pressable="true" id="react-aria-_product-hero-R_d9H1_-tab-result" aria-selected="false" role="tab"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check-check" aria-hidden="true"><path d="M18 6 7 17l-5-5"></path><path d="m22 10-7.5 7.5L13 16"></path></svg>查看结果</div></div></div><div data-product-panel="start" data-slot="tabs-panel" id="react-aria-_product-hero-R_d9H1_-tabpanel-start" aria-labelledby="react-aria-_product-hero-R_d9H1_-tab-start" tabindex="0" role="tabpanel" class="tabs__panel pi-tab-panel" data-rac=""><div class="cc-messages"><div class="cc-user"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-user-round lucide-user-2" aria-hidden="true"><circle cx="12" cy="8" r="5"></circle><path d="M20 21a8 8 0 0 0-16 0"></path></svg><div><strong>你</strong><p>看看登录页的表单报错，先定位原因。</p></div></div><div class="cc-agent"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-terminal" aria-hidden="true"><path d="M12 19h8"></path><path d="m4 17 6-6-6-6"></path></svg><div><strong>你的本地 Agent</strong><p>已收到。接下来读取表单代码，检查校验和错误提示。</p><small>处理中 · 在本地工作区执行</small></div></div></div></div></div></div><div class="cc-chat-controls"><output aria-live="polite">1<!-- --> / 3 ·<!-- --> <!-- -->发起任务</output><button data-slot="button" class="button button--md button--primary cc-advance" data-rac="" type="button" tabindex="0" data-react-aria-pressable="true" id="react-aria-_product-hero-R_5p_">补充一句要求</button></div></article></div></section><section aria-label="Notifications alt+T" tabindex="-1" aria-live="polite" aria-relevant="additions text" aria-atomic="false" data-react-aria-top-layer="true"></section></div>
 <section id="how" class="section container">
 <div class="section-intro">
 <p data-i18n="howEyebrow" class="eyebrow">熟悉的工具，新的连接方式</p>
@@ -261,22 +152,7 @@
 <h2 data-i18n="faqTitle">还有几个常见问题。</h2>
 </div>
 <div class="faq-list">
-<details>
-<summary data-i18n="faqQlocal">官网会连接我的电脑吗？</summary>
-<p data-i18n="faqAlocal">不会。官网提供介绍、交互示例与安装说明。实际连接由你在自己机器上安装和配置的 CC Connect Next 完成。</p>
-</details>
-<details>
-<summary data-i18n="faqQpublic">需要公网 IP 吗？</summary>
-<p data-i18n="faqApublic">飞书使用 WebSocket 长连接，不需要公网 IP、域名或证书。其他平台的接入要求见对应指南。</p>
-</details>
-<details>
-<summary data-i18n="faqQprivacy">数据会发往哪里？</summary>
-<p data-i18n="faqAprivacy">执行环境在本地；消息经过所选聊天平台，Agent 请求会发往其配置的服务提供方。本地执行并不代表完全离线。</p>
-</details>
-<details>
-<summary data-i18n="faqQcost">CC Connect Next 免费吗？</summary>
-<p data-i18n="faqAcost">代码采用 MIT 许可。Agent 订阅、模型 API 与聊天平台可能产生各自的费用。</p>
-</details>
+<div class="pi-surface" data-product-surface="faq"><div data-slot="accordion" class="accordion pi-faq" data-rac=""><div data-slot="accordion-item" class="accordion__item pi-faq-item" data-rac=""><h3 data-slot="accordion-heading" class="accordion__heading"><button id="react-aria-_product-faq-R_1H1_" data-slot="accordion-trigger" class="accordion__trigger pi-faq-trigger" data-rac="" type="button" tabindex="0" data-react-aria-pressable="true" aria-expanded="false" aria-controls="react-aria-_product-faq-R_1H2_" slot="trigger">官网会连接我的电脑吗？<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></h3><div data-slot="accordion-panel" class="accordion__panel pi-faq-answer" data-rac="" id="react-aria-_product-faq-R_1H2_" role="group" aria-labelledby="react-aria-_product-faq-R_1H1_" aria-hidden="true" hidden=""><div class="accordion__body" data-slot="accordion-body"><div class="accordion__body-inner"><div><p data-i18n="faqAlocal">不会。官网提供介绍、交互示例与安装说明。实际连接由你在自己机器上安装和配置的 CC Connect Next 完成。</p></div></div></div></div></div><div data-slot="accordion-item" class="accordion__item pi-faq-item" data-rac=""><h3 data-slot="accordion-heading" class="accordion__heading"><button id="react-aria-_product-faq-R_2H1_" data-slot="accordion-trigger" class="accordion__trigger pi-faq-trigger" data-rac="" type="button" tabindex="0" data-react-aria-pressable="true" aria-expanded="false" aria-controls="react-aria-_product-faq-R_2H2_" slot="trigger">需要公网 IP 吗？<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></h3><div data-slot="accordion-panel" class="accordion__panel pi-faq-answer" data-rac="" id="react-aria-_product-faq-R_2H2_" role="group" aria-labelledby="react-aria-_product-faq-R_2H1_" aria-hidden="true" hidden=""><div class="accordion__body" data-slot="accordion-body"><div class="accordion__body-inner"><div><p data-i18n="faqApublic">飞书使用 WebSocket 长连接，不需要公网 IP、域名或证书。其他平台的接入要求见对应指南。</p></div></div></div></div></div><div data-slot="accordion-item" class="accordion__item pi-faq-item" data-rac=""><h3 data-slot="accordion-heading" class="accordion__heading"><button id="react-aria-_product-faq-R_3H1_" data-slot="accordion-trigger" class="accordion__trigger pi-faq-trigger" data-rac="" type="button" tabindex="0" data-react-aria-pressable="true" aria-expanded="false" aria-controls="react-aria-_product-faq-R_3H2_" slot="trigger">数据会发往哪里？<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></h3><div data-slot="accordion-panel" class="accordion__panel pi-faq-answer" data-rac="" id="react-aria-_product-faq-R_3H2_" role="group" aria-labelledby="react-aria-_product-faq-R_3H1_" aria-hidden="true" hidden=""><div class="accordion__body" data-slot="accordion-body"><div class="accordion__body-inner"><div><p data-i18n="faqAprivacy">执行环境在本地；消息经过所选聊天平台，Agent 请求会发往其配置的服务提供方。本地执行并不代表完全离线。</p></div></div></div></div></div><div data-slot="accordion-item" class="accordion__item pi-faq-item" data-rac=""><h3 data-slot="accordion-heading" class="accordion__heading"><button id="react-aria-_product-faq-R_4H1_" data-slot="accordion-trigger" class="accordion__trigger pi-faq-trigger" data-rac="" type="button" tabindex="0" data-react-aria-pressable="true" aria-expanded="false" aria-controls="react-aria-_product-faq-R_4H2_" slot="trigger">CC Connect Next 免费吗？<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chevron-down" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button></h3><div data-slot="accordion-panel" class="accordion__panel pi-faq-answer" data-rac="" id="react-aria-_product-faq-R_4H2_" role="group" aria-labelledby="react-aria-_product-faq-R_4H1_" aria-hidden="true" hidden=""><div class="accordion__body" data-slot="accordion-body"><div class="accordion__body-inner"><div><p data-i18n="faqAcost">代码采用 MIT 许可。Agent 订阅、模型 API 与聊天平台可能产生各自的费用。</p></div></div></div></div></div></div></div>
 </div>
 </section>
 <section class="section final-cta">

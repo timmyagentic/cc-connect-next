@@ -40,12 +40,13 @@ test('the demo is local and migration starts with inspection', () => {
   assert.doesNotMatch(readFileSync(resolve(root,'app.js'),'utf8'), /fetch\(|WebSocket\(/);
 });
 
-test('the guided demo keeps the next-step control in the conversation and all steps keyboard-addressable', () => {
-  const page = readFileSync(resolve(root, 'index.html'), 'utf8');
-  const demo = page.slice(page.indexOf('<div class="demo-container">'), page.indexOf('<div class="hero-install">'));
-  const steps = [...demo.matchAll(/data-demo="([^"]+)" role="tab" aria-controls="([^"]+)"/g)];
-  assert.deepEqual(steps.map(match => match[1]), ['start', 'steer', 'result']);
-  for (const [, , panel] of steps) assert.ok(demo.includes('id="' + panel + '"'));
-  assert.ok(demo.includes('id="demo-progress" aria-live="polite"'));
-  assert.match(demo, /id="demo-next" type="button"><\/button>\s*<\/div>\s*<\/div>\s*<\/section>/);
+test('the staged conversation is rendered with a tab for each local step and a keyboard-accessible next action', () => {
+  const page = readFileSync(resolve(root, 'index.html'),'utf8');
+  for (const key of ['start','steer','result']) assert.ok(page.includes('data-key="' + key + '"'));
+  assert.ok(page.includes('role="tablist"'));
+  assert.ok(page.includes('role="tabpanel"'));
+  assert.ok(page.includes('<output aria-live="polite">'));
+  assert.ok(page.includes('class="button button--primary cc-advance"') || /<button[^>]*class="[^"]*cc-advance[^"]*"[^>]*>/.test(page));
+  const source = readFileSync(resolve(root,'../interface/Page.jsx'),'utf8');
+  assert.doesNotMatch(source,/fetch\(|WebSocket\(/);
 });
