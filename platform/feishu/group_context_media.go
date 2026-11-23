@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -112,6 +113,13 @@ func (p *Platform) HydrateMessageContext(ctx context.Context, target any, messag
 				downloader.resourceMaxBytes = p.resourceMaxBytes
 			}
 			data, err := downloader.downloadResourceBytes(ctx, resource.MessageID, resource.Key, resource.Kind)
+			// Some forwarded resources are addressed through the outer message.
+			// The child and its container have already passed the source checks above.
+			if errors.Is(err, errResourceNotInMessage) && resource.MessageID != entry.ID &&
+				ctx.Err() == nil && budget.remaining > 0 && !p.isMessageRecalled(entry.ID) && !p.isMessageRecalled(resource.MessageID) {
+				downloader.resourceMaxBytes = min(downloader.resourceMaxBytes, budget.remaining)
+				data, err = downloader.downloadResourceBytes(ctx, entry.ID, resource.Key, resource.Kind)
+			}
 			if err != nil || len(data) == 0 {
 				contextMediaUnavailable(entry, label, "download failed or size limit")
 				continue

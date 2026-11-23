@@ -168,6 +168,65 @@ func TestGroupContextForwardDownloadsAttachmentsByChildMessageID(t *testing.T) {
 	}
 }
 
+func TestGroupContextForwardFallbackOnlyForResourceNotInChild(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	for _, tc := range []struct {
+		name, kind, raw, payload string
+		status, code             int
+		wantFallback             bool
+	}{
+		{"image with HTTP error", "image", `{"image_key":"key"}`, "\x89PNG\r\n\x1a\nimage", http.StatusBadRequest, 234003, true},
+		{"file with JSON error", "file", `{"file_key":"key","file_name":"report.pdf"}`, "%PDF-1.7\nreport", http.StatusOK, 234003, true},
+		{"unrelated error", "image", `{"image_key":"key"}`, "", http.StatusForbidden, 234002, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const childPath = "/open-apis/im/v1/messages/child/resources/key"
+			const outerPath = "/open-apis/im/v1/messages/outer/resources/key"
+			var childRequested atomic.Bool
+			p, calls := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("type") != tc.kind {
+					t.Error("wrong resource type")
+				}
+				if r.URL.Path == childPath {
+					childRequested.Store(true)
+					w.WriteHeader(tc.status)
+					writeJSON(t, w, map[string]any{"code": tc.code, "msg": "attachment error"})
+					return
+				}
+				if !tc.wantFallback || !childRequested.Load() {
+					t.Error("unexpected fallback")
+				}
+				w.Header().Set("Content-Type", http.DetectContentType([]byte(tc.payload)))
+				_, _ = w.Write([]byte(tc.payload))
+			}, childPath, outerPath)
+			entry := parseGroupContextContent(tc.kind, tc.raw, "child")
+			entry.ID, entry.Time = "outer", now.Add(-time.Minute)
+			target := contextMediaTarget(now)
+			target.forwardedResourceSources = map[forwardedResourceSource]bool{{containerID: "outer", messageID: "child"}: true}
+			got, err := p.HydrateMessageContext(context.Background(), target, []core.ContextMessage{entry})
+			if err != nil || len(got) != 1 || got[0].Incomplete == tc.wantFallback {
+				t.Fatalf("hydrate = %+v %v", got, err)
+			}
+			result := got[0]
+			if !tc.wantFallback {
+				if calls.Load() != 1 || len(result.Images)+len(result.Files) != 0 {
+					t.Fatalf("unrelated error retried against outer message: %+v", result)
+				}
+				return
+			}
+			if calls.Load() != 2 {
+				t.Fatalf("resource requests = %d, want child then outer", calls.Load())
+			}
+			if tc.kind == "image" && (len(result.Images) != 1 || string(result.Images[0].Data) != tc.payload) {
+				t.Fatalf("image fallback lost payload: %+v", result)
+			}
+			if tc.kind == "file" && (len(result.Files) != 1 || string(result.Files[0].Data) != tc.payload || result.Files[0].MessageID != "child") {
+				t.Fatalf("file fallback lost payload or child provenance: %+v", result)
+			}
+		})
+	}
+}
+
 func TestGroupContextContentFailureIsPerEntryAndStickerIsExpected(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	p, _ := contextAPIPlatform(t, func(w http.ResponseWriter, r *http.Request) {

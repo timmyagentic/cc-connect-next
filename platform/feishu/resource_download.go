@@ -21,7 +21,10 @@ const (
 	resourceDownloadTimeout        = 2 * time.Minute
 )
 
-var errResourceRangeUnsupported = errors.New("resource server does not support Range")
+var (
+	errResourceRangeUnsupported = errors.New("resource server does not support Range")
+	errResourceNotInMessage     = errors.New("resource API code=234003")
+)
 
 type resourceChunk struct {
 	apiJSON bool // JSON without attachment disposition; inspect assembled body too
@@ -126,14 +129,19 @@ func requestResourceChunk(ctx context.Context, client *http.Client, endpoint, to
 		return resourceChunk{}, ctx.Err() == nil && isTransientError(err), err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if ranged && expectedTotal == 0 && (resp.StatusCode == 400 || resp.StatusCode == 405 || resp.StatusCode == 416 || resp.StatusCode == 501) {
-		return resourceChunk{}, false, errResourceRangeUnsupported
-	}
-	if resp.StatusCode == 429 || resp.StatusCode >= 500 {
-		return resourceChunk{}, true, fmt.Errorf("resource API status=%d", resp.StatusCode)
-	}
+	apiJSON := resp.Header.Get("Content-Disposition") == "" && strings.EqualFold(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]), "application/json")
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
-		return resourceChunk{}, false, fmt.Errorf("resource API status=%d", resp.StatusCode)
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != 429 && apiJSON {
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
+			if readErr == nil && errors.Is(resourceEnvelopeError(body), errResourceNotInMessage) {
+				return resourceChunk{}, false, errResourceNotInMessage
+			}
+		}
+		if ranged && expectedTotal == 0 && (resp.StatusCode == 400 || resp.StatusCode == 405 || resp.StatusCode == 416 || resp.StatusCode == 501) {
+			return resourceChunk{}, false, errResourceRangeUnsupported
+		}
+		retry := resp.StatusCode == 429 || resp.StatusCode >= 500
+		return resourceChunk{}, retry, fmt.Errorf("resource API status=%d", resp.StatusCode)
 	}
 	limit := maxBytes
 	total := int64(0)
@@ -178,7 +186,6 @@ func requestResourceChunk(ctx context.Context, client *http.Client, endpoint, to
 	}
 	// Feishu can return an API error envelope with HTTP 200. Do not forward
 	// that envelope as if it were the user's attachment.
-	apiJSON := resp.Header.Get("Content-Disposition") == "" && strings.EqualFold(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]), "application/json")
 	if apiJSON {
 		if err := resourceEnvelopeError(data); err != nil {
 			return resourceChunk{}, false, err
@@ -194,6 +201,9 @@ func resourceEnvelopeError(data []byte) error {
 		Msg  string `json:"msg"`
 	}
 	if json.Unmarshal(data, &envelope) == nil && envelope.Code != 0 && envelope.Msg != "" {
+		if envelope.Code == 234003 {
+			return errResourceNotInMessage
+		}
 		return fmt.Errorf("resource API code=%d", envelope.Code)
 	}
 	return nil
