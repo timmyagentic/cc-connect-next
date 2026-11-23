@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CC Connect Next — 你的本地 Agent，随处连接</title>
+<meta name="description" content="通过飞书、Telegram、Slack 等聊天平台使用自己机器上的 Codex、Claude Code 等编程 Agent。">
+<meta property="og:title" content="CC Connect Next — 你的本地 Agent，随处连接">
+<meta property="og:description" content="通过飞书、Telegram、Slack 等聊天平台使用自己机器上的 Codex、Claude Code 等编程 Agent。">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#f8f9f6">
+<link rel="icon" href="/icons/terminal-2.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/app.js">
+</script>
+<link rel="canonical" href="https://cc-connect-next.timmyagentic.si/">
+<meta property="og:url" content="https://cc-connect-next.timmyagentic.si/">
+<link rel="stylesheet" href="/brand/brand.css">
+<meta property="og:image" content="https://cc-connect-next.timmyagentic.si/assets/social-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="CC Connect Next — 在聊天里，把工作继续做完。">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://cc-connect-next.timmyagentic.si/assets/social-card.png">
+<meta name="twitter:image:alt" content="CC Connect Next — 在聊天里，把工作继续做完。">
+<link rel="stylesheet" href="/viewport.css">
+<script src="/viewport.js" defer></script>
+<link rel="stylesheet" id="react-aria-pressable-style" href="/product-ui/product.css">
+<script type="module" src="/product-ui/product.js" integrity="__PRODUCT_INTEGRITY__"></script>
+</head>
+<body data-page="Home" class="brand-site brand-cc viewport-home" data-viewport-page data-product-edition="cc">
+<a class="skip" href="#main">
+<span data-i18n="skip">跳到正文</span>
+</a>
+<!--product:header-->
+<main id="main">
+<!--product:hero-->
+<section id="how" class="section container">
+<div class="section-intro">
+<p data-i18n="howEyebrow" class="eyebrow">熟悉的工具，新的连接方式</p>
+<h2 data-i18n="howTitle">从办公桌，到你手边。</h2>
+<p data-i18n="howBody">一个 Go 二进制，连接聊天平台与本地编程 Agent。</p>
+</div>
+<div class="steps">
+<article>
+<img class="icon" src="/icons/terminal-2.svg" width="24" height="24" alt="" aria-hidden="true">
+<span class="step-number">01</span>
+<h3 data-i18n="stepTitle01">Agent 跑在本地</h3>
+<p data-i18n="stepBody01">使用已经安装并登录的 Codex、Claude Code 等 CLI，在你的工作区执行。</p>
+</article>
+<article>
+<img class="icon" src="/icons/message-circle.svg" width="24" height="24" alt="" aria-hidden="true">
+<span class="step-number">02</span>
+<h3 data-i18n="stepTitle02">消息送到身边</h3>
+<p data-i18n="stepBody02">绑定飞书、Telegram、Slack 等平台，发消息、收进展，继续同一段协作。</p>
+</article>
+<article>
+<img class="icon" src="/icons/shield-check.svg" width="24" height="24" alt="" aria-hidden="true">
+<span class="step-number">03</span>
+<h3 data-i18n="stepTitle03">把权限握在手里</h3>
+<p data-i18n="stepBody03">按项目配置工作区与访问范围。能力和权限依所选 Agent 与平台而定。</p>
+</article>
+</div>
+</section>
+<section class="section feishu-section">
+<div class="container split">
+<div>
+<p data-i18n="feishuEyebrow" class="eyebrow">为飞书深入打磨</p>
+<h2 data-i18n="feishuTitle">消息背后，
+是完整的协作。</h2>
+<p data-i18n="feishuBody" class="section-description">流式回答、权限确认和话题隔离，让长任务也能在聊天里清楚推进。</p>
+<a data-i18n="feishuLink" class="text-link" href="https://github.com/timmyagentic/cc-connect-next/blob/main/docs/feishu.md">查看飞书接入指南</a>
+</div>
+<div class="feature-list">
+<article>
+<h3 data-i18n="cardsTitle">一个回答，持续更新</h3>
+<p data-i18n="cardsBody">用交互卡片呈现进度，支持的操作就在消息里完成。</p>
+</article>
+<article>
+<h3 data-i18n="topicsTitle">话题各自专注</h3>
+<p data-i18n="topicsBody">真实话题可以拥有独立会话与工作区绑定，减少上下文混在一起。</p>
+</article>
+<article>
+<h3 data-i18n="steerTitle">任务进行中，也能补充</h3>
+<p data-i18n="steerBody">Codex 原生 steer 可并入当前回合；其他 Agent 按实际能力回退排队。</p>
+</article>
+</div>
+</div>
+</section>
+<section class="section container integrations">
+<div class="section-intro">
+<h2 data-i18n="integrationTitle">用你熟悉的组合。</h2>
+<p data-i18n="integrationBody">先选 Agent，再选聊天平台。完整支持范围与限制见项目文档。</p>
+</div>
+<div class="integration-columns">
+<div>
+<h3 data-i18n="agentsLabel">本地编程 Agent</h3>
+<ul>
+<li>Codex</li>
+<li>Claude Code</li>
+<li>Cursor</li>
+<li>Gemini CLI</li>
+<li>OpenCode</li>
+<li>GitHub Copilot CLI</li>
+</ul>
+</div>
+<div>
+<h3 data-i18n="platformsLabel">聊天平台</h3>
+<ul>
+<li>飞书 / Lark</li>
+<li>Telegram</li>
+<li>Slack</li>
+<li>Discord</li>
+<li>钉钉</li>
+<li>Matrix</li>
+</ul>
+</div>
+</div>
+<a data-i18n="allIntegrations" class="text-link" href="https://github.com/timmyagentic/cc-connect-next#-支持的-agent-与平台">查看全部集成与能力</a>
+</section>
+<section class="section get-started">
+<div class="container">
+<div class="section-intro">
+<h2 data-i18n="startTitle">从这里，连起来。</h2>
+<p data-i18n="startBody">全新安装、接入飞书，或从官方 CC Connect 迁移。</p>
+</div>
+<div class="path-grid">
+<a class="path" href="/docs#agent-install">
+<span class="step-number">01</span>
+<h3 data-i18n="pathTitleinstall">第一次使用</h3>
+<p data-i18n="pathBodyinstall">复制完整安装 Prompt，让 Agent 帮你配置、验证首条回复，再启动后台服务。</p>
+<img class="icon" src="/icons/arrow-up-right.svg" width="24" height="24" alt="" aria-hidden="true">
+</a>
+<a class="path" href="/docs#feishu">
+<span class="step-number">02</span>
+<h3 data-i18n="pathTitlefeishu">接入飞书</h3>
+<p data-i18n="pathBodyfeishu">配置机器人并扫码授权；已有项目的工作目录需在配置文件中填写。</p>
+<img class="icon" src="/icons/arrow-up-right.svg" width="24" height="24" alt="" aria-hidden="true">
+</a>
+<a class="path" href="/docs#migration">
+<span class="step-number">03</span>
+<h3 data-i18n="pathTitlemigration">从 CC Connect 迁移</h3>
+<p data-i18n="pathBodymigration">先用 dry-run 查看迁移计划，再按文档决定是否切换服务。</p>
+<img class="icon" src="/icons/arrow-up-right.svg" width="24" height="24" alt="" aria-hidden="true">
+</a>
+</div>
+</div>
+</section>
+<section class="section container faq">
+<div>
+<h2 data-i18n="faqTitle">还有几个常见问题。</h2>
+</div>
+<div class="faq-list">
+<!--product:faq-->
+</div>
+</section>
+<section class="section final-cta">
+<div class="container">
+<img class="icon" src="/icons/terminal-2.svg" width="24" height="24" alt="" aria-hidden="true">
+<h2 data-i18n="finalTitle">下一个想法，
+就在下一条消息里。</h2>
+<a data-i18n="finalCta" class="button primary" href="/docs">开始连接</a>
+</div>
+</section>
+</main>
+<footer class="site-footer">
+<div class="container footer-inner">
+<div>
+<a class="brand" href="/">cc connect <strong>next</strong>
+</a>
+<p data-i18n="footerTag">本地执行，随处连接。</p>
+</div>
+<nav aria-label="Footer">
+<a data-i18n="docsLink" href="/docs">文档</a>
+<a data-i18n="releases" href="https://github.com/timmyagentic/cc-connect-next/releases">更新日志</a>
+<a href="https://github.com/timmyagentic/cc-connect-next">GitHub</a>
+</nav>
+</div>
+<div class="container credit">
+<span data-i18n="credit">源自 CC Connect，保留上游历史与 MIT 许可。</span> <a href="https://github.com/timmyagentic/cc-connect-next/blob/main/NOTICE">NOTICE</a>
+</div>
+</footer>
+<p id="copy-status" class="sr-only" role="status">
+</p>
+<div class="studio-signoff"><a href="https://timmyagentic.si/">timmyagentic</a><p>Built with AI.<br>Shaped by everyday use.</p></div>
+</body>
+</html>

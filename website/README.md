@@ -1,5 +1,7 @@
 # CC Connect Next website
 
+Source for the React and HeroUI interface lives in `interface/`. Run `npm ci && npm run build` there after editing components. Commit the generated HTML and local assets with their source.
+
 The independent public website lives here. It is separate from the local management UI in `web/` and never connects to a running daemon. Chinese and English content, the message-flow example, and command-copy controls run entirely in the browser. Only the language preference is stored locally.
 
 ```sh

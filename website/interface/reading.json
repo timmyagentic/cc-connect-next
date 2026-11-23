@@ -1,0 +1,53 @@
+{
+  "docs": [
+    {
+      "id": "agent-install-title",
+      "label": {
+        "en": "From installation to your first reply.",
+        "zh": "从安装，\n到第一条回复。"
+      }
+    },
+    {
+      "id": "prepare",
+      "label": {
+        "en": "Prepare a working agent",
+        "zh": "先准备可用的 Agent"
+      }
+    },
+    {
+      "id": "install",
+      "label": {
+        "en": "Install and fill in the configuration",
+        "zh": "安装并填写配置"
+      }
+    },
+    {
+      "id": "feishu",
+      "label": {
+        "en": "Connect Feishu",
+        "zh": "接入飞书"
+      }
+    },
+    {
+      "id": "verify",
+      "label": {
+        "en": "Start in the foreground and get a reply",
+        "zh": "前台启动，收到真实回复"
+      }
+    },
+    {
+      "id": "background",
+      "label": {
+        "en": "Move to the background and verify again",
+        "zh": "转到后台，再验证一次"
+      }
+    },
+    {
+      "id": "migration",
+      "label": {
+        "en": "Inspect a migration before switching",
+        "zh": "先评估迁移，再切换服务"
+      }
+    }
+  ]
+}

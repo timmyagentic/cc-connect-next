@@ -1,0 +1,42 @@
+[
+  {
+    "question": {
+      "zh": "官网会连接我的电脑吗？",
+      "en": "Does this website connect to my computer?"
+    },
+    "answer": {
+      "zh": "<p data-i18n=\"faqAlocal\">不会。官网提供介绍、交互示例与安装说明。实际连接由你在自己机器上安装和配置的 CC Connect Next 完成。</p>",
+      "en": "<p data-i18n=\"faqAlocal\">No. This website provides information, interactive examples, and setup instructions. Connections are handled by CC Connect Next installed and configured on your own machine.</p>"
+    }
+  },
+  {
+    "question": {
+      "zh": "需要公网 IP 吗？",
+      "en": "Do I need a public IP address?"
+    },
+    "answer": {
+      "zh": "<p data-i18n=\"faqApublic\">飞书使用 WebSocket 长连接，不需要公网 IP、域名或证书。其他平台的接入要求见对应指南。</p>",
+      "en": "<p data-i18n=\"faqApublic\">Feishu uses a WebSocket connection and does not require a public IP, domain, or certificate. Other platforms have their own setup requirements.</p>"
+    }
+  },
+  {
+    "question": {
+      "zh": "数据会发往哪里？",
+      "en": "Where does my data go?"
+    },
+    "answer": {
+      "zh": "<p data-i18n=\"faqAprivacy\">执行环境在本地；消息经过所选聊天平台，Agent 请求会发往其配置的服务提供方。本地执行并不代表完全离线。</p>",
+      "en": "<p data-i18n=\"faqAprivacy\">Execution stays local. Messages pass through your chosen chat platform, and agent requests go to the configured provider. Local execution does not mean fully offline.</p>"
+    }
+  },
+  {
+    "question": {
+      "zh": "CC Connect Next 免费吗？",
+      "en": "Is CC Connect Next free?"
+    },
+    "answer": {
+      "zh": "<p data-i18n=\"faqAcost\">代码采用 MIT 许可。Agent 订阅、模型 API 与聊天平台可能产生各自的费用。</p>",
+      "en": "<p data-i18n=\"faqAcost\">The code is MIT licensed. Agent subscriptions, model APIs, and chat platforms may have their own costs.</p>"
+    }
+  }
+]
