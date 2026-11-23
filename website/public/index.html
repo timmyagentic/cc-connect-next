@@ -67,13 +67,13 @@
 <h2 data-i18n="demoHeading" id="demo-heading" class="sr-only">从一句话，到继续推进。</h2>
 <div class="demo-tabs" role="tablist" aria-label="Demo steps">
 <button id="tab-start" data-demo="start" role="tab" aria-controls="panel-start" aria-selected="true" tabindex="0">
-<span data-i18n="demoTabstart">发起任务</span>
+<span class="demo-step-no" aria-hidden="true">01</span><span data-i18n="demoTabstart">发起任务</span>
 </button>
 <button id="tab-steer" data-demo="steer" role="tab" aria-controls="panel-steer" aria-selected="false" tabindex="-1">
-<span data-i18n="demoTabsteer">中途补充</span>
+<span class="demo-step-no" aria-hidden="true">02</span><span data-i18n="demoTabsteer">中途补充</span>
 </button>
 <button id="tab-result" data-demo="result" role="tab" aria-controls="panel-result" aria-selected="false" tabindex="-1">
-<span data-i18n="demoTabresult">查看结果</span>
+<span class="demo-step-no" aria-hidden="true">03</span><span data-i18n="demoTabresult">查看结果</span>
 </button>
 </div>
 <div class="demo-window">
@@ -123,6 +123,10 @@
 </div>
 </div>
 <p data-i18n="demoFoot" class="demo-foot">示例展示消息流转；实际能力取决于所选 Agent、平台和配置。</p>
+<div class="demo-navigation" hidden>
+  <output id="demo-progress" aria-live="polite"></output>
+  <button id="demo-next" type="button"></button>
+</div>
 </div>
 </section>
 <div class="hero-install">

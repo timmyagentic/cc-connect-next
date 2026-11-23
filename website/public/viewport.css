@@ -126,3 +126,13 @@
   .viewport-home .hero .message-status { margin-top: 8px; padding-top: 6px; font-size: 12px; }
   .viewport-home.brand-cc .hero-links { margin-top: 10px; gap: 6px; }
 }
+
+.viewport-home.brand-cc .demo-tabs { align-items:stretch; gap:3px; padding:4px; border-radius:12px; background:#e8edef; }
+.demo-tabs [role=tab] { display:inline-flex; align-items:center; justify-content:center; gap:5px; min-height:40px; border-radius:8px; }
+.demo-tabs [aria-selected=true] { color:#203d82; background:#fff; }
+.demo-step-no { font-size:.72em; font-variant-numeric:tabular-nums; opacity:.75; }
+.demo-navigation:not([hidden]) { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; width:100%; padding:4px 0; }
+#demo-progress { font:600 13px/1.4 system-ui,sans-serif; color:#3d4b60; font-variant-numeric:tabular-nums; }
+#demo-next { min-height:42px; padding:6px 14px; background:#203d70; color:white; border:0; border-radius:8px; font-family:inherit; font-weight:600; font-size:14px; line-height:1.4; cursor:pointer; }
+#demo-next:is(:hover,:focus-visible) { background:#14325f; }
+@media(prefers-reduced-motion:no-preference){.demo-window [role=tabpanel]:not([hidden]){animation:demo-step-in .17s ease-out both}@keyframes demo-step-in{from{opacity:.6;transform:translateY(3px)}to{opacity:1;transform:none}}}
