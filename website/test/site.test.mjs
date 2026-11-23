@@ -39,3 +39,13 @@ test('the demo is local and migration starts with inspection', () => {
   assert.doesNotMatch(docs, /<code>[^<]*migrate --switch/);
   assert.doesNotMatch(readFileSync(resolve(root,'app.js'),'utf8'), /fetch\(|WebSocket\(/);
 });
+
+test('the guided demo keeps the next-step control in the conversation and all steps keyboard-addressable', () => {
+  const page = readFileSync(resolve(root, 'index.html'), 'utf8');
+  const demo = page.slice(page.indexOf('<div class="demo-container">'), page.indexOf('<div class="hero-install">'));
+  const steps = [...demo.matchAll(/data-demo="([^"]+)" role="tab" aria-controls="([^"]+)"/g)];
+  assert.deepEqual(steps.map(match => match[1]), ['start', 'steer', 'result']);
+  for (const [, , panel] of steps) assert.ok(demo.includes('id="' + panel + '"'));
+  assert.ok(demo.includes('id="demo-progress" aria-live="polite"'));
+  assert.match(demo, /id="demo-next" type="button"><\/button>\s*<\/div>\s*<\/div>\s*<\/section>/);
+});

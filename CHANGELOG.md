@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Step through the website’s bilingual conversation demo and replay it from the final reply.
+
 ## v0.3.7-beta.3 (2026-11-17)
 
 - Add an opt-in, non-blocking scheduled progress hook for Cron and Timer jobs (#244).
