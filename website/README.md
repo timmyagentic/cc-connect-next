@@ -1,7 +1,5 @@
 # CC Connect Next website
 
-Source for the React and HeroUI interface lives in `interface/`. Run `npm ci && npm run build` there after editing components. Commit the generated HTML and local assets with their source.
-
 The independent public website lives here. It is separate from the local management UI in `web/` and never connects to a running daemon. Chinese and English content, the message-flow example, and command-copy controls run entirely in the browser. Only the language preference is stored locally.
 
 ```sh
@@ -22,7 +20,7 @@ Icons are from Tabler Icons 3.49.0, with their MIT license under `public/icons/L
 
 ## timmyagentic visual system
 
-The landing page opens with a three-stage local conversation, a copyable install command and links to the setup guide.
+The product website follows the approved timmyagentic main-site visual language: Instrument Sans and Noto Sans SC, paper/ink colors, blue emphasis, quiet image backgrounds, generous spacing, and a shared parent-brand navigation and footer. Product content, languages, existing links and JavaScript interactions stay owned by this website.
 
 The self-hosted visual assets live under `brand/` in the static directory. Font licenses are included in `brand/fonts/`; Chinese subsets cover the current HTML/JavaScript copy (800 characters). Regenerate those subsets when adding new characters; system fallbacks remain configured. The ambient image is the same approved asset used on the main site. No third-party font request is made by visitors.
 
