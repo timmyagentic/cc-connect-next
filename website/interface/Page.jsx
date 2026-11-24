@@ -9,7 +9,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { Button } from "@heroui/react/button";
-import { Action, Choices, CopyAction, Mark, HeroCopy } from "./ui.jsx";
+import { Action, Choices, CopyAction } from "./ui.jsx";
 import { dialogue } from "./dialogue.mjs";
 const dual = (zh, en) => ({ zh, en });
 export const site = {
@@ -28,45 +28,40 @@ const steps = [
   { id: "result", icon: CheckCheck },
 ];
 export function Hero({ lang }) {
-  const zh = lang === "zh",
-    t = dialogue[lang],
-    [current, setCurrent] = useState("start");
-  const items = steps.map((s) => ({ ...s, label: t["demoTab" + s.id] }));
-  const next = () =>
-    setCurrent(steps[(steps.findIndex((s) => s.id === current) + 1) % 3].id);
+  const zh = lang === "zh";
+  const t = dialogue[lang];
+  const [current, setCurrent] = useState("start");
+  const items = steps.map((step) => ({
+    ...step,
+    label: t["demoTab" + step.id],
+  }));
+  const idx = steps.findIndex((step) => step.id === current);
   return (
     <section className="pi-hero cc-hero" aria-labelledby="hero-title">
-      <div className="pi-container pi-split">
-        <HeroCopy
-          mark={<Mark Icon={Terminal}>CC Connect Next</Mark>}
-          title={
-            <>
-              {t.heroFirst}
-              <br />
-              {t.heroSecond}
-            </>
-          }
-          description={t.heroBody}
-        >
-          <div className="pi-actions">
-            <Action href="/docs#agent-install" icon={BookOpen}>
-              {zh ? "打开安装指南" : "Installation guide"}
-            </Action>
-          </div>
+      <div className="pi-container cc-workspace">
+        <div className="cc-directory">
+          <Terminal size={30} aria-hidden="true" />
+          <h1 id="hero-title">CC Connect Next</h1>
+          <p>
+            {zh
+              ? "从飞书、Telegram 或 Slack 把任务交给自己电脑上的编程 Agent。"
+              : "Talk to the coding agent on your own computer from Feishu, Telegram, or Slack."}
+          </p>
           <CopyAction
             text="npm install -g cc-connect-next"
             lang={lang}
             label={zh ? "复制安装命令" : "Copy install command"}
           />
-        </HeroCopy>
-        <article className="cc-chat">
-          <div className="cc-chat-bar">
-            <span>
-              <MessagesSquare size={20} />{" "}
-              {zh ? "本地 Agent 对话" : "Local agent conversation"}
-            </span>
+          <Action href="/docs#agent-install" icon={BookOpen}>
+            {zh ? "打开安装指南" : "Installation guide"}
+          </Action>
+        </div>
+        <article className="cc-conversation">
+          <header>
+            <MessagesSquare size={21} />
+            <h2>{zh ? "登录页排查" : "Investigating a sign-in form"}</h2>
             <small>{t.demoLabel}</small>
-          </div>
+          </header>
           <Choices
             label={zh ? "选择对话阶段" : "Conversation stage"}
             tabs={items}
@@ -75,21 +70,24 @@ export function Hero({ lang }) {
           >
             {(item) => (
               <div className="cc-messages">
-                <div className="cc-user">
-                  <UserRound aria-hidden="true" size={15} />
+                <div className="cc-entry cc-user">
+                  <UserRound size={17} aria-hidden="true" />
                   <div>
                     <strong>{t.userLabelstart}</strong>
                     <p>{t.requeststart}</p>
                   </div>
                 </div>
                 {item.id !== "start" && (
-                  <div className="cc-follow">
-                    <CornerDownRight size={15} aria-hidden="true" />
-                    <p>{t["direction" + item.id]}</p>
+                  <div className="cc-entry cc-follow">
+                    <CornerDownRight size={17} aria-hidden="true" />
+                    <div>
+                      <strong>{t.userLabelstart}</strong>
+                      <p>{t["direction" + item.id]}</p>
+                    </div>
                   </div>
                 )}
-                <div className="cc-agent">
-                  <Terminal aria-hidden="true" size={17} />
+                <div className="cc-entry cc-agent">
+                  <Terminal size={17} aria-hidden="true" />
                   <div>
                     <strong>{t["agentLabel" + item.id]}</strong>
                     <p>{t[item.id + "Response"]}</p>
@@ -101,16 +99,16 @@ export function Hero({ lang }) {
           </Choices>
           <div className="cc-chat-controls">
             <output aria-live="polite">
-              {steps.findIndex((x) => x.id === current) + 1} / 3 ·{" "}
-              {t["demoTab" + current]}
+              {idx + 1} / 3 · {t["demoTab" + current]}
             </output>
-            <Button className="cc-advance" onPress={next}>
+            <Button
+              className="cc-advance"
+              onPress={() => setCurrent(steps[(idx + 1) % steps.length].id)}
+            >
               {
                 (zh
                   ? ["补充一句要求", "查看最终回复", "重新演示"]
-                  : ["Add a follow-up", "See the result", "Replay"])[
-                  steps.findIndex((x) => x.id === current)
-                ]
+                  : ["Add a follow-up", "See the result", "Replay"])[idx]
               }
             </Button>
           </div>

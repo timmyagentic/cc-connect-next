@@ -40,7 +40,7 @@ export const translations = {
     resultStatus: "示例结果 · 可继续追问、检查差异或安排下一步",
     demoFoot: "示例展示消息流转；实际能力取决于所选 Agent、平台和配置。",
     howEyebrow: "熟悉的工具，新的连接方式",
-    howTitle: "从办公桌，到你手边。",
+    howTitle: "任务如何到达本机",
     howBody: "一个 Go 二进制，连接聊天平台与本地编程 Agent。",
     stepTitle01: "Agent 跑在本地",
     stepBody01:
@@ -52,7 +52,7 @@ export const translations = {
     stepBody03:
       "按项目配置工作区与访问范围。能力和权限依所选 Agent 与平台而定。",
     feishuEyebrow: "为飞书深入打磨",
-    feishuTitle: "消息背后，\n是完整的协作。",
+    feishuTitle: "飞书里的协作",
     feishuBody: "流式回答、权限确认和话题隔离，让长任务也能在聊天里清楚推进。",
     feishuLink: "查看飞书接入指南",
     cardsTitle: "一个回答，持续更新",
@@ -62,12 +62,12 @@ export const translations = {
     steerTitle: "任务进行中，也能补充",
     steerBody:
       "Codex 原生 steer 可并入当前回合；其他 Agent 按实际能力回退排队。",
-    integrationTitle: "用你熟悉的组合。",
+    integrationTitle: "平台和 Agent 后端",
     integrationBody: "先选 Agent，再选聊天平台。完整支持范围与限制见项目文档。",
     agentsLabel: "本地编程 Agent",
     platformsLabel: "聊天平台",
     allIntegrations: "查看全部集成与能力",
-    startTitle: "从这里，连起来。",
+    startTitle: "连接第一个 Agent",
     startBody: "全新安装、接入飞书，或从官方 CC Connect 迁移。",
     pathTitleinstall: "第一次使用",
     pathBodyinstall: "复制完整安装 Prompt，让 Agent 帮你配置、验证首条回复，再启动后台服务。",
@@ -75,7 +75,7 @@ export const translations = {
     pathBodyfeishu: "配置机器人并扫码授权；已有项目的工作目录需在配置文件中填写。",
     pathTitlemigration: "从 CC Connect 迁移",
     pathBodymigration: "先用 dry-run 查看迁移计划，再按文档决定是否切换服务。",
-    faqTitle: "还有几个常见问题。",
+    faqTitle: "常见问题",
     faqQlocal: "官网会连接我的电脑吗？",
     faqAlocal:
       "不会。官网提供介绍、交互示例与安装说明。实际连接由你在自己机器上安装和配置的 CC Connect Next 完成。",
@@ -88,7 +88,7 @@ export const translations = {
     faqQcost: "CC Connect Next 免费吗？",
     faqAcost:
       "代码采用 MIT 许可。Agent 订阅、模型 API 与聊天平台可能产生各自的费用。",
-    finalTitle: "下一个想法，\n就在下一条消息里。",
+    finalTitle: "安装 CC Connect Next",
     finalCta: "开始连接",
     agentInstallEyebrow: "让 Agent 帮你装好",
     agentInstallTitle: "从安装，\n到第一条回复。",
@@ -187,7 +187,7 @@ export const translations = {
     demoFoot:
       "An illustration of message flow. Capabilities depend on your agent, platform, and configuration.",
     howEyebrow: "FAMILIAR TOOLS. A NEW CONNECTION.",
-    howTitle: "From your desk to wherever you are.",
+    howTitle: "How a task reaches your computer",
     howBody:
       "One Go binary connects your chat platforms and local coding agents.",
     stepTitle01: "Run your agent locally",
@@ -200,7 +200,7 @@ export const translations = {
     stepBody03:
       "Configure workspaces and access per project. Permissions and capabilities depend on each integration.",
     feishuEyebrow: "BUILT WITH FEISHU IN MIND",
-    feishuTitle: "A message opens up\na whole workflow.",
+    feishuTitle: "Working in Feishu",
     feishuBody:
       "Streaming replies, permission prompts, and topic isolation keep longer tasks clear and manageable.",
     feishuLink: "Read the Feishu guide",
@@ -213,13 +213,13 @@ export const translations = {
     steerTitle: "Add direction while work is running",
     steerBody:
       "Native Codex steer can update the active turn. Other agents fall back to queues according to their capabilities.",
-    integrationTitle: "Use the combination you know.",
+    integrationTitle: "Platforms and agent backends",
     integrationBody:
       "Choose your agent and your chat platform. See the docs for the full support matrix and limitations.",
     agentsLabel: "Local coding agents",
     platformsLabel: "Chat platforms",
     allIntegrations: "Explore all integrations and capabilities",
-    startTitle: "Make your first connection.",
+    startTitle: "Connect your first agent",
     startBody:
       "Start fresh, connect Feishu, or migrate from official CC Connect.",
     pathTitleinstall: "Start fresh",
@@ -231,7 +231,7 @@ export const translations = {
     pathTitlemigration: "Migrate from CC Connect",
     pathBodymigration:
       "Inspect the migration plan with a dry run before choosing whether to switch services.",
-    faqTitle: "A few common questions.",
+    faqTitle: "Frequently asked questions",
     faqQlocal: "Does this website connect to my computer?",
     faqAlocal:
       "No. This website provides information, interactive examples, and setup instructions. Connections are handled by CC Connect Next installed and configured on your own machine.",
@@ -244,7 +244,7 @@ export const translations = {
     faqQcost: "Is CC Connect Next free?",
     faqAcost:
       "The code is MIT licensed. Agent subscriptions, model APIs, and chat platforms may have their own costs.",
-    finalTitle: "Your next idea is\none message away.",
+    finalTitle: "Install CC Connect Next",
     finalCta: "Get connected",
     agentInstallEyebrow: "LET YOUR AGENT SET IT UP",
     agentInstallTitle: "From installation to your first reply.",
