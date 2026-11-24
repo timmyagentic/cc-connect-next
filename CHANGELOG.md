@@ -2,9 +2,8 @@
 
 ## Unreleased
 
-- Rebuild the bilingual website navigation, interactive conversation and reading guide using React components.
+- Restore the original website and preserve language switching and keyboard navigation in the conversation demo.
 
-- Step through the website’s bilingual conversation demo and replay it from the final reply.
 
 ## v0.3.7-beta.3 (2026-11-17)
 

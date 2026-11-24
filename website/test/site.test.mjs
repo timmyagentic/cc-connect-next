@@ -39,27 +39,3 @@ test('the demo is local and migration starts with inspection', () => {
   assert.doesNotMatch(docs, /<code>[^<]*migrate --switch/);
   assert.doesNotMatch(readFileSync(resolve(root,'app.js'),'utf8'), /fetch\(|WebSocket\(/);
 });
-
-test('the staged conversation is rendered with a tab for each local step and a keyboard-accessible next action', () => {
-  const page = readFileSync(resolve(root, 'index.html'),'utf8');
-  for (const key of ['start','steer','result']) assert.ok(page.includes('data-key="' + key + '"'));
-  assert.ok(page.includes('role="tablist"'));
-  assert.ok(page.includes('role="tabpanel"'));
-  assert.ok(page.includes('<output aria-live="polite">'));
-  assert.ok(page.includes('class="button button--primary cc-advance"') || /<button[^>]*class="[^"]*cc-advance[^"]*"[^>]*>/.test(page));
-  const source = readFileSync(resolve(root,'../interface/Page.jsx'),'utf8');
-  assert.doesNotMatch(source,/fetch\(|WebSocket\(/);
-});
-
-test('the narrow mobile masthead keeps both identity links and navigation actions usable', () => {
-  const css = readFileSync(resolve(root, 'product-ui/product.css'), 'utf8');
-  const mobile = css.match(/@media\s*\(max-width:\s*360px\)\s*\{([^@]+)/)?.[1] ?? '';
-  assert.match(mobile, /\.pi-identity\s*\{[^}]*flex-direction:\s*column/);
-  assert.match(mobile, /\.pi-identity\s*>\s*span\s*\{[^}]*display:\s*none/);
-  for (const page of ['index.html', 'docs.html']) {
-    const html = readFileSync(resolve(root, page), 'utf8');
-    assert.match(html, /class="pi-publisher"/);
-    assert.match(html, /class="pi-brand"/);
-    assert.match(html, /class="[^"]*pi-mobile-toggle/);
-  }
-});
