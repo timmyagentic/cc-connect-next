@@ -15,6 +15,7 @@
 </script>
 <link rel="canonical" href="https://cc-connect-next.timmyagentic.si/">
 <meta property="og:url" content="https://cc-connect-next.timmyagentic.si/">
+<link rel="stylesheet" href="/brand/brand.css">
 <meta property="og:image" content="https://cc-connect-next.timmyagentic.si/assets/social-card.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -23,9 +24,10 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://cc-connect-next.timmyagentic.si/assets/social-card.png">
 <meta name="twitter:image:alt" content="CC Connect Next — 在聊天里，把工作继续做完。">
-<link id="react-aria-pressable-style" rel="stylesheet" href="/landing.css">
+<link id="react-aria-pressable-style" rel="stylesheet" href="/viewport.css">
+<script src="/viewport.js" defer></script>
 </head>
-<body data-page="Home" class="landing landing-cc">
+<body data-page="Home" class="brand-site brand-cc viewport-home" data-viewport-page>
 <a class="skip" href="#main">
 <span data-i18n="skip">跳到正文</span>
 </a>
@@ -51,22 +53,16 @@
 </div>
 </header>
 <main id="main">
-<section class="landing-hero" aria-labelledby="hero-title">
-  <div class="landing-copy">
-    <h1 id="hero-title"><span class="landing-line"><span data-i18n="heroFirst">从聊天窗口，</span></span><span class="landing-line"><span data-i18n="heroSecond">接着写代码。</span></span></h1>
-    <p class="landing-desc"><span data-i18n="heroBody">在飞书、Telegram 或 Slack 发起任务，中途补充要求，再回到同一段对话看结果。代码留在自己的电脑上。</span></p>
-    <div class="landing-actions"><a class="landing-action" data-primary-action href="/docs"><span data-i18n="start">接入我的 Agent</span> <span aria-hidden="true">↗</span></a></div>
-    <p class="landing-note"><span data-i18n="platformNote">macOS、Linux、Windows · 开源</span></p><div class="command-shortcut"><div class="install-command">
-<code id="install-command">npm install -g cc-connect-next</code>
-<button data-copy="install-command" aria-label="Copy install command">
-<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
-<span data-copy-label>
-<span data-i18n="copy">复制</span>
-</span>
-</button>
-</div></div>
-  </div>
-  <section class="demo-section" aria-labelledby="demo-heading">
+<section class="hero container" aria-labelledby="hero-title">
+<div class="hero-intro">
+<h1 id="hero-title">
+<span data-i18n="heroFirst">在聊天里用</span>
+<br>
+<span data-i18n="heroSecond">本机的编程 Agent。</span>
+</h1>
+<p data-i18n="heroBody" class="hero-description">从飞书、Telegram 或 Slack 发起任务，查看回复，给进行中的工作补一句要求。代码留在自己的电脑上。</p>
+</div>
+<section class="demo-section" aria-labelledby="demo-heading">
 <div class="demo-container">
 <h2 data-i18n="demoHeading" id="demo-heading" class="sr-only">从一句话，到继续推进。</h2>
 <div class="demo-tabs" role="tablist" aria-label="Demo steps">
@@ -86,7 +82,7 @@
 <span>cc connect next</span>
 <span data-i18n="demoLabel" class="demo-label">交互示例 · 不连接你的机器</span>
 </div>
-<div id="panel-start" role="tabpanel" aria-labelledby="tab-start" class="demo-panel" tabindex="0">
+<div id="panel-start" role="tabpanel" aria-labelledby="tab-start" class="demo-panel" tabindex="0" >
 <div class="message user-message">
 <span data-i18n="userLabelstart" class="message-label">你</span>
 <p data-i18n="requeststart">看看登录页的表单报错，先定位原因。</p>
@@ -129,6 +125,21 @@
 <p data-i18n="demoFoot" class="demo-foot">示例展示消息流转；实际能力取决于所选 Agent、平台和配置。</p>
 </div>
 </section>
+<div class="hero-install">
+<div class="install-command">
+<code id="install-command">npm install -g cc-connect-next</code>
+<button data-copy="install-command" aria-label="Copy install command">
+<img class="icon" src="/icons/copy.svg" width="24" height="24" alt="" aria-hidden="true">
+<span data-copy-label>
+<span data-i18n="copy">复制</span>
+</span>
+</button>
+</div>
+<div class="hero-links">
+<a data-i18n="start" class="text-link" href="/docs">安装与接入指南</a>
+<span data-i18n="platformNote">macOS · Linux · Windows · 开源</span>
+</div>
+</div>
 </section>
 <section id="how" class="section container">
 <div class="section-intro">
@@ -157,7 +168,6 @@
 </article>
 </div>
 </section>
-<div class="benefit-statement"><p><span class="lo-zh" lang="zh-Hans"><span class="benefit-line"><span class="benefit-word">电脑上</span><span class="benefit-word">跑着任务，</span></span><span class="benefit-line"><span class="benefit-word">手机里</span><span class="benefit-word">接着聊。</span></span></span><span class="lo-en" lang="en"><span class="benefit-line"><span class="benefit-word">The task keeps running </span><span class="benefit-word">on your computer.</span></span><span class="benefit-line"><span class="benefit-word">The conversation continues </span><span class="benefit-word">on your phone.</span></span></span></p></div>
 <section class="section feishu-section">
 <div class="container split">
 <div>
