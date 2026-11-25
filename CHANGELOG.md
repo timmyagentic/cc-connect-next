@@ -2,10 +2,6 @@
 
 ## Unreleased
 
-- Improve the contrast of supporting text on the product landing page.
-
-- Lead the public website with the local agent connection guide and a keyboard-accessible chat demo.
-
 - Restore the original website and preserve language switching and keyboard navigation in the conversation demo.
 
 
