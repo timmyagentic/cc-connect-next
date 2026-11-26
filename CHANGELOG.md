@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Move official website maintenance and deployment to the shared websites repository.
+
 - Restore the original website and preserve language switching and keyboard navigation in the conversation demo.
 
 
